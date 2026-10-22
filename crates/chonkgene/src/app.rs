@@ -386,12 +386,19 @@ impl App {
         }
     }
 
-    fn save_now(&mut self) {
+    /// Copy the live affinity of every pet into the saves. It must run before
+    /// any pet is rebuilt or removed, or recent affinity would be lost and
+    /// affinity must never go down (PLAN §0).
+    fn collect_affinity(&mut self) {
         for p in &self.pets {
             if let Some(s) = self.store.pets.iter_mut().find(|s| s.id == p.save.id) {
                 s.set_affinity(&p.mind.affinity);
             }
         }
+    }
+
+    fn save_now(&mut self) {
+        self.collect_affinity();
         if let Err(e) = store::save(&self.data.pets(), &self.store) {
             eprintln!("{e}");
         }
@@ -420,6 +427,7 @@ impl App {
 
     /// Spawn and remove pet windows so the desktop matches the saves.
     fn sync_desktop(&mut self, el: &ActiveEventLoop) {
+        self.collect_affinity();
         let Some(shared) = &self.shared else {
             return;
         };
@@ -526,6 +534,7 @@ impl App {
             }
             Msg::Pet(mut update) => {
                 update.sanitise();
+                self.collect_affinity();
                 let Some(save) = self.store.pets.iter_mut().find(|p| p.id == update.id) else {
                     return;
                 };

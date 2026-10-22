@@ -550,6 +550,8 @@ Roger asked (2026-10-22) for a downloadable test version before the phases are f
 
 **Done when**: the archives from the tag's release unpack and run on Windows 11 and Ubuntu 24.04, and every row above works there.
 
+**Status (2026-10-22, branch `feat/beta-1`)**: every row above is built and covered by tests where logic allows (affinity property test, skits, lines, saves, IPC, golden PNGs for pets, bubbles and menu, headless settings screenshots). **Not yet run on a real desktop**: the development machine has no display, so window behaviour, the tray, the hotkey, sound output and the settings window under an IME are owed to the first test on Windows 11 and Ubuntu. The release workflow (`.github/workflows/release.yml`) builds the archives from a `v*` tag.
+
 ### Phase 1: Shiba prototype (feel) — `v0.1.0`
 
 - The art pipeline (§3.3) works end to end for one Shiba, with placeholder art.

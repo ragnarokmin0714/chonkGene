@@ -1,0 +1,99 @@
+name: Release
+
+# A version tag (v0.5.0-beta.1, …) builds the portable archives for every
+# target and publishes them with SHA256SUMS (PLAN §2.1). Tags with a "-"
+# become pre-releases.
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - os: windows-2025
+            target: x86_64-pc-windows-msvc
+            platform: windows-x64
+          - os: ubuntu-24.04
+            target: x86_64-unknown-linux-gnu
+            platform: linux-x86_64
+          - os: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-gnu
+            platform: linux-aarch64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: release-${{ matrix.target }}
+      - run: cargo test --workspace --locked
+
+      # Static CRT comes from .cargo/config.toml.
+      - name: Build (Windows)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: cargo build --release --locked -p chonkgene --target ${{ matrix.target }}
+
+      # One file against a glibc 2.31 baseline (Ubuntu 20.04+, Debian 11+).
+      - uses: mlugg/setup-zig@v2
+        if: runner.os == 'Linux'
+      - name: Build (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          cargo install cargo-zigbuild --locked
+          cargo zigbuild --release --locked -p chonkgene --target ${{ matrix.target }}.2.31
+          echo "newest glibc symbol needed:"
+          objdump -T target/${{ matrix.target }}/release/chonkgene | grep -o 'GLIBC_[0-9.]*' | sort -Vu | tail -1
+
+      - name: Package
+        shell: bash
+        run: |
+          name="chonkGene-${GITHUB_REF_NAME#v}-${{ matrix.platform }}"
+          mkdir -p "pkg/chonkGene/chonkGene-data" "pkg/chonkGene/licenses"
+          cp packaging/README.txt pkg/chonkGene/README.txt
+          cp packaging/data-README.txt pkg/chonkGene/chonkGene-data/README.txt
+          cp licenses/* pkg/chonkGene/licenses/
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            cp target/${{ matrix.target }}/release/chonkgene.exe pkg/chonkGene/chonkGene.exe
+            (cd pkg && 7z a -tzip "../$name.zip" chonkGene > /dev/null)
+          else
+            cp target/${{ matrix.target }}/release/chonkgene pkg/chonkGene/chonkgene
+            chmod +x pkg/chonkGene/chonkgene
+            tar -C pkg -czf "$name.tar.gz" chonkGene
+          fi
+          ls -la chonkGene-*
+      - uses: actions/upload-artifact@v7
+        with:
+          name: ${{ matrix.platform }}
+          path: chonkGene-*
+
+  publish:
+    needs: build
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Checksums
+        working-directory: dist
+        run: sha256sum chonkGene-* > SHA256SUMS && cat SHA256SUMS
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          prerelease=""
+          case "$GITHUB_REF_NAME" in *-*) prerelease="--prerelease" ;; esac
+          gh release create "$GITHUB_REF_NAME" dist/* $prerelease \
+            --title "肉肉賴桌 ${GITHUB_REF_NAME#v}" \
+            --notes-file packaging/RELEASE_NOTES.md

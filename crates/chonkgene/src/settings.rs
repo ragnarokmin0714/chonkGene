@@ -149,6 +149,7 @@ struct State {
     adopt_coat: String,
     reachable: bool,
     pet_dirty: bool,
+    settings_dirty: bool,
     preview: Option<Preview>,
 }
 
@@ -367,6 +368,7 @@ fn setup(
         adopt_coat: String::new(),
         reachable: true,
         pet_dirty: false,
+        settings_dirty: false,
         preview: None,
     }));
 
@@ -519,8 +521,9 @@ fn setup(
         st.send_settings();
     });
     on!(on_volume_changed, |_ui, st, v: f32| {
+        // Dragging sends at most every SEND_EVERY, via the send timer.
         st.settings.volume = (v * 100.0).round().clamp(0.0, 100.0) as u8;
-        st.send_settings();
+        st.settings_dirty = true;
     });
     on!(on_irrational_toggled, |_ui, st, v: bool| {
         st.settings.irrational = v;
@@ -583,6 +586,10 @@ fn setup(
         send_timer.start(TimerMode::Repeated, SEND_EVERY, move || {
             let Some(ui) = weak.upgrade() else { return };
             let mut st = st.borrow_mut();
+            if st.settings_dirty {
+                st.settings_dirty = false;
+                st.send_settings();
+            }
             if st.pet_dirty {
                 st.pet_dirty = false;
                 if let Some(p) = st.pet().cloned() {
@@ -620,6 +627,9 @@ pub fn run(data: Option<PathBuf>, pet: Option<u64>) -> Result<(), String> {
     let (st, _timers) = setup(&ui, data, pet)?;
     ui.run().map_err(|e| e.to_string())?;
     let mut st = st.borrow_mut();
+    if st.settings_dirty {
+        st.send_settings();
+    }
     if st.pet_dirty
         && let Some(p) = st.pet().cloned()
     {

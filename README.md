@@ -16,13 +16,18 @@ The UI is in Traditional Chinese first, with English to follow.
 
 ## Status
 
-Phase 1 (a Shiba prototype) is in progress; see [docs/PLAN.md §8](docs/PLAN.md#8-phases).
+First beta, `0.5.0-beta.1`: all six pets with placeholder art and sounds. See [docs/PLAN.md §8](docs/PLAN.md#first-beta--v050-beta1) for what is in it and what is left.
 
-## Trying the prototype
+## Trying it
 
-CI builds `chonkgene-windows-x64.exe`, `chonkgene-linux-x86_64` and `chonkgene-linux-aarch64` on every push; download them from the run's artifacts. Or build it: `cargo run --release -p chonkgene`.
+Download the archive for your system from [Releases](https://github.com/ragnarokmin0714/chonkGene/releases), unpack it and run `chonkGene.exe` (Windows) or `chonkgene` (Linux). Settings and pets are kept in the `chonkGene-data` folder next to it.
 
-Run it from a terminal. Click the Shiba to poke it (belly, cheeks, paws, head and bottom react differently), drag to lift it, shake it while dragging, and let go to throw it. `--help` lists the options (more Shibas, size, body shape, coat, CPU and memory numbers).
+- Click a pet to poke it; keep poking and it laughs belly-up or looks thoroughly fed up.
+- Drag to lift it, shake it, let go to throw it.
+- Right-click a pet for its menu: pat, snacks, sleep, rename, settings.
+- Ctrl+Alt+P hides every pet; press it again to bring them back.
+
+Building from source: `cargo run --release -p chonkgene`. `cargo xtask art` recompiles the rigs after editing `assets/species`.
 
 ## Platforms
 

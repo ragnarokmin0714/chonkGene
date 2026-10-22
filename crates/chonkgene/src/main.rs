@@ -3,6 +3,9 @@
 //! One executable (PLAN §3.2): the pet process by default, the settings
 //! window with `--settings`.
 
+// Release builds on Windows are GUI programs: no console window pops up.
+#![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
+
 mod app;
 mod ipc;
 mod lines;
