@@ -36,4 +36,6 @@ winit = { version = "0.30.13", default-features = false, features = ["rwh_06", "
 unsafe_code = "forbid"
 
 [profile.release]
+# Release archives carry no symbols (smaller downloads).
+strip = true
 lto = "thin"
