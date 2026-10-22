@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Duckling, body value 0.0 (標準). Placeholder art.
+     Every element id is a rig part (rig.ron); standard.svg and mochi.svg
+     must have the same ids, element types and order. Colours are only for
+     previewing: the app paints by palette slot. -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 184" width="200" height="184">
+  <ellipse id="shadow" cx="100" cy="177" rx="56" ry="5" fill="#3B2A22" fill-opacity="0.09"/>
+  <path id="feet" d="M78 166 L70 177 L92 177 Z M122 166 L110 177 L132 177 Z" fill="#F29B38"/>
+  <path id="tail" d="M152 118 Q176 104 172 88 Q162 104 146 106 Z" fill="#FFFFFF"/>
+  <ellipse id="body_line" cx="100" cy="128" rx="66" ry="46" fill="#E2DAD0"/>
+  <ellipse id="body" cx="100" cy="128" rx="64" ry="44" fill="#FFFFFF"/>
+  <ellipse id="belly" cx="104" cy="142" rx="42" ry="24" fill="#F6F2EC"/>
+  <ellipse id="wing" cx="140" cy="124" rx="24" ry="14" transform="rotate(-14 140 124)" fill="#F3EEE7"/>
+  <ellipse id="head_line" cx="100" cy="72" rx="42" ry="42" fill="#E2DAD0"/>
+  <ellipse id="head" cx="100" cy="72" rx="40" ry="40" fill="#FFFFFF"/>
+  <path id="tuft" d="M96 34 Q100 22 108 28 Q104 30 104 36" fill="none" stroke="#E2DAD0" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/>
+  <ellipse id="eye_l" cx="84" cy="70" rx="6.5" ry="6.5" fill="#3B2A22"/>
+  <ellipse id="eye_r" cx="116" cy="70" rx="6.5" ry="6.5" fill="#3B2A22"/>
+  <ellipse id="eye_hl_l" cx="86.2" cy="67.2" rx="2.2" ry="2.2" fill="#FFFFFF"/>
+  <ellipse id="eye_hl_r" cx="118.2" cy="67.2" rx="2.2" ry="2.2" fill="#FFFFFF"/>
+  <ellipse id="bill" cx="100" cy="90" rx="17" ry="7.5" fill="#F29B38"/>
+  <ellipse id="bill_top" cx="100" cy="86.5" rx="16" ry="5.5" fill="#F7B955"/>
+  <ellipse id="blush_l" cx="72" cy="84" rx="7.5" ry="4.2" fill="#F7A9A0" fill-opacity="0.75"/>
+  <ellipse id="blush_r" cx="128" cy="84" rx="7.5" ry="4.2" fill="#F7A9A0" fill-opacity="0.75"/>
+</svg>

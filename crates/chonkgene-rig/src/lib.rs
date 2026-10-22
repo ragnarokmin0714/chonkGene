@@ -18,6 +18,24 @@ pub const FORMAT: u16 = 1;
 /// Rigs shipped in the binary, compiled by `cargo xtask art`.
 pub mod builtin {
     pub const SHIBA: &[u8] = include_bytes!("../compiled/shiba.rig");
+    pub const MUNCHKIN: &[u8] = include_bytes!("../compiled/munchkin.rig");
+    pub const FOLD: &[u8] = include_bytes!("../compiled/fold.rig");
+    pub const OWL: &[u8] = include_bytes!("../compiled/owl.rig");
+    pub const CHICK: &[u8] = include_bytes!("../compiled/chick.rig");
+    pub const DUCK: &[u8] = include_bytes!("../compiled/duck.rig");
+
+    /// The compiled rig for a species id (`shiba`, `munchkin`, …).
+    pub fn for_species(id: &str) -> Option<&'static [u8]> {
+        Some(match id {
+            "shiba" => SHIBA,
+            "munchkin" => MUNCHKIN,
+            "fold" => FOLD,
+            "owl" => OWL,
+            "chick" => CHICK,
+            "duck" => DUCK,
+            _ => return None,
+        })
+    }
 }
 
 #[derive(Debug)]
@@ -269,6 +287,26 @@ mod tests {
         assert_eq!(zones, ["belly", "cheek", "paw", "head", "bottom"]);
         assert!(rig.coat("red").is_some());
         assert!(rig.anchor("bubble").is_some());
+    }
+
+    #[test]
+    fn every_builtin_rig_loads_with_the_conventional_bones() {
+        for id in ["shiba", "munchkin", "fold", "owl", "chick", "duck"] {
+            let rig = Rig::load(builtin::for_species(id).unwrap())
+                .unwrap_or_else(|e| panic!("{id}: {e}"));
+            assert_eq!(rig.data().species, id);
+            for bone in ["root", "body", "belly", "head", "eye_l", "eye_r"] {
+                assert!(rig.bone(bone).is_some(), "{id} has no {bone} bone");
+            }
+            assert!(rig.anchor("bubble").is_some(), "{id} has no bubble anchor");
+            let shape = rig.shape(0.33);
+            let mut world = Vec::new();
+            rig.world_into(&rig.rest_pose(), &mut world);
+            assert!(
+                rig.hit(&shape, &world, (100.0, 140.0)).is_some(),
+                "{id}: nothing under the belly"
+            );
+        }
     }
 
     #[test]

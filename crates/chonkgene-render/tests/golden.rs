@@ -128,3 +128,15 @@ fn speech_bubbles() {
         compare(name, &pm);
     }
 }
+
+#[test]
+fn every_species_at_its_default_coat() {
+    for id in ["munchkin", "fold", "owl", "chick", "duck"] {
+        let rig = Rig::load(builtin::for_species(id).unwrap()).unwrap();
+        for (label, chonk) in [("chubby", 0.33), ("mochi", 1.0)] {
+            let mut r = Renderer::new(&rig, 1.0, chonk, 0).unwrap();
+            let pm = r.render(&rig, &rig.rest_pose()).clone();
+            compare(&format!("{id}-{label}"), &pm);
+        }
+    }
+}
