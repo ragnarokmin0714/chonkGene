@@ -4,8 +4,10 @@
 //! a clock.
 
 pub mod anim;
+pub mod mind;
 pub mod motion;
 pub mod shake;
+pub mod species;
 pub mod spring;
 pub mod tickle;
 
