@@ -49,10 +49,16 @@ pub enum Line {
     GrudgePat,
     Forgive,
     LevelUp,
+    SkitGlare,
+    SkitHuff,
+    SkitChase,
+    SkitMakeUp,
+    SkitTalk,
+    SkitShrug,
 }
 
 impl Line {
-    pub const ALL: [Line; 21] = [
+    pub const ALL: [Line; 27] = [
         Line::Hello,
         Line::WelcomeBack,
         Line::PokeSmall,
@@ -74,6 +80,12 @@ impl Line {
         Line::GrudgePat,
         Line::Forgive,
         Line::LevelUp,
+        Line::SkitGlare,
+        Line::SkitHuff,
+        Line::SkitChase,
+        Line::SkitMakeUp,
+        Line::SkitTalk,
+        Line::SkitShrug,
     ];
 
     /// Key in the line tables.
@@ -100,6 +112,12 @@ impl Line {
             Line::GrudgePat => "grudge_pat",
             Line::Forgive => "forgive",
             Line::LevelUp => "level_up",
+            Line::SkitGlare => "skit_glare",
+            Line::SkitHuff => "skit_huff",
+            Line::SkitChase => "skit_chase",
+            Line::SkitMakeUp => "skit_make_up",
+            Line::SkitTalk => "skit_talk",
+            Line::SkitShrug => "skit_shrug",
         }
     }
 }

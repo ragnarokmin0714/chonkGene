@@ -10,6 +10,7 @@ use chonkgene_core::anim::{Animator, Expression};
 use chonkgene_core::mind::{Line, Mind, Out, World, XP_PER_LEVEL};
 use chonkgene_core::motion::{Area, Body, Motion};
 use chonkgene_core::shake::ShakeDetector;
+use chonkgene_core::skit::{Actor, Cmd, Director};
 use chonkgene_core::species::{Grumpiness, Species};
 use chonkgene_platform::tray::{Tray, TrayCommand};
 use chonkgene_platform::{Presenter, Shared, autostart, hotkey};
@@ -123,6 +124,8 @@ struct Pet {
     hello_at: Option<f64>,
     act: Option<(Grumpiness, f64)>,
     bubble: Option<Bubble>,
+    /// Walking is up to the skit director while this is set.
+    in_skit: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -187,6 +190,7 @@ struct App {
     child: Option<Child>,
     open_settings_on_start: bool,
     proxy: EventLoopProxy<UserEvent>,
+    director: Director,
     tray: Option<Tray>,
     hotkey: Option<hotkey::Hotkey>,
     stats: bool,
@@ -256,6 +260,7 @@ impl App {
             child: None,
             open_settings_on_start: false,
             proxy,
+            director: Director::default(),
             tray: None,
             hotkey: None,
             stats,
@@ -710,6 +715,57 @@ impl App {
     }
 }
 
+/// The pets as the skit director sees them.
+fn actors(pets: &[Pet]) -> Vec<Actor> {
+    pets.iter()
+        .map(|p| Actor {
+            id: p.save.id,
+            species: p.species,
+            x: p.center_x(),
+            available: !p.mind.asleep()
+                && !p.mind.grumpy()
+                && p.act.is_none()
+                && p.press.is_none()
+                && p.body.motion != Motion::Fall
+                && p.anim.expression != Expression::Sulk,
+        })
+        .collect()
+}
+
+fn direct(pets: &mut [Pet], ctx: &mut Ctx, cmds: Vec<Cmd>) {
+    for cmd in cmds {
+        let id = match cmd {
+            Cmd::Walk { id, .. }
+            | Cmd::Face { id, .. }
+            | Cmd::Say { id, .. }
+            | Cmd::Express { id, .. } => id,
+        };
+        let Some(p) = pets.iter_mut().find(|p| p.save.id == id) else {
+            continue;
+        };
+        p.next = Instant::now();
+        match cmd {
+            Cmd::Walk { x, pace, .. } => {
+                p.body.facing = if x >= p.center_x() { 1.0 } else { -1.0 };
+                p.body.motion = Motion::Walk;
+                p.body.pace = pace;
+            }
+            Cmd::Face { x, .. } => {
+                p.body.facing = if x >= p.center_x() { 1.0 } else { -1.0 };
+                p.body.motion = Motion::Idle;
+                p.body.pace = 1.0;
+            }
+            Cmd::Say { line, .. } => p.say(ctx, line),
+            Cmd::Express { expression, .. } => {
+                p.anim.expression = expression;
+                if expression == Expression::Happy {
+                    p.happy_until = ctx.world.now + HAPPY_SECS;
+                }
+            }
+        }
+    }
+}
+
 /// A paw print for the tray, straight-alpha RGBA.
 fn tray_icon(scale: f32) -> (Vec<u8>, u32) {
     let size = (32.0 * scale.max(1.0)).round() as u32;
@@ -793,11 +849,16 @@ fn spawn(
         hello_at: Some(t + 1.2 + slot as f64 * 1.4),
         act: None,
         bubble: None,
+        in_skit: false,
         save,
     })
 }
 
 impl Pet {
+    fn center_x(&self) -> f32 {
+        self.placed.0 as f32 + self.renderer.pixmap().width() as f32 / 2.0
+    }
+
     fn say(&mut self, ctx: &mut Ctx, line: Line) {
         let Some(text) = ctx.lines.pick(
             self.species,
@@ -923,7 +984,10 @@ impl Pet {
             if let Some(landing) = self.body.step(dt, &ctx.area) {
                 self.anim.land(landing.speed);
             }
-            let free = !self.mind.asleep() && self.act.is_none();
+            let free = !self.mind.asleep() && self.act.is_none() && !self.in_skit;
+            if !self.in_skit && self.act.is_none() && self.body.pace != 1.0 {
+                self.body.pace = 1.0;
+            }
             if self.mind.asleep() && self.body.motion == Motion::Walk {
                 self.body.motion = Motion::Idle;
             }
@@ -1156,6 +1220,15 @@ impl ApplicationHandler<UserEvent> for App {
                         p.shake = ShakeDetector::default();
                     }
                     (MouseButton::Left, ElementState::Released) => {
+                        let id = self.pets[i].save.id;
+                        let clicked = self.pets[i].press.as_ref().is_some_and(|p| !p.moved);
+                        let cmds = if clicked && self.director.involves(id) {
+                            // 勸架: a click on a squabbling pet makes both make up.
+                            let cast = actors(&self.pets);
+                            self.director.interrupt(id, world.now, &cast)
+                        } else {
+                            Vec::new()
+                        };
                         let App {
                             pets,
                             shared,
@@ -1169,6 +1242,21 @@ impl ApplicationHandler<UserEvent> for App {
                         let Some(shared) = shared.as_ref() else {
                             return;
                         };
+                        if !cmds.is_empty() {
+                            pets[i].press = None;
+                            let mut ctx = Ctx {
+                                el,
+                                shared,
+                                kinds,
+                                lines,
+                                face: bubble_face,
+                                area: *area,
+                                ui_scale: *ui_scale,
+                                world,
+                            };
+                            direct(pets, &mut ctx, cmds);
+                            return;
+                        }
                         let p = &mut pets[i];
                         let Some(press) = p.press.take() else {
                             return;
@@ -1271,6 +1359,9 @@ impl ApplicationHandler<UserEvent> for App {
             area,
             ui_scale,
             frames,
+            director,
+            settings,
+            rng,
             ..
         } = self;
         let shared = shared.as_ref().expect("checked above");
@@ -1289,6 +1380,20 @@ impl ApplicationHandler<UserEvent> for App {
             ui_scale: *ui_scale,
             world,
         };
+        if visible {
+            let cast = actors(pets);
+            let cmds = director.tick(
+                world.now,
+                settings.irrational,
+                settings.squabble,
+                &cast,
+                rng,
+            );
+            direct(pets, &mut ctx, cmds);
+            for p in pets.iter_mut() {
+                p.in_skit = director.involves(p.save.id);
+            }
+        }
         for (i, p) in pets.iter_mut().enumerate() {
             if !visible || p.next > now {
                 continue;

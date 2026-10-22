@@ -7,6 +7,7 @@ pub mod anim;
 pub mod mind;
 pub mod motion;
 pub mod shake;
+pub mod skit;
 pub mod species;
 pub mod spring;
 pub mod tickle;
