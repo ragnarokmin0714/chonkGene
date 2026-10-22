@@ -116,3 +116,15 @@ fn cached_frames_match_direct_drawing() {
     let off = differing(&direct, &cached);
     assert_eq!(off, 0, "{off} pixels differ");
 }
+
+#[test]
+fn speech_bubbles() {
+    let mut face = chonkgene_render::text::Face::bubble();
+    for (name, line) in [
+        ("bubble-laugh", "哈哈哈哈！不行了啦～"),
+        ("bubble-sigh", "……唉。"),
+    ] {
+        let pm = chonkgene_render::bubble::bubble(&mut face, line, 1.0).unwrap();
+        compare(name, &pm);
+    }
+}

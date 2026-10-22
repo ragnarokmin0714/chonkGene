@@ -9,6 +9,7 @@ rust-version = "1.88"
 publish = false
 
 [workspace.dependencies]
+skrifa = "0.49.0"
 chonkgene-core = { path = "crates/chonkgene-core" }
 chonkgene-rig = { path = "crates/chonkgene-rig" }
 chonkgene-render = { path = "crates/chonkgene-render" }

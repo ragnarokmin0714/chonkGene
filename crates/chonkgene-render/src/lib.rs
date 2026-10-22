@@ -6,8 +6,10 @@
 //! - runs of parts on one bone (the face) are drawn once into a layer and
 //!   re-blitted while that bone only moves, never turns or scales.
 
+pub mod bubble;
 mod layer;
 mod pose;
+pub mod text;
 
 use chonkgene_rig::{Pose, Rig, Shape};
 use tiny_skia::{
