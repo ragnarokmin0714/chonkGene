@@ -11,7 +11,8 @@ use chonkgene_core::mind::{Line, Mind, Out, World, XP_PER_LEVEL};
 use chonkgene_core::motion::{Area, Body, Motion};
 use chonkgene_core::shake::ShakeDetector;
 use chonkgene_core::species::{Grumpiness, Species};
-use chonkgene_platform::{Presenter, Shared};
+use chonkgene_platform::tray::{Tray, TrayCommand};
+use chonkgene_platform::{Presenter, Shared, autostart, hotkey};
 use chonkgene_render::menu::{self, Icon, Item};
 use chonkgene_render::text::Face;
 use chonkgene_render::{BoneMap, Renderer, bubble};
@@ -21,7 +22,7 @@ use tiny_skia::Pixmap;
 use winit::application::ApplicationHandler;
 use winit::dpi::PhysicalPosition;
 use winit::event::{ElementState, MouseButton, WindowEvent};
-use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
+use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop, EventLoopProxy};
 use winit::window::{Window, WindowId};
 
 use crate::ipc::{self, Claim, Msg};
@@ -44,6 +45,7 @@ pub struct Options {
 #[derive(Debug)]
 pub enum UserEvent {
     Ipc(Msg),
+    Tray(TrayCommand),
 }
 
 pub fn run(opts: Options) -> Result<(), String> {
@@ -59,10 +61,11 @@ pub fn run(opts: Options) -> Result<(), String> {
     chonkgene_platform::configure_event_loop(&mut builder);
     let event_loop = builder.build().map_err(|e| e.to_string())?;
     let proxy = event_loop.create_proxy();
+    let ipc_proxy = proxy.clone();
     ipc::serve(listener, move |msg| {
-        proxy.send_event(UserEvent::Ipc(msg)).is_ok()
+        ipc_proxy.send_event(UserEvent::Ipc(msg)).is_ok()
     });
-    let mut app = App::new(data, opts.stats)?;
+    let mut app = App::new(data, opts.stats, proxy)?;
     event_loop.run_app(&mut app).map_err(|e| e.to_string())?;
     app.save_now();
     Ok(())
@@ -183,6 +186,9 @@ struct App {
     rng: fastrand::Rng,
     child: Option<Child>,
     open_settings_on_start: bool,
+    proxy: EventLoopProxy<UserEvent>,
+    tray: Option<Tray>,
+    hotkey: Option<hotkey::Hotkey>,
     stats: bool,
     stats_at: Instant,
     stats_cpu: ProcessTime,
@@ -190,7 +196,7 @@ struct App {
 }
 
 impl App {
-    fn new(data: DataDir, stats: bool) -> Result<Self, String> {
+    fn new(data: DataDir, stats: bool, proxy: EventLoopProxy<UserEvent>) -> Result<Self, String> {
         let mut kinds = HashMap::new();
         for species in Species::ALL {
             let bytes = builtin::for_species(species.id()).ok_or("missing built-in rig")?;
@@ -249,6 +255,9 @@ impl App {
             rng: fastrand::Rng::new(),
             child: None,
             open_settings_on_start: false,
+            proxy,
+            tray: None,
+            hotkey: None,
             stats,
             stats_at: now + STATS_EVERY,
             stats_cpu: ProcessTime::now(),
@@ -274,9 +283,14 @@ impl App {
         }
         self.settings.welcomed = true;
         self.open_settings_on_start = true;
-        self.dirty = true;
-        if let Err(e) = store::save(&self.data.settings(), &self.settings) {
-            eprintln!("{e}");
+        // Saved right away: the settings window reads these files as it opens.
+        for result in [
+            store::save(&self.data.settings(), &self.settings),
+            store::save(&self.data.pets(), &self.store),
+        ] {
+            if let Err(e) = result {
+                eprintln!("{e}");
+            }
         }
     }
 
@@ -379,6 +393,30 @@ impl App {
         }
     }
 
+    /// Make the login entry match the setting, and repair it if the folder moved.
+    fn sync_autostart(&self) {
+        let Ok(exe) = std::env::current_exe() else {
+            return;
+        };
+        if let Err(e) = autostart::sync(self.settings.start_at_login, &exe) {
+            eprintln!("start at login: {e}");
+        }
+    }
+
+    fn command(&mut self, el: &ActiveEventLoop, command: TrayCommand) {
+        match command {
+            TrayCommand::Toggle => {
+                self.hidden = !self.hidden;
+                self.set_visible();
+            }
+            TrayCommand::Settings => self.open_settings(None),
+            TrayCommand::Quit => {
+                self.save_now();
+                el.exit();
+            }
+        }
+    }
+
     fn set_visible(&mut self) {
         let visible = !self.hidden && !self.fullscreen;
         for p in &mut self.pets {
@@ -405,6 +443,7 @@ impl App {
                 if let Err(e) = store::save(&self.data.settings(), &self.settings) {
                     eprintln!("{e}");
                 }
+                self.sync_autostart();
                 self.sync_desktop(el);
             }
             Msg::Pet(mut update) => {
@@ -456,7 +495,10 @@ impl App {
                 self.dirty = true;
                 self.sync_desktop(el);
             }
-            Msg::RemoveTraces => {}
+            Msg::RemoveTraces => {
+                self.settings.start_at_login = false;
+                self.sync_autostart();
+            }
             Msg::Quit => el.exit(),
         }
         if self.dirty {
@@ -666,6 +708,38 @@ impl App {
         self.stats_cpu = ProcessTime::now();
         self.stats_at = now + STATS_EVERY;
     }
+}
+
+/// A paw print for the tray, straight-alpha RGBA.
+fn tray_icon(scale: f32) -> (Vec<u8>, u32) {
+    let size = (32.0 * scale.max(1.0)).round() as u32;
+    let Some(mut pm) = tiny_skia::Pixmap::new(size, size) else {
+        return (vec![0; 4], 1);
+    };
+    let s = size as f32 / 24.0;
+    let mut paint = tiny_skia::Paint::default();
+    paint.set_color_rgba8(0xE8, 0x89, 0x4A, 255);
+    paint.anti_alias = true;
+    let ts = tiny_skia::Transform::from_scale(s, s);
+    if let Some(r) = tiny_skia::Rect::from_xywh(6.8, 11.2, 10.4, 8.6)
+        && let Some(pad) = tiny_skia::PathBuilder::from_oval(r)
+    {
+        pm.fill_path(&pad, &paint, tiny_skia::FillRule::Winding, ts, None);
+    }
+    for (x, y) in [(5.8, 10.0), (9.6, 6.4), (14.4, 6.4), (18.2, 10.0)] {
+        if let Some(toe) = tiny_skia::PathBuilder::from_circle(x, y, 2.3) {
+            pm.fill_path(&toe, &paint, tiny_skia::FillRule::Winding, ts, None);
+        }
+    }
+    let rgba = pm
+        .pixels()
+        .iter()
+        .flat_map(|p| {
+            let c = p.demultiply();
+            [c.red(), c.green(), c.blue(), c.alpha()]
+        })
+        .collect();
+    (rgba, size)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1000,6 +1074,22 @@ impl ApplicationHandler<UserEvent> for App {
             self.data.path.display()
         );
         self.shared = Some(shared);
+        self.sync_autostart();
+        let proxy = std::sync::Arc::new(std::sync::Mutex::new(self.proxy.clone()));
+        let send = move |c: TrayCommand| {
+            if let Ok(p) = proxy.lock() {
+                let _ = p.send_event(UserEvent::Tray(c));
+            }
+        };
+        let (icon, size) = tray_icon(self.ui_scale);
+        match chonkgene_platform::tray::create(icon, size, send.clone()) {
+            Ok(t) => self.tray = Some(t),
+            Err(e) => eprintln!("no tray icon: {e}"),
+        }
+        match hotkey::register(move || send(TrayCommand::Toggle)) {
+            Ok(h) => self.hotkey = Some(h),
+            Err(e) => eprintln!("Ctrl+Alt+P is not available: {e}"),
+        }
         self.sync_desktop(el);
         if self.open_settings_on_start {
             self.open_settings(None);
@@ -1007,8 +1097,10 @@ impl ApplicationHandler<UserEvent> for App {
     }
 
     fn user_event(&mut self, el: &ActiveEventLoop, event: UserEvent) {
-        let UserEvent::Ipc(msg) = event;
-        self.handle(el, msg);
+        match event {
+            UserEvent::Ipc(msg) => self.handle(el, msg),
+            UserEvent::Tray(command) => self.command(el, command),
+        }
     }
 
     fn window_event(&mut self, el: &ActiveEventLoop, id: WindowId, event: WindowEvent) {

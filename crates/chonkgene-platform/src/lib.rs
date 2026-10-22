@@ -5,6 +5,10 @@
 //! Windows: layered windows fed by `UpdateLayeredWindow`. Linux: X11 (also
 //! under XWayland) with an ARGB visual and an XShape input region.
 
+pub mod autostart;
+pub mod hotkey;
+pub mod tray;
+
 #[cfg(target_os = "linux")]
 mod x11;
 #[cfg(target_os = "linux")]
