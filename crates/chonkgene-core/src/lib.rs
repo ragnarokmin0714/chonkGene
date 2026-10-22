@@ -8,6 +8,7 @@ pub mod mind;
 pub mod motion;
 pub mod shake;
 pub mod skit;
+pub mod sound;
 pub mod species;
 pub mod spring;
 pub mod tickle;

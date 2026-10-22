@@ -11,6 +11,7 @@ use chonkgene_core::mind::{Line, Mind, Out, World, XP_PER_LEVEL};
 use chonkgene_core::motion::{Area, Body, Motion};
 use chonkgene_core::shake::ShakeDetector;
 use chonkgene_core::skit::{Actor, Cmd, Director};
+use chonkgene_core::sound::Sound;
 use chonkgene_core::species::{Grumpiness, Species};
 use chonkgene_platform::tray::{Tray, TrayCommand};
 use chonkgene_platform::{Presenter, Shared, autostart, hotkey};
@@ -164,6 +165,76 @@ struct Ctx<'a> {
     area: Area,
     ui_scale: f32,
     world: World,
+    sounds: &'a mut Sounds,
+    sound_on: bool,
+    volume: f32,
+}
+
+/// Placeholder sounds, rate-limited (PLAN §1.5).
+struct Sounds {
+    audio: Option<chonkgene_platform::audio::Audio>,
+    cache: HashMap<(Species, Sound), Vec<i16>>,
+    last: f64,
+    recent: HashMap<u64, Vec<f64>>,
+}
+
+/// At most this many sounds per pet per minute, and this far apart overall.
+const SOUNDS_PER_MINUTE: usize = 6;
+const SOUND_GAP: f64 = 0.15;
+
+impl Sounds {
+    fn new() -> Self {
+        Self {
+            audio: chonkgene_platform::audio::Audio::new(),
+            cache: HashMap::new(),
+            last: f64::NEG_INFINITY,
+            recent: HashMap::new(),
+        }
+    }
+
+    fn play(&mut self, pet: u64, species: Species, sound: Sound, now: f64, volume: f32) {
+        let Some(audio) = &self.audio else {
+            return;
+        };
+        if now - self.last < SOUND_GAP {
+            return;
+        }
+        let recent = self.recent.entry(pet).or_default();
+        recent.retain(|t| now - t < 60.0);
+        if recent.len() >= SOUNDS_PER_MINUTE {
+            return;
+        }
+        recent.push(now);
+        self.last = now;
+        let samples = self
+            .cache
+            .entry((species, sound))
+            .or_insert_with(|| chonkgene_core::sound::synth(species, sound, 7));
+        audio.play(samples, chonkgene_core::sound::RATE, volume);
+    }
+}
+
+/// Which sound goes with a line.
+fn line_sound(line: Line) -> Sound {
+    match line {
+        Line::PokeSmall | Line::TurnOver => Sound::Poke,
+        Line::Laugh | Line::SkitChase => Sound::Laugh,
+        Line::FedUp
+        | Line::Overdone
+        | Line::StillOverdone
+        | Line::AfterGrumpy
+        | Line::Full
+        | Line::SkitShrug => Sound::Sigh,
+        Line::Grumpy
+        | Line::Dizzy
+        | Line::GrudgePoke
+        | Line::GrudgePat
+        | Line::SkitGlare
+        | Line::SkitHuff => Sound::Grumpy,
+        Line::Eat => Sound::Eat,
+        Line::SleepTalk => Sound::Snore,
+        _ => Sound::Voice,
+    }
 }
 
 struct App {
@@ -191,6 +262,7 @@ struct App {
     open_settings_on_start: bool,
     proxy: EventLoopProxy<UserEvent>,
     director: Director,
+    sounds: Sounds,
     tray: Option<Tray>,
     hotkey: Option<hotkey::Hotkey>,
     stats: bool,
@@ -261,6 +333,7 @@ impl App {
             open_settings_on_start: false,
             proxy,
             director: Director::default(),
+            sounds: Sounds::new(),
             tray: None,
             hotkey: None,
             stats,
@@ -661,6 +734,8 @@ impl App {
             kinds,
             lines,
             bubble_face,
+            sounds,
+            settings,
             area,
             ui_scale,
             dirty,
@@ -676,6 +751,9 @@ impl App {
             kinds,
             lines,
             face: bubble_face,
+            sounds,
+            sound_on: settings.sound,
+            volume: f32::from(settings.volume) / 100.0,
             area: *area,
             ui_scale: *ui_scale,
             world,
@@ -904,6 +982,15 @@ impl Pet {
             eprintln!("present failed: {e}");
         }
         self.bubble = Some(b);
+        if ctx.sound_on {
+            ctx.sounds.play(
+                self.save.id,
+                self.species,
+                line_sound(line),
+                ctx.world.now,
+                ctx.volume,
+            );
+        }
     }
 
     fn bubble_pos(&self, ctx: &Ctx, size: (u32, u32)) -> (i32, i32) {
@@ -983,6 +1070,15 @@ impl Pet {
         } else {
             if let Some(landing) = self.body.step(dt, &ctx.area) {
                 self.anim.land(landing.speed);
+                if ctx.sound_on && landing.speed > 600.0 {
+                    ctx.sounds.play(
+                        self.save.id,
+                        self.species,
+                        Sound::Land,
+                        ctx.world.now,
+                        ctx.volume,
+                    );
+                }
             }
             let free = !self.mind.asleep() && self.act.is_none() && !self.in_skit;
             if !self.in_skit && self.act.is_none() && self.body.pace != 1.0 {
@@ -1235,6 +1331,8 @@ impl ApplicationHandler<UserEvent> for App {
                             kinds,
                             lines,
                             bubble_face,
+                            sounds,
+                            settings,
                             area,
                             ui_scale,
                             ..
@@ -1250,6 +1348,9 @@ impl ApplicationHandler<UserEvent> for App {
                                 kinds,
                                 lines,
                                 face: bubble_face,
+                                sounds,
+                                sound_on: settings.sound,
+                                volume: f32::from(settings.volume) / 100.0,
                                 area: *area,
                                 ui_scale: *ui_scale,
                                 world,
@@ -1279,6 +1380,9 @@ impl ApplicationHandler<UserEvent> for App {
                                 kinds,
                                 lines,
                                 face: bubble_face,
+                                sounds,
+                                sound_on: settings.sound,
+                                volume: f32::from(settings.volume) / 100.0,
                                 area: *area,
                                 ui_scale: *ui_scale,
                                 world,
@@ -1356,6 +1460,7 @@ impl ApplicationHandler<UserEvent> for App {
             kinds,
             lines,
             bubble_face,
+            sounds,
             area,
             ui_scale,
             frames,
@@ -1376,6 +1481,9 @@ impl ApplicationHandler<UserEvent> for App {
             kinds,
             lines,
             face: bubble_face,
+            sounds,
+            sound_on: settings.sound,
+            volume: f32::from(settings.volume) / 100.0,
             area: *area,
             ui_scale: *ui_scale,
             world,
