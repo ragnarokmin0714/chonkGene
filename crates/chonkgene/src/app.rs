@@ -1,75 +1,112 @@
-//! The pet process: one winit event loop owning every pet window (PLAN §3.2).
+//! The pet process: one winit event loop owning every pet, bubble and menu
+//! window (PLAN §3.2).
 
+use std::collections::HashMap;
+use std::process::{Child, Command};
 use std::time::{Duration, Instant};
 
+use chonkgene_core::Zone;
 use chonkgene_core::anim::{Animator, Expression};
+use chonkgene_core::mind::{Line, Mind, Out, World, XP_PER_LEVEL};
 use chonkgene_core::motion::{Area, Body, Motion};
 use chonkgene_core::shake::ShakeDetector;
-use chonkgene_core::tickle::{Reaction, Tickle};
-use chonkgene_core::{Personality, Zone};
+use chonkgene_core::species::{Grumpiness, Species};
 use chonkgene_platform::{Presenter, Shared};
-use chonkgene_render::{BoneMap, Renderer};
+use chonkgene_render::menu::{self, Icon, Item};
+use chonkgene_render::text::Face;
+use chonkgene_render::{BoneMap, Renderer, bubble};
 use chonkgene_rig::{Pose, Rig, builtin};
 use cpu_time::ProcessTime;
+use tiny_skia::Pixmap;
 use winit::application::ApplicationHandler;
 use winit::dpi::PhysicalPosition;
 use winit::event::{ElementState, MouseButton, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
 use winit::window::{Window, WindowId};
 
+use crate::ipc::{self, Claim, Msg};
+use crate::lines::Lines;
+use crate::store::{self, DataDir, PetSave, Pets, Settings};
+
 const STATS_EVERY: Duration = Duration::from_secs(5);
+const SAVE_EVERY: Duration = Duration::from_secs(5);
+const POLL_EVERY: Duration = Duration::from_secs(1);
 /// A press that moves further than this (pixels) is a lift, not a poke.
 const DRAG_START: f32 = 4.0;
 const HAPPY_SECS: f64 = 3.0;
+const ACT_SECS: f64 = 3.2;
 
 pub struct Options {
-    pub pets: usize,
-    pub scale: f32,
-    pub chonk: f32,
-    pub coat: String,
+    pub data: Option<std::path::PathBuf>,
     pub stats: bool,
 }
 
-impl Default for Options {
-    fn default() -> Self {
-        Self {
-            pets: 1,
-            scale: 1.0,
-            chonk: 0.33,
-            coat: "red".into(),
-            stats: false,
-        }
-    }
+#[derive(Debug)]
+pub enum UserEvent {
+    Ipc(Msg),
 }
 
 pub fn run(opts: Options) -> Result<(), String> {
-    let rig = Rig::load(builtin::SHIBA).map_err(|e| e.to_string())?;
-    let coat = rig
-        .coat(&opts.coat)
-        .ok_or_else(|| format!("unknown coat {}", opts.coat))?;
-    let mut builder = EventLoop::builder();
+    let data = DataDir::locate(opts.data).map_err(|e| format!("cannot find a data folder: {e}"))?;
+    let listener = match ipc::claim().map_err(|e| format!("cannot start: {e}"))? {
+        Claim::AlreadyRunning => {
+            println!("肉肉賴桌 is already running; asked it to bring the pets back.");
+            return Ok(());
+        }
+        Claim::Ours(listener) => listener,
+    };
+    let mut builder = EventLoop::<UserEvent>::with_user_event();
     chonkgene_platform::configure_event_loop(&mut builder);
     let event_loop = builder.build().map_err(|e| e.to_string())?;
-    let mut app = App::new(opts, rig, coat);
-    event_loop.run_app(&mut app).map_err(|e| e.to_string())
+    let proxy = event_loop.create_proxy();
+    ipc::serve(listener, move |msg| {
+        proxy.send_event(UserEvent::Ipc(msg)).is_ok()
+    });
+    let mut app = App::new(data, opts.stats)?;
+    event_loop.run_app(&mut app).map_err(|e| e.to_string())?;
+    app.save_now();
+    Ok(())
+}
+
+/// Local hour and day number, for sleep rhythm and daily caps.
+fn local_time() -> (f32, i64) {
+    let now = jiff::Zoned::now();
+    let secs = now.timestamp().as_second() + i64::from(now.offset().seconds());
+    (
+        secs.rem_euclid(86_400) as f32 / 3600.0,
+        secs.div_euclid(86_400),
+    )
+}
+
+struct Kind {
+    rig: Rig,
+    bones: BoneMap,
 }
 
 struct Press {
-    /// Cursor offset inside the window when the button went down.
     grab: (f32, f32),
     moved: bool,
     last: Instant,
 }
 
+struct Bubble {
+    window: Window,
+    presenter: Presenter,
+    pixmap: Pixmap,
+    until: f64,
+    placed: (i32, i32),
+}
+
 struct Pet {
+    save: PetSave,
+    species: Species,
     window: Window,
     presenter: Presenter,
     renderer: Renderer,
     pose: Pose,
     body: Body,
     anim: Animator,
-    tickle: Tickle,
-    personality: Personality,
+    mind: Mind,
     shake: ShakeDetector,
     rng: fastrand::Rng,
     cursor: (f32, f32),
@@ -79,30 +116,120 @@ struct Pet {
     last: Instant,
     switch_at: f64,
     happy_until: f64,
+    asleep_since: f64,
+    hello_at: Option<f64>,
+    act: Option<(Grumpiness, f64)>,
+    bubble: Option<Bubble>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Action {
+    Pat,
+    Feed,
+    Edit,
+    Sleep,
+    Wake,
+    HideAll,
+    Settings,
+    Quit,
+}
+
+struct Menu {
+    pet: u64,
+    window: Window,
+    presenter: Presenter,
+    drawn: menu::Drawn,
+    model: menu::Model,
+    actions: Vec<Action>,
+    hover: Option<usize>,
+    pos: (i32, i32),
+    /// Outside clicks count only after every button was released once.
+    armed: bool,
+}
+
+/// Everything a pet needs from the app for one step, borrowed apart from
+/// the pet list.
+struct Ctx<'a> {
+    el: &'a ActiveEventLoop,
+    shared: &'a Shared,
+    kinds: &'a HashMap<Species, Kind>,
+    lines: &'a Lines,
+    face: &'a mut Face,
+    area: Area,
+    ui_scale: f32,
+    world: World,
 }
 
 struct App {
-    opts: Options,
-    rig: Rig,
-    bones: BoneMap,
-    coat: usize,
+    data: DataDir,
+    settings: Settings,
+    store: Pets,
+    dirty: bool,
+    kinds: HashMap<Species, Kind>,
+    lines: Lines,
+    bubble_face: Face,
+    ui_face: Face,
     shared: Option<Shared>,
     area: Area,
+    ui_scale: f32,
     pets: Vec<Pet>,
+    menu: Option<Menu>,
+    hidden: bool,
+    fullscreen: bool,
+    user_idle: f64,
+    poll_at: Instant,
+    save_at: Instant,
     start: Instant,
+    rng: fastrand::Rng,
+    child: Option<Child>,
+    open_settings_on_start: bool,
+    stats: bool,
     stats_at: Instant,
     stats_cpu: ProcessTime,
     frames: u64,
 }
 
 impl App {
-    fn new(opts: Options, rig: Rig, coat: usize) -> Self {
+    fn new(data: DataDir, stats: bool) -> Result<Self, String> {
+        let mut kinds = HashMap::new();
+        for species in Species::ALL {
+            let bytes = builtin::for_species(species.id()).ok_or("missing built-in rig")?;
+            let rig = Rig::load(bytes).map_err(|e| format!("{}: {e}", species.id()))?;
+            kinds.insert(
+                species,
+                Kind {
+                    bones: BoneMap::new(&rig),
+                    rig,
+                },
+            );
+        }
+        let mut notes = Vec::new();
+        let settings = store::load::<Settings>(&data.settings())
+            .unwrap_or_else(|e| {
+                notes.push(e);
+                None
+            })
+            .unwrap_or_default();
+        let mut pets = store::load::<Pets>(&data.pets())
+            .unwrap_or_else(|e| {
+                notes.push(e);
+                None
+            })
+            .unwrap_or_default();
+        pets.sanitise();
+        for note in notes {
+            eprintln!("{note}");
+        }
         let now = Instant::now();
-        Self {
-            opts,
-            bones: BoneMap::new(&rig),
-            rig,
-            coat,
+        let mut app = Self {
+            data,
+            settings,
+            store: pets,
+            dirty: false,
+            kinds,
+            lines: Lines::zh_tw()?,
+            bubble_face: Face::bubble(),
+            ui_face: Face::ui(),
             shared: None,
             area: Area {
                 x: 0.0,
@@ -110,11 +237,46 @@ impl App {
                 w: 1920.0,
                 h: 1080.0,
             },
+            ui_scale: 1.0,
             pets: Vec::new(),
+            menu: None,
+            hidden: false,
+            fullscreen: false,
+            user_idle: 0.0,
+            poll_at: now,
+            save_at: now + SAVE_EVERY,
             start: now,
+            rng: fastrand::Rng::new(),
+            child: None,
+            open_settings_on_start: false,
+            stats,
             stats_at: now + STATS_EVERY,
             stats_cpu: ProcessTime::now(),
             frames: 0,
+        };
+        app.first_run();
+        Ok(app)
+    }
+
+    /// First launch: a Shiba and a Fold move in, and settings opens to say hello.
+    fn first_run(&mut self) {
+        if self.settings.welcomed {
+            return;
+        }
+        if self.store.pets.is_empty() {
+            for (species, coat) in [(Species::Shiba, "red"), (Species::Fold, "bluegrey")] {
+                let id = self.store.next_id;
+                self.store.next_id += 1;
+                self.store
+                    .pets
+                    .push(PetSave::adopt(id, species, coat, &mut self.rng));
+            }
+        }
+        self.settings.welcomed = true;
+        self.open_settings_on_start = true;
+        self.dirty = true;
+        if let Err(e) = store::save(&self.data.settings(), &self.settings) {
+            eprintln!("{e}");
         }
     }
 
@@ -122,85 +284,370 @@ impl App {
         (at - self.start).as_secs_f64()
     }
 
-    fn spawn(&mut self, event_loop: &ActiveEventLoop, shared: &Shared) -> Result<(), String> {
-        let size = Renderer::pixel_size(&self.rig, self.opts.scale);
-        let size_f = (size.0 as f32, size.1 as f32);
-        let now = Instant::now();
-        for i in 0..self.opts.pets {
-            let span = (self.area.w - size_f.0).max(1.0);
-            let x = self.area.x + (self.area.w * 0.6 + i as f32 * size_f.0 * 0.8) % span;
-            let body = Body::on_ground(&self.area, x, size_f);
-            let pos = (body.pos.0.round() as i32, body.pos.1.round() as i32);
-            let window = event_loop
-                .create_window(chonkgene_platform::pet_window(size, pos, "肉肉賴桌"))
-                .map_err(|e| e.to_string())?;
-            let presenter = Presenter::new(shared, &window)?;
-            if i == 0 {
-                println!("window: {}", presenter.describe());
-            }
-            let renderer = Renderer::new(&self.rig, self.opts.scale, self.opts.chonk, self.coat)
-                .ok_or("cannot allocate the pet's pixmap")?;
-            let seed = 0x5EED + i as u64;
-            self.pets.push(Pet {
-                window,
-                presenter,
-                renderer,
-                pose: self.rig.rest_pose(),
-                body,
-                anim: Animator::new(seed, self.opts.chonk),
-                tickle: Tickle::default(),
-                personality: Personality::SHIBA,
-                shake: ShakeDetector::default(),
-                rng: fastrand::Rng::with_seed(seed),
-                cursor: (0.0, 0.0),
-                press: None,
-                placed: pos,
-                next: now,
-                last: now,
-                switch_at: self.secs(now) + 2.0 + i as f64,
-                happy_until: 0.0,
-            });
+    fn world(&self, now: Instant) -> World {
+        let (hour, day) = local_time();
+        World {
+            now: self.secs(now),
+            hour,
+            day,
+            user_idle: self.user_idle,
         }
-        Ok(())
     }
 
-    fn on_mouse(&mut self, i: usize, state: ElementState, button: MouseButton) {
+    fn save_now(&mut self) {
+        for p in &self.pets {
+            if let Some(s) = self.store.pets.iter_mut().find(|s| s.id == p.save.id) {
+                s.set_affinity(&p.mind.affinity);
+            }
+        }
+        if let Err(e) = store::save(&self.data.pets(), &self.store) {
+            eprintln!("{e}");
+        }
+        self.dirty = false;
+    }
+
+    fn open_settings(&mut self, pet: Option<u64>) {
+        if let Some(child) = &mut self.child
+            && matches!(child.try_wait(), Ok(None))
+        {
+            return;
+        }
+        let Ok(exe) = std::env::current_exe() else {
+            return;
+        };
+        let mut cmd = Command::new(exe);
+        cmd.arg("--settings").arg("--data").arg(&self.data.path);
+        if let Some(id) = pet {
+            cmd.arg("--pet").arg(id.to_string());
+        }
+        match cmd.spawn() {
+            Ok(child) => self.child = Some(child),
+            Err(e) => eprintln!("cannot open settings: {e}"),
+        }
+    }
+
+    /// Spawn and remove pet windows so the desktop matches the saves.
+    fn sync_desktop(&mut self, el: &ActiveEventLoop) {
+        let Some(shared) = &self.shared else {
+            return;
+        };
+        let wanted: Vec<u64> = self
+            .store
+            .pets
+            .iter()
+            .filter(|p| p.on_desktop)
+            .take(self.settings.on_desktop as usize)
+            .map(|p| p.id)
+            .collect();
+        let mut removed = false;
+        self.pets.retain(|p| {
+            let keep = wanted.contains(&p.save.id);
+            removed |= !keep;
+            keep
+        });
+        if removed && self.menu.as_ref().is_some_and(|m| !wanted.contains(&m.pet)) {
+            self.menu = None;
+        }
         let now = Instant::now();
         let t = self.secs(now);
-        let p = &mut self.pets[i];
-        match (button, state) {
-            (MouseButton::Left, ElementState::Pressed) => {
-                p.press = Some(Press {
-                    grab: p.cursor,
-                    moved: false,
-                    last: now,
-                });
-                p.shake = ShakeDetector::default();
+        for (slot, id) in wanted.iter().enumerate() {
+            if self.pets.iter().any(|p| p.save.id == *id) {
+                continue;
             }
-            (MouseButton::Left, ElementState::Released) => {
-                let Some(press) = p.press.take() else {
+            let Some(save) = self.store.pets.iter().find(|p| p.id == *id).cloned() else {
+                continue;
+            };
+            match spawn(
+                el,
+                shared,
+                &self.kinds,
+                save,
+                self.area,
+                self.ui_scale,
+                slot,
+                t,
+                now,
+            ) {
+                Ok(pet) => {
+                    if self.hidden || self.fullscreen {
+                        pet.window.set_visible(false);
+                    }
+                    self.pets.push(pet);
+                }
+                Err(e) => eprintln!("cannot place a pet: {e}"),
+            }
+        }
+    }
+
+    fn set_visible(&mut self) {
+        let visible = !self.hidden && !self.fullscreen;
+        for p in &mut self.pets {
+            p.window.set_visible(visible);
+            if !visible {
+                p.bubble = None;
+            }
+            p.next = Instant::now();
+        }
+        if !visible {
+            self.menu = None;
+        }
+    }
+
+    fn handle(&mut self, el: &ActiveEventLoop, msg: Msg) {
+        match msg {
+            Msg::Show => {
+                self.hidden = false;
+                self.set_visible();
+                self.open_settings(None);
+            }
+            Msg::Settings(s) => {
+                self.settings = s;
+                if let Err(e) = store::save(&self.data.settings(), &self.settings) {
+                    eprintln!("{e}");
+                }
+                self.sync_desktop(el);
+            }
+            Msg::Pet(mut update) => {
+                update.sanitise();
+                let Some(save) = self.store.pets.iter_mut().find(|p| p.id == update.id) else {
                     return;
                 };
-                if press.moved {
-                    p.body.release();
-                } else {
-                    let zone = p
-                        .renderer
-                        .hit(&self.rig, p.cursor.0, p.cursor.1)
-                        .and_then(Zone::from_name)
-                        .unwrap_or(Zone::Belly);
-                    p.anim.poke(zone);
-                    let reaction = p.tickle.poke(t, zone, &p.personality, &mut p.rng);
-                    println!("pet {i}: poke {zone:?} → {reaction:?}");
-                    react(p, reaction, t);
+                // Affinity lives in the pet process; never take it from settings.
+                let affinity = save.affinity();
+                *save = update;
+                save.set_affinity(&affinity);
+                let save = save.clone();
+                self.dirty = true;
+                if let Some(i) = self.pets.iter().position(|p| p.save.id == save.id) {
+                    let resized = (self.pets[i].save.size - save.size).abs() > 1e-3;
+                    if resized {
+                        self.pets.remove(i);
+                    } else {
+                        let p = &mut self.pets[i];
+                        let kind = &self.kinds[&p.species];
+                        p.renderer.set_chonk(&kind.rig, save.chonk);
+                        if let Some(coat) = kind.rig.coat(&save.coat) {
+                            p.renderer.set_coat(&kind.rig, coat);
+                        }
+                        p.anim.set_chonk(save.chonk);
+                        p.mind.personality = save.personality();
+                        p.window.set_title(&save.name);
+                        p.save = save;
+                        p.next = Instant::now();
+                    }
                 }
-                p.next = now;
+                self.sync_desktop(el);
             }
-            (MouseButton::Right, ElementState::Pressed) => {
-                println!("pet {i}: the right-click menu is not built yet");
+            Msg::Adopt { species, coat } => {
+                let Some(s) = Species::from_id(&species) else {
+                    return;
+                };
+                let id = self.store.next_id;
+                self.store.next_id += 1;
+                let mut save = PetSave::adopt(id, s, &coat, &mut self.rng);
+                let on_desktop = self.store.pets.iter().filter(|p| p.on_desktop).count();
+                save.on_desktop = on_desktop < self.settings.on_desktop as usize;
+                self.store.pets.push(save);
+                self.dirty = true;
+                self.sync_desktop(el);
+            }
+            Msg::Release(id) => {
+                self.store.pets.retain(|p| p.id != id);
+                self.dirty = true;
+                self.sync_desktop(el);
+            }
+            Msg::RemoveTraces => {}
+            Msg::Quit => el.exit(),
+        }
+        if self.dirty {
+            self.save_now();
+        }
+    }
+
+    fn open_menu(&mut self, el: &ActiveEventLoop, i: usize, world: &World) {
+        let Some(shared) = &self.shared else {
+            return;
+        };
+        let p = &self.pets[i];
+        let asleep = p.mind.asleep();
+        let snacks = p.mind.snacks_left(world.day);
+        let kind = &self.kinds[&p.species];
+        let colors = kind
+            .rig
+            .coat(&p.save.coat)
+            .and_then(|c| kind.rig.data().coats.get(c))
+            .map(|c| (c.colors.get(1).copied(), c.colors.get(2).copied()));
+        let avatar = match colors {
+            Some((Some(a), Some(b))) => (a, b),
+            _ => ([0xE8, 0x95, 0x5A, 255], [0xFF, 0xF3, 0xE2, 255]),
+        };
+        let item = |label: &str, hint: Option<String>, icon, separated| Item {
+            label: label.into(),
+            hint,
+            icon,
+            separated,
+        };
+        let mut items = vec![
+            item("摸摸頭", None, Icon::Heart, false),
+            item(
+                "餵零食",
+                Some(if snacks > 0 {
+                    format!("還有 {snacks} 份")
+                } else {
+                    "吃飽了".into()
+                }),
+                Icon::Snack,
+                false,
+            ),
+            item("改名字…", None, Icon::Pencil, false),
+            item("幫牠換造型…", None, Icon::Palette, false),
+        ];
+        let mut actions = vec![Action::Pat, Action::Feed, Action::Edit, Action::Edit];
+        if asleep {
+            items.push(item("輕輕叫醒牠", None, Icon::Sun, false));
+            actions.push(Action::Wake);
+        } else {
+            items.push(item("讓牠去睡覺", None, Icon::Moon, false));
+            actions.push(Action::Sleep);
+        }
+        items.push(item(
+            "全部收起來",
+            Some("Ctrl+Alt+P".into()),
+            Icon::Hide,
+            true,
+        ));
+        items.push(item("設定…", None, Icon::Sliders, false));
+        items.push(item("結束肉肉賴桌", None, Icon::Exit, false));
+        actions.extend([Action::HideAll, Action::Settings, Action::Quit]);
+        let status = if asleep {
+            Some("睡覺中".to_string())
+        } else if p.mind.grumpy() {
+            Some("有起床氣".to_string())
+        } else {
+            None
+        };
+        let model = menu::Model {
+            name: p.save.name.clone(),
+            species: p.species.label().into(),
+            level: p.mind.affinity.level,
+            progress: p.mind.affinity.xp as f32 / XP_PER_LEVEL as f32,
+            grumpy: p.mind.grumpy() && !asleep,
+            status,
+            avatar,
+            items,
+        };
+        let Some(drawn) = menu::draw(&mut self.ui_face, &model, None, self.ui_scale) else {
+            return;
+        };
+        let (w, h) = (drawn.pixmap.width() as i32, drawn.pixmap.height() as i32);
+        let cursor = shared.cursor().unwrap_or((
+            p.placed.0 + p.cursor.0 as i32,
+            p.placed.1 + p.cursor.1 as i32,
+        ));
+        let (ax, ay, aw, ah) = (
+            self.area.x as i32,
+            self.area.y as i32,
+            self.area.w as i32,
+            self.area.h as i32,
+        );
+        let pos = (
+            (cursor.0 + 4).clamp(ax, (ax + aw - w).max(ax)),
+            (cursor.1 - h / 3).clamp(ay, (ay + ah - h).max(ay)),
+        );
+        let attrs = chonkgene_platform::pet_window((w as u32, h as u32), pos, "肉肉賴桌");
+        let Ok(window) = el.create_window(attrs) else {
+            return;
+        };
+        let Ok(mut presenter) = Presenter::new(shared, &window) else {
+            return;
+        };
+        if let Err(e) = presenter.present(shared, &drawn.pixmap) {
+            eprintln!("present failed: {e}");
+        }
+        self.menu = Some(Menu {
+            pet: p.save.id,
+            window,
+            presenter,
+            drawn,
+            model,
+            actions,
+            hover: None,
+            pos,
+            armed: false,
+        });
+    }
+
+    fn redraw_menu(&mut self) {
+        let (Some(m), Some(shared)) = (&mut self.menu, &self.shared) else {
+            return;
+        };
+        if let Some(drawn) = menu::draw(&mut self.ui_face, &m.model, m.hover, self.ui_scale) {
+            m.drawn = drawn;
+            if let Err(e) = m.presenter.present(shared, &m.drawn.pixmap) {
+                eprintln!("present failed: {e}");
+            }
+        }
+    }
+
+    fn act(&mut self, el: &ActiveEventLoop, pet: u64, action: Action) {
+        self.menu = None;
+        let now = Instant::now();
+        let world = self.world(now);
+        match action {
+            Action::HideAll => {
+                self.hidden = true;
+                self.set_visible();
+                return;
+            }
+            Action::Settings => return self.open_settings(None),
+            Action::Edit => return self.open_settings(Some(pet)),
+            Action::Quit => {
+                self.save_now();
+                el.exit();
+                return;
             }
             _ => {}
         }
+        let App {
+            pets,
+            shared,
+            kinds,
+            lines,
+            bubble_face,
+            area,
+            ui_scale,
+            dirty,
+            ..
+        } = self;
+        let (Some(shared), Some(p)) = (shared.as_ref(), pets.iter_mut().find(|p| p.save.id == pet))
+        else {
+            return;
+        };
+        let mut ctx = Ctx {
+            el,
+            shared,
+            kinds,
+            lines,
+            face: bubble_face,
+            area: *area,
+            ui_scale: *ui_scale,
+            world,
+        };
+        let out = match action {
+            Action::Pat => p.mind.pat(&world),
+            Action::Feed => p.mind.feed(&world),
+            Action::Sleep => {
+                let mut rng = p.rng.clone();
+                let out = p.mind.put_to_sleep(&world, &mut rng);
+                p.rng = rng;
+                out
+            }
+            Action::Wake => p.mind.wake(&world),
+            _ => Out::default(),
+        };
+        p.apply(&mut ctx, out);
+        p.next = now;
+        *dirty = true;
     }
 
     fn report(&mut self, now: Instant) {
@@ -221,22 +668,304 @@ impl App {
     }
 }
 
-fn react(p: &mut Pet, reaction: Reaction, t: f64) {
-    p.anim.expression = match reaction {
-        Reaction::Small | Reaction::Ignored => p.anim.expression,
-        Reaction::Laugh => Expression::Giggle,
-        Reaction::FedUp => Expression::FedUp,
-        Reaction::Overdone => Expression::Sulk,
-        Reaction::CalmedDown => Expression::Neutral,
-        Reaction::MadeUp => {
-            p.happy_until = t + HAPPY_SECS;
-            Expression::Happy
-        }
-    };
+#[allow(clippy::too_many_arguments)]
+fn spawn(
+    el: &ActiveEventLoop,
+    shared: &Shared,
+    kinds: &HashMap<Species, Kind>,
+    save: PetSave,
+    area: Area,
+    ui_scale: f32,
+    slot: usize,
+    t: f64,
+    now: Instant,
+) -> Result<Pet, String> {
+    let species = save.species().ok_or("unknown species")?;
+    let kind = &kinds[&species];
+    let scale = save.size * ui_scale;
+    let size = Renderer::pixel_size(&kind.rig, scale);
+    let size_f = (size.0 as f32, size.1 as f32);
+    let span = (area.w - size_f.0).max(1.0);
+    let x = area.x + (area.w * 0.55 + slot as f32 * size_f.0 * 0.9) % span;
+    let body = Body::on_ground(&area, x, size_f);
+    let pos = (body.pos.0.round() as i32, body.pos.1.round() as i32);
+    let window = el
+        .create_window(chonkgene_platform::pet_window(size, pos, &save.name))
+        .map_err(|e| e.to_string())?;
+    let presenter = Presenter::new(shared, &window)?;
+    let coat = kind.rig.coat(&save.coat).unwrap_or(0);
+    let renderer =
+        Renderer::new(&kind.rig, scale, save.chonk, coat).ok_or("cannot allocate a pixmap")?;
+    let seed = save.id.wrapping_mul(0x9E37_79B9_7F4A_7C15) ^ (t * 1000.0) as u64;
+    Ok(Pet {
+        mind: Mind::new(species, save.personality(), save.affinity()),
+        anim: Animator::new(seed, save.chonk),
+        pose: kind.rig.rest_pose(),
+        species,
+        window,
+        presenter,
+        renderer,
+        body,
+        shake: ShakeDetector::default(),
+        rng: fastrand::Rng::with_seed(seed),
+        cursor: (0.0, 0.0),
+        press: None,
+        placed: pos,
+        next: now,
+        last: now,
+        switch_at: t + 2.0 + slot as f64,
+        happy_until: 0.0,
+        asleep_since: 0.0,
+        hello_at: Some(t + 1.2 + slot as f64 * 1.4),
+        act: None,
+        bubble: None,
+        save,
+    })
 }
 
-impl ApplicationHandler for App {
-    fn resumed(&mut self, event_loop: &ActiveEventLoop) {
+impl Pet {
+    fn say(&mut self, ctx: &mut Ctx, line: Line) {
+        let Some(text) = ctx.lines.pick(
+            self.species,
+            line,
+            &self.save.name,
+            &self.save.you,
+            &mut self.rng,
+        ) else {
+            return;
+        };
+        let Some(pixmap) = bubble::bubble(ctx.face, &text, ctx.ui_scale) else {
+            return;
+        };
+        let size = (pixmap.width(), pixmap.height());
+        let pos = self.bubble_pos(ctx, size);
+        let until = ctx.world.now + 2.4 + 0.12 * text.chars().count() as f64;
+        let reuse = self
+            .bubble
+            .take()
+            .filter(|b| b.pixmap.width() == size.0 && b.pixmap.height() == size.1);
+        let (window, presenter) = match reuse {
+            Some(b) => (b.window, b.presenter),
+            None => {
+                let attrs = chonkgene_platform::pet_window(size, pos, "肉肉賴桌");
+                let Ok(window) = ctx.el.create_window(attrs) else {
+                    return;
+                };
+                let Ok(presenter) = Presenter::new(ctx.shared, &window) else {
+                    return;
+                };
+                (window, presenter)
+            }
+        };
+        window.set_outer_position(PhysicalPosition::new(pos.0, pos.1));
+        let mut b = Bubble {
+            window,
+            presenter,
+            pixmap,
+            until,
+            placed: pos,
+        };
+        if let Err(e) = b.presenter.present(ctx.shared, &b.pixmap) {
+            eprintln!("present failed: {e}");
+        }
+        self.bubble = Some(b);
+    }
+
+    fn bubble_pos(&self, ctx: &Ctx, size: (u32, u32)) -> (i32, i32) {
+        let rig = &ctx.kinds[&self.species].rig;
+        let (ax, ay) = rig.anchor("bubble").unwrap_or((100.0, 0.0));
+        let mut p = [tiny_skia::Point::from_xy(ax, ay)];
+        self.renderer.view().map_points(&mut p);
+        let (x, y) = (
+            self.placed.0 + p[0].x as i32 - size.0 as i32 / 2,
+            self.placed.1 + p[0].y as i32 - size.1 as i32,
+        );
+        let a = ctx.area;
+        (
+            x.clamp(a.x as i32, (a.x + a.w) as i32 - size.0 as i32),
+            y.max(a.y as i32),
+        )
+    }
+
+    fn apply(&mut self, ctx: &mut Ctx, out: Out) {
+        if let Some(e) = out.expression {
+            self.anim.expression = e;
+            if e == Expression::Happy {
+                self.happy_until = ctx.world.now + HAPPY_SECS;
+            }
+        }
+        if let Some(kind) = out.act {
+            self.act = Some((kind, ctx.world.now + ACT_SECS));
+            match kind {
+                Grumpiness::Swat | Grumpiness::PuffUp => {
+                    self.anim.poke(Zone::Belly);
+                    self.anim.land(1200.0);
+                }
+                Grumpiness::Zoomies => {
+                    self.body.motion = Motion::Walk;
+                    self.body.pace = 4.0;
+                }
+                _ => {}
+            }
+        }
+        let line = out.line.or(out.level_up.then_some(Line::LevelUp));
+        if let Some(line) = line {
+            self.say(ctx, line);
+        }
+    }
+
+    fn step(&mut self, ctx: &mut Ctx, i: usize, dt: f32, now: Instant, cursor: Option<(i32, i32)>) {
+        let t = ctx.world.now;
+        if let Some(at) = self.hello_at
+            && t >= at
+        {
+            self.hello_at = None;
+            if !self.mind.asleep() {
+                self.say(ctx, Line::Hello);
+            }
+        }
+
+        if let Some(press) = self.press.as_mut() {
+            if let Some((cx, cy)) = cursor {
+                let target = (cx as f32 - press.grab.0, cy as f32 - press.grab.1);
+                let dist = (target.0 - self.body.pos.0).hypot(target.1 - self.body.pos.1);
+                if !press.moved && dist > DRAG_START {
+                    press.moved = true;
+                }
+                if press.moved {
+                    let held_dt = (now - press.last).as_secs_f32();
+                    press.last = now;
+                    self.body.hold_at(target, held_dt);
+                    self.anim.sway = (-self.body.vel.0 * 0.03).clamp(-20.0, 20.0);
+                    if self.shake.feed(target.0, t) {
+                        let out = self.mind.shake(&ctx.world);
+                        self.anim.poke(Zone::Belly);
+                        println!("pet {i}: shaken");
+                        self.apply(ctx, out);
+                    }
+                }
+            }
+        } else {
+            if let Some(landing) = self.body.step(dt, &ctx.area) {
+                self.anim.land(landing.speed);
+            }
+            let free = !self.mind.asleep() && self.act.is_none();
+            if self.mind.asleep() && self.body.motion == Motion::Walk {
+                self.body.motion = Motion::Idle;
+            }
+            if free
+                && matches!(self.body.motion, Motion::Idle | Motion::Walk)
+                && t >= self.switch_at
+            {
+                self.body.motion = if self.body.motion == Motion::Idle {
+                    Motion::Walk
+                } else {
+                    Motion::Idle
+                };
+                if self.rng.bool() {
+                    self.body.facing = -self.body.facing;
+                }
+                self.switch_at = t + 3.0 + f64::from(self.rng.f32()) * 5.0;
+            }
+        }
+
+        if let Some((kind, until)) = self.act {
+            if t >= until {
+                self.act = None;
+                self.body.pace = 1.0;
+                if self.body.motion == Motion::Walk {
+                    self.body.motion = Motion::Idle;
+                }
+                self.anim.sway = 0.0;
+            } else {
+                match kind {
+                    Grumpiness::Zoomies => {
+                        if ((until - t) * 2.0).fract() < 0.03 {
+                            self.body.facing = -self.body.facing;
+                        }
+                    }
+                    Grumpiness::Dizzy => self.anim.sway = 12.0 * (t as f32 * 7.0).sin(),
+                    Grumpiness::Spin => {
+                        if ((until - t) * 6.0).fract() < 0.1 {
+                            self.body.facing = -self.body.facing;
+                        }
+                    }
+                    Grumpiness::Swat | Grumpiness::PuffUp => {}
+                }
+            }
+        }
+
+        let out = self.mind.tick(&ctx.world, &mut self.rng);
+        if out != Out::default() {
+            self.apply(ctx, out);
+        }
+        if self.mind.asleep() {
+            if self.anim.expression != Expression::Asleep {
+                self.asleep_since = t;
+            }
+            self.anim.expression = Expression::Asleep;
+        } else if self.anim.expression == Expression::Asleep
+            || (self.anim.expression == Expression::Happy && t >= self.happy_until)
+        {
+            self.anim.expression = Expression::Neutral;
+        }
+        self.anim.walking = self.body.motion == Motion::Walk;
+        self.anim.facing = self.body.facing;
+        self.anim.step(dt);
+
+        let placed = (
+            self.body.pos.0.round() as i32,
+            self.body.pos.1.round() as i32,
+        );
+        if placed != self.placed {
+            self.window
+                .set_outer_position(PhysicalPosition::new(placed.0, placed.1));
+            self.placed = placed;
+        }
+        if let Some(b) = &self.bubble {
+            if t >= b.until {
+                self.bubble = None;
+            } else {
+                let size = (b.pixmap.width(), b.pixmap.height());
+                let pos = self.bubble_pos(ctx, size);
+                if let Some(b) = &mut self.bubble
+                    && pos != b.placed
+                {
+                    b.window
+                        .set_outer_position(PhysicalPosition::new(pos.0, pos.1));
+                    b.placed = pos;
+                }
+            }
+        }
+    }
+
+    fn draw(&mut self, kind: &Kind, shared: &Shared, t: f64) {
+        kind.bones.apply(&self.anim.params(), &mut self.pose);
+        let frame = if self.mind.asleep() {
+            self.renderer
+                .render_asleep(&kind.rig, &self.pose, (t - self.asleep_since) as f32)
+        } else {
+            self.renderer.render(&kind.rig, &self.pose)
+        };
+        if let Err(e) = self.presenter.present(shared, frame) {
+            eprintln!("present failed: {e}");
+        }
+    }
+
+    fn moving(&self) -> bool {
+        self.press.as_ref().is_some_and(|p| p.moved)
+            || self.body.motion == Motion::Fall
+            || self.act.is_some_and(|(k, _)| {
+                matches!(
+                    k,
+                    Grumpiness::Zoomies | Grumpiness::Dizzy | Grumpiness::Spin
+                )
+            })
+    }
+}
+
+impl ApplicationHandler<UserEvent> for App {
+    fn resumed(&mut self, el: &ActiveEventLoop) {
         if self.shared.is_some() {
             return;
         }
@@ -244,14 +973,16 @@ impl ApplicationHandler for App {
             Ok(s) => s,
             Err(e) => {
                 eprintln!("{e}");
-                event_loop.exit();
+                el.exit();
                 return;
             }
         };
+        let monitor = el.primary_monitor();
+        self.ui_scale = monitor.as_ref().map_or(1.0, |m| m.scale_factor() as f32);
         let (x, y, w, h) = shared
             .work_area()
             .or_else(|| {
-                event_loop.primary_monitor().map(|m| {
+                monitor.map(|m| {
                     let (p, s) = (m.position(), m.size());
                     (p.x, p.y, s.width as i32, s.height as i32)
                 })
@@ -263,34 +994,128 @@ impl ApplicationHandler for App {
             w: w as f32,
             h: h as f32,
         };
-        println!("肉肉賴桌 Phase 1 prototype · {}", shared.describe());
         println!(
-            "click to poke (belly, cheeks, paws, head, bottom) · drag to lift · shake while dragging · let go to throw"
+            "肉肉賴桌 · {} · data in {}",
+            shared.describe(),
+            self.data.path.display()
         );
-        println!("Ctrl+C here to quit");
-        if let Err(e) = self.spawn(event_loop, &shared) {
-            eprintln!("cannot create the pet window: {e}");
-            event_loop.exit();
-            return;
-        }
         self.shared = Some(shared);
+        self.sync_desktop(el);
+        if self.open_settings_on_start {
+            self.open_settings(None);
+        }
     }
 
-    fn window_event(&mut self, event_loop: &ActiveEventLoop, id: WindowId, event: WindowEvent) {
+    fn user_event(&mut self, el: &ActiveEventLoop, event: UserEvent) {
+        let UserEvent::Ipc(msg) = event;
+        self.handle(el, msg);
+    }
+
+    fn window_event(&mut self, el: &ActiveEventLoop, id: WindowId, event: WindowEvent) {
+        if let Some(m) = &mut self.menu
+            && m.window.id() == id
+        {
+            match event {
+                WindowEvent::CursorMoved { position, .. } => {
+                    let hover = menu::row_at(&m.drawn, position.x as f32, position.y as f32);
+                    if hover != m.hover {
+                        m.hover = hover;
+                        self.redraw_menu();
+                    }
+                }
+                WindowEvent::CursorLeft { .. } => {
+                    if m.hover.take().is_some() {
+                        self.redraw_menu();
+                    }
+                }
+                WindowEvent::MouseInput {
+                    state: ElementState::Released,
+                    button: MouseButton::Left,
+                    ..
+                } => {
+                    if let Some(row) = m.hover {
+                        let (pet, action) = (m.pet, m.actions[row]);
+                        self.act(el, pet, action);
+                    }
+                }
+                _ => {}
+            }
+            return;
+        }
         let Some(i) = self.pets.iter().position(|p| p.window.id() == id) else {
             return;
         };
         match event {
-            WindowEvent::CloseRequested => event_loop.exit(),
             WindowEvent::CursorMoved { position, .. } => {
                 self.pets[i].cursor = (position.x as f32, position.y as f32);
             }
-            WindowEvent::MouseInput { state, button, .. } => self.on_mouse(i, state, button),
+            WindowEvent::MouseInput { state, button, .. } => {
+                let now = Instant::now();
+                let world = self.world(now);
+                match (button, state) {
+                    (MouseButton::Left, ElementState::Pressed) => {
+                        self.menu = None;
+                        let p = &mut self.pets[i];
+                        p.press = Some(Press {
+                            grab: p.cursor,
+                            moved: false,
+                            last: now,
+                        });
+                        p.shake = ShakeDetector::default();
+                    }
+                    (MouseButton::Left, ElementState::Released) => {
+                        let App {
+                            pets,
+                            shared,
+                            kinds,
+                            lines,
+                            bubble_face,
+                            area,
+                            ui_scale,
+                            ..
+                        } = self;
+                        let Some(shared) = shared.as_ref() else {
+                            return;
+                        };
+                        let p = &mut pets[i];
+                        let Some(press) = p.press.take() else {
+                            return;
+                        };
+                        if press.moved {
+                            p.body.release();
+                        } else {
+                            let zone = p
+                                .renderer
+                                .hit(&kinds[&p.species].rig, p.cursor.0, p.cursor.1)
+                                .and_then(Zone::from_name)
+                                .unwrap_or(Zone::Belly);
+                            p.anim.poke(zone);
+                            let mut rng = p.rng.clone();
+                            let out = p.mind.poke(&world, zone, &mut rng);
+                            p.rng = rng;
+                            let mut ctx = Ctx {
+                                el,
+                                shared,
+                                kinds,
+                                lines,
+                                face: bubble_face,
+                                area: *area,
+                                ui_scale: *ui_scale,
+                                world,
+                            };
+                            p.apply(&mut ctx, out);
+                        }
+                        p.next = now;
+                        self.dirty = true;
+                    }
+                    (MouseButton::Right, ElementState::Pressed) => self.open_menu(el, i, &world),
+                    _ => {}
+                }
+            }
             WindowEvent::RedrawRequested => {
                 if let Some(shared) = &self.shared {
                     let p = &mut self.pets[i];
-                    let frame = p.renderer.render(&self.rig, &p.pose);
-                    if let Err(e) = p.presenter.present(shared, frame) {
+                    if let Err(e) = p.presenter.present(shared, p.renderer.pixmap()) {
                         eprintln!("present failed: {e}");
                     }
                 }
@@ -299,109 +1124,113 @@ impl ApplicationHandler for App {
         }
     }
 
-    fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
-        let Some(shared) = &self.shared else {
-            return;
-        };
+    fn about_to_wait(&mut self, el: &ActiveEventLoop) {
         let now = Instant::now();
-        let t = (now - self.start).as_secs_f64();
-        let cursor = if self.pets.iter().any(|p| p.press.is_some()) {
+        if self.shared.is_none() {
+            return;
+        }
+
+        if now >= self.poll_at {
+            self.poll_at = now + POLL_EVERY;
+            if let Some(shared) = &self.shared {
+                self.user_idle = shared.idle_secs().unwrap_or(0.0);
+                let ours: Vec<u32> = self.pets.iter().map(|p| p.presenter.id()).collect();
+                let fullscreen =
+                    self.settings.hide_in_fullscreen && shared.fullscreen_active(&ours);
+                if fullscreen != self.fullscreen {
+                    self.fullscreen = fullscreen;
+                    self.set_visible();
+                }
+            }
+            if let Some(child) = &mut self.child
+                && !matches!(child.try_wait(), Ok(None))
+            {
+                self.child = None;
+            }
+        }
+
+        // Close the menu on a click anywhere else.
+        if let (Some(m), Some(shared)) = (&mut self.menu, &self.shared) {
+            let down = shared.button_down();
+            if !down {
+                m.armed = true;
+            } else if m.armed {
+                let inside = shared.cursor().is_some_and(|(x, y)| {
+                    let (w, h) = (
+                        m.drawn.pixmap.width() as i32,
+                        m.drawn.pixmap.height() as i32,
+                    );
+                    x >= m.pos.0 && x < m.pos.0 + w && y >= m.pos.1 && y < m.pos.1 + h
+                });
+                if !inside {
+                    self.menu = None;
+                }
+            }
+        }
+
+        let visible = !self.hidden && !self.fullscreen;
+        let world = self.world(now);
+        let App {
+            pets,
+            shared,
+            kinds,
+            lines,
+            bubble_face,
+            area,
+            ui_scale,
+            frames,
+            ..
+        } = self;
+        let shared = shared.as_ref().expect("checked above");
+        let cursor = if pets.iter().any(|p| p.press.is_some()) {
             shared.cursor()
         } else {
             None
         };
-        for (i, p) in self.pets.iter_mut().enumerate() {
-            if p.next > now {
+        let mut ctx = Ctx {
+            el,
+            shared,
+            kinds,
+            lines,
+            face: bubble_face,
+            area: *area,
+            ui_scale: *ui_scale,
+            world,
+        };
+        for (i, p) in pets.iter_mut().enumerate() {
+            if !visible || p.next > now {
                 continue;
             }
             let dt = (now - p.last).as_secs_f32().min(0.1);
             p.last = now;
-            step(p, i, t, dt, now, cursor, &self.area);
-
-            self.bones.apply(&p.anim.params(), &mut p.pose);
-            let frame = p.renderer.render(&self.rig, &p.pose);
-            if let Err(e) = p.presenter.present(shared, frame) {
-                eprintln!("present failed: {e}");
-            }
-            self.frames += 1;
-            let moving =
-                p.press.as_ref().is_some_and(|pr| pr.moved) || p.body.motion == Motion::Fall;
-            p.next = now + Duration::from_secs_f64(1.0 / f64::from(p.anim.fps(moving)));
+            p.step(&mut ctx, i, dt, now, cursor);
+            p.draw(&ctx.kinds[&p.species], ctx.shared, world.now);
+            *frames += 1;
+            p.next = now + Duration::from_secs_f64(1.0 / f64::from(p.anim.fps(p.moving())));
         }
-        if self.opts.stats && now >= self.stats_at {
+
+        if self.dirty && now >= self.save_at {
+            self.save_at = now + SAVE_EVERY;
+            self.save_now();
+        }
+        if self.stats && now >= self.stats_at {
             self.report(now);
         }
-        let wake = self
-            .pets
-            .iter()
-            .map(|p| p.next)
-            .chain(self.opts.stats.then_some(self.stats_at))
-            .min();
-        event_loop.set_control_flow(wake.map_or(ControlFlow::Wait, ControlFlow::WaitUntil));
-    }
-}
 
-fn step(
-    p: &mut Pet,
-    i: usize,
-    t: f64,
-    dt: f32,
-    now: Instant,
-    cursor: Option<(i32, i32)>,
-    area: &Area,
-) {
-    if let Some(press) = p.press.as_mut() {
-        if let Some((cx, cy)) = cursor {
-            let target = (cx as f32 - press.grab.0, cy as f32 - press.grab.1);
-            let dist = (target.0 - p.body.pos.0).hypot(target.1 - p.body.pos.1);
-            if !press.moved && dist > DRAG_START {
-                press.moved = true;
-            }
-            if press.moved {
-                let held_dt = (now - press.last).as_secs_f32();
-                press.last = now;
-                p.body.hold_at(target, held_dt);
-                p.anim.sway = (-p.body.vel.0 * 0.03).clamp(-20.0, 20.0);
-                if p.shake.feed(target.0, t) {
-                    // Sleep comes in Phase 2; for now a shake just makes it dizzy.
-                    println!("pet {i}: shaken!");
-                    p.anim.poke(Zone::Belly);
-                    p.anim.expression = Expression::FedUp;
-                }
-            }
+        let mut wake = self.poll_at.min(self.save_at);
+        if visible && let Some(next) = self.pets.iter().map(|p| p.next).min() {
+            wake = wake.min(next);
         }
-    } else {
-        if let Some(landing) = p.body.step(dt, area) {
-            p.anim.land(landing.speed);
+        if self.menu.is_some() {
+            wake = wake.min(now + Duration::from_millis(33));
         }
-        if matches!(p.body.motion, Motion::Idle | Motion::Walk) && t >= p.switch_at {
-            p.body.motion = if p.body.motion == Motion::Idle {
-                Motion::Walk
-            } else {
-                Motion::Idle
-            };
-            if p.rng.bool() {
-                p.body.facing = -p.body.facing;
-            }
-            p.switch_at = t + 3.0 + f64::from(p.rng.f32()) * 5.0;
+        if self.stats {
+            wake = wake.min(self.stats_at);
         }
+        el.set_control_flow(ControlFlow::WaitUntil(wake));
     }
 
-    if let Some(reaction) = p.tickle.update(t, &p.personality) {
-        println!("pet {i}: {reaction:?}");
-        react(p, reaction, t);
-    }
-    if p.anim.expression == Expression::Happy && t >= p.happy_until {
-        p.anim.expression = Expression::Neutral;
-    }
-    p.anim.walking = p.body.motion == Motion::Walk;
-    p.anim.facing = p.body.facing;
-    p.anim.step(dt);
-
-    let placed = (p.body.pos.0.round() as i32, p.body.pos.1.round() as i32);
-    if placed != p.placed {
-        p.window
-            .set_outer_position(PhysicalPosition::new(placed.0, placed.1));
-        p.placed = placed;
+    fn exiting(&mut self, _el: &ActiveEventLoop) {
+        self.save_now();
     }
 }

@@ -141,6 +141,64 @@ impl Renderer {
         &self.pixmap
     }
 
+    /// Render a sleeping pet: the frame plus a snot bubble that swells with
+    /// each breath and a drifting 「z」. `phase` is seconds asleep.
+    pub fn render_asleep(&mut self, rig: &Rig, pose: &Pose, phase: f32) -> &Pixmap {
+        self.render(rig, pose);
+        let (Some(head), Some(el), Some(er)) =
+            (rig.bone("head"), rig.bone("eye_l"), rig.bone("eye_r"))
+        else {
+            return &self.pixmap;
+        };
+        let bones = &rig.data().bones;
+        let (l, r) = (bones[el].pivot, bones[er].pivot);
+        let ts = self.view().pre_concat(self.world[head]);
+        let tau = std::f32::consts::TAU;
+
+        // Snot bubble beside the nose, swelling with the slow sleeping breath.
+        let swell = 0.5 + 0.5 * (phase * tau / 5.1).sin();
+        let (nx, ny) = ((l.0 + r.0) / 2.0 + 9.0, (l.1 + r.1) / 2.0 + 15.0);
+        if let Some(bubble) =
+            tiny_skia::PathBuilder::from_circle(nx + 3.0 * swell, ny, 2.5 + 5.5 * swell)
+        {
+            let mut fill = Paint::default();
+            fill.set_color_rgba8(0xD6, 0xEE, 0xFA, 220);
+            fill.anti_alias = true;
+            self.pixmap
+                .fill_path(&bubble, &fill, FillRule::Winding, ts, None);
+            let mut edge = fill.clone();
+            edge.set_color_rgba8(0xA9, 0xD6, 0xEE, 255);
+            let stroke = Stroke {
+                width: 1.2,
+                ..Stroke::default()
+            };
+            self.pixmap.stroke_path(&bubble, &edge, &stroke, ts, None);
+        }
+
+        // A 「z」 drifting up and fading every 2.4 s.
+        let cycle = (phase / 2.4).fract();
+        let (zx, zy) = (r.0 + 28.0 + 6.0 * cycle, r.1 - 34.0 - 14.0 * cycle);
+        let mut pb = tiny_skia::PathBuilder::new();
+        pb.move_to(zx, zy);
+        pb.line_to(zx + 8.0, zy);
+        pb.line_to(zx, zy + 8.0);
+        pb.line_to(zx + 8.0, zy + 8.0);
+        if let Some(z) = pb.finish() {
+            let mut ink = Paint::default();
+            let alpha = (255.0 * (1.0 - cycle) * (cycle * 4.0).min(1.0)) as u8;
+            ink.set_color_rgba8(0x8E, 0x7C, 0x6E, alpha);
+            ink.anti_alias = true;
+            let stroke = Stroke {
+                width: 2.4,
+                line_cap: LineCap::Round,
+                line_join: LineJoin::Round,
+                ..Stroke::default()
+            };
+            self.pixmap.stroke_path(&z, &ink, &stroke, ts, None);
+        }
+        &self.pixmap
+    }
+
     /// The hit zone under pixel `(x, y)` of the last rendered frame.
     pub fn hit<'r>(&self, rig: &'r Rig, x: f32, y: f32) -> Option<&'r str> {
         let inv = self.view().invert()?;

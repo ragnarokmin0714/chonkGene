@@ -176,3 +176,17 @@ fn pet_menu() {
     assert_eq!(menu::row_at(&drawn, r.x() + 5.0, r.y() + 5.0), Some(4));
     compare("menu", &drawn.pixmap);
 }
+
+#[test]
+fn shiba_asleep() {
+    let rig = Rig::load(builtin::SHIBA).unwrap();
+    let mut r = Renderer::new(&rig, 1.0, 0.33, 0).unwrap();
+    let mut pose = rig.rest_pose();
+    let params = PoseParams {
+        eyes_open: 0.06,
+        breath: 1.0,
+        ..PoseParams::default()
+    };
+    BoneMap::new(&rig).apply(&params, &mut pose);
+    compare("shiba-asleep", &r.render_asleep(&rig, &pose, 1.6).clone());
+}

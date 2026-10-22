@@ -21,6 +21,8 @@ pub enum Expression {
     Sulk,
     /// Content squint after making up or a head pat.
     Happy,
+    /// Eyes shut, tail still, slow breathing; the renderer adds the snot bubble.
+    Asleep,
 }
 
 /// Inputs a renderer maps onto bones by convention (see chonkgene-render).
@@ -124,6 +126,8 @@ impl Animator {
     pub fn fps(&self, moving: bool) -> u32 {
         if moving || self.is_settling() || self.expression == Expression::Giggle {
             60
+        } else if self.expression == Expression::Asleep {
+            5
         } else if self.walking {
             30
         } else {
@@ -155,18 +159,23 @@ impl Animator {
         let (wag_hz, wag_deg) = match self.expression {
             Expression::Giggle => (4.0, 16.0),
             Expression::FedUp => (0.5, 3.0),
-            Expression::Sulk => (0.0, 0.0),
+            Expression::Sulk | Expression::Asleep => (0.0, 0.0),
             _ if self.walking => (3.0, 14.0),
             _ => (1.2, 8.0),
         };
         let blinking = self.t < self.blink_until;
         PoseParams {
-            breath: (self.t * tau / BREATH_PERIOD).sin(),
+            breath: if self.expression == Expression::Asleep {
+                1.6 * (self.t * tau / (BREATH_PERIOD * 1.6)).sin()
+            } else {
+                (self.t * tau / BREATH_PERIOD).sin()
+            },
             squash: self.body.pos.clamp(-0.4, 0.4),
             belly: self.belly.pos.clamp(-0.4, 0.4),
             eyes_open: match self.expression {
                 Expression::Giggle | Expression::Happy => 0.18,
                 Expression::Sulk => 0.12,
+                Expression::Asleep => 0.06,
                 Expression::FedUp if blinking => 0.12,
                 Expression::FedUp => 0.5,
                 Expression::Neutral if blinking => 0.12,
@@ -174,6 +183,7 @@ impl Animator {
             },
             tail: match self.expression {
                 Expression::Sulk => 12.0,
+                Expression::Asleep => 4.0,
                 _ => (self.t * tau * wag_hz).sin() * wag_deg,
             },
             bob: if self.walking {

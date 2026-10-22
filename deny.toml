@@ -13,6 +13,7 @@ confidence-threshold = 0.9
 # Our own crates are unpublished and their licence is still open (PLAN §10).
 private = { ignore = true }
 allow = [
+    "0BSD",
     "Apache-2.0",
     "Apache-2.0 WITH LLVM-exception",
     "BSD-2-Clause",

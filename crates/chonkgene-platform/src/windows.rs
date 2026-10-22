@@ -12,6 +12,13 @@ use windows_sys::Win32::Graphics::Gdi::{
     CreateCompatibleDC, CreateDIBSection, DIB_RGB_COLORS, DeleteDC, DeleteObject, GetDC, HBITMAP,
     HDC, HGDIOBJ, ReleaseDC, SelectObject,
 };
+use windows_sys::Win32::System::SystemInformation::GetTickCount;
+use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
+    GetAsyncKeyState, GetLastInputInfo, LASTINPUTINFO, VK_LBUTTON, VK_RBUTTON,
+};
+use windows_sys::Win32::UI::Shell::{
+    QUNS_BUSY, QUNS_PRESENTATION_MODE, QUNS_RUNNING_D3D_FULL_SCREEN, SHQueryUserNotificationState,
+};
 use windows_sys::Win32::UI::WindowsAndMessaging::{
     GWL_EXSTYLE, GetCursorPos, GetWindowLongPtrW, SPI_GETWORKAREA, SetWindowLongPtrW,
     SystemParametersInfoW, ULW_ALPHA, UpdateLayeredWindow, WS_EX_LAYERED, WS_EX_NOACTIVATE,
@@ -44,6 +51,42 @@ impl Shared {
         let ok =
             unsafe { SystemParametersInfoW(SPI_GETWORKAREA, 0, (&raw mut r).cast::<c_void>(), 0) };
         (ok != 0).then(|| (r.left, r.top, r.right - r.left, r.bottom - r.top))
+    }
+
+    /// Is a mouse button held anywhere on screen? Polled, for closing menus
+    /// on an outside click (no hooks, PLAN §6).
+    pub fn button_down(&self) -> bool {
+        // SAFETY: GetAsyncKeyState only reads key state; any virtual key is valid.
+        let down = |vk: u16| unsafe { GetAsyncKeyState(i32::from(vk)) } < 0;
+        down(VK_LBUTTON) || down(VK_RBUTTON)
+    }
+
+    /// Seconds since the last keyboard or mouse input.
+    pub fn idle_secs(&self) -> Option<f64> {
+        let mut info = LASTINPUTINFO {
+            cbSize: size_of::<LASTINPUTINFO>() as u32,
+            dwTime: 0,
+        };
+        // SAFETY: `info` is a properly sized LASTINPUTINFO.
+        if unsafe { GetLastInputInfo(&mut info) } == 0 {
+            return None;
+        }
+        // SAFETY: no arguments; returns milliseconds since boot (wraps, hence wrapping_sub).
+        let now = unsafe { GetTickCount() };
+        Some(f64::from(now.wrapping_sub(info.dwTime)) / 1000.0)
+    }
+
+    /// Is a full-screen app, game or presentation in front?
+    pub fn fullscreen_active(&self, _ours: &[u32]) -> bool {
+        let mut state = 0;
+        // SAFETY: writes one QUERY_USER_NOTIFICATION_STATE to `state`.
+        if unsafe { SHQueryUserNotificationState(&mut state) } != 0 {
+            return false;
+        }
+        matches!(
+            state,
+            QUNS_BUSY | QUNS_RUNNING_D3D_FULL_SCREEN | QUNS_PRESENTATION_MODE
+        )
     }
 
     /// Global cursor position, polled (no input hooks, PLAN §6).
@@ -119,6 +162,11 @@ impl Presenter {
 
     pub fn describe(&self) -> String {
         "layered window, premultiplied BGRA".into()
+    }
+
+    /// Only meaningful on X11; Windows tells full-screen apps apart itself.
+    pub fn id(&self) -> u32 {
+        0
     }
 
     pub fn present(&mut self, _shared: &Shared, pm: &Pixmap) -> Result<(), String> {

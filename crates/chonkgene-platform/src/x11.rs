@@ -9,8 +9,11 @@ use winit::window::Window;
 use x11rb::connection::{Connection, RequestConnection};
 use x11rb::image::{BitsPerPixel, Image, ImageOrder, ScanlinePad};
 use x11rb::protocol::Event;
+use x11rb::protocol::screensaver::{self, ConnectionExt as _};
 use x11rb::protocol::shape::{self, ConnectionExt as _, SK, SO};
-use x11rb::protocol::xproto::{AtomEnum, ClipOrdering, ConnectionExt as _, CreateGCAux, Rectangle};
+use x11rb::protocol::xproto::{
+    AtomEnum, ClipOrdering, ConnectionExt as _, CreateGCAux, KeyButMask, Rectangle,
+};
 use x11rb::rust_connection::RustConnection;
 
 /// Alpha below this lets clicks through.
@@ -27,6 +30,17 @@ pub struct Shared {
     conn: RustConnection,
     root: u32,
     shape: bool,
+    screensaver: bool,
+    active_window: u32,
+    wm_state: u32,
+    fullscreen: u32,
+}
+
+fn intern(conn: &RustConnection, name: &[u8]) -> u32 {
+    conn.intern_atom(false, name)
+        .ok()
+        .and_then(|c| c.reply().ok())
+        .map_or(0, |r| r.atom)
 }
 
 impl Shared {
@@ -38,7 +52,22 @@ impl Shared {
             .extension_information(shape::X11_EXTENSION_NAME)
             .map_err(err)?
             .is_some();
-        Ok(Self { conn, root, shape })
+        let screensaver = conn
+            .extension_information(screensaver::X11_EXTENSION_NAME)
+            .map_err(err)?
+            .is_some();
+        let active_window = intern(&conn, b"_NET_ACTIVE_WINDOW");
+        let wm_state = intern(&conn, b"_NET_WM_STATE");
+        let fullscreen = intern(&conn, b"_NET_WM_STATE_FULLSCREEN");
+        Ok(Self {
+            conn,
+            root,
+            shape,
+            screensaver,
+            active_window,
+            wm_state,
+            fullscreen,
+        })
     }
 
     pub fn describe(&self) -> String {
@@ -82,6 +111,58 @@ impl Shared {
         let r = self.conn.query_pointer(self.root).ok()?.reply().ok()?;
         Some((i32::from(r.root_x), i32::from(r.root_y)))
     }
+
+    /// Is a mouse button held anywhere on screen? Polled, for closing menus
+    /// on an outside click without grabbing the pointer.
+    pub fn button_down(&self) -> bool {
+        self.conn
+            .query_pointer(self.root)
+            .ok()
+            .and_then(|c| c.reply().ok())
+            .is_some_and(|r| {
+                let buttons =
+                    u16::from(KeyButMask::BUTTON1 | KeyButMask::BUTTON2 | KeyButMask::BUTTON3);
+                u16::from(r.mask) & buttons != 0
+            })
+    }
+
+    /// Seconds since the last keyboard or mouse input (XScreenSaver; under
+    /// XWayland this only sees X11 input).
+    pub fn idle_secs(&self) -> Option<f64> {
+        if !self.screensaver {
+            return None;
+        }
+        let r = self
+            .conn
+            .screensaver_query_info(self.root)
+            .ok()?
+            .reply()
+            .ok()?;
+        Some(f64::from(r.ms_since_user_input) / 1000.0)
+    }
+
+    /// Is the active window full screen? `ours` are the pet windows, which
+    /// never count.
+    pub fn fullscreen_active(&self, ours: &[u32]) -> bool {
+        if self.active_window == 0 || self.fullscreen == 0 {
+            return false;
+        }
+        let active = self
+            .conn
+            .get_property(false, self.root, self.active_window, AtomEnum::WINDOW, 0, 1)
+            .ok()
+            .and_then(|c| c.reply().ok())
+            .and_then(|r| r.value32().and_then(|mut v| v.next()));
+        let Some(win) = active.filter(|w| *w != 0 && !ours.contains(w)) else {
+            return false;
+        };
+        self.conn
+            .get_property(false, win, self.wm_state, AtomEnum::ATOM, 0, 32)
+            .ok()
+            .and_then(|c| c.reply().ok())
+            .and_then(|r| r.value32().map(|mut v| v.any(|a| a == self.fullscreen)))
+            .unwrap_or(false)
+    }
 }
 
 pub struct Presenter {
@@ -117,6 +198,11 @@ impl Presenter {
             buf: vec![0; (size.width * size.height * 4) as usize],
             frame: 0,
         })
+    }
+
+    /// The X11 window id, for telling our windows apart from others.
+    pub fn id(&self) -> u32 {
+        self.win
     }
 
     pub fn describe(&self) -> String {

@@ -13,11 +13,24 @@ chonkgene-render.workspace = true
 chonkgene-rig.workspace = true
 cpu-time.workspace = true
 ron.workspace = true
+tiny-skia.workspace = true
 serde.workspace = true
+slint.workspace = true
 fastrand.workspace = true
 interprocess.workspace = true
+jiff.workspace = true
 memory-stats.workspace = true
 winit.workspace = true
 
-[lints]
-workspace = true
+[build-dependencies]
+slint-build.workspace = true
+
+# Load fontconfig at run time instead of linking it, so the build needs no
+# -dev packages and the binary stays portable (PLAN §2.1).
+[target.'cfg(target_os = "linux")'.dependencies]
+fontique = { version = "0.11.1", features = ["fontconfig-dlopen"] }
+
+# `deny`, not the workspace's `forbid`: Slint's generated code allows unsafe
+# locally, which `forbid` would reject. Our own code still may not use it.
+[lints.rust]
+unsafe_code = "deny"

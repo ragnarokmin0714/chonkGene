@@ -35,6 +35,8 @@ pub struct Body {
     pub motion: Motion,
     /// 1.0 faces right.
     pub facing: f32,
+    /// Walking speed multiplier (zoomies run faster).
+    pub pace: f32,
 }
 
 /// Something worth a squash: the speed of a landing.
@@ -51,6 +53,7 @@ impl Body {
             size,
             motion: Motion::Idle,
             facing: 1.0,
+            pace: 1.0,
         };
         b.pos.1 = b.ground(area);
         b
@@ -87,7 +90,7 @@ impl Body {
                 None
             }
             Motion::Walk => {
-                self.pos.0 += WALK_SPEED * self.facing * dt;
+                self.pos.0 += WALK_SPEED * self.pace * self.facing * dt;
                 if self.pos.0 <= left {
                     self.pos.0 = left;
                     self.facing = 1.0;

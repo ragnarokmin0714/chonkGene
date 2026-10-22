@@ -7,7 +7,8 @@ use chonkgene_core::species::Species;
 
 const ZH_TW: &str = include_str!("../../../assets/lines/zh-TW.ron");
 /// Longest a bubble line may be, in characters (PLAN §1.11).
-pub const MAX_LINE: usize = 14;
+#[cfg(test)]
+const MAX_LINE: usize = 14;
 pub const MAX_NAME: usize = 12;
 pub const MAX_YOU: usize = 8;
 
