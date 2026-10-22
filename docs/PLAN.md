@@ -450,6 +450,21 @@ Measured on a mid-range laptop **with the settings window closed**:
 - Capped at 30 fps on battery.
 - `cargo xtask bench`: headless per-frame simulation + raster timing, tracked in CI.
 
+**Phase 0 S2, first numbers (2026-10-22)**: `pet-spike --bench` on the development machine (aarch64 VM under QEMU), 256 px stand-in Shiba, default mix (one in six walking, the rest idle, occasional pokes):
+
+| Pets | Draw + BGRA convert per frame | Frames/s | CPU at full clock | Extra memory |
+|---|---|---|---|---|
+| 6 | 199 + 5 µs | 123 | 2.5% of one core | +2.4 MiB |
+| 24 | 197 + 5 µs | 463 | 9.4% of one core | +6.2 MiB |
+
+- Memory is far inside the budget (about 0.3 MiB per pet).
+- CPU is about **2.5× over** the 6-pet budget, and each pet beyond 6 costs about 0.4% against the 0.2% target. (The VM's measured CPU, 18%, is inflated by wake-up overhead in QEMU and is not used.)
+- Phase 1 has to cut drawing to **≤ 70 µs per frame** before real-machine numbers can confirm the CPU-rendering decision:
+  1. build paths once and pre-rasterise parts that do not deform, instead of rebuilding everything every frame;
+  2. size each window to the pet's bounds (about 200 × 180 instead of 256 × 256, roughly 45% fewer pixels);
+  3. breathe at 10 fps when idle, and skip frames whose pixels would not change.
+- Still owed from real desktops: present cost, real CPU and memory (spikes/README.md).
+
 ---
 
 ## 6. Security and privacy
