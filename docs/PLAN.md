@@ -527,6 +527,27 @@ Each completed phase gets an annotated tag (`v0.1.0`, `v0.2.0`, …).
 
 **Done when**: every S1–S6 result is written back here, and every "doesn't work" comes with the route taken instead.
 
+### First beta — `v0.5.0-beta.1`
+
+Roger asked (2026-10-22) for a downloadable test version before the phases are finished one by one. The beta cuts across Phases 1–5 and takes the core of each:
+
+| Area | In the beta | Left for later |
+|---|---|---|
+| Pets | all six species with placeholder art, standard ↔ mochi body and 2–4 coats each | final art, accessories, seasonal outfits |
+| Poking | five zones, three tickle stages, laugh / fed-up routes, lift, shake, throw (placeholder expressions) | keyframed poses (belly-up, playing dead, turned away) |
+| Speech bubbles | per-species lines in zh-TW with `{name}` / `{you}` | English |
+| Sleep | sleeping by rhythm, idle and menu; snot bubble, sleep talk; gentle wake vs shaken awake; grudges | — |
+| Nurturing | affinity (only up, daily cap), snacks (3 a day), level-up note in the menu | tricks, growth diary |
+| Pet menu | custom-drawn right-click menu: pat, feed, rename / change look (open settings), sleep / wake, hide all, settings, quit | — |
+| Irrational mode | two skits (stare-off and chase, 雞同鴨講), always making up, frequency setting | the other skits, relationship table |
+| Settings | Slint child process: adopt and rest pets, name, 「牠怎麼叫你」, coat, body, size, personality, sound, irrational mode, don't disturb, start at login, data location, remove all traces | growth diary tab, quiet hours |
+| Don't disturb | hide in full screen, global hotkey | meeting detection, quiet hours |
+| Desktop | tray icon (Windows, Linux StatusNotifierItem), single instance, saved settings in the portable folder | sitting on window tops, multi-monitor walking |
+| Sound | sound mode with **synthesised placeholder sounds**, volume, rate limit | real recorded sounds (§10) |
+| Release | GitHub pre-release from a tag: zip / tar.gz with `chonkGene-data/`, `SHA256SUMS` | code signing |
+
+**Done when**: the archives from the tag's release unpack and run on Windows 11 and Ubuntu 24.04, and every row above works there.
+
 ### Phase 1: Shiba prototype (feel) — `v0.1.0`
 
 - The art pipeline (§3.3) works end to end for one Shiba, with placeholder art.
