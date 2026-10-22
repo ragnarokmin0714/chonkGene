@@ -1,0 +1,77 @@
+name: Phase 0 spikes
+
+# Builds the throwaway Phase 0 spike (docs/PLAN.md §8) for every target so it
+# can be tried on real desktops, and records the headless drawing bench on
+# each runner.
+
+on:
+  push:
+    branches: [chore/phase0-spikes]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    working-directory: spikes/pet-spike
+
+jobs:
+  spike:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-2025
+            target: x86_64-pc-windows-msvc
+            file: pet-spike-windows-x64.exe
+          - os: ubuntu-24.04
+            target: x86_64-unknown-linux-gnu
+            file: pet-spike-linux-x86_64
+          - os: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-gnu
+            file: pet-spike-linux-aarch64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: spikes/pet-spike
+          key: ${{ matrix.target }}
+      - run: cargo fmt --check
+      - run: cargo clippy --release --all-targets --locked -- -D warnings
+
+      # Windows: static CRT, so no VC++ redistributable is needed (PLAN §2.1).
+      - name: Build (Windows)
+        if: runner.os == 'Windows'
+        env:
+          RUSTFLAGS: -C target-feature=+crt-static
+        run: |
+          cargo build --release --locked --target ${{ matrix.target }}
+          cp target/${{ matrix.target }}/release/pet-spike.exe ${{ matrix.file }}
+        shell: bash
+
+      # Linux: one file against a glibc 2.31 baseline (Ubuntu 20.04+, Debian 11+);
+      # not static musl, because X11 and audio libraries load at run time.
+      - uses: mlugg/setup-zig@v2
+        if: runner.os == 'Linux'
+      - name: Build (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          cargo install cargo-zigbuild --locked
+          cargo zigbuild --release --locked --target ${{ matrix.target }}.2.31
+          cp target/${{ matrix.target }}/release/pet-spike ${{ matrix.file }}
+          echo "newest glibc symbol needed:"
+          objdump -T ${{ matrix.file }} | grep -o 'GLIBC_[0-9.]*' | sort -Vu | tail -1
+
+      - name: Headless drawing bench (S2)
+        run: ./${{ matrix.file }} --bench --pets 6 --secs 6
+        shell: bash
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: ${{ matrix.file }}
+          path: spikes/pet-spike/${{ matrix.file }}

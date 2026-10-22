@@ -1,0 +1,163 @@
+// S3 settings spike: just enough UI to judge Slint for chonkGene —
+// Chinese IME in a text field, a frameless rounded window, spring
+// animation on a paw switch, and a squashy button.
+
+import { LineEdit } from "std-widgets.slint";
+
+component PawSwitch inherits Rectangle {
+    in-out property <bool> checked: true;
+    width: 60px;
+    height: 34px;
+    border-radius: 17px;
+    background: checked ? #FFB37A : #EADBCB;
+    animate background { duration: 250ms; }
+
+    knob := Rectangle {
+        x: root.checked ? 29px : 3px;
+        y: 3px;
+        width: 28px;
+        height: 28px;
+        border-radius: 14px;
+        background: white;
+        drop-shadow-blur: 4px;
+        drop-shadow-offset-y: 2px;
+        drop-shadow-color: #4B352840;
+        animate x { duration: 450ms; easing: cubic-bezier(0.3, 1.6, 0.5, 1.0); }
+
+        property <color> pad: root.checked ? #F08C9A : #CDBBA9;
+        Rectangle { x: 9px; y: 13px; width: 10px; height: 8px; border-radius: 4px; background: pad; }
+        Rectangle { x: 5px; y: 8px; width: 4px; height: 4px; border-radius: 2px; background: pad; }
+        Rectangle { x: 9px; y: 5px; width: 4px; height: 4px; border-radius: 2px; background: pad; }
+        Rectangle { x: 15px; y: 5px; width: 4px; height: 4px; border-radius: 2px; background: pad; }
+        Rectangle { x: 19px; y: 8px; width: 4px; height: 4px; border-radius: 2px; background: pad; }
+    }
+
+    TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.checked = !root.checked; }
+    }
+}
+
+component CuteButton inherits Rectangle {
+    in property <string> text;
+    in property <bool> primary: true;
+    callback clicked;
+
+    height: 42px;
+    border-radius: 21px;
+    background: primary ? (ta.pressed ? #F5A86E : #FFB37A) : (ta.pressed ? #FFE3CC : #FFFFFF);
+    border-width: primary ? 0px : 1.5px;
+    border-color: #F0DFCC;
+    drop-shadow-blur: 0px;
+    drop-shadow-offset-y: ta.pressed ? 1px : 4px;
+    drop-shadow-color: primary ? #E08A4E : #F0DFCC;
+    animate drop-shadow-offset-y { duration: 120ms; }
+
+    Text {
+        text: root.text;
+        color: #4B3528;
+        font-size: 15px;
+        font-weight: 600;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+
+    ta := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+}
+
+export component SettingsWindow inherits Window {
+    callback send-name(string);
+    callback crash();
+    callback close-window();
+    callback drag();
+
+    title: "肉肉賴桌・設定（Phase 0）";
+    no-frame: true;
+    background: transparent;
+    width: 440px;
+    height: 340px;
+
+    Rectangle {
+        x: 12px;
+        y: 12px;
+        width: root.width - 24px;
+        height: root.height - 24px;
+        border-radius: 22px;
+        background: #FFF8EF;
+        border-width: 1.5px;
+        border-color: #F0DFCC;
+        drop-shadow-blur: 12px;
+        drop-shadow-offset-y: 4px;
+        drop-shadow-color: #4B352833;
+
+        VerticalLayout {
+            padding: 20px;
+            spacing: 14px;
+
+            HorizontalLayout {
+                height: 34px;
+                spacing: 8px;
+
+                TouchArea {
+                    horizontal-stretch: 1;
+                    pointer-event(event) => {
+                        if (event.kind == PointerEventKind.down && event.button == PointerEventButton.left) {
+                            root.drag();
+                        }
+                    }
+                    Text {
+                        x: 0px;
+                        text: "肉肉賴桌・設定";
+                        color: #4B3528;
+                        font-size: 17px;
+                        vertical-alignment: center;
+                    }
+                }
+
+                Rectangle {
+                    width: 34px;
+                    border-radius: 12px;
+                    background: close-ta.has-hover ? #FFEEDB : transparent;
+                    Text { text: "×"; color: #7A6253; font-size: 20px; horizontal-alignment: center; vertical-alignment: center; }
+                    close-ta := TouchArea {
+                        mouse-cursor: pointer;
+                        clicked => { root.close-window(); }
+                    }
+                }
+            }
+
+            Text { text: "名字（用中文輸入法打打看）"; color: #4B3528; font-size: 14px; }
+            name := LineEdit { placeholder-text: "阿柴"; }
+
+            HorizontalLayout {
+                spacing: 12px;
+                alignment: start;
+                PawSwitch { }
+                Text { text: "聲音模式"; color: #4B3528; font-size: 15px; vertical-alignment: center; }
+            }
+
+            HorizontalLayout {
+                spacing: 12px;
+                CuteButton {
+                    text: "送給寵物";
+                    clicked => { root.send-name(name.text); }
+                }
+                CuteButton {
+                    text: "模擬當掉";
+                    primary: false;
+                    clicked => { root.crash(); }
+                }
+            }
+
+            Text {
+                text: "送出後，寵物那邊的終端機會印出名字。這個視窗當掉時，寵物要照常活著。";
+                color: #7A6253;
+                font-size: 12px;
+                wrap: word-wrap;
+            }
+        }
+    }
+}
