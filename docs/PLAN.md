@@ -1,556 +1,574 @@
-# chonkGene 施工計畫
+# chonkGene build plan
 
-> 這份文件記錄已經定案的設計決策，以及每個階段要做什麼、做到什麼程度算完成。
-> 施工時照這份文件走；決策改變時，先改這份文件再改程式碼。
-> 標示「Phase 0 驗證」的項目是推論，還沒在真機上確認過。
+> This document records the design decisions that are settled, and for each phase what to build and when it counts as done.
+> Build from this document; when a decision changes, change this document first, then the code.
+> Items marked **"verify in Phase 0"** are reasoned, not yet confirmed on real machines.
+> UI copy and pet lines are quoted in Traditional Chinese (zh-TW), the product's default language, with an English gloss where it helps.
 >
-> 最後更新：2026-10-22
+> Last updated: 2026-10-22
 
 ---
 
-## 0. 已定案的決策
+## 0. Settled decisions
 
-| 主題 | 決定 | 原因 |
+| Topic | Decision | Why |
 |---|---|---|
-| 平台 | **Windows 10/11 + Linux（x86_64、aarch64）**；不做 macOS | 使用者需求 |
-| 發佈形式 | **免安裝**：Windows 單一 `.exe`、Linux 單一執行檔，各包在一個壓縮檔裡 | 使用者需求；見 §2 |
-| 語言 | **Rust**（edition 2024，最新 stable） | 和 gamegene、graphicgene 等專案一致；記憶體安全 |
-| 寵物繪製 | **CPU 點陣化（tiny-skia）**，每隻寵物一個小透明視窗 | 視窗小（約 256px），CPU 繪製很便宜；避開 GPU 透明視窗在各平台的驅動問題；閒置時不必常駐 GPU context |
-| 寵物美術 | **參數化向量部件 + 骨骼 + 形變目標（morph）** | 膚色、花色、體型都只是參數，不必為每種組合重畫；任何縮放都清晰 |
-| 設定介面 | **Slint**，在獨立的子行程裡執行（同一個執行檔加 `--settings`） | 介面要很萌，Slint 最容易做出來（宣告式動畫、狀態轉場）；免安裝不能依賴 WebView。比較見 §3.6 |
-| Linux 顯示協定 | v1 一律走 **X11 協定**（原生 X11 或 XWayland） | 一般 Wayland 視窗無法自己決定位置；XWayland 在 GNOME、KDE 上都有。原生 Wayland 留到之後（§9） |
-| 網路 | **v1 完全不連網** | 沒有需要連網的功能；用 cargo-deny 禁止網路 crate（§6） |
-| 設定與存檔格式 | **RON** | 和 borrowborne、gamegene 一致；人類可讀 |
-| 預設值 | 聲音 **開**、非理性模式 **開**、體型 **略肥**、開機自啟 **關**（首次啟動時詢問） | 使用者需求；自啟動未經同意就寫入是不好的做法 |
-| 親密度 | **只升不降**；被惹毛只影響短期「心情」，幾分鐘內自己恢復 | 最愛戳寵物的人就是最喜歡這個程式的人，不該被懲罰；罪惡感會讓人直接關掉程式 |
-| 培育的底線 | 寵物**不會死、不會生病、不會離家出走**；幾天沒開也不扣任何數值 | 整天開著的東西不能變成負擔；這和「不打擾」是同一個原則 |
+| Platforms | **Windows 10/11 + Linux (x86_64, aarch64)**; no macOS | Requirement |
+| Distribution | **Portable, no installer**: one `.exe` on Windows, one binary on Linux, each in an archive | Requirement; see §2 |
+| Language | **Rust** (edition 2024, latest stable) | Matches gamegene, graphicgene, etc.; memory safety |
+| Pet rendering | **CPU rasterising (tiny-skia)**, one small transparent window per pet | Windows are small (~256 px), so CPU drawing is cheap; avoids per-platform GPU transparency driver issues; no resident GPU context while idle |
+| Pet art | **Parametric vector parts + bones + morph targets** | Coat colour, pattern and body shape are parameters, so no redraw per combination; crisp at any scale |
+| Settings UI | **Slint**, run in a separate child process (same executable with `--settings`) | The UI must be very cute and Slint makes that easiest (declarative animation, state transitions); portability rules out a WebView. Comparison in §3.6 |
+| Linux display protocol | v1 always speaks **X11** (native X11 or XWayland) | A normal Wayland window cannot place itself; XWayland exists on GNOME and KDE. Native Wayland is later (§9) |
+| Network | **v1 never touches the network** | No feature needs it; network crates banned with cargo-deny (§6) |
+| Settings and save format | **RON** | Matches borrowborne and gamegene; human-readable |
+| Defaults | Sound **on**, irrational mode **on**, body **slightly chubby (略肥)**, start-at-login **off** (asked on first run) | Requirement; writing a login item without consent is bad practice |
+| Affinity | **Only ever goes up**; annoying a pet only lowers its short-term mood, which recovers within minutes | The people who poke pets most are the ones who like the app most and should not be punished; guilt makes people quit the app |
+| Nurturing floor | Pets **never die, get sick or run away**; days without opening the app cost nothing | Something that is on all day must not become a chore; same principle as "don't disturb" |
+| Documentation language | Repo docs (README, `docs/`) in **English**; UI copy in zh-TW | Public repo |
 
 ---
 
-## 1. 產品規格
+## 1. Product spec
 
-### 1.1 寵物
+### 1.1 Pets
 
-v1 有四種寵物。物種只決定**預設個性**；每隻個體在領養時會在預設值附近隨機產生自己的個性，之後可以在設定裡調整。
+v1 has six species. A species only sets **default personality**; each individual rolls its own personality near those defaults when adopted, editable later in settings.
 
-| 物種 | 怕癢 | 耐性 | 活潑 | 作息 | 招牌動作 |
-|---|---|---|---|---|---|
-| 柴犬 | 高 | 中 | 高 | 早上最興奮 | 翻肚爆笑、柴犬尖叫、裝死不走 |
-| 曼赤肯貓 | 高 | 高 | 中 | 白天 | 腿短跳不上去、翻肚後翻不回來 |
-| 蘇格蘭折耳貓 | 低 | 低 | 低 | 全天慵懶 | 大叔坐、死魚眼、嘆氣、一掌拍開游標 |
-| 貓頭鷹 | 中 | 中 | 白天低、晚上高 | **夜行**（跟系統時鐘） | 頭轉 270°、炸毛變圓球、白天打瞌睡 |
+| Species | Default name | Ticklish | Patience | Energy | Daily rhythm | Signature moves |
+|---|---|---|---|---|---|---|
+| Shiba Inu (柴犬) | 阿柴 | high | medium | high | most excited in the morning | belly-up laughing, the Shiba scream, playing dead to refuse walking |
+| Munchkin cat (曼赤肯貓) | 奶茶 | high | high | medium | daytime | legs too short to jump up; rolls belly-up and cannot roll back |
+| Scottish Fold (蘇格蘭折耳貓) | 芋圓 | low | low | low | lazy all day | "uncle sit", dead-fish eyes, sighing, swatting the cursor away |
+| Owl (貓頭鷹) | 咕咕 | medium | medium | low by day, high at night | **nocturnal** (system clock) | 270° head turn, puffing into a ball, dozing by day |
+| Chick (小雞) | 蛋黃 | medium | low | high | **early riser**: up first, asleep first | pecks at the cursor and window edges; puffs up and drops a feather when startled; tiny rapid steps |
+| Duckling (小鴨) | 湯圓 | medium | high | low | daytime | waddles; lines up behind another pet and follows it; floats on the taskbar as if on water; "呱" when poked |
 
-- 同時存在的寵物數量上限 **6 隻**（效能考量，§5）。
-- 首次啟動顯示**領養畫面**，可以多選；同時勾選開機自啟與否。
+- At most **6 pets** on screen at once (performance, §5).
+- First run shows an **adoption screen** (multi-select), with the start-at-login choice.
+- Chick morning call: the first wake of the day may crow (「啾啾啾——！」), subject to sound mode and quiet hours (§1.7).
 
-### 1.2 戳肉肉與點擊互動
+### 1.2 Poking and click interactions
 
-**部位判定**：每隻寵物的骨架定義以下觸碰區（hit zone），依部位給不同反應。
+**Hit zones**: each rig defines these zones, each with its own reaction.
 
-| 部位 | 單戳 | 長按 |
+| Zone | Single poke | Long press |
 |---|---|---|
-| 肚子（主戲） | 肉會晃，累積癢度 | 搓肚子：舒服到融化成一灘 |
-| 臉頰 | 鼓起來 | 被捏臉 |
-| 肉球 | 伸手回碰游標 | 握手 |
-| 屁股 | 嚇一跳回頭 | 尾巴甩你 |
-| 頭 | 瞇眼 | 摸頭：蹭你的游標 |
+| Belly (the main event) | flesh jiggles; adds tickle | belly rub: melts into a puddle |
+| Cheeks | puff up | cheek squish |
+| Paw pads (birds: feet / wings) | reaches back and touches the cursor (birds flap) | handshake (birds: high-five with a wing) |
+| Bottom | startles and looks back | tail flick at you |
+| Head | squints | head pat: nuzzles the cursor |
 
-**肉要會晃**：肚子和臉頰的控制點掛在彈簧阻尼系統上，體型值越大，質量與振幅越大。「預設略肥」和「戳肉肉」用同一套參數。
+**The flesh must jiggle**: belly and cheek control points hang on spring-damper systems; a higher body value means more mass and amplitude. "Slightly chubby by default" and poking share one parameter set.
 
-**連戳升級**：短時間內的戳累積「癢度」，癢度隨時間衰減（半衰期約 2 秒，實作時調）。
+**Escalation**: pokes in quick succession build "tickle", which decays over time (half-life about 2 s, tuned in implementation).
 
-| 階段 | 觸發 | 反應 |
+| Stage | Trigger | Reaction |
 |---|---|---|
-| 1 | 癢度低 | 小反應（歪頭、縮一下、瞄你） |
-| 2 | 癢度越過第一門檻 | 依個性分流：**怕癢高 → 翻肚躺平爆笑**；**怕癢低 → 厭世** |
-| 3 | 戳過頭 | 物種招牌收尾（柴犬裝死、曼赤肯滾走、折耳貓背對你、貓頭鷹盯著你審判） |
+| 1 | low tickle | small reaction (head tilt, flinch, side-eye) |
+| 2 | tickle passes the first threshold | splits by personality: **ticklish → belly-up laughing**; **not ticklish → fed up (厭世)** |
+| 3 | overdone | species finale: Shiba plays dead, Munchkin rolls away, Fold turns its back, Owl stares in judgement, Chick runs a panicked lap flapping, Duckling spins and plops on its bottom |
 
-- 個性只決定權重，不是寫死：同一隻柴犬偶爾也會厭世，避免可預測。
-- 當下狀態會修正權重：**睡覺時被戳一律厭世**；心情好時偏向笑。
-- **厭世必須好笑，不能真的生氣**：不扣永久親密度；1–3 分鐘後自己消氣，並主動過來蹭游標。
-- 狂點時不重播動畫：計數器只決定要切到哪一階段；戳的音效同樣限頻（§1.5）。
+- Personality only sets weights, nothing is hard-coded: the same Shiba is sometimes fed up, so reactions stay unpredictable.
+- Current state adjusts weights: **poked while asleep is always fed up**; good mood leans towards laughing.
+- **Fed up must be funny, never really angry**: no permanent affinity loss; calms down after 1–3 minutes and comes back to nuzzle the cursor.
+- Spam clicks do not restart animations: a counter only picks the stage; poke sounds are rate-limited too (§1.5).
 
-**其他互動**
-- **拎起來**：拖曳時抓後頸，身體下垂、腳會晃。
-- **搖一搖**：拖曳時 1.2 秒內左右來回 4 次以上算「搖」。醒著被搖會頭暈；睡著被搖見 §1.12。
-- **丟出去**：放開時帶速度，有拋物線、碰撞螢幕邊緣、落地彈跳；胖的落地更有份量。
-- **右鍵**：寵物選單。標頭顯示名字、物種、親密度等級與目前狀態（例如「睡覺中」「有起床氣」）。項目依序為：摸摸頭、餵零食、改名字…、幫牠換造型…、讓牠去睡覺（睡著時換成「輕輕叫醒牠」）、全部收起來、設定…。
-- **改名字**：從右鍵選單直接改，不必開設定；同一個小視窗也能改「牠怎麼叫你」。
+**Other interactions**
+- **Lift**: dragging grabs the scruff; body hangs, feet dangle.
+- **Shake**: while dragging, 4+ left-right reversals within 1.2 s count as a shake. Shaken while awake → dizzy; shaken while asleep → see §1.12.
+- **Throw**: release carries velocity: arc, bounce off screen edges, land with a bounce; chubbier pets land heavier.
+- **Right click**: pet menu. The header shows name, species, affinity level and current state (e.g. 「睡覺中」 asleep, 「有起床氣」 grumpy). Items in order: 摸摸頭 (pat), 餵零食 (feed), 改名字… (rename), 幫牠換造型… (change look), 讓牠去睡覺 (put to sleep; while asleep it becomes 輕輕叫醒牠, wake gently), 全部收起來 (hide all), 設定… (settings).
+- **Rename** from the right-click menu, no settings window needed; the same popover also edits 「牠怎麼叫你」 (what it calls you).
 
-### 1.3 行為系統
+### 1.3 Behaviour
 
-- **動作庫**：每個物種至少 15 個閒置/移動動作；選擇時用加權隨機，並對最近做過的動作扣分（**同一動作不連續出現超過 2 次**）。
-- **需求值**：精力、心情、社交；影響動作選擇（精力低 → 打瞌睡）。
-- **作息**：每個物種有一條 24 小時活躍度曲線，跟系統時鐘連動。
-- **閒置偵測**：使用者閒置超過 N 分鐘 → 寵物睡著或湊到游標附近看你；使用者回來 → 伸懶腰。只用系統的閒置時間 API，**不攔截鍵盤滑鼠**（§6）。
-- **游標好奇心**：游標靠近時偶爾轉頭、追一小段（低頻輪詢游標位置，不用 hook）。
-- **桌面地形**：
-  - 沿**工作區底部**（工作列上緣）走動；工作列在上下左右任一邊都要處理。
-  - 坐在**視窗頂端**；視窗被拖走或關閉時跌下來（Windows、原生 X11；Wayland 工作階段見 §4）。
-  - 多螢幕之間可以走過去；每個螢幕各自的 DPI 縮放都要正確。
+- **Action library**: at least 15 idle/move actions per species; weighted random choice with a penalty for recent actions (**the same action never runs more than 2 times in a row**).
+- **Needs**: energy, mood, social; they steer action choice (low energy → dozing).
+- **Daily rhythm**: each species has a 24-hour activity curve tied to the system clock.
+- **Idle detection**: user idle for N minutes → pets fall asleep or come over to look at the cursor; user returns → they stretch. Uses only the system idle-time API, **never hooks keyboard or mouse** (§6).
+- **Cursor curiosity**: when the cursor comes near, sometimes turn the head or chase it a little (low-rate cursor polling, no hooks).
+- **Desktop terrain**:
+  - walk along the **bottom of the work area** (top edge of the taskbar), with the taskbar on any side;
+  - sit on **window tops**; fall when the window is dragged away or closed (Windows and native X11; Wayland sessions see §4);
+  - walk between monitors, with correct per-monitor DPI scaling.
 
-### 1.4 非理性模式（預設開）
+### 1.4 Irrational mode (on by default)
 
-- **兩隻以上**才會觸發。
-- **關係表**：每對寵物有一個好感度；有些組合特別愛吵（例如柴犬 × 折耳貓）。
-- **短劇**：v1 至少 5 種（搶位置、互瞪、拍打、追逐、一隻被戳笑時另一隻在旁邊嘲笑 → 被惱羞追打）。
-- **一定有和好結局**：互相舔毛、靠在一起睡。
-- **頻率**：設定裡有「偶爾 / 常常 / 超常」三段；每對寵物之間有冷卻時間。
-- **勸架**：短劇進行中點任何一方會中斷爭執，兩隻一起看你，然後和好。
-- 不打擾狀態（§1.7）下暫停。
+- Only with **two or more** pets.
+- **Relationship table**: every pair has a fondness value; some pairs love to squabble (e.g. Shiba × Fold, Chick × Duckling).
+- **Skits**: at least 7 in v1:
+  - fight over a spot, stare-off, swatting, chasing;
+  - one pet is poked into laughter, the other laughs at it → the first chases it in embarrassment;
+  - **雞同鴨講** (chick and duck talk past each other): their bubbles go 「啾啾！」/「呱呱。」 back and forth, louder each time, until both shrug;
+  - the duckling lines up behind another pet and follows it everywhere; the leader gets annoyed, then gives up and leads a parade.
+- **Always ends in making up**: grooming each other, sleeping side by side.
+- **Frequency**: settings offer 偶爾 / 常常 / 超常 (sometimes / often / constantly); each pair has a cooldown.
+- **Breaking it up**: clicking either pet during a skit stops it; both look at you, then make up.
+- Paused while any "don't disturb" state is active (§1.7).
 
-### 1.5 聲音模式（預設開）
+### 1.5 Sound mode (on by default)
 
-- 每個物種一組音效（OGG Vorbis）：叫聲、笑聲、嘆氣、打呼、落地。柴犬尖叫是必備。
-- **主音量滑桿**，另外每隻寵物可以個別靜音。
-- **限頻**：每隻寵物每分鐘發聲次數有上限；連戳的音效合併成一次。
-- 不打擾狀態下自動靜音。
+- One sound set per species (OGG Vorbis): calls, laugh, sigh, snore, landing. The Shiba scream and the duck's 「呱」 are mandatory.
+- **Master volume slider**, plus per-pet mute.
+- **Rate limit**: a cap on sounds per pet per minute; a poke burst plays one sound.
+- Muted automatically in any "don't disturb" state.
 
-### 1.6 外觀自訂
+### 1.6 Appearance
 
-| 項目 | 內容 |
+| Item | Detail |
 |---|---|
-| 名字 | 可輸入中文（輸入法必須能用，Phase 0 驗證）；上限 12 字 |
-| 牠怎麼叫你 | 牠在對話泡泡裡對你的稱呼，每隻各自設定，上限 8 字。預設依物種：柴犬「主人」、曼赤肯「好朋友」、折耳貓「奴才」、貓頭鷹「同學」 |
-| 吃多了會慢慢變圓 | 選用，預設**關**。開啟後，餵零食會讓體型在設定值上方慢慢增加，多玩一陣子會回來；關閉時體型只聽滑桿 |
-| 毛色 | 每個物種有預設組（柴犬：赤、黑、胡麻、白；貓：橘、灰、奶茶、黑……），也可自選顏色 |
-| 花色 | 虎斑、三花、乳牛、賓士等；用調色盤槽位實作 |
-| 體型 | 連續滑桿，四個吸附點：**標準 → 略肥（預設）→ 圓滾滾 → 麻糬** |
-| 尺寸 | 整體縮放（50%–200%） |
-| 配件 | 圍巾、帽子、項圈、領結；**季節/節日裝扮**自動套用（可關） |
-| 個性 | 怕癢、耐性、活潑三個滑桿 |
+| Name | Chinese input must work (IME, verify in Phase 0); max 12 characters |
+| What it calls you (牠怎麼叫你) | How the pet addresses you in bubbles; per pet, max 8 characters. Defaults by species: Shiba 「主人」, Munchkin 「好朋友」, Fold 「奴才」, Owl 「同學」, Chick 「老大」, Duckling 「領隊」 |
+| Eating makes it rounder (吃多了會慢慢變圓) | Optional, **off** by default. When on, feeding slowly raises the body value above the slider setting and play brings it back; when off, body shape follows only the slider |
+| Coat colour | Preset sets per species (Shiba: red, black, sesame, white; cats: orange, grey, milk-tea, black…; Chick: yolk yellow, white, black silkie; Duckling: white, yellow, mallard), plus custom colours |
+| Pattern | tabby, calico, tuxedo, etc.; implemented with palette slots |
+| Body | continuous slider with four snap points: **標準 standard → 略肥 slightly chubby (default) → 圓滾滾 round → 麻糬 mochi** |
+| Size | overall scale (50%–200%) |
+| Accessories | scarf, hat, collar, bow tie; **seasonal / holiday outfits** applied automatically (can be turned off) |
+| Personality | ticklish, patience and energy sliders |
 
-- 調整時**即時預覽**：調胖瘦時寵物低頭看肚子嚇一跳；調顏色時轉圈看自己。
-- 農曆新年等農曆節日用**內建日期表**（涵蓋 10 年），不引入農曆計算 crate。
+- **Live preview** while editing: changing body shape makes the pet look down at its belly in surprise; changing colours makes it spin to look at itself.
+- Lunar holidays (Lunar New Year, etc.) come from a **built-in date table** covering 10 years; no lunar-calendar crate.
 
-### 1.7 不打擾機制
+### 1.7 Don't disturb
 
-| 情境 | 行為 |
+| Situation | Behaviour |
 |---|---|
-| 前景全螢幕（遊戲、影片、簡報） | 寵物躲起來 + 靜音 |
-| 麥克風或鏡頭使用中（視訊會議） | 靜音 + 非理性模式暫停（寵物照常顯示） |
-| 勿擾時段（使用者設定） | 靜音；可選擇一起隱藏 |
-| 全域快捷鍵 | 一鍵全部收起/叫回 |
-| 狀態結束 | 寵物從螢幕邊緣探頭回來 |
+| Foreground full screen (games, video, presentations) | pets hide + mute |
+| Microphone or camera in use (video calls) | mute + irrational mode paused (pets stay visible) |
+| Quiet hours (user-set) | mute; optionally hide too |
+| Global hotkey | hide / bring back all pets |
+| State ends | pets peek back in from the screen edge |
 
-- **點擊穿透**：透明部分的點擊必須穿過去，只有點到寵物本體才算互動。
-- 各平台的偵測方式見 §3.5。
+- **Click-through**: clicks on transparent pixels must pass through; only the pet's body is interactive.
+- Per-platform detection in §3.5.
 
-### 1.8 依桌面環境調整
+### 1.8 Adapting to the desktop
 
-- **深淺色**：跟隨系統；設定介面、對話泡泡跟著換。
-- **強調色**：寵物圍巾預設使用系統強調色（可關）。
-- **工作列位置與大小**：從系統讀工作區，不寫死。
-- **減少動態**：可取得時跟隨系統設定，另有手動開關；開啟後關閉大幅晃動、彈跳與介面彈簧動畫。
+- **Light / dark**: follow the system; settings UI and bubbles follow.
+- **Accent colour**: pets' scarves default to the system accent colour (can be turned off).
+- **Taskbar position and size**: read the work area from the system, never hard-code.
+- **Reduced motion**: follow the system setting where available, plus a manual switch; when on, large wobbles, bounces and UI spring animations are off.
 
-### 1.9 介面與字體
+### 1.9 UI and fonts
 
-**字體**（全部 SIL OFL，可隨程式附上；授權全文放 `licenses/`）
+**Fonts** (all SIL OFL, bundled; full licence texts in `licenses/`)
 
-| 用途 | 字體 |
+| Use | Font |
 |---|---|
-| 介面主字體 | **jf open 粉圓體** |
-| 對話泡泡 | **芫荽 Iansui**（手寫感）；建置時只保留內建台詞用到的字，使用者輸入的名字退回粉圓體 |
-| 英文、數字 | **Fredoka** 或 **Nunito**（Phase 4 看實際搭配決定） |
+| Main UI | **jf open 粉圓體 (jf open huninn)** |
+| Speech bubbles | **芫荽 Iansui** (handwritten feel); the build keeps only glyphs used by built-in lines; user-entered names fall back to huninn |
+| Latin and digits | **Fredoka** or **Nunito** (decided in Phase 4 by how they pair) |
 
-**字體檢查結果**（Phase 0 S5，2026-10-22 完成）
-- jf open 粉圓體 2.1：TTF 4.9 MB（woff2 2.2 MB）。宣告了保留字型名稱「open huninn」「huninn」，所以**子集化或修改過的版本必須改名**。介面用**未修改的完整版**（使用者輸入的名字可能是任何字），不必改名。
-- 芫荽 1.020：TTF 9.4 MB（woff2 3.0 MB），沒有宣告保留字型名稱，子集化不必改名。
-- 兩套都涵蓋測試用字（萌、戳、糬、嘆、鷹等）。
+**Font check results** (Phase 0 S5, done 2026-10-22)
+- jf open huninn 2.1: TTF 4.9 MB (woff2 2.2 MB). Declares Reserved Font Names "open huninn" and "huninn", so **any subset or modified version must be renamed**. The UI ships the **unmodified full font** (user-entered names can be any character), so no rename is needed.
+- Iansui 1.020: TTF 9.4 MB (woff2 3.0 MB); no Reserved Font Name, so subsetting needs no rename.
+- Both cover the test characters (萌, 戳, 糬, 嘆, 鷹, etc.).
 
-**視覺目標**：互動樣稿 <https://claude.ai/artifact/YNitgf9JsVtqCVXY9PE4xe>（桌面戳戳看、第一次啟動領養、設定視窗；用的是上面的實際字體）。
+**Visual target**: interactive mockup <https://claude.ai/artifact/YNitgf9JsVtqCVXY9PE4xe> (desktop poke demo, first-run adoption, settings window; uses the real fonts above).
 
-**介面元素**
-- 開關：肉球；開啟時按下去「啵」一聲（受聲音模式控制）。
-- 滑桿：拖曳鈕是小魚乾或骨頭；體型滑桿的鈕會跟著變胖。
-- 按鈕：按下壓扁再彈回（彈簧動畫）。
-- 游標：移到寵物身上時變成手指。
-- 主題色跟著目前選的寵物：柴犬赤橙、曼赤肯奶茶、折耳灰藍、貓頭鷹栗棕配月黃。
-- 深色模式用暖色深灰，不用純黑。
+**UI elements**
+- Switches: paw pads; turning one on makes a soft 「啵」 pop (respects sound mode).
+- Sliders: the thumb is a dried fish or a bone; the body slider's thumb gets fatter with the value.
+- Buttons: squash on press, then spring back.
+- Cursor: becomes a pointing hand over a pet.
+- Theme colour follows the selected pet: Shiba red-orange, Munchkin milk tea, Fold blue-grey, Owl chestnut with moon yellow, Chick yolk yellow, Duckling pond blue.
+- Dark mode uses warm dark greys, never pure black.
 
-**底線**：文字對比度達 WCAG AA、最小字級 13px；晃動元素要克制並遵守「減少動態」。
+**Floor**: text contrast meets WCAG AA, minimum text size 13 px; wobbling elements stay restrained and respect reduced motion.
 
-### 1.10 托盤、選單、快捷鍵、開機自啟
+### 1.10 Tray, menu, hotkey, start at login
 
-- **托盤圖示**：收起/叫回、設定、暫停非理性模式、結束。Linux 用 StatusNotifierItem；GNOME 沒裝 AppIndicator 擴充時沒有托盤，**所有功能也都能從寵物右鍵選單進入**。
-- **全域快捷鍵**：預設 `Ctrl+Alt+P`（可改）。
-- **開機自啟**：預設關，首次啟動詢問；見 §2.3。
-- **單一實例**：第二次啟動不開新的，而是通知已在執行的那份「叫寵物出來 + 開設定」。
+- **Tray icon**: hide / bring back, settings, pause irrational mode, quit. Linux uses StatusNotifierItem; GNOME without the AppIndicator extension has no tray, so **every function is also reachable from the pet's right-click menu**.
+- **Global hotkey**: `Ctrl+Alt+P` by default (configurable).
+- **Start at login**: off by default, asked on first run; see §2.3.
+- **Single instance**: a second launch does not start another copy; it tells the running one to bring the pets back and open settings.
 
-### 1.11 介面文字守則
+### 1.11 UI copy rules
 
-介面上的每一句話都照這一節寫；新增文字前先查下面的用語表。
+Every string in the UI follows this section; check the glossary below before adding text.
 
-**語氣分兩層**
-- **標籤**（開關、按鈕、分頁名稱）：平實、清楚，一看就懂。例如「聲音模式」「勿擾時段」「大小」。不在標籤上玩諧音或撒嬌。
-- **說明、提示、寵物台詞、完成畫面**：萌感放在這裡。例如「開機時一起醒來」「牠們先躲起來了」「我是一顆麻糬。」
+**Two voices**
+- **Labels** (switches, buttons, tab names): plain and clear at a glance, e.g. 「聲音模式」, 「勿擾時段」, 「大小」. No puns or baby talk in labels.
+- **Descriptions, hints, pet lines, completion screens**: this is where the cuteness goes, e.g. 「開機時一起醒來」, 「牠們先躲起來了」, 「我是一顆麻糬。」
 
-**寫法**
-- 用台灣慣用詞：設定（不用「設置」）、螢幕、資料夾、捷徑、預設、視窗、滑鼠、檔案、麥克風、鏡頭。
-- 動物用「牠」；兩隻以上用「牠們」。會隨數量變的句子都要跟著變（「帶牠回家」／「帶牠們回家」）。
-- 開關的標籤描述**開啟時會發生什麼**：「全螢幕時躲起來」，不要寫「全螢幕偵測」。
-- 說明文字最多兩句，句尾加「。」。驚嘆號只用在歡迎標題和寵物台詞。
-- 會再開一個視窗、或還要再確認的項目，結尾加「…」：「設定…」「移除…」。
-- 全形中文標點；中文與英文、數字之間空一格（「按 Ctrl+Alt+P」）；百分比不空格（「100%」）。
-- 跟隱私有關的功能，要明講**不做什麼**：「只看是否使用中，不會聽內容。」
-- 錯誤訊息說「發生了什麼＋你可以怎麼做」，不怪使用者。
+**Writing**
+- Taiwan usage: 設定 (not 設置), 螢幕, 資料夾, 捷徑, 預設, 視窗, 滑鼠, 檔案, 麥克風, 鏡頭.
+- Animals are 「牠」, two or more 「牠們」. Sentences that depend on the count must change with it (「帶牠回家」 / 「帶牠們回家」).
+- A switch label says **what happens when it is on**: 「全螢幕時躲起來」, never 「全螢幕偵測」.
+- Descriptions are at most two sentences, each ending in 「。」. Exclamation marks only in the welcome title and pet lines.
+- Items that open another window or ask for confirmation end in 「…」: 「設定…」, 「移除…」.
+- Full-width Chinese punctuation; a space between Chinese and Latin text or digits (「按 Ctrl+Alt+P」); no space before a percent sign (「100%」).
+- Privacy-related features say plainly **what they do not do**: 「只看是否使用中，不會聽內容。」
+- Error messages say what happened and what you can do, and never blame the user.
 
-**用語表**
+**Glossary**
 
-| 概念 | 一律寫成 | 不要寫 |
+| Concept | Always write | Never write |
 |---|---|---|
-| 隱藏全部寵物 | 收起來 | 隱藏、最小化 |
-| 讓寵物回到桌面 | 叫回來 | 顯示、還原 |
-| 新增寵物 | 領養 | 新增、建立 |
-| 胖瘦 | 體型（標準、略肥、圓滾滾、麻糬） | 身材、胖度 |
-| 縮放 | 大小 | 尺寸、比例 |
-| 吵架功能 | 非理性模式 | 打架模式 |
-| 開機自啟 | 開機時一起醒來（說明文字可寫「開機自動啟動」） | 開機自啟、自動執行 |
-| 長期好感 | 親密度（等級寫「Lv.3」） | 好感度、愛心值 |
-| 短期情緒 | 心情；被惹毛時寫「有起床氣」「在鬧脾氣」 | 怒氣值、生氣中 |
-| 你在對話裡的稱呼 | 牠怎麼叫你 | 暱稱設定、使用者名稱 |
-| 培育紀錄 | 成長日記 | 養成、日誌、紀錄檔 |
+| hide all pets | 收起來 | 隱藏, 最小化 |
+| bring pets back | 叫回來 | 顯示, 還原 |
+| add a pet | 領養 | 新增, 建立 |
+| fat vs thin | 體型 (標準, 略肥, 圓滾滾, 麻糬) | 身材, 胖度 |
+| scale | 大小 | 尺寸, 比例 |
+| squabble feature | 非理性模式 | 打架模式 |
+| start at login | 開機時一起醒來 (descriptions may say 「開機自動啟動」) | 開機自啟, 自動執行 |
+| long-term fondness | 親密度 (levels written 「Lv.3」) | 好感度, 愛心值 |
+| short-term emotion | 心情; when annoyed 「有起床氣」, 「在鬧脾氣」 | 怒氣值, 生氣中 |
+| how the pet addresses you | 牠怎麼叫你 | 暱稱設定, 使用者名稱 |
+| nurturing record | 成長日記 | 養成, 日誌, 紀錄檔 |
 
-**寵物台詞**
-- 每個物種一種語氣：柴犬熱情愛撒嬌；折耳貓開頭常是「……」，傲嬌；曼赤肯努力但有點委屈；貓頭鷹白天很睏、晚上很嗨。
-- 台詞放在 RON 字串表；測試檢查**泡泡一行不超過 14 個全形字**，以及每種語言都有。
-- 台詞可以帶入 `{name}`（寵物名字）和 `{you}`（牠怎麼叫你）；帶入後同樣要過長度檢查（以上限字數計算）。
+**Pet lines**
+- One voice per species:
+  - Shiba: warm and clingy;
+  - Fold: often opens with 「……」, aloof but secretly fond (傲嬌);
+  - Munchkin: tries hard, a little hard done by;
+  - Owl: sleepy by day, hyper at night;
+  - Chick: impatient, short bursts (「啾？！」);
+  - Duckling: half a beat slow, lines often end in 「呱。」
+- Lines live in RON string tables; tests check that **a bubble line is at most 14 full-width characters** and that every language has every line.
+- Lines may include `{name}` (the pet's name) and `{you}` (what it calls you); the length check counts them at their maximum lengths.
 
-### 1.12 睡眠與起床氣
+### 1.12 Sleep and waking up grumpy
 
-**什麼時候睡**
-- 作息：柴犬、曼赤肯、折耳貓晚上睡；貓頭鷹白天打瞌睡。
-- 使用者閒置太久（§1.3）。
-- 精力用完時午睡。
-- 右鍵選單「讓牠去睡覺」。
+**When pets sleep**
+- Daily rhythm: Shiba, Munchkin, Fold and Duckling sleep at night; Owl dozes by day; Chick sleeps earliest and wakes earliest.
+- The user has been idle a long time (§1.3).
+- Naps when energy runs out.
+- Right-click menu 「讓牠去睡覺」.
 
-**睡著時**：鼻涕泡跟著呼吸變大變小、偶爾說夢話（「……肉乾……」）、打呼聲很小。遵守聲音模式與不打擾（§1.7）。
+**While asleep**: a snot bubble grows and shrinks with breathing, occasional sleep talk (「……肉乾……」), very quiet snoring. Respects sound mode and don't disturb (§1.7).
 
-**吵醒的方式決定反應**
+**How it is woken decides the reaction**
 
-| 怎麼吵醒 | 反應 | 心情 |
+| How | Reaction | Mood |
 |---|---|---|
-| 輕戳一下 | 不會醒：翻個身，嘟囔一句 | 不變 |
-| 2 秒內連戳兩下以上，或從選單「輕輕叫醒牠」 | 醒來：揉眼睛、打哈欠，叫你一聲（用「牠怎麼叫你」） | 不變 |
-| **拎起來搖**（§1.2） | 嚇醒，觸發物種的起床氣 | 下降，開始記仇 |
+| One poke | does not wake: rolls over, mumbles | unchanged |
+| Two or more pokes within 2 s, or menu 「輕輕叫醒牠」 | wakes: rubs its eyes, yawns, greets you (using 「牠怎麼叫你」) | unchanged |
+| **Lifted and shaken** (§1.2) | startled awake, species-specific grumpiness | drops; holds a grudge |
 
-**起床氣**
+**Grumpiness**
 
-| 物種 | 被搖醒後 |
+| Species | After being shaken awake |
 |---|---|
-| 柴犬 | **爆走**：在工作列上來回暴衝約 3 秒，然後喘著氣說「醒了！」 |
-| 曼赤肯 | 迷迷糊糊、走路歪歪的，撞到螢幕邊緣，一臉委屈 |
-| 折耳貓 | 死魚眼，一掌拍你，然後背對你繼續睡 |
-| 貓頭鷹 | 白天被吵醒：炸毛、睜一隻眼瞪你，然後馬上又睡著 |
+| Shiba | **Zoomies**: tears back and forth along the taskbar for about 3 s, then pants 「醒了！」 |
+| Munchkin | groggy, walks crooked, bumps into the screen edge, looks hard done by |
+| Fold | dead-fish eyes, swats you once, then turns its back and goes back to sleep |
+| Owl | woken by day: feathers puff up, glares with one eye, falls asleep again immediately |
+| Chick | bursts into a puff of feathers, flaps around clucking, then smooths its feathers as if nothing happened |
+| Duckling | dizzy: spins, plops down, 「呱？」, and nods off again sitting up |
 
-**記仇**：心情下降後的 3–5 分鐘，戳牠只會得到冷淡回應，摸頭會被躲開。時間到了自己消氣，主動回來蹭你（「……好啦，原諒你。」）。記仇期間**親密度照樣只升不降**。
+**Holding a grudge**: for 3–5 minutes after the mood drops, pokes get cold replies and head pats are dodged. When time is up it calms down by itself and comes back to nuzzle you (「……好啦，原諒你。」). **Affinity still only goes up** during a grudge. Feeding shortens it.
 
-### 1.13 培育
+### 1.13 Nurturing
 
-**原則**：見 §0「親密度」「培育的底線」。培育是讓人想每天回來看看，不是讓人有壓力。
+**Principle**: see §0 "Affinity" and "Nurturing floor". Nurturing gives people a reason to come back each day, not pressure.
 
-**親密度**
-- 每隻寵物各自累積：戳、摸頭、餵零食、被叫醒後陪牠玩都會加，**沒有任何行為會扣**。
-- 每天可得的親密度有上限，避免狂點刷等級。
-- 等級（Lv.1 起）解鎖新台詞、新動作（把戲）和配件。
-- 幾天沒開程式，回來時寵物會說「你終於回來了！」，不扣任何數值。
+**Affinity (親密度)**
+- Per pet: pokes, pats, snacks and playing after waking all add; **nothing subtracts**.
+- A daily cap on gainable affinity, so click-spamming cannot farm levels.
+- Levels (from Lv.1) unlock new lines, new actions (tricks) and accessories.
+- After days away, pets greet you with 「你終於回來了！」 and nothing has decreased.
 
-**心情**：短期數值，影響動作選擇與台詞語氣；被惹毛會下降（§1.12），幾分鐘內自己回到平常。
+**Mood (心情)**: short-term; steers action choice and the tone of lines; drops when annoyed (§1.12) and returns to normal within minutes.
 
-**餵零食**
-- 從右鍵選單餵，或從托盤拖一份零食到寵物身上。每個物種有自己愛吃的（柴犬肉乾、貓咪罐罐、貓頭鷹……再決定）。
-- 每天有份量；吃飽了會拒絕（「吃不下了……」），不會因為沒餵而餓壞。
-- 「吃多了會慢慢變圓」開啟時才影響體型（§1.6）。
+**Snacks**
+- Fed from the right-click menu, or by dragging a snack from the tray onto a pet. Each species has a favourite: Shiba jerky, cats wet food (罐罐), Chick corn kernels, Duckling peas, Owl to be decided.
+- A daily portion; a full pet declines (「吃不下了……」). Pets never go hungry from not being fed.
+- Affects body shape only when 「吃多了會慢慢變圓」 is on (§1.6).
 
-**把戲**：隨親密度學會，例如握手（Lv.1）、坐下（Lv.2）、轉圈（Lv.3）、翻滾（Lv.4）、裝可愛（Lv.6）。學會後偶爾自己表演，也可以從選單叫牠做。
+**Tricks**: learned with affinity, e.g. handshake (Lv.1), sit (Lv.2), spin (Lv.3), roll over (Lv.4), act cute (Lv.6). Learned tricks are sometimes performed spontaneously and can be requested from the menu. Birds get bird versions (wing wave instead of handshake).
 
-**成長日記**（設定裡的一個分頁）
-- 親密度等級與進度、學會的把戲。
-- 今天的小統計：被戳幾次、翻肚幾次、吵了幾次架（都和好了）、睡了多久。
-- 日記：寵物用自己的語氣，記下當天好笑的事（「午睡被搖醒，忍不住在工作列上爆走了三圈。」）。保留最近 30 天。
-- **只存在這台電腦**，不上傳；設定的「移除所有痕跡」會一起詢問是否刪除。
+**Growth diary (成長日記)**, a settings tab
+- Affinity level and progress, learned tricks.
+- Today's small stats: times poked, belly-up laughs, squabbles (all made up), time asleep.
+- Diary: the pet writes the day's funny moments in its own voice (「午睡被搖醒，忍不住在工作列上爆走了三圈。」). Keeps the last 30 days.
+- **Stays on this computer** and is never uploaded; 「移除所有痕跡」 in settings also asks whether to delete it.
 
 ---
 
-## 2. 免安裝
+## 2. Portable distribution
 
-### 2.1 發佈產物
+### 2.1 Release artefacts
 
-| 檔案 | 內容 |
+| File | Contents |
 |---|---|
-| `chonkGene-<版本>-windows-x64.zip` | `chonkGene/chonkGene.exe` + `chonkGene/chonkGene-data/` |
-| `chonkGene-<版本>-linux-x86_64.tar.gz` | `chonkGene/chonkgene` + `chonkGene/chonkGene-data/` |
-| `chonkGene-<版本>-linux-aarch64.tar.gz` | 同上 |
-| `SHA256SUMS` | 所有壓縮檔的雜湊 |
+| `chonkGene-<version>-windows-x64.zip` | `chonkGene/chonkGene.exe` + `chonkGene/chonkGene-data/` |
+| `chonkGene-<version>-linux-x86_64.tar.gz` | `chonkGene/chonkgene` + `chonkGene/chonkGene-data/` |
+| `chonkGene-<version>-linux-aarch64.tar.gz` | same |
+| `SHA256SUMS` | hashes of all archives |
 
-- 解壓縮、雙擊就能用；**不需要系統管理員權限、不寫系統目錄**。
-- 所有美術、字體、音效**嵌入執行檔**；執行時不讀外部素材。
-- **Windows**：靜態連結 CRT（`+crt-static`），不需要 VC++ 可轉散發套件；嵌入圖示與版本資訊。**不用 UPX 壓縮**（防毒常誤判）。
-- **Linux**：用 glibc 2.31 為基準建置（cargo-zigbuild），涵蓋 Ubuntu 20.04+、Debian 11+。X11、xkbcommon、ALSA 這些桌面系統一定有的函式庫照常動態連結。**不用 AppImage**：Ubuntu 22.04 起預設沒有 libfuse2，反而打不開。
-- 設定裡有「加到應用程式選單」按鈕：在 `~/.local/share/applications/` 寫入 `.desktop` 和圖示（Linux）；Windows 則是建立開始選單捷徑（選用）。
+- Unpack and double-click; **no administrator rights, no writes to system directories**.
+- All art, fonts and sounds are **embedded in the executable**; no external assets are read at run time.
+- **Windows**: statically linked CRT (`+crt-static`), so no VC++ redistributable; embedded icon and version info. **No UPX** (antivirus false positives).
+- **Linux**: built against a glibc 2.31 baseline (cargo-zigbuild), covering Ubuntu 20.04+ and Debian 11+. X11, xkbcommon and ALSA, present on every desktop, stay dynamically linked. **No AppImage**: Ubuntu 22.04+ lacks libfuse2 by default, so it would not even open.
+- Settings has 「加到應用程式選單」 (add to the app menu): writes a `.desktop` file and icon to `~/.local/share/applications/` on Linux; on Windows it optionally creates a Start menu shortcut.
 
-### 2.2 資料放哪裡（可攜模式）
+### 2.2 Where data lives (portable mode)
 
-- 執行檔旁邊有 `chonkGene-data/` → **可攜模式**，所有設定與存檔都放這裡（可以整個資料夾帶著走）。
-- 沒有 → 用系統設定目錄（Windows `%APPDATA%\chonkGene`、Linux `~/.config/chonkgene`）。
-- 發佈的壓縮檔已經附上 `chonkGene-data/`，所以預設就是可攜模式。
-- 設定頁會顯示目前資料位置。
+- A `chonkGene-data/` folder next to the executable → **portable mode**: all settings and saves go there (the whole folder can be carried around).
+- Otherwise → the system config directory (`%APPDATA%\chonkGene` on Windows, `~/.config/chonkgene` on Linux).
+- Release archives already include `chonkGene-data/`, so portable mode is the default.
+- Settings shows the current data location.
 
-### 2.3 自啟動與移除
+### 2.3 Start at login and removal
 
-- 開機自啟寫入使用者層級的位置：Windows `HKCU\...\Run`；Linux `~/.config/autostart/chonkgene.desktop`。
-- 每次啟動時檢查：自啟動已開但記錄的路徑不是目前執行檔 → 自動更新（資料夾被搬走也不會失效）。
-- 設定裡有「**移除所有痕跡**」：刪除自啟動項目、選單項目，並詢問是否刪除資料。之後刪掉資料夾就完全移除。
+- Start at login writes user-level entries: Windows `HKCU\...\Run`; Linux `~/.config/autostart/chonkgene.desktop`.
+- Checked on every start: if start at login is on but the recorded path is not the current executable → update it (moving the folder does not break it).
+- Settings has 「移除所有痕跡」 (remove all traces): deletes the login entry and menu entries, and asks whether to delete data. After that, deleting the folder removes everything.
 
-### 2.4 更新
+### 2.4 Updates
 
-- v1 不連網，所以**沒有自動更新**。「檢查更新」按鈕只是用瀏覽器打開 GitHub Releases 頁面。
+- v1 has no network access, so **no auto-update**. 「檢查更新」 just opens the GitHub Releases page in the browser.
 
 ---
 
-## 3. 技術架構
+## 3. Architecture
 
 ### 3.1 Workspace
 
-| crate | 職責 | unsafe |
+| Crate | Responsibility | unsafe |
 |---|---|---|
-| `chonkgene-core` | 寵物狀態、行為選擇、癢度、關係表、短劇、彈簧物理、作息。**純邏輯、不碰 IO**；亂數可指定種子 | `forbid` |
-| `chonkgene-rig` | 骨架格式、形變目標、調色盤、觸碰區、動畫片段；姿勢 → 路徑 | `forbid` |
-| `chonkgene-render` | 用 tiny-skia 點陣化路徑與對話泡泡文字（ab_glyph） | `forbid` |
-| `chonkgene-platform` | 透明視窗呈現、點擊穿透、工作區、全螢幕/會議/閒置偵測、主題、自啟動、托盤、快捷鍵 | **只有這裡允許**，每段都要註解理由 |
-| `chonkgene-settings` | Slint 設定介面（`.slint` 檔）、可愛元件、主題；以子行程執行 | `forbid` |
-| `chonkgene-ipc` | 寵物行程與設定行程之間的訊息格式與通道 | `forbid` |
-| `chonkgene`（bin） | 事件迴圈、組裝、存檔、音效（rodio）；`--settings` 時改跑設定介面 | `forbid` |
-| `xtask` | 美術建置（SVG → 骨架資料）、字體子集化、效能量測 | — |
+| `chonkgene-core` | pet state, action choice, tickle, relationships, skits, spring physics, daily rhythm, affinity and mood. **Pure logic, no IO**; seedable RNG | `forbid` |
+| `chonkgene-rig` | rig format, morph targets, palettes, hit zones, animation clips; pose → paths | `forbid` |
+| `chonkgene-render` | rasterises paths and bubble text with tiny-skia (ab_glyph for text) | `forbid` |
+| `chonkgene-platform` | transparent window presentation, click-through, work area, full-screen / meeting / idle detection, theme, login item, tray, hotkey | **only crate allowed**, every block commented with its reason |
+| `chonkgene-settings` | Slint settings UI (`.slint` files), cute widgets, theme; runs as the child process | `forbid` |
+| `chonkgene-ipc` | message format and channel between the pet process and the settings process | `forbid` |
+| `chonkgene` (bin) | event loop, wiring, saves, audio (rodio); runs the settings UI when started with `--settings` | `forbid` |
+| `xtask` | art build (SVG → rig data), font subsetting, benchmarks | — |
 
-### 3.2 視窗與事件迴圈
+### 3.2 Windows and event loop
 
-- 寵物行程有**單一 winit 事件迴圈**，擁有所有寵物視窗：每隻寵物一個、每個對話泡泡一個（避免寵物視窗為了泡泡變大）。
-- 設定視窗是**另一個行程**：同一個執行檔以 `--settings` 啟動，透過單一實例用的 IPC 通道（§3.5）與寵物行程溝通。原因：
-  - winit 一個行程只能有一個事件迴圈，Slint 也要有自己的事件迴圈，分開最乾淨。
-  - 關掉設定，整個行程的記憶體就還給系統。
-  - 設定介面當掉，不會連寵物一起帶走。
-- 設定裡的即時預覽用同一套 `chonkgene-render` 畫成點陣，交給 Slint 顯示；調整透過 IPC 即時送到寵物行程。
-- 寵物視窗不透過 GPU，由 `chonkgene-platform` 直接把點陣送到視窗：
-  - **Windows**：`UpdateLayeredWindow` 送預乘 alpha 的 BGRA。分層視窗在 alpha = 0 的像素**原生就會讓點擊穿過去**。
-  - **X11**：ARGB visual + `XPutImage`（或 MIT-SHM）；用 **XShape 輸入區域**設定成寵物輪廓（以低頻率更新）。
-- 拎起、丟出時每幀移動視窗位置。
+- The pet process has **one winit event loop** owning every pet window: one per pet and one per speech bubble (so a pet window does not grow to fit its bubble).
+- The settings window is **a separate process**: the same executable started with `--settings`, talking to the pet process over the single-instance IPC channel (§3.5). Why:
+  - winit allows one event loop per process, and Slint needs its own, so separate processes are cleanest;
+  - closing settings returns all of that process's memory to the system;
+  - a crash in the settings UI cannot take the pets with it.
+- The live preview in settings is rasterised by the same `chonkgene-render` and handed to Slint as an image; changes go over IPC to the pet process immediately.
+- Pet windows bypass the GPU; `chonkgene-platform` pushes pixels straight to the window:
+  - **Windows**: `UpdateLayeredWindow` with premultiplied BGRA. Layered windows **natively let clicks through** pixels with alpha = 0.
+  - **X11**: ARGB visual + `XPutImage` (or MIT-SHM); an **XShape input region** set to the pet's silhouette (updated at a low rate).
+- Lifting and throwing move the window every frame.
 
-> **Phase 0 驗證**：在 winit 建立的 HWND 上加 `WS_EX_LAYERED` 後用 `UpdateLayeredWindow`；以及從另一條 x11rb 連線繪製 winit 建立的 X11 視窗。不行就由 platform crate 自己建立寵物視窗。
+> **Verify in Phase 0**: adding `WS_EX_LAYERED` to a winit-created HWND and using `UpdateLayeredWindow`; drawing into a winit-created X11 window from a separate x11rb connection. If either fails, the platform crate creates pet windows itself.
 
-### 3.3 美術管線
+### 3.3 Art pipeline
 
-- 美術在 Inkscape（或 graphicgene）畫成 SVG，部件用約定的 id 命名（`body`、`belly`、`cheek_l`、`paw_fl`……）。
-- `rig.ron` 描述：骨骼與支點、部件對骨骼的權重、調色盤槽位（`fur_main`、`fur_belly`、`pattern`、`nose`、`eye`）、形變目標（標準 ↔ 麻糬兩組同結構的路徑）、觸碰區、錨點（泡泡、配件）。
-- `cargo xtask art` 把 SVG + `rig.ron` 編譯成精簡的二進位資料並嵌入執行檔。**執行時不解析 SVG**（啟動快、依賴少、攻擊面小）。
-- 建置時檢查：形變目標的路徑結構一致、調色盤槽位都有定義、觸碰區齊全、動畫片段引用的骨骼都存在。
-- 動畫分兩層：**程序動畫**（呼吸、眨眼、尾巴、耳朵抖動、肚子彈簧）＋ **關鍵影格片段**（翻肚、裝死、大叔坐等，RON），兩者混合。
+- Art is drawn as SVG in Inkscape (or graphicgene), with parts named by convention (`body`, `belly`, `cheek_l`, `paw_fl`, `wing_l`, …).
+- `rig.ron` describes bones and pivots, part-to-bone weights, palette slots (`fur_main`, `fur_belly`, `pattern`, `nose`, `eye`; birds use `feather_main`, `beak`, `comb`), morph targets (standard ↔ mochi as two structurally identical paths), hit zones, and anchors (bubble, accessories).
+- `cargo xtask art` compiles SVG + `rig.ron` into compact binary data embedded in the executable. **No SVG parsing at run time** (fast start, fewer dependencies, smaller attack surface).
+- Build-time checks: morph targets have matching path structure, every palette slot is defined, every hit zone exists, every bone referenced by a clip exists.
+- Two animation layers, blended: **procedural** (breathing, blinking, tail, ear twitch, belly spring) + **keyframed clips** (belly-up, playing dead, uncle sit, etc., in RON).
 
-### 3.4 資料檔
+### 3.4 Data files
 
-- 設定與存檔：`settings.ron`、`pets.ron`（外觀、個性、親密度、心情、今日統計）、`diary.ron`（最近 30 天），都有 `format` 版本欄位。
-- 寫入一律「寫暫存檔 → rename」，避免寫到一半斷電。
-- 讀取設大小上限；解析失敗 → 把壞檔改名備份，用預設值啟動並提示。
-- 介面與台詞的多語系：每種語言一個 RON 字串表（`zh-TW` 預設、`en`）。
+- Settings and saves: `settings.ron`, `pets.ron` (appearance, personality, affinity, mood, today's stats), `diary.ron` (last 30 days); each has a `format` version field.
+- Writes always go to a temp file, then rename, so a power cut mid-write cannot corrupt them.
+- Reads have a size cap; on a parse failure the bad file is renamed as a backup and the app starts with defaults and says so.
+- UI and pet-line localisation: one RON string table per language (`zh-TW` default, `en`).
 
-### 3.5 平台偵測方式
+### 3.5 Platform detection
 
-| 功能 | Windows | X11（含 XWayland） |
+| Feature | Windows | X11 (incl. XWayland) |
 |---|---|---|
-| 工作區 | `GetMonitorInfo` 的 `rcWork` | `_NET_WORKAREA` |
-| 全螢幕 | `SHQueryUserNotificationState` | 作用中視窗的 `_NET_WM_STATE_FULLSCREEN` |
-| 麥克風/鏡頭使用中 | `CapabilityAccessManager\ConsentStore` 的 `LastUsedTimeStop == 0` | Phase 2 決定：候選為 `/proc/asound` 擷取裝置狀態、或 PipeWire |
-| 閒置時間 | `GetLastInputInfo` | XScreenSaver 擴充；Wayland 工作階段改用 D-Bus（GNOME `Mutter.IdleMonitor`、KDE `org.freedesktop.ScreenSaver`） |
-| 游標位置 | `GetCursorPos`（輪詢） | `XQueryPointer`（輪詢） |
-| 視窗位置（坐在視窗上） | `EnumWindows` + DWM 實際框線 | `_NET_CLIENT_LIST_STACKING` + 幾何 |
-| 深淺色、強調色 | 登錄檔 `AppsUseLightTheme`、DWM 強調色 | xdg-desktop-portal `org.freedesktop.appearance`（zbus） |
-| 全域快捷鍵 | `RegisterHotKey` | `XGrabKey`；Wayland 工作階段用 portal GlobalShortcuts（有才用） |
-| 托盤 | tray-icon | StatusNotifierItem（ksni） |
-| 單一實例 + IPC | 具名 mutex + 具名管道 | 使用者執行期目錄下的 Unix socket |
+| Work area | `rcWork` from `GetMonitorInfo` | `_NET_WORKAREA` |
+| Full screen | `SHQueryUserNotificationState` | `_NET_WM_STATE_FULLSCREEN` on the active window |
+| Mic / camera in use | `LastUsedTimeStop == 0` under `CapabilityAccessManager\ConsentStore` | decided in Phase 2: candidates are `/proc/asound` capture state or PipeWire |
+| Idle time | `GetLastInputInfo` | XScreenSaver extension; Wayland sessions use D-Bus (GNOME `Mutter.IdleMonitor`, KDE `org.freedesktop.ScreenSaver`) |
+| Cursor position | `GetCursorPos` (polled) | `XQueryPointer` (polled) |
+| Window positions (sitting on windows) | `EnumWindows` + DWM extended frame bounds | `_NET_CLIENT_LIST_STACKING` + geometry |
+| Light/dark, accent colour | registry `AppsUseLightTheme`, DWM accent colour | xdg-desktop-portal `org.freedesktop.appearance` (zbus) |
+| Global hotkey | `RegisterHotKey` | `XGrabKey`; Wayland sessions use the GlobalShortcuts portal where available |
+| Tray | tray-icon | StatusNotifierItem (ksni) |
+| Single instance + IPC | named mutex + named pipe | Unix socket in the user runtime directory |
 
-### 3.6 設定介面框架比較（2026-10-22）
+### 3.6 Settings UI toolkit comparison (2026-10-22)
 
-比較順序照 Roger 的規則：先看穩定性、效能、相容性；這三項差不多時，外觀優先。
+Order of comparison follows Roger's rule: stability, performance and compatibility first; when those are close, appearance decides.
 
 | | egui | iced | Slint |
 |---|---|---|---|
-| 穩定性 | 成熟；每版有小幅 API 變動 | 0.x，每版常有大改 | 1.x，承諾向下相容 |
-| 效能 | 好（立即模式，每幀重畫） | 好 | 好；另有不需 GPU 的軟體渲染器 |
-| 中文輸入法 | 有支援，但這類立即模式工具長期有缺口（graphicgene 因此改用網頁介面） | 較新版本才補上，成熟度待確認 | 有支援，待 Phase 0 實測 |
-| 動畫 | 只有簡單的數值動畫，彈簧、轉場都要自己寫 | 有，較陽春 | 宣告式 `animate`，狀態與轉場內建 |
-| 樣式 | 以全域樣式為主，可愛元件要自己畫 | 每個元件可設樣式 | 逐元件設計，接近寫 CSS |
-| 無頭截圖測試 | kittest（這台機器可用） | 待查 | 軟體渲染器直接輸出 PNG |
-| 授權 | MIT / Apache-2.0 | MIT | GPLv3、免權利金授權（需標示）或商業授權 |
+| Stability | mature; small API changes each release | 0.x, frequent large changes | 1.x with a compatibility promise |
+| Performance | good (immediate mode, redraws every frame) | good | good; also a GPU-free software renderer |
+| Chinese IME | supported, but immediate-mode toolkits have long-standing gaps (why graphicgene moved to a web UI) | added in recent releases, maturity unconfirmed | supported, to be tested in Phase 0 |
+| Animation | simple value animation only; springs and transitions are hand-written | present, basic | declarative `animate`, states and transitions built in |
+| Styling | mostly global styles; cute widgets must be hand-painted | per-widget styles | per-element design, close to writing CSS |
+| Headless screenshot tests | kittest (works on this machine) | unchecked | software renderer outputs PNG directly |
+| Licence | MIT / Apache-2.0 | MIT | GPLv3, royalty-free (with attribution) or commercial |
 
-**結論：Slint。** 前三項沒有一個明顯落後到可以否決，外觀上 Slint 領先最多。代價：
-- 授權要在公開前決定：用 GPLv3 開源，或用免權利金授權並依規定標示（公開前再讀一次授權原文）。
-- 中文輸入法列為 Phase 0 S3 的必過項目；不過就重新比較。
+**Conclusion: Slint.** None of the first three criteria rules any toolkit out, and Slint leads clearly on appearance. Costs:
+- The licence must be chosen before going public: GPLv3 open source, or the royalty-free licence with the required attribution (re-read the licence text before publishing).
+- Chinese IME is a must-pass item in Phase 0 S3; if it fails, redo this comparison.
 
 ---
 
-## 4. 平台支援矩陣
+## 4. Platform support matrix
 
-v1 在 Wayland 工作階段裡是以 XWayland 執行，**看不到原生 Wayland 視窗**，所以有些功能會降級。下表的 Wayland 欄是推論，Phase 0 實測後回填。
+In Wayland sessions v1 runs under XWayland and **cannot see native Wayland windows**, so some features degrade. The Wayland columns are reasoned and get filled in after Phase 0.
 
-| 功能 | Windows | X11 工作階段 | GNOME Wayland | KDE Wayland |
+| Feature | Windows | X11 session | GNOME Wayland | KDE Wayland |
 |---|---|---|---|---|
-| 透明置頂 + 點擊穿透 | ✅ | ✅ | Phase 0 驗證 | Phase 0 驗證 |
-| 沿工作區走動、拎起丟出 | ✅ | ✅ | Phase 0 驗證 | Phase 0 驗證 |
-| 坐在視窗頂端 | ✅ | ✅ | ❌（只看得到 XWayland 視窗） | ❌ |
-| 游標好奇心 | ✅ | ✅ | ⚠️ 游標在原生視窗上時拿不到位置 | ⚠️ |
-| 全螢幕偵測 | ✅ | ✅ | ⚠️ 原生全螢幕視窗偵測不到；Phase 0 確認它是否本來就蓋住寵物 | ⚠️ |
-| 會議靜音、閒置偵測 | ✅ | ✅ | ✅（D-Bus / 音訊層） | ✅ |
-| 全域快捷鍵 | ✅ | ✅ | portal 有才有 | portal 有才有 |
-| 托盤 | ✅ | ✅ | 需 AppIndicator 擴充 | ✅ |
+| Transparent, always on top, click-through | ✅ | ✅ | verify in Phase 0 | verify in Phase 0 |
+| Walking along the work area, lift and throw | ✅ | ✅ | verify in Phase 0 | verify in Phase 0 |
+| Sitting on window tops | ✅ | ✅ | ❌ (only XWayland windows are visible) | ❌ |
+| Cursor curiosity | ✅ | ✅ | ⚠️ no cursor position over native windows | ⚠️ |
+| Full-screen detection | ✅ | ✅ | ⚠️ native full-screen windows are invisible to us; Phase 0 checks whether they cover the pets anyway | ⚠️ |
+| Meeting mute, idle detection | ✅ | ✅ | ✅ (D-Bus / audio layer) | ✅ |
+| Global hotkey | ✅ | ✅ | only with the portal | only with the portal |
+| Tray | ✅ | ✅ | needs the AppIndicator extension | ✅ |
 
 ---
 
-## 5. 效能預算
+## 5. Performance budget
 
-在中階筆電上量測，**設定視窗關閉時**：
+Measured on a mid-range laptop **with the settings window closed**:
 
-| 指標 | 目標 |
+| Metric | Target |
 |---|---|
-| CPU（4 隻寵物、一般行為，5 分鐘平均） | < 單核 1% |
-| 記憶體 | < 80 MB |
-| 戳下去到第一個視覺反應 | ≤ 1 幀 |
-| 啟動到寵物出現 | < 1 秒 |
+| CPU (6 pets, normal behaviour, 5-minute average) | < 1% of one core |
+| Memory | < 80 MB |
+| Poke to first visual reaction | ≤ 1 frame |
+| Launch to pets on screen | < 1 s |
 
-**幀率依狀態調整**
+**Frame rate by state**
 
-| 狀態 | 幀率 |
+| State | fps |
 |---|---|
-| 被戳、彈跳、拎起丟出 | 60 |
-| 走動、一般動作 | 30 |
-| 原地呼吸 | 12–15 |
-| 睡覺 | ≤ 5 |
-| 隱藏、全螢幕 | 0（只剩約 1 Hz 的狀態偵測） |
+| poked, bouncing, lifted, thrown | 60 |
+| walking, normal actions | 30 |
+| breathing in place | 12–15 |
+| asleep | ≤ 5 |
+| hidden, full screen | 0 (only ~1 Hz state detection) |
 
-- 姿勢沒變就不重繪、不重送點陣。
-- 使用電池時上限 30 幀。
-- `cargo xtask bench`：無頭量測每幀模擬 + 點陣化時間，CI 記錄趨勢。
-
----
-
-## 6. 資安與隱私
-
-1. **v1 零網路**：cargo-deny 的 `bans` 禁止 reqwest、hyper、ureq、curl 等網路 crate；本機 D-Bus 不在此限。
-2. **不裝全域鍵盤滑鼠 hook**：閒置與游標都用輪詢 API。hook 會被防毒誤判，本身也是隱私問題。
-3. **不讀取內容**：會議偵測只讀「使用中」旗標，不碰音訊；視窗只讀位置與全螢幕狀態，不讀標題；不記錄按鍵。
-4. **不需要系統管理員權限**：只寫可攜資料夾、使用者設定目錄、`HKCU`。
-5. **unsafe 只在 `chonkgene-platform`**，其他 crate `#![forbid(unsafe_code)]`。
-6. **不解析外部檔案**：v1 所有素材在建置時編譯並嵌入；唯一會讀的外部檔案是自己的存檔（§3.4 的大小上限與壞檔處理）。
-7. **供應鏈**：commit `Cargo.lock`，CI 用 `--locked`；cargo-deny 檢查 advisories、授權、來源（只允許 crates.io）。
-8. **發佈**：CI 從 tag 建置，附 `SHA256SUMS`；不用 UPX。程式碼簽章見 §10。
-9. **IPC 只限同一個使用者**：Unix socket 放在權限 0700 的 `$XDG_RUNTIME_DIR`；Windows 具名管道拒絕遠端連線、只允許目前使用者。訊息是有大小上限的 RON，解析失敗就丟棄。
+- No redraw and no pixel upload when the pose has not changed.
+- Capped at 30 fps on battery.
+- `cargo xtask bench`: headless per-frame simulation + raster timing, tracked in CI.
 
 ---
 
-## 7. 測試與驗證
+## 6. Security and privacy
 
-| 層級 | 方式 | 在哪跑 |
+1. **No network in v1**: cargo-deny `bans` forbids network crates such as reqwest, hyper, ureq and curl; local D-Bus is exempt.
+2. **No global keyboard or mouse hooks**: idle and cursor use polling APIs. Hooks trip antivirus and are a privacy problem in themselves.
+3. **No content is read**: meeting detection reads only an "in use" flag and never touches audio; windows are read only for position and full-screen state, never titles; no keystrokes are recorded.
+4. **No administrator rights**: writes only to the portable folder, the user config directory and `HKCU`.
+5. **unsafe only in `chonkgene-platform`**; every other crate has `#![forbid(unsafe_code)]`.
+6. **No external files are parsed**: in v1 every asset is compiled and embedded at build time; the only external files read are our own saves (size caps and bad-file handling in §3.4).
+7. **Supply chain**: `Cargo.lock` committed, CI uses `--locked`; cargo-deny checks advisories, licences and sources (crates.io only).
+8. **Releases**: built by CI from tags, with `SHA256SUMS`; no UPX. Code signing in §10.
+9. **IPC is same-user only**: the Unix socket lives in `$XDG_RUNTIME_DIR` (mode 0700); the Windows named pipe rejects remote clients and admits only the current user. Messages are size-capped RON; anything that fails to parse is dropped.
+
+---
+
+## 7. Testing and verification
+
+| Layer | How | Where |
 |---|---|---|
-| 行為邏輯 | 固定亂數種子的單元測試：同一動作不連續超過 2 次、短劇一定和好、不打擾時不發聲、癢度門檻、「搖」的判定、記仇一定會消氣 | 本機 + CI |
-| 培育 | 性質測試：任何事件序列都**不會讓親密度下降**；每日上限有效；離線多天回來數值不變 | 本機 + CI |
-| 美術資料 | `xtask art` 的建置檢查（§3.3）也當成測試跑 | 本機 + CI |
-| 繪製 | 每個物種 × 體型吸附點 × 數組調色盤的 **golden PNG 快照**；CPU 繪製，無頭環境直接能跑 | 本機 + CI |
-| 設定介面 | Slint 軟體渲染器輸出 PNG 快照（不需要 GPU） | 本機 + CI |
-| 介面文字 | 泡泡台詞長度上限、用語表（§1.11）裡「不要寫」的詞不得出現 | 本機 + CI |
-| 多語系 | 每個鍵在每種語言都存在 | 本機 + CI |
-| 平台行為 | 手動檢查清單：Windows 11、Windows 10、Ubuntu 24.04 GNOME（Wayland 與 X11 工作階段）、KDE Plasma 6 Wayland | Roger 實機 |
+| Behaviour | seeded unit tests: no action more than 2 times in a row, skits always end in making up, no sound while not disturbing, tickle thresholds, shake detection, grudges always end | local + CI |
+| Nurturing | property tests: **no event sequence ever lowers affinity**; the daily cap holds; values are unchanged after days offline | local + CI |
+| Art data | the `xtask art` build checks (§3.3) run as tests too | local + CI |
+| Rendering | **golden PNG snapshots** for each species × body snap point × several palettes; CPU rendering runs headless | local + CI |
+| Settings UI | Slint software-renderer PNG snapshots (no GPU) | local + CI |
+| UI copy | bubble length cap; no "never write" word from the glossary (§1.11) appears | local + CI |
+| Localisation | every key exists in every language | local + CI |
+| Platform behaviour | manual checklist: Windows 11, Windows 10, Ubuntu 24.04 GNOME (Wayland and X11 sessions), KDE Plasma 6 Wayland | Roger, real machines |
 
-- CI（GitHub Actions）：`ubuntu-24.04`、`ubuntu-24.04-arm`、`windows-2025`；`cargo fmt --check`、`cargo clippy --all-targets -- -D warnings`、`cargo test --locked`、`cargo deny check`；tag 觸發發佈（§2.1）。
-- 開發機是無頭 aarch64：Windows 程式碼用 stub C 編譯器跑 `clippy --target x86_64-pc-windows-msvc` 檢查；實際視窗行為由 Roger 在真機確認。
+- CI (GitHub Actions): `ubuntu-24.04`, `ubuntu-24.04-arm`, `windows-2025`; `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, `cargo test --locked`, `cargo deny check`; tags trigger releases (§2.1).
+- The development machine is headless aarch64: Windows code is checked with `clippy --target x86_64-pc-windows-msvc` via a stub C compiler; real window behaviour is confirmed by Roger on real machines.
 
 ---
 
-## 8. 階段
+## 8. Phases
 
-每個階段完成時打 annotated tag（`v0.1.0`、`v0.2.0`……）。
+Each completed phase gets an annotated tag (`v0.1.0`, `v0.2.0`, …).
 
-### Phase 0：技術驗證（spike，不進 main）
+### Phase 0: technical spikes (not merged to main)
 
-| 編號 | 驗證項目 | 驗收 |
+| ID | What | Done when |
 |---|---|---|
-| S1 | 透明、置頂、逐像素點擊穿透、每幀移動（§3.2 兩種做法） | Windows 11、X11、GNOME Wayland、KDE Wayland 四個環境實測結果回填 §4 |
-| S2 | tiny-skia 繪製 256px 測試圖形 × 4 個視窗 | 量到的 CPU、記憶體寫回 §5；不達標就重新評估繪製決策 |
-| S3 | Slint 設定子行程 + IPC；無邊框圓角視窗；名字欄用中文輸入法輸入 | Windows 注音、Linux fcitx5 與 ibus 都能輸入；設定行程結束或當掉時寵物行程不受影響 |
-| S4 | 免安裝產物 | Windows 乾淨 VM（無 VC++ 套件）、Ubuntu 22.04/24.04、Debian 12 直接執行成功 |
-| S5 | 字體檔大小與 RFN | **已完成**（2026-10-22），結果在 §1.9 |
-| S6 | GNOME Wayland 下原生全螢幕視窗是否蓋過寵物 | 結果寫回 §4，決定是否需要額外處理 |
+| S1 | transparency, always on top, per-pixel click-through, per-frame moves (both approaches in §3.2) | results from Windows 11, X11, GNOME Wayland and KDE Wayland written back into §4 |
+| S2 | tiny-skia drawing a 256 px test figure × 6 windows | measured CPU and memory written back into §5; if over budget, revisit the rendering decision |
+| S3 | Slint settings child process + IPC; frameless rounded window; Chinese IME in the name field | Windows Zhuyin, Linux fcitx5 and ibus all work; the pet process survives the settings process exiting or crashing |
+| S4 | portable artefacts | run directly on a clean Windows VM (no VC++ redistributable), Ubuntu 22.04/24.04 and Debian 12 |
+| S5 | font sizes and Reserved Font Names | **done** (2026-10-22), results in §1.9 |
+| S6 | whether native full-screen windows cover the pets on GNOME Wayland | result written into §4, deciding whether extra handling is needed |
 
-**驗收**：S1–S6 結果都寫回本文件，任何「不行」都附上改走的路線。
+**Done when**: every S1–S6 result is written back here, and every "doesn't work" comes with the route taken instead.
 
-### Phase 1：柴犬原型（手感）— `v0.1.0`
+### Phase 1: Shiba prototype (feel) — `v0.1.0`
 
-- 美術管線（§3.3）跑通一隻柴犬；先用暫定美術。
-- 程序動畫：呼吸、眨眼、尾巴、肚子彈簧。
-- 戳肉肉：五個觸碰區、三段癢度、翻肚爆笑與厭世兩條路線。
-- 拎起、丟出、落地；沿工作區底部走動。
-- 聲音開關、最小右鍵選單、單一實例。
+- The art pipeline (§3.3) works end to end for one Shiba, with placeholder art.
+- Procedural animation: breathing, blinking, tail, belly spring.
+- Poking: five hit zones, three tickle stages, both the laughing and fed-up routes.
+- Lift, throw, land; walk along the bottom of the work area.
+- Sound switch, minimal right-click menu, single instance.
 
-**驗收**：Roger 實機戳過，確認「手感對了」；golden PNG 建立；1 隻寵物達到 §5 的預算。
+**Done when**: Roger has poked it on a real machine and confirms the feel is right; golden PNGs exist; one pet meets the §5 budget.
 
-### Phase 2：行為、睡眠與不打擾 — `v0.2.0`
+### Phase 2: behaviour, sleep and don't disturb — `v0.2.0`
 
-- 行為系統完整版（§1.3）：動作庫、需求值、作息、閒置、游標好奇心。
-- 睡眠與起床氣（§1.12）：鼻涕泡、夢話、三種吵醒方式、柴犬爆走、記仇與消氣。
-- 心情與親密度的核心（§1.13）：只升不降、每日上限；右鍵選單顯示等級與狀態；改名字與「牠怎麼叫你」。
-- 不打擾機制全部（§1.7、§3.5）；Linux 的麥克風偵測方式在這裡定案。
-- 托盤、全域快捷鍵、設定存檔、可攜模式、開機自啟、選單項目、移除所有痕跡。
+- Full behaviour system (§1.3): action library, needs, daily rhythm, idle, cursor curiosity.
+- Sleep and grumpiness (§1.12): snot bubble, sleep talk, the three ways of waking, Shiba zoomies, grudges and calming down.
+- Core of mood and affinity (§1.13): only goes up, daily cap; level and state in the right-click menu; rename and 「牠怎麼叫你」.
+- All don't-disturb mechanisms (§1.7, §3.5); Linux mic detection is decided here.
+- Tray, global hotkey, saved settings, portable mode, start at login, menu entries, remove all traces.
 
-**驗收**：§7 的行為測試全過；手動檢查清單的「不打擾」段落在四個環境通過。
+**Done when**: the §7 behaviour tests pass; the "don't disturb" part of the manual checklist passes in all four environments.
 
-### Phase 3：全員與非理性模式 — `v0.3.0`
+### Phase 3: the whole cast and irrational mode — `v0.3.0`
 
-- 曼赤肯、折耳貓、貓頭鷹的美術與骨架（貓頭鷹的頭轉 270°、炸毛）。
-- 個體個性、關係表、5 種短劇、勸架。
+- Art and rigs for Munchkin, Fold, Owl (270° head turn, puffing up), Chick (feather burst, pecking) and Duckling (waddle, follow-the-leader).
+- Individual personalities, relationship table, 7 skits (including 雞同鴨講 and the duckling parade), breaking it up.
 
-**驗收**：四隻同時在桌面上，達到 §5 的預算；短劇測試全過。
+**Done when**: all six on the desktop at once meet the §5 budget; skit tests pass.
 
-### Phase 4：外觀自訂與設定介面 — `v0.4.0`
+### Phase 4: appearance and the settings UI — `v0.4.0`
 
-- 可愛介面元件（§1.9）、領養畫面、即時預覽。
-- 外觀自訂全部項目（§1.6）、季節/節日裝扮。
-- 跟隨主題、強調色、減少動態；對話泡泡字體子集化。
+- Cute UI widgets (§1.9), adoption screen, live preview.
+- Every appearance option (§1.6), seasonal / holiday outfits.
+- Follow theme, accent colour, reduced motion; subset bubble font.
 
-**驗收**：Slint 截圖快照建立，並和 §1.9 的樣稿並排比對；Roger 確認風格。
+**Done when**: Slint screenshot snapshots exist and are compared side by side with the §1.9 mockup; Roger confirms the style.
 
-### Phase 5：培育 — `v0.5.0`
+### Phase 5: nurturing — `v0.5.0`
 
-- 餵零食（選單與從托盤拖曳）、每日份量、「吃多了會慢慢變圓」。
-- 把戲：隨親密度學會、自己表演、從選單叫牠做。
-- 成長日記分頁：等級與進度、把戲、今日統計、寵物語氣的日記（30 天）。
+- Snacks (menu and drag from tray), daily portions, 「吃多了會慢慢變圓」.
+- Tricks: learned with affinity, performed spontaneously, requested from the menu.
+- Growth diary tab: level and progress, tricks, today's stats, diary in the pet's voice (30 days).
 
-**驗收**：§7 的培育性質測試全過；日記台詞過 §1.11 的長度與用語檢查。
+**Done when**: the §7 nurturing property tests pass; diary lines pass the §1.11 length and glossary checks.
 
-### Phase 6：打磨與發佈 — `v1.0.0`
+### Phase 6: polish and release — `v1.0.0`
 
-- 坐在視窗頂端（Windows、X11）、多螢幕、HiDPI。
-- 英文翻譯。
-- 真機效能調校，全部指標達到 §5。
-- 發佈流程（§2.1）、`SHA256SUMS`、程式碼簽章決定（§10）。
+- Sitting on window tops (Windows, X11), multiple monitors, HiDPI.
+- English translation of the UI.
+- Performance tuning on real machines until every §5 target is met.
+- Release pipeline (§2.1), `SHA256SUMS`, code-signing decision (§10).
 
-**驗收**：手動檢查清單在所有環境通過；GitHub Release 上的壓縮檔在乾淨機器上解壓即用。
-
----
-
-## 9. 之後（v1 不做）
-
-- **原生 Wayland**：KDE、wlroots 系用 `wlr-layer-shell` + foreign-toplevel，補齊 §4 的降級項目；GNOME 另寫 Shell 擴充。
-- **社群皮膚包**：只收資料、不執行程式碼；走與 `xtask art` 相同的驗證，並限制大小與解析度。
-- **提醒**：記得作息（半夜叫你去睡）、喝水、番茄鐘（全部選用）。
-- **更多互動**：逗貓棒游標模式、丟球。
-- **日文**、更多物種。
+**Done when**: the manual checklist passes in every environment; the archives on GitHub Releases unpack and run on clean machines.
 
 ---
 
-## 10. 待決事項
+## 9. Later (not in v1)
 
-| 事項 | 影響 | 何時要決定 |
+- **Native Wayland**: `wlr-layer-shell` + foreign-toplevel for KDE and wlroots compositors to close the §4 gaps; a GNOME Shell extension for GNOME.
+- **Community skin packs**: data only, never code; validated like `xtask art`, with size and resolution caps.
+- **Reminders**: knowing your routine (telling you to go to bed), water, pomodoro (all optional).
+- **More interactions**: feather-wand cursor mode, ball throwing.
+- **Japanese**, more species.
+
+---
+
+## 10. Open questions
+
+| Question | Affects | Decide by |
 |---|---|---|
-| **美術由誰畫**（自己、委託、或先用我畫的暫定版） | 關鍵路徑；萌不萌主要看這裡 | Phase 1 結束前 |
-| 音效來源（自錄、委託、CC0 素材） | 授權 | Phase 1 結束前 |
-| Windows 程式碼簽章（不簽會被 SmartScreen 警告；雲端簽章服務約每月 10 美元，屆時再確認） | 首次使用體驗 | Phase 6 |
-| GNOME Wayland 的降級是否可接受 | 是否要提早做 §9 的原生 Wayland | Phase 0 之後 |
-| 開源授權與 repo 可見度 | 美術、字體、音效授權要一致 | 公開前 |
+| **Who draws the art** (Roger, a commission, or my placeholders first) | critical path; cuteness depends on it | end of Phase 1 |
+| Sound sources (self-recorded, commissioned, CC0) | licensing | end of Phase 1 |
+| Owl's favourite snack | snack content | Phase 5 |
+| Windows code signing (unsigned triggers SmartScreen warnings; cloud signing is about USD 10/month, to be rechecked) | first-run experience | Phase 6 |
+| Whether the GNOME Wayland degradation is acceptable | whether §9's native Wayland moves earlier | after Phase 0 |
+| Open-source licence and repo visibility | art, font and sound licences must agree | before going public |

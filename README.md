@@ -1,22 +1,24 @@
-# chonkGene（肉肉賴桌）
+# chonkGene (肉肉賴桌)
 
-一群胖嘟嘟的桌面寵物，整天賴在你的桌面上賣萌。
+A gang of chubby desktop pets that lounge on your desktop all day being cute.
 
-- **四隻預設寵物**：柴犬、曼赤肯貓、蘇格蘭折耳貓、貓頭鷹，每隻個性不同。
-- **戳肉肉**：肚子會晃；連戳下去，有的翻肚躺平爆笑，有的一臉厭世。
-- **非理性模式**（預設開）：兩隻以上會起小爭執，最後一定和好。
-- **會睡覺**：鼻涕泡、說夢話；輕輕叫醒沒事，拎起來搖醒就有起床氣（柴犬會爆走）。
-- **培育**：親密度只升不降，隨等級學會把戲；餵零食；寵物用自己的語氣寫成長日記。不會死、不會生病。
-- **聲音模式**（預設開）：有音量、限頻，全螢幕和視訊會議時自動靜音。
-- **外觀自訂**：毛色、花色、配件、體型（預設略肥）、尺寸、個性。
-- **不打擾**：透明處點擊會穿透；全螢幕自動躲起來；一鍵全部收起。
-- **免安裝**：Windows 與 Linux 解壓即用，不需要系統管理員權限，不連網。
+- **Six pets**: Shiba Inu, Munchkin cat, Scottish Fold, owl, chick and duckling, each with its own personality.
+- **Poke the chonk**: bellies jiggle; keep poking and some roll over laughing while others look thoroughly fed up.
+- **Irrational mode** (on by default): with two or more pets they squabble over small things, always making up in the end. The chick and duckling talk past each other (雞同鴨講).
+- **They sleep**: snot bubbles and sleep talk; wake them gently and all is well, shake them awake and they get grumpy (the Shiba gets the zoomies).
+- **Nurturing**: affinity only goes up and unlocks tricks; snacks; each pet writes a growth diary in its own voice. Pets never die or get sick.
+- **Sound mode** (on by default): volume and rate limits; muted automatically in full screen and video calls.
+- **Appearance**: coat colour, pattern, accessories, body shape (slightly chubby by default), size, personality.
+- **Doesn't get in the way**: clicks pass through transparent areas; pets hide in full screen; one key hides them all.
+- **Portable**: unpack and run on Windows and Linux; no administrator rights, no network access.
 
-## 狀態
+The UI is in Traditional Chinese first, with English to follow.
 
-規劃中，尚未開始實作。施工規格見 [docs/PLAN.md](docs/PLAN.md)。
+## Status
 
-## 平台
+Planning; implementation has not started. The build plan is [docs/PLAN.md](docs/PLAN.md).
 
-Windows 10/11、Linux（x86_64、aarch64；X11 與 Wayland 工作階段）。
-Wayland 工作階段下有部分功能降級，見 [docs/PLAN.md §4](docs/PLAN.md#4-平台支援矩陣)。
+## Platforms
+
+Windows 10/11 and Linux (x86_64, aarch64; X11 and Wayland sessions).
+Some features are reduced in Wayland sessions; see [docs/PLAN.md §4](docs/PLAN.md#4-platform-support-matrix).
