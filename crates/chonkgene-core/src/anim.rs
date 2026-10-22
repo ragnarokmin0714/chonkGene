@@ -6,6 +6,22 @@ use crate::spring::Spring;
 
 const BREATH_PERIOD: f32 = 3.2;
 const BLINK_SECS: f32 = 0.12;
+const GIGGLE_EVERY: f32 = 0.22;
+
+/// How the face and tail read. Placeholder for the keyframed poses (belly-up
+/// laughing, playing dead, …) that need real art (PLAN §3.3, §10).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Expression {
+    Neutral,
+    /// Squinting, bouncing with giggles, tail going wild.
+    Giggle,
+    /// Half-lidded, limp tail: 厭世.
+    FedUp,
+    /// Eyes shut, tail down: the overdone finale.
+    Sulk,
+    /// Content squint after making up or a head pat.
+    Happy,
+}
 
 /// Inputs a renderer maps onto bones by convention (see chonkgene-render).
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -50,7 +66,9 @@ pub struct Animator {
     belly: Spring,
     next_blink: f32,
     blink_until: f32,
+    next_giggle: f32,
     rng: fastrand::Rng,
+    pub expression: Expression,
     pub walking: bool,
     pub sway: f32,
     pub facing: f32,
@@ -66,7 +84,9 @@ impl Animator {
             belly: Spring::new(220.0, 7.0),
             next_blink: t + 1.0 + rng.f32() * 3.0,
             blink_until: 0.0,
+            next_giggle: 0.0,
             rng,
+            expression: Expression::Neutral,
             walking: false,
             sway: 0.0,
             facing: 1.0,
@@ -102,7 +122,7 @@ impl Animator {
 
     /// Frames per second this pet needs now (PLAN §5).
     pub fn fps(&self, moving: bool) -> u32 {
-        if moving || self.is_settling() {
+        if moving || self.is_settling() || self.expression == Expression::Giggle {
             60
         } else if self.walking {
             30
@@ -120,6 +140,10 @@ impl Animator {
         if self.sway.abs() < 0.01 {
             self.sway = 0.0;
         }
+        if self.expression == Expression::Giggle && self.t >= self.next_giggle {
+            self.body.kick(2.5);
+            self.next_giggle = self.t + GIGGLE_EVERY;
+        }
         if self.t >= self.next_blink {
             self.blink_until = self.t + BLINK_SECS;
             self.next_blink = self.t + 3.5 + self.rng.f32() * 2.0;
@@ -128,17 +152,30 @@ impl Animator {
 
     pub fn params(&self) -> PoseParams {
         let tau = std::f32::consts::TAU;
-        let (wag_hz, wag_deg) = if self.walking {
-            (3.0, 14.0)
-        } else {
-            (1.2, 8.0)
+        let (wag_hz, wag_deg) = match self.expression {
+            Expression::Giggle => (4.0, 16.0),
+            Expression::FedUp => (0.5, 3.0),
+            Expression::Sulk => (0.0, 0.0),
+            _ if self.walking => (3.0, 14.0),
+            _ => (1.2, 8.0),
         };
+        let blinking = self.t < self.blink_until;
         PoseParams {
             breath: (self.t * tau / BREATH_PERIOD).sin(),
             squash: self.body.pos.clamp(-0.4, 0.4),
             belly: self.belly.pos.clamp(-0.4, 0.4),
-            eyes_open: if self.t < self.blink_until { 0.12 } else { 1.0 },
-            tail: (self.t * tau * wag_hz).sin() * wag_deg,
+            eyes_open: match self.expression {
+                Expression::Giggle | Expression::Happy => 0.18,
+                Expression::Sulk => 0.12,
+                Expression::FedUp if blinking => 0.12,
+                Expression::FedUp => 0.5,
+                Expression::Neutral if blinking => 0.12,
+                Expression::Neutral => 1.0,
+            },
+            tail: match self.expression {
+                Expression::Sulk => 12.0,
+                _ => (self.t * tau * wag_hz).sin() * wag_deg,
+            },
             bob: if self.walking {
                 -(self.t * 9.0).sin().abs() * 6.0
             } else {
@@ -164,6 +201,26 @@ mod tests {
             a.step(1.0 / 60.0);
         }
         assert_eq!(a.fps(false), 10);
+    }
+
+    #[test]
+    fn giggling_keeps_the_belly_bouncing_at_sixty_fps() {
+        let mut a = Animator::new(3, 0.33);
+        a.expression = Expression::Giggle;
+        for _ in 0..240 {
+            a.step(1.0 / 60.0);
+            assert_eq!(a.fps(false), 60);
+        }
+        assert!(a.params().eyes_open < 0.5);
+    }
+
+    #[test]
+    fn fed_up_is_half_lidded_and_slow() {
+        let mut a = Animator::new(4, 0.33);
+        a.expression = Expression::FedUp;
+        a.step(0.5);
+        assert_eq!(a.fps(false), 10);
+        assert!(a.params().tail.abs() <= 3.0);
     }
 
     #[test]

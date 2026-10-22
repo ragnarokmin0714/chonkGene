@@ -537,6 +537,11 @@ Each completed phase gets an annotated tag (`v0.1.0`, `v0.2.0`, …).
 
 **Done when**: Roger has poked it on a real machine and confirms the feel is right; golden PNGs exist; one pet meets the §5 budget.
 
+**Status (2026-10-22, branch `feat/phase1-shiba`)**
+- Done: art pipeline with standard/mochi morph targets and four coats; procedural breathing, blinking, tail and belly spring; five hit zones; three tickle stages with the laugh and fed-up routes; lift, shake, throw, landing squash; walking along the work area; golden PNGs; the §5 budget at 100% on the development machine. CI builds the app for all three targets.
+- The laugh, fed-up and overdone reactions are **procedural placeholders** (squint and giggle bounce, half-lidded eyes, eyes shut): the real belly-up, playing-dead and turned-away poses need keyframed clips and art (§10).
+- Still to do: sound switch, minimal right-click menu, single instance.
+
 ### Phase 2: behaviour, sleep and don't disturb — `v0.2.0`
 
 - Full behaviour system (§1.3): action library, needs, daily rhythm, idle, cursor curiosity.

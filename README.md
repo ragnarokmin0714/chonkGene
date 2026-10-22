@@ -16,7 +16,13 @@ The UI is in Traditional Chinese first, with English to follow.
 
 ## Status
 
-Planning; implementation has not started. The build plan is [docs/PLAN.md](docs/PLAN.md).
+Phase 1 (a Shiba prototype) is in progress; see [docs/PLAN.md §8](docs/PLAN.md#8-phases).
+
+## Trying the prototype
+
+CI builds `chonkgene-windows-x64.exe`, `chonkgene-linux-x86_64` and `chonkgene-linux-aarch64` on every push; download them from the run's artifacts. Or build it: `cargo run --release -p chonkgene`.
+
+Run it from a terminal. Click the Shiba to poke it (belly, cheeks, paws, head and bottom react differently), drag to lift it, shake it while dragging, and let go to throw it. `--help` lists the options (more Shibas, size, body shape, coat, CPU and memory numbers).
 
 ## Platforms
 

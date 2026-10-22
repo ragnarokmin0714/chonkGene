@@ -12,13 +12,19 @@ publish = false
 chonkgene-core = { path = "crates/chonkgene-core" }
 chonkgene-rig = { path = "crates/chonkgene-rig" }
 chonkgene-render = { path = "crates/chonkgene-render" }
+chonkgene-platform = { path = "crates/chonkgene-platform" }
+cpu-time = "1.0.0"
 fastrand = "2.5.0"
+memory-stats = "1.2.0"
 postcard = { version = "1.1.3", default-features = false, features = ["use-std"] }
 ron = "0.12.2"
 serde = { version = "1.0.229", features = ["derive"] }
 tiny-skia = "0.12.0"
 tiny-skia-path = "0.12.0"
 usvg = "0.48.1"
+# X11 only: v1 runs under XWayland on Wayland (PLAN §0), and pet windows have
+# no decorations, so the Wayland and Adwaita-frame code is left out.
+winit = { version = "0.30.13", default-features = false, features = ["rwh_06", "x11"] }
 
 # Only chonkgene-platform may use unsafe (PLAN §6); it overrides this.
 [workspace.lints.rust]
