@@ -3181,6 +3181,7 @@ name = "pet-spike"
 version = "0.1.0"
 dependencies = [
  "cpu-time",
+ "fontique",
  "interprocess",
  "memory-stats",
  "slint",

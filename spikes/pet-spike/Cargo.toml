@@ -12,6 +12,9 @@ tiny-skia = "0.12.0"
 winit = "0.30.13"
 
 [target.'cfg(target_os = "linux")'.dependencies]
+# Load fontconfig at run time instead of linking it at build time, so the
+# build needs no -dev packages and the binary stays portable (PLAN §2.1).
+fontique = { version = "0.11.1", features = ["fontconfig-dlopen"] }
 x11rb = { version = "0.14.0", features = ["shape", "image"] }
 
 [target."cfg(windows)".dependencies]
