@@ -442,7 +442,7 @@ Measured on a mid-range laptop **with the settings window closed**:
 |---|---|
 | poked, bouncing, lifted, thrown | 60 |
 | walking, normal actions | 30 |
-| breathing in place | 12–15 |
+| breathing in place | 10 |
 | asleep | ≤ 5 |
 | hidden, full screen | 0 (only ~1 Hz state detection) |
 
@@ -459,11 +459,22 @@ Measured on a mid-range laptop **with the settings window closed**:
 
 - Memory is far inside the budget (about 0.3 MiB per pet).
 - CPU is about **2.5× over** the 6-pet budget, and each pet beyond 6 costs about 0.4% against the 0.2% target. (The VM's measured CPU, 18%, is inflated by wake-up overhead in QEMU and is not used.)
-- Phase 1 has to cut drawing to **≤ 70 µs per frame** before real-machine numbers can confirm the CPU-rendering decision:
-  1. build paths once and pre-rasterise parts that do not deform, instead of rebuilding everything every frame;
-  2. size each window to the pet's bounds (about 200 × 180 instead of 256 × 256, roughly 45% fewer pixels);
-  3. breathe at 10 fps when idle, and skip frames whose pixels would not change.
 - Still owed from real desktops: present cost, real CPU and memory (spikes/README.md).
+
+**Phase 1 renderer (2026-10-22)**: `cargo run --release -p chonkgene-render --example bench`, same machine, real Shiba rig, animated (breathing, blinking, walking, a poke every 2 s):
+
+| Scale | Window | Per frame | 6 pets (one walking at 30 fps, five idle at 10 fps) | Each extra idle pet |
+|---|---|---|---|---|
+| 100% | 220 × 192 | 119 µs | **0.95%** of one core | 0.12% |
+| 150% | 330 × 288 | 201 µs | 1.61% (over budget) | 0.20% |
+
+What got it there, all in `chonkgene-render`:
+1. paths are rebuilt only when the body value changes; line parts (tail, mouth) are expanded to filled outlines at the same time instead of being stroked every frame;
+2. runs of parts on one bone (the face) are drawn once into a layer and blitted while the bone only moves; that bone and its children snap to whole pixels on those frames so the eyes stay put on the face;
+3. the window fits the pet (220 × 192 at 100%, 37% fewer pixels than 256 × 256);
+4. idle breathing runs at 10 fps.
+
+The budget holds at 100% on this machine. If real machines or larger sizes miss it, the next step is caching the body's runs at a few quantised breathing scales.
 
 ---
 

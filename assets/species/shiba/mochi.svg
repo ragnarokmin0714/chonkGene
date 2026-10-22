@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Shiba, body value 1.0 (麻糬). Same ids, element types and order as
+     standard.svg; only shapes differ. Placeholder art. -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 184" width="200" height="184">
+  <ellipse id="shadow" cx="100" cy="177" rx="80" ry="6" fill="#3B2A22" fill-opacity="0.09"/>
+  <path id="tail" d="M158 134 C188 130 192 96 172 88 C158 82 150 100 162 106" fill="none" stroke="#E8955A" stroke-width="14" stroke-linecap="round"/>
+  <ellipse id="body" cx="100" cy="128" rx="74" ry="48" fill="#E8955A"/>
+  <ellipse id="belly" cx="100" cy="137" rx="50" ry="35" fill="#FFF3E2"/>
+  <ellipse id="foot_bl" cx="55" cy="169" rx="18" ry="8" fill="#FFF3E2"/>
+  <ellipse id="foot_br" cx="145" cy="169" rx="18" ry="8" fill="#FFF3E2"/>
+  <ellipse id="paw_fl" cx="83" cy="166" rx="12" ry="9.5" fill="#FFF3E2"/>
+  <ellipse id="paw_fr" cx="117" cy="166" rx="12" ry="9.5" fill="#FFF3E2"/>
+  <path id="ear_l" d="M56 52 L63 15 Q66 8 72 13 L95 34 Z" fill="#E8955A"/>
+  <path id="ear_r" d="M144 52 L137 15 Q134 8 128 13 L105 34 Z" fill="#E8955A"/>
+  <path id="ear_inner_l" d="M64 42 L68 22 L84 35 Z" fill="#FFD2B5"/>
+  <path id="ear_inner_r" d="M136 42 L132 22 L116 35 Z" fill="#FFD2B5"/>
+  <ellipse id="head" cx="100" cy="67" rx="55" ry="43" fill="#E8955A"/>
+  <ellipse id="cheek_l" cx="69" cy="86" rx="23" ry="17" fill="#FFF3E2"/>
+  <ellipse id="cheek_r" cx="131" cy="86" rx="23" ry="17" fill="#FFF3E2"/>
+  <ellipse id="muzzle" cx="100" cy="92" rx="32" ry="18" fill="#FFF3E2"/>
+  <ellipse id="brow_l" cx="80" cy="54" rx="6" ry="4" fill="#FFF3E2"/>
+  <ellipse id="brow_r" cx="120" cy="54" rx="6" ry="4" fill="#FFF3E2"/>
+  <ellipse id="eye_l" cx="80" cy="69" rx="5" ry="6" fill="#3B2A22"/>
+  <ellipse id="eye_r" cx="120" cy="69" rx="5" ry="6" fill="#3B2A22"/>
+  <ellipse id="eye_hl_l" cx="82" cy="66.5" rx="1.9" ry="1.9" fill="#FFFFFF"/>
+  <ellipse id="eye_hl_r" cx="122" cy="66.5" rx="1.9" ry="1.9" fill="#FFFFFF"/>
+  <ellipse id="nose" cx="100" cy="81" rx="6" ry="4.2" fill="#3B2A22"/>
+  <path id="mouth" d="M92 87 Q96 92 100 87 Q104 92 108 87" fill="none" stroke="#3B2A22" stroke-width="2.4" stroke-linecap="round"/>
+  <ellipse id="blush_l" cx="61" cy="87" rx="9" ry="5" fill="#F7A9A0" fill-opacity="0.86"/>
+  <ellipse id="blush_r" cx="139" cy="87" rx="9" ry="5" fill="#F7A9A0" fill-opacity="0.86"/>
+</svg>

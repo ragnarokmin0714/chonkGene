@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Shiba, body value 0.0 (標準). Placeholder art.
+     Every element id is a rig part (rig.ron); mochi.svg must have the same
+     ids, element types and order. Colours here are only for previewing:
+     the app paints by palette slot. -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 184" width="200" height="184">
+  <ellipse id="shadow" cx="100" cy="177" rx="60" ry="5" fill="#3B2A22" fill-opacity="0.09"/>
+  <path id="tail" d="M148 132 C178 128 184 94 164 86 C150 80 142 98 154 104" fill="none" stroke="#E8955A" stroke-width="14" stroke-linecap="round"/>
+  <ellipse id="body" cx="100" cy="130" rx="52" ry="44" fill="#E8955A"/>
+  <ellipse id="belly" cx="100" cy="140" rx="32" ry="28" fill="#FFF3E2"/>
+  <ellipse id="foot_bl" cx="68" cy="168" rx="15" ry="7" fill="#FFF3E2"/>
+  <ellipse id="foot_br" cx="132" cy="168" rx="15" ry="7" fill="#FFF3E2"/>
+  <ellipse id="paw_fl" cx="87" cy="165" rx="10" ry="8.5" fill="#FFF3E2"/>
+  <ellipse id="paw_fr" cx="113" cy="165" rx="10" ry="8.5" fill="#FFF3E2"/>
+  <path id="ear_l" d="M56 52 L63 15 Q66 8 72 13 L95 34 Z" fill="#E8955A"/>
+  <path id="ear_r" d="M144 52 L137 15 Q134 8 128 13 L105 34 Z" fill="#E8955A"/>
+  <path id="ear_inner_l" d="M64 42 L68 22 L84 35 Z" fill="#FFD2B5"/>
+  <path id="ear_inner_r" d="M136 42 L132 22 L116 35 Z" fill="#FFD2B5"/>
+  <ellipse id="head" cx="100" cy="66" rx="52" ry="42" fill="#E8955A"/>
+  <ellipse id="cheek_l" cx="72" cy="84" rx="18" ry="13" fill="#FFF3E2"/>
+  <ellipse id="cheek_r" cx="128" cy="84" rx="18" ry="13" fill="#FFF3E2"/>
+  <ellipse id="muzzle" cx="100" cy="90" rx="28" ry="16" fill="#FFF3E2"/>
+  <ellipse id="brow_l" cx="80" cy="54" rx="6" ry="4" fill="#FFF3E2"/>
+  <ellipse id="brow_r" cx="120" cy="54" rx="6" ry="4" fill="#FFF3E2"/>
+  <ellipse id="eye_l" cx="80" cy="68" rx="5" ry="6" fill="#3B2A22"/>
+  <ellipse id="eye_r" cx="120" cy="68" rx="5" ry="6" fill="#3B2A22"/>
+  <ellipse id="eye_hl_l" cx="82" cy="65.5" rx="1.9" ry="1.9" fill="#FFFFFF"/>
+  <ellipse id="eye_hl_r" cx="122" cy="65.5" rx="1.9" ry="1.9" fill="#FFFFFF"/>
+  <ellipse id="nose" cx="100" cy="80" rx="6" ry="4.2" fill="#3B2A22"/>
+  <path id="mouth" d="M92 86 Q96 91 100 86 Q104 91 108 86" fill="none" stroke="#3B2A22" stroke-width="2.4" stroke-linecap="round"/>
+  <ellipse id="blush_l" cx="66" cy="84" rx="8" ry="4.5" fill="#F7A9A0" fill-opacity="0.86"/>
+  <ellipse id="blush_r" cx="134" cy="84" rx="8" ry="4.5" fill="#F7A9A0" fill-opacity="0.86"/>
+</svg>

@@ -1,0 +1,75 @@
+// Shiba rig. Part ids are element ids in standard.svg / mochi.svg, listed
+// back to front. Compile with `cargo xtask art`.
+(
+    species: "shiba",
+    size: (200, 184),
+    ground_y: 176,
+    slots: ["shadow", "fur_main", "fur_light", "ear_inner", "ink", "white", "blush"],
+    coats: [
+        (name: "red", colors: {
+            "shadow": "#3B2A2218", "fur_main": "#E8955A", "fur_light": "#FFF3E2",
+            "ear_inner": "#FFD2B5", "ink": "#3B2A22", "white": "#FFFFFF", "blush": "#F7A9A0DC",
+        }),
+        (name: "black", colors: {
+            "shadow": "#3B2A2218", "fur_main": "#4A3B36", "fur_light": "#F5E7D6",
+            "ear_inner": "#C9A48A", "ink": "#2A1E18", "white": "#FFFFFF", "blush": "#F7A9A0DC",
+        }),
+        (name: "sesame", colors: {
+            "shadow": "#3B2A2218", "fur_main": "#C79A6E", "fur_light": "#FFF3E2",
+            "ear_inner": "#F2CDB0", "ink": "#3B2A22", "white": "#FFFFFF", "blush": "#F7A9A0DC",
+        }),
+        (name: "white", colors: {
+            "shadow": "#3B2A2218", "fur_main": "#F1E2CC", "fur_light": "#FFFFFF",
+            "ear_inner": "#F7D3C4", "ink": "#3B2A22", "white": "#FFFFFF", "blush": "#F7A9A0DC",
+        }),
+    ],
+    // Parents before children. Pivots are where each bone scales and turns.
+    bones: [
+        (name: "root", parent: None, pivot: (100, 176)),
+        (name: "body", parent: Some("root"), pivot: (100, 174)),
+        (name: "belly", parent: Some("body"), pivot: (100, 140)),
+        (name: "tail", parent: Some("body"), pivot: (150, 130)),
+        (name: "head", parent: Some("root"), pivot: (100, 108)),
+        (name: "eye_l", parent: Some("head"), pivot: (80, 68)),
+        (name: "eye_r", parent: Some("head"), pivot: (120, 68)),
+    ],
+    parts: [
+        (id: "shadow", bone: "root", slot: "shadow"),
+        (id: "tail", bone: "tail", slot: "fur_main"),
+        (id: "body", bone: "body", slot: "fur_main"),
+        (id: "belly", bone: "belly", slot: "fur_light"),
+        (id: "foot_bl", bone: "body", slot: "fur_light"),
+        (id: "foot_br", bone: "body", slot: "fur_light"),
+        (id: "paw_fl", bone: "body", slot: "fur_light"),
+        (id: "paw_fr", bone: "body", slot: "fur_light"),
+        (id: "ear_l", bone: "head", slot: "fur_main"),
+        (id: "ear_r", bone: "head", slot: "fur_main"),
+        (id: "ear_inner_l", bone: "head", slot: "ear_inner"),
+        (id: "ear_inner_r", bone: "head", slot: "ear_inner"),
+        (id: "head", bone: "head", slot: "fur_main"),
+        (id: "cheek_l", bone: "head", slot: "fur_light"),
+        (id: "cheek_r", bone: "head", slot: "fur_light"),
+        (id: "muzzle", bone: "head", slot: "fur_light"),
+        (id: "brow_l", bone: "head", slot: "fur_light"),
+        (id: "brow_r", bone: "head", slot: "fur_light"),
+        (id: "eye_l", bone: "eye_l", slot: "ink"),
+        (id: "eye_r", bone: "eye_r", slot: "ink"),
+        (id: "eye_hl_l", bone: "eye_l", slot: "white"),
+        (id: "eye_hl_r", bone: "eye_r", slot: "white"),
+        (id: "nose", bone: "head", slot: "ink"),
+        (id: "mouth", bone: "head", slot: "ink"),
+        (id: "blush_l", bone: "head", slot: "blush"),
+        (id: "blush_r", bone: "head", slot: "blush"),
+    ],
+    // Hit-test priority: the first zone containing the point wins (PLAN §1.2).
+    zones: [
+        (name: "belly", parts: ["belly"]),
+        (name: "cheek", parts: ["cheek_l", "cheek_r"]),
+        (name: "paw", parts: ["paw_fl", "paw_fr"]),
+        (name: "head", parts: ["head", "ear_l", "ear_r", "muzzle"]),
+        (name: "bottom", parts: ["body", "tail", "foot_bl", "foot_br"]),
+    ],
+    anchors: {
+        "bubble": (100, 6),
+    },
+)

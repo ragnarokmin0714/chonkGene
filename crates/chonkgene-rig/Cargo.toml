@@ -1,0 +1,15 @@
+[package]
+name = "chonkgene-rig"
+description = "Rig data for chonkGene pets: bones, morph targets, palettes, hit zones."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+postcard.workspace = true
+serde.workspace = true
+tiny-skia-path.workspace = true
+
+[lints]
+workspace = true

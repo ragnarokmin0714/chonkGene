@@ -1,0 +1,46 @@
+# cargo-deny policy (docs/PLAN.md §6).
+
+[graph]
+all-features = true
+
+[advisories]
+version = 2
+yanked = "deny"
+
+[licenses]
+version = 2
+confidence-threshold = 0.9
+# Our own crates are unpublished and their licence is still open (PLAN §10).
+private = { ignore = true }
+allow = [
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "BSL-1.0",
+    "ISC",
+    "MIT",
+    "MPL-2.0",
+    "Unicode-3.0",
+    "Zlib",
+]
+
+[bans]
+multiple-versions = "allow"
+wildcards = "deny"
+# Workspace path dependencies carry no version.
+allow-wildcard-paths = true
+# v1 never touches the network (PLAN §6 item 1).
+deny = [
+    { crate = "curl", reason = "no network in v1" },
+    { crate = "hyper", reason = "no network in v1" },
+    { crate = "isahc", reason = "no network in v1" },
+    { crate = "reqwest", reason = "no network in v1" },
+    { crate = "surf", reason = "no network in v1" },
+    { crate = "ureq", reason = "no network in v1" },
+]
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
