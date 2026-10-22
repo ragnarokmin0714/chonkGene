@@ -44,7 +44,8 @@ v1 has six species. A species only sets **default personality**; each individual
 | Chick (小雞) | 蛋黃 | medium | low | high | **early riser**: up first, asleep first | pecks at the cursor and window edges; puffs up and drops a feather when startled; tiny rapid steps |
 | Duckling (小鴨) | 湯圓 | medium | high | low | daytime | waddles; lines up behind another pet and follows it; floats on the taskbar as if on water; "呱" when poked |
 
-- At most **6 pets** on screen at once (performance, §5).
+- **How many pets are on the desktop at once** is a setting: **6 by default, no upper limit**. Above 6 the setting shows a plain hint that CPU and memory use grow with each pet (§5); nothing stops the user.
+- Adopted pets beyond that number rest in the **pet house (寵物窩)** and can be swapped onto the desktop at any time. The same species can be adopted more than once.
 - First run shows an **adoption screen** (multi-select), with the start-at-login choice.
 - Chick morning call: the first wake of the day may crow (「啾啾啾——！」), subject to sound mode and quiet hours (§1.7).
 
@@ -219,6 +220,7 @@ Every string in the UI follows this section; check the glossary below before add
 | short-term emotion | 心情; when annoyed 「有起床氣」, 「在鬧脾氣」 | 怒氣值, 生氣中 |
 | how the pet addresses you | 牠怎麼叫你 | 暱稱設定, 使用者名稱 |
 | nurturing record | 成長日記 | 養成, 日誌, 紀錄檔 |
+| adopted pets not on the desktop | 在寵物窩休息 | 停用, 收納, 封存 |
 
 **Pet lines**
 - One voice per species:
@@ -428,8 +430,9 @@ Measured on a mid-range laptop **with the settings window closed**:
 
 | Metric | Target |
 |---|---|
-| CPU (6 pets, normal behaviour, 5-minute average) | < 1% of one core |
-| Memory | < 80 MB |
+| CPU (6 pets, the default, normal behaviour, 5-minute average) | < 1% of one core |
+| Memory (6 pets) | < 80 MB |
+| Each pet beyond 6 | < 0.2% of one core and < 8 MB (measured in Phase 0 S2) |
 | Poke to first visual reaction | ≤ 1 frame |
 | Launch to pets on screen | < 1 s |
 
@@ -490,7 +493,7 @@ Each completed phase gets an annotated tag (`v0.1.0`, `v0.2.0`, …).
 | ID | What | Done when |
 |---|---|---|
 | S1 | transparency, always on top, per-pixel click-through, per-frame moves (both approaches in §3.2) | results from Windows 11, X11, GNOME Wayland and KDE Wayland written back into §4 |
-| S2 | tiny-skia drawing a 256 px test figure × 6 windows | measured CPU and memory written back into §5; if over budget, revisit the rendering decision |
+| S2 | tiny-skia drawing a 256 px test figure × 6 windows, then × 24 to get the per-pet cost | measured CPU and memory written back into §5; if over budget, revisit the rendering decision |
 | S3 | Slint settings child process + IPC; frameless rounded window; Chinese IME in the name field | Windows Zhuyin, Linux fcitx5 and ibus all work; the pet process survives the settings process exiting or crashing |
 | S4 | portable artefacts | run directly on a clean Windows VM (no VC++ redistributable), Ubuntu 22.04/24.04 and Debian 12 |
 | S5 | font sizes and Reserved Font Names | **done** (2026-10-22), results in §1.9 |
