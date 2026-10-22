@@ -6,6 +6,14 @@ all-features = true
 [advisories]
 version = 2
 yanked = "deny"
+# zvariant and friends were merged into zbus 6; they arrive through Slint's
+# AT-SPI accessibility, which still uses zbus 5. Not vulnerabilities.
+# Remove these once Slint moves to zbus 6.
+ignore = [
+    { id = "RUSTSEC-2026-0370", reason = "zvariant merged into zbus 6; via Slint accessibility" },
+    { id = "RUSTSEC-2026-0371", reason = "zbus_names merged into zbus 6; via Slint accessibility" },
+    { id = "RUSTSEC-2026-0372", reason = "zvariant_derive merged into zbus 6; via Slint accessibility" },
+]
 
 [licenses]
 version = 2
@@ -25,6 +33,52 @@ allow = [
     "Unicode-3.0",
     "Zlib",
 ]
+
+# Slint is used under its Royalty-free Desktop licence 2.0 for now, with
+# the AboutSlint attribution in Settings › 一般 (PLAN §3.6, §10).
+[[licenses.exceptions]]
+allow = ["LicenseRef-Slint-Royalty-free-2.0"]
+crate = "slint"
+
+[[licenses.exceptions]]
+allow = ["LicenseRef-Slint-Royalty-free-2.0"]
+crate = "slint-build"
+
+[[licenses.exceptions]]
+allow = ["LicenseRef-Slint-Royalty-free-2.0"]
+crate = "slint-macros"
+
+[[licenses.exceptions]]
+allow = ["LicenseRef-Slint-Royalty-free-2.0"]
+crate = "i-slint-backend-selector"
+
+[[licenses.exceptions]]
+allow = ["LicenseRef-Slint-Royalty-free-2.0"]
+crate = "i-slint-backend-winit"
+
+[[licenses.exceptions]]
+allow = ["LicenseRef-Slint-Royalty-free-2.0"]
+crate = "i-slint-common"
+
+[[licenses.exceptions]]
+allow = ["LicenseRef-Slint-Royalty-free-2.0"]
+crate = "i-slint-compiler"
+
+[[licenses.exceptions]]
+allow = ["LicenseRef-Slint-Royalty-free-2.0"]
+crate = "i-slint-core"
+
+[[licenses.exceptions]]
+allow = ["LicenseRef-Slint-Royalty-free-2.0"]
+crate = "i-slint-core-macros"
+
+[[licenses.exceptions]]
+allow = ["LicenseRef-Slint-Royalty-free-2.0"]
+crate = "i-slint-renderer-skia"
+
+[[licenses.exceptions]]
+allow = ["LicenseRef-Slint-Royalty-free-2.0"]
+crate = "i-slint-renderer-software"
 
 [bans]
 multiple-versions = "allow"

@@ -339,7 +339,7 @@ Every string in the UI follows this section; check the glossary below before add
 | `chonkgene-platform` | transparent window presentation, click-through, work area, full-screen / meeting / idle detection, theme, login item, tray, hotkey | **only crate allowed**, every block commented with its reason |
 | `chonkgene-settings` | Slint settings UI (`.slint` files), cute widgets, theme; runs as the child process | `forbid` |
 | `chonkgene-ipc` | message format and channel between the pet process and the settings process | `forbid` |
-| `chonkgene` (bin) | event loop, wiring, saves, audio (rodio); runs the settings UI when started with `--settings` | `forbid` |
+| `chonkgene` (bin) | event loop, wiring, saves, audio (rodio); runs the settings UI when started with `--settings` | `deny` (Slint's generated code allows it locally, which `forbid` would reject) |
 | `xtask` | art build (SVG → rig data), font subsetting, benchmarks | — |
 
 ### 3.2 Windows and event loop
@@ -400,6 +400,8 @@ Order of comparison follows Roger's rule: stability, performance and compatibili
 | Styling | mostly global styles; cute widgets must be hand-painted | per-widget styles | per-element design, close to writing CSS |
 | Headless screenshot tests | kittest (works on this machine) | unchecked | software renderer outputs PNG directly |
 | Licence | MIT / Apache-2.0 | MIT | GPLv3, royalty-free (with attribution) or commercial |
+
+**Licence in use (2026-10-22)**: until the project's own licence is chosen (§10), Slint is used under its **Royalty-free Desktop licence 2.0**, whose condition is attribution: the settings window's 一般 page shows Slint's `AboutSlint` widget. `deny.toml` allows that licence for the Slint crates only.
 
 **Conclusion: Slint.** None of the first three criteria rules any toolkit out, and Slint leads clearly on appearance. Costs:
 - The licence must be chosen before going public: GPLv3 open source, or the royalty-free licence with the required attribution (re-read the licence text before publishing).

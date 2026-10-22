@@ -1,7 +1,7 @@
 // The settings window (PLAN §1.6–§1.11, mockup in §1.9).
 // Labels are plain; the cuteness lives in hints and the pet's own lines.
 
-import { LineEdit, ScrollView } from "std-widgets.slint";
+import { AboutSlint, LineEdit, ScrollView } from "std-widgets.slint";
 import "../../../assets/fonts/jf-openhuninn-2.1.ttf";
 
 export struct PetRow {
@@ -840,6 +840,11 @@ export component SettingsWindow inherits Window {
                         }
                     }
                     Text { text: "肉肉賴桌 " + root.version + "・不連網，不收集任何資料"; color: Theme.muted; font-size: 13px; horizontal-alignment: center; }
+                    // Attribution required by Slint's royalty-free licence.
+                    HorizontalLayout {
+                        alignment: center;
+                        AboutSlint { max-width: 260px; }
+                    }
                 }
             }
         }
