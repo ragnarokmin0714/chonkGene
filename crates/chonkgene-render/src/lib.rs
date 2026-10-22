@@ -8,6 +8,7 @@
 
 pub mod bubble;
 mod layer;
+pub mod menu;
 mod pose;
 pub mod text;
 

@@ -4,7 +4,9 @@
 //! poking, lifting, shaking and throwing on a real desktop.
 
 mod app;
+mod ipc;
 mod lines;
+mod store;
 
 use std::process::ExitCode;
 

@@ -140,3 +140,39 @@ fn every_species_at_its_default_coat() {
         }
     }
 }
+
+#[test]
+fn pet_menu() {
+    use chonkgene_render::menu::{self, Icon, Item, Model};
+    let item = |label: &str, hint: Option<&str>, icon, separated| Item {
+        label: label.into(),
+        hint: hint.map(Into::into),
+        icon,
+        separated,
+    };
+    let model = Model {
+        name: "阿柴".into(),
+        species: "柴犬".into(),
+        level: 3,
+        progress: 0.6,
+        status: Some("有起床氣".into()),
+        grumpy: true,
+        avatar: ([0xE8, 0x95, 0x5A, 255], [0xFF, 0xF3, 0xE2, 255]),
+        items: vec![
+            item("摸摸頭", None, Icon::Heart, false),
+            item("餵零食", Some("還有 2 份"), Icon::Snack, false),
+            item("改名字…", None, Icon::Pencil, false),
+            item("幫牠換造型…", None, Icon::Palette, false),
+            item("讓牠去睡覺", None, Icon::Moon, false),
+            item("全部收起來", Some("Ctrl+Alt+P"), Icon::Hide, true),
+            item("設定…", None, Icon::Sliders, false),
+            item("結束肉肉賴桌", None, Icon::Exit, false),
+        ],
+    };
+    let mut face = chonkgene_render::text::Face::ui();
+    let drawn = menu::draw(&mut face, &model, Some(1), 1.0).unwrap();
+    assert_eq!(drawn.rows.len(), 8);
+    let r = drawn.rows[4];
+    assert_eq!(menu::row_at(&drawn, r.x() + 5.0, r.y() + 5.0), Some(4));
+    compare("menu", &drawn.pixmap);
+}

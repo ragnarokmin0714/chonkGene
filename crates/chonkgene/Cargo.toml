@@ -13,7 +13,9 @@ chonkgene-render.workspace = true
 chonkgene-rig.workspace = true
 cpu-time.workspace = true
 ron.workspace = true
+serde.workspace = true
 fastrand.workspace = true
+interprocess.workspace = true
 memory-stats.workspace = true
 winit.workspace = true
 
