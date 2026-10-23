@@ -579,7 +579,7 @@ Roger played beta 1 (2026-10-23) and found the pets not cute enough: not round, 
 | Costumes | the bones and sockets they will hang on | hats, scarves, bows (§1.6) |
 | Decorations | — | cushions, beds, bowls as their own small models |
 
-**Status (2026-10-23, branch `feat/3d-pets`, version `0.5.0-beta.2`)**: built and tested headlessly; the app ran under Xvfb, where it also showed an event-loop busy spin present since beta 1 (fixed) (goldens, hit zones, the settings preview and adoption list); the frame budget is met (§5). Not yet seen on a real desktop. The tail no longer wags (it is part of each sprite); a separate tail layer can bring it back.
+**Status (2026-10-23, branch `feat/3d-pets`, version `0.5.0-beta.3`)**: built and tested headlessly; beta 2 left afterimages behind moving pets (a cached idle frame copied the previous frame), fixed in beta 3; the app ran under Xvfb, where it also showed an event-loop busy spin present since beta 1 (fixed) (goldens, hit zones, the settings preview and adoption list); the frame budget is met (§5). Not yet seen on a real desktop. The tail no longer wags (it is part of each sprite); a separate tail layer can bring it back.
 
 ### Phase 1: Shiba prototype (feel) — `v0.1.0`
 

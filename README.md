@@ -16,7 +16,7 @@ The UI is in Traditional Chinese first, with English to follow.
 
 ## Status
 
-Second beta, `0.5.0-beta.2`: all six pets as round 3D models, with placeholder sounds. See [docs/PLAN.md §8](docs/PLAN.md#3d-pets--v050-beta2) for what is in it and what is left.
+Beta `0.5.0-beta.3`: all six pets as round 3D models, with placeholder sounds. See [docs/PLAN.md §8](docs/PLAN.md#3d-pets--v050-beta2) for what is in it and what is left.
 
 ## Trying it
 
