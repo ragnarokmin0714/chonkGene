@@ -1,6 +1,6 @@
 [package]
 name = "chonkgene-render"
-description = "Draws chonkGene rigs into pixmaps with tiny-skia."
+description = "Draws chonkGene pets: 3D models ray-marched into sprites, blitted with tiny-skia."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

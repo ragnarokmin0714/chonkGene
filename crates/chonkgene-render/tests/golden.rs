@@ -1,18 +1,24 @@
-//! Golden snapshots (PLAN §7): the Shiba at each body snap point and coat.
+//! Golden snapshots (PLAN §7): the Shiba at each body snap point, coat, pose
+//! and face; every species; bubbles and the menu.
 //! `UPDATE_GOLDEN=1 cargo test -p chonkgene-render` rewrites them.
 
 use std::path::PathBuf;
 
-use chonkgene_core::anim::PoseParams;
-use chonkgene_render::{BoneMap, Renderer};
-use chonkgene_rig::{Rig, builtin};
-use tiny_skia::Pixmap;
+use std::sync::Arc;
 
-/// Largest per-channel difference that still counts as equal; tiny-skia's
-/// SIMD paths differ slightly between x86-64 and aarch64.
+use chonkgene_core::anim::{Expression, PoseParams};
+use chonkgene_render::sprites::{Variant, render_one};
+use chonkgene_render::{KEYS, Key, Renderer};
+use chonkgene_rig::{Look, PoseId, builtin};
+use tiny_skia::{IntSize, Pixmap};
+
+/// Largest per-channel difference that still counts as equal: tiny-skia's
+/// SIMD paths and the platform's sin/cos differ slightly between x86-64 and
+/// aarch64.
 const CHANNEL_TOLERANCE: u8 = 3;
-/// Share of pixels allowed beyond the tolerance.
-const PIXEL_TOLERANCE: f64 = 0.002;
+/// Share of pixels allowed beyond the tolerance; a ray grazing an edge may
+/// land on either side of it.
+const PIXEL_TOLERANCE: f64 = 0.005;
 
 fn golden_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/golden")
@@ -58,13 +64,35 @@ fn compare(name: &str, actual: &Pixmap) {
     );
 }
 
-fn render(chonk: f32, coat: &str, params: PoseParams) -> Pixmap {
-    let rig = Rig::load(builtin::SHIBA).unwrap();
-    let mut r = Renderer::new(&rig, 1.0, chonk, rig.coat(coat).unwrap()).unwrap();
-    let mut pose = rig.rest_pose();
-    BoneMap::new(&rig).apply(&params, &mut pose);
-    r.render(&rig, &pose).clone()
+/// One sprite, rendered now on every core.
+fn sprite(id: &str, chonk: f32, coat: &str, key: Key) -> Pixmap {
+    let model = builtin::load(id).unwrap();
+    let coat = model.coat(coat).unwrap();
+    let threads = std::thread::available_parallelism().map_or(1, |n| n.get());
+    let s = render_one(
+        &model,
+        Variant {
+            coat,
+            chonk,
+            scale: 1.0,
+        },
+        key,
+        threads,
+    );
+    Pixmap::from_vec(s.rgba, IntSize::from_wh(s.width, s.height).unwrap()).unwrap()
 }
+
+fn shiba() -> Renderer {
+    let model = Arc::new(builtin::load("shiba").unwrap());
+    let mut r = Renderer::new(model, 1.0, 0.33, 0).unwrap();
+    r.finish();
+    r
+}
+
+const SIT: Key = Key {
+    pose: PoseId::Sit,
+    look: Look::Open,
+};
 
 #[test]
 fn shiba_at_every_body_snap_point() {
@@ -76,7 +104,7 @@ fn shiba_at_every_body_snap_point() {
     ] {
         compare(
             &format!("shiba-red-{label}"),
-            &render(chonk, "red", PoseParams::default()),
+            &sprite("shiba", chonk, "red", SIT),
         );
     }
 }
@@ -86,35 +114,91 @@ fn shiba_in_every_coat() {
     for coat in ["black", "sesame", "white"] {
         compare(
             &format!("shiba-{coat}-chubby"),
-            &render(0.33, coat, PoseParams::default()),
+            &sprite("shiba", 0.33, coat, SIT),
         );
     }
 }
 
 #[test]
-fn shiba_squashed_mid_poke_and_blinking() {
+fn shiba_in_every_pose_and_face() {
+    for key in KEYS {
+        let name = format!("shiba-{}-{:?}", key.pose.name(), key.look).to_lowercase();
+        compare(&name, &sprite("shiba", 0.33, "red", key));
+    }
+}
+
+#[test]
+fn shiba_squashed_mid_poke() {
     let params = PoseParams {
         squash: 0.3,
         belly: 0.3,
-        eyes_open: 0.12,
-        tail: 8.0,
         ..PoseParams::default()
     };
-    compare("shiba-red-poked", &render(0.33, "red", params));
+    compare(
+        "shiba-red-poked",
+        &shiba().render(&params, Expression::Neutral).clone(),
+    );
 }
 
-/// The face layer is used from the second identical frame on; it must look
-/// the same as drawing every part.
+/// Idle pets mostly look the same from frame to frame; those frames must
+/// not be drawn or shown again (PLAN §5), but any visible change must be.
 #[test]
-fn cached_frames_match_direct_drawing() {
-    let rig = Rig::load(builtin::SHIBA).unwrap();
-    let mut r = Renderer::new(&rig, 1.0, 0.33, 0).unwrap();
-    let pose = rig.rest_pose();
-    let direct = r.render(&rig, &pose).clone();
-    r.render(&rig, &pose);
-    let cached = r.render(&rig, &pose).clone();
-    let off = differing(&direct, &cached);
-    assert_eq!(off, 0, "{off} pixels differ");
+fn unchanged_frames_are_not_redrawn() {
+    let mut r = shiba();
+    let still = PoseParams::default();
+    r.render(&still, Expression::Neutral);
+    assert!(r.changed());
+    r.render(&still, Expression::Neutral);
+    assert!(!r.changed(), "same pose twice");
+    let breath = PoseParams {
+        breath: 1.0,
+        ..still
+    };
+    r.render(&breath, Expression::Neutral);
+    assert!(r.changed(), "a breath step");
+    r.render(&breath, Expression::Happy);
+    assert!(r.changed(), "a new face");
+    let poked = PoseParams {
+        squash: 0.3,
+        ..breath
+    };
+    r.render(&poked, Expression::Happy);
+    assert!(r.changed(), "a squash");
+    // Asleep, the snot bubble and the z always move.
+    r.render_asleep(&still, 1.0);
+    r.render_asleep(&still, 1.0);
+    assert!(r.changed());
+}
+
+/// Hit-testing reads the zone the ray hit, through the frame's squash and
+/// mirroring, so a poke lands where the pixels are.
+#[test]
+fn pokes_land_on_the_zone_under_the_cursor() {
+    let mut r = shiba();
+    for facing in [1.0, -1.0] {
+        let params = PoseParams {
+            facing,
+            ..PoseParams::default()
+        };
+        let frame = r.render(&params, Expression::Neutral).clone();
+        let (ax, ay) = r.anchor();
+        assert_eq!(r.hit(ax, ay + 6.0), Some("head"), "facing {facing}");
+        assert_eq!(r.hit(1.0, 1.0), None);
+        // The belly is a front patch of the body, below the face.
+        let belly: Vec<(u32, u32)> = (0..frame.height())
+            .flat_map(|y| (0..frame.width()).map(move |x| (x, y)))
+            .filter(|&(x, y)| r.hit(x as f32, y as f32) == Some("belly"))
+            .collect();
+        assert!(belly.len() > 200, "belly is only {} px", belly.len());
+        assert!(belly.iter().all(|&(_, y)| y as f32 > ay + 40.0));
+        for zone in ["cheek", "paw", "bottom"] {
+            assert!(
+                (0..frame.height())
+                    .any(|y| (0..frame.width()).any(|x| r.hit(x as f32, y as f32) == Some(zone))),
+                "no {zone} zone"
+            );
+        }
+    }
 }
 
 #[test]
@@ -132,11 +216,9 @@ fn speech_bubbles() {
 #[test]
 fn every_species_at_its_default_coat() {
     for id in ["munchkin", "fold", "owl", "chick", "duck"] {
-        let rig = Rig::load(builtin::for_species(id).unwrap()).unwrap();
+        let coat = builtin::load(id).unwrap().coats[0].name.clone();
         for (label, chonk) in [("chubby", 0.33), ("mochi", 1.0)] {
-            let mut r = Renderer::new(&rig, 1.0, chonk, 0).unwrap();
-            let pm = r.render(&rig, &rig.rest_pose()).clone();
-            compare(&format!("{id}-{label}"), &pm);
+            compare(&format!("{id}-{label}"), &sprite(id, chonk, &coat, SIT));
         }
     }
 }
@@ -179,14 +261,10 @@ fn pet_menu() {
 
 #[test]
 fn shiba_asleep() {
-    let rig = Rig::load(builtin::SHIBA).unwrap();
-    let mut r = Renderer::new(&rig, 1.0, 0.33, 0).unwrap();
-    let mut pose = rig.rest_pose();
     let params = PoseParams {
         eyes_open: 0.06,
         breath: 1.0,
         ..PoseParams::default()
     };
-    BoneMap::new(&rig).apply(&params, &mut pose);
-    compare("shiba-asleep", &r.render_asleep(&rig, &pose, 1.6).clone());
+    compare("shiba-asleep", &shiba().render_asleep(&params, 1.6).clone());
 }

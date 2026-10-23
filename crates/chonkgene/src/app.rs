@@ -3,6 +3,7 @@
 
 use std::collections::HashMap;
 use std::process::{Child, Command};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use chonkgene_core::Zone;
@@ -17,8 +18,8 @@ use chonkgene_platform::tray::{Tray, TrayCommand};
 use chonkgene_platform::{Presenter, Shared, autostart, hotkey};
 use chonkgene_render::menu::{self, Icon, Item};
 use chonkgene_render::text::Face;
-use chonkgene_render::{BoneMap, Renderer, bubble};
-use chonkgene_rig::{Pose, Rig, builtin};
+use chonkgene_render::{Renderer, bubble};
+use chonkgene_rig::{Model, builtin};
 use cpu_time::ProcessTime;
 use tiny_skia::Pixmap;
 use winit::application::ApplicationHandler;
@@ -84,8 +85,7 @@ fn local_time() -> (f32, i64) {
 }
 
 struct Kind {
-    rig: Rig,
-    bones: BoneMap,
+    model: Arc<Model>,
 }
 
 struct Press {
@@ -108,7 +108,6 @@ struct Pet {
     window: Window,
     presenter: Presenter,
     renderer: Renderer,
-    pose: Pose,
     body: Body,
     anim: Animator,
     mind: Mind,
@@ -159,7 +158,6 @@ struct Menu {
 struct Ctx<'a> {
     el: &'a ActiveEventLoop,
     shared: &'a Shared,
-    kinds: &'a HashMap<Species, Kind>,
     lines: &'a Lines,
     face: &'a mut Face,
     area: Area,
@@ -269,19 +267,22 @@ struct App {
     stats_at: Instant,
     stats_cpu: ProcessTime,
     frames: u64,
+    /// Time spent drawing pet frames since the last report, and the part of
+    /// it spent handing them to the window system.
+    drawing: Duration,
+    presenting: Duration,
 }
 
 impl App {
     fn new(data: DataDir, stats: bool, proxy: EventLoopProxy<UserEvent>) -> Result<Self, String> {
         let mut kinds = HashMap::new();
         for species in Species::ALL {
-            let bytes = builtin::for_species(species.id()).ok_or("missing built-in rig")?;
-            let rig = Rig::load(bytes).map_err(|e| format!("{}: {e}", species.id()))?;
+            let model =
+                builtin::load(species.id()).map_err(|e| format!("{}: {e}", species.id()))?;
             kinds.insert(
                 species,
                 Kind {
-                    bones: BoneMap::new(&rig),
-                    rig,
+                    model: Arc::new(model),
                 },
             );
         }
@@ -340,6 +341,8 @@ impl App {
             stats_at: now + STATS_EVERY,
             stats_cpu: ProcessTime::now(),
             frames: 0,
+            drawing: Duration::ZERO,
+            presenting: Duration::ZERO,
         };
         app.first_run();
         Ok(app)
@@ -551,9 +554,9 @@ impl App {
                     } else {
                         let p = &mut self.pets[i];
                         let kind = &self.kinds[&p.species];
-                        p.renderer.set_chonk(&kind.rig, save.chonk);
-                        if let Some(coat) = kind.rig.coat(&save.coat) {
-                            p.renderer.set_coat(&kind.rig, coat);
+                        p.renderer.set_chonk(save.chonk);
+                        if let Some(coat) = kind.model.coat(&save.coat) {
+                            p.renderer.set_coat(coat);
                         }
                         p.anim.set_chonk(save.chonk);
                         p.mind.personality = save.personality();
@@ -601,15 +604,8 @@ impl App {
         let asleep = p.mind.asleep();
         let snacks = p.mind.snacks_left(world.day);
         let kind = &self.kinds[&p.species];
-        let colors = kind
-            .rig
-            .coat(&p.save.coat)
-            .and_then(|c| kind.rig.data().coats.get(c))
-            .map(|c| (c.colors.get(1).copied(), c.colors.get(2).copied()));
-        let avatar = match colors {
-            Some((Some(a), Some(b))) => (a, b),
-            _ => ([0xE8, 0x95, 0x5A, 255], [0xFF, 0xF3, 0xE2, 255]),
-        };
+        let coat = kind.model.coat(&p.save.coat).unwrap_or(0);
+        let avatar = kind.model.coats[coat].swatch();
         let item = |label: &str, hint: Option<String>, icon, separated| Item {
             label: label.into(),
             hint,
@@ -740,7 +736,6 @@ impl App {
         let App {
             pets,
             shared,
-            kinds,
             lines,
             bubble_face,
             sounds,
@@ -757,7 +752,6 @@ impl App {
         let mut ctx = Ctx {
             el,
             shared,
-            kinds,
             lines,
             face: bubble_face,
             sounds,
@@ -790,13 +784,17 @@ impl App {
         let rss = memory_stats::memory_stats()
             .map(|m| m.physical_mem as f64 / 1_048_576.0)
             .unwrap_or(f64::NAN);
+        let us = |d: Duration| d.as_secs_f64() * 1e6 / self.frames.max(1) as f64;
+        let (draw, present) = (us(self.drawing), us(self.presenting));
         println!(
-            "[{:6.1}s] {} pets | {:5.1} frames/s | CPU {cpu:5.2}% of one core | RSS {rss:.1} MiB",
+            "[{:6.1}s] {} pets | {:5.1} frames/s, {draw:4.0} µs each ({present:.0} presenting) | CPU {cpu:5.2}% of one core | RSS {rss:.1} MiB",
             self.secs(now),
             self.pets.len(),
             self.frames as f64 / wall,
         );
         self.frames = 0;
+        self.drawing = Duration::ZERO;
+        self.presenting = Duration::ZERO;
         self.stats_cpu = ProcessTime::now();
         self.stats_at = now + STATS_EVERY;
     }
@@ -900,7 +898,7 @@ fn spawn(
     let species = save.species().ok_or("unknown species")?;
     let kind = &kinds[&species];
     let scale = save.size * ui_scale;
-    let size = Renderer::pixel_size(&kind.rig, scale);
+    let size = Renderer::pixel_size(scale);
     let size_f = (size.0 as f32, size.1 as f32);
     let span = (area.w - size_f.0).max(1.0);
     let x = area.x + (area.w * 0.55 + slot as f32 * size_f.0 * 0.9) % span;
@@ -910,14 +908,13 @@ fn spawn(
         .create_window(chonkgene_platform::pet_window(size, pos, &save.name))
         .map_err(|e| e.to_string())?;
     let presenter = Presenter::new(shared, &window)?;
-    let coat = kind.rig.coat(&save.coat).unwrap_or(0);
-    let renderer =
-        Renderer::new(&kind.rig, scale, save.chonk, coat).ok_or("cannot allocate a pixmap")?;
+    let coat = kind.model.coat(&save.coat).unwrap_or(0);
+    let renderer = Renderer::new(Arc::clone(&kind.model), scale, save.chonk, coat)
+        .ok_or("cannot allocate a pixmap")?;
     let seed = save.id.wrapping_mul(0x9E37_79B9_7F4A_7C15) ^ (t * 1000.0) as u64;
     Ok(Pet {
         mind: Mind::new(species, save.personality(), save.affinity()),
         anim: Animator::new(seed, save.chonk),
-        pose: kind.rig.rest_pose(),
         species,
         window,
         presenter,
@@ -1003,13 +1000,10 @@ impl Pet {
     }
 
     fn bubble_pos(&self, ctx: &Ctx, size: (u32, u32)) -> (i32, i32) {
-        let rig = &ctx.kinds[&self.species].rig;
-        let (ax, ay) = rig.anchor("bubble").unwrap_or((100.0, 0.0));
-        let mut p = [tiny_skia::Point::from_xy(ax, ay)];
-        self.renderer.view().map_points(&mut p);
+        let (ax, ay) = self.renderer.anchor();
         let (x, y) = (
-            self.placed.0 + p[0].x as i32 - size.0 as i32 / 2,
-            self.placed.1 + p[0].y as i32 - size.1 as i32,
+            self.placed.0 + ax as i32 - size.0 as i32 / 2,
+            self.placed.1 + ay as i32 - size.1 as i32,
         );
         let a = ctx.area;
         (
@@ -1182,17 +1176,26 @@ impl Pet {
         }
     }
 
-    fn draw(&mut self, kind: &Kind, shared: &Shared, t: f64) {
-        kind.bones.apply(&self.anim.params(), &mut self.pose);
-        let frame = if self.mind.asleep() {
+    /// Draw and show a frame; returns how long showing it took.
+    fn draw(&mut self, shared: &Shared, t: f64) -> Duration {
+        // Sprites rendered in the background land here; the slowest pet
+        // still draws at 5 fps, so a new one shows within 0.2 s.
+        self.renderer.poll();
+        let params = self.anim.params();
+        if self.mind.asleep() {
             self.renderer
-                .render_asleep(&kind.rig, &self.pose, (t - self.asleep_since) as f32)
+                .render_asleep(&params, (t - self.asleep_since) as f32);
         } else {
-            self.renderer.render(&kind.rig, &self.pose)
-        };
-        if let Err(e) = self.presenter.present(shared, frame) {
+            self.renderer.render(&params, self.anim.expression);
+        }
+        if !self.renderer.changed() {
+            return Duration::ZERO;
+        }
+        let started = Instant::now();
+        if let Err(e) = self.presenter.present(shared, self.renderer.pixmap()) {
             eprintln!("present failed: {e}");
         }
+        started.elapsed()
     }
 
     fn moving(&self) -> bool {
@@ -1337,7 +1340,6 @@ impl ApplicationHandler<UserEvent> for App {
                         let App {
                             pets,
                             shared,
-                            kinds,
                             lines,
                             bubble_face,
                             sounds,
@@ -1354,7 +1356,6 @@ impl ApplicationHandler<UserEvent> for App {
                             let mut ctx = Ctx {
                                 el,
                                 shared,
-                                kinds,
                                 lines,
                                 face: bubble_face,
                                 sounds,
@@ -1376,7 +1377,7 @@ impl ApplicationHandler<UserEvent> for App {
                         } else {
                             let zone = p
                                 .renderer
-                                .hit(&kinds[&p.species].rig, p.cursor.0, p.cursor.1)
+                                .hit(p.cursor.0, p.cursor.1)
                                 .and_then(Zone::from_name)
                                 .unwrap_or(Zone::Belly);
                             p.anim.poke(zone);
@@ -1386,7 +1387,6 @@ impl ApplicationHandler<UserEvent> for App {
                             let mut ctx = Ctx {
                                 el,
                                 shared,
-                                kinds,
                                 lines,
                                 face: bubble_face,
                                 sounds,
@@ -1466,13 +1466,14 @@ impl ApplicationHandler<UserEvent> for App {
         let App {
             pets,
             shared,
-            kinds,
             lines,
             bubble_face,
             sounds,
             area,
             ui_scale,
             frames,
+            drawing,
+            presenting,
             director,
             settings,
             rng,
@@ -1487,7 +1488,6 @@ impl ApplicationHandler<UserEvent> for App {
         let mut ctx = Ctx {
             el,
             shared,
-            kinds,
             lines,
             face: bubble_face,
             sounds,
@@ -1518,7 +1518,9 @@ impl ApplicationHandler<UserEvent> for App {
             let dt = (now - p.last).as_secs_f32().min(0.1);
             p.last = now;
             p.step(&mut ctx, i, dt, now, cursor);
-            p.draw(&ctx.kinds[&p.species], ctx.shared, world.now);
+            let started = Instant::now();
+            *presenting += p.draw(ctx.shared, world.now);
+            *drawing += started.elapsed();
             *frames += 1;
             p.next = now + Duration::from_secs_f64(1.0 / f64::from(p.anim.fps(p.moving())));
         }

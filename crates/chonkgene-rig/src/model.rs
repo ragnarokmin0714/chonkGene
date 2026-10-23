@@ -1,120 +1,584 @@
-//! The two rig formats: `RigSource` is what an artist writes next to the SVGs
-//! (`assets/species/<id>/rig.ron`); `CompiledRig` is what `cargo xtask art`
-//! produces and the app embeds.
+//! The model format (`assets/species/<id>/model.ron`) and its checked,
+//! resolved form.
 
-use std::collections::BTreeMap;
+use std::collections::HashMap;
 
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 
-/// `rig.ron`. Part ids name elements in `standard.svg` and `mochi.svg`.
-#[derive(Debug, Deserialize)]
-pub struct RigSource {
-    pub species: String,
-    /// Design box, width × height.
-    pub size: (f32, f32),
-    /// Where the feet touch the ground, in design units.
-    pub ground_y: f32,
-    pub slots: Vec<String>,
-    pub coats: Vec<CoatSource>,
-    pub bones: Vec<BoneSource>,
-    pub parts: Vec<PartSource>,
-    pub zones: Vec<ZoneSource>,
-    pub anchors: BTreeMap<String, (f32, f32)>,
+use crate::math::{V3, v3};
+use crate::sdf::Shape;
+use crate::{Error, invalid};
+
+/// Hit zones, in hit-test priority order (PLAN §1.2).
+pub const ZONES: [&str; 5] = ["belly", "cheek", "paw", "head", "bottom"];
+
+/// Whole-body poses every species can strike.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum PoseId {
+    Sit,
+    /// On its back, paws in the air: giggling.
+    BellyUp,
+    /// Flattened into a puddle: 厭世.
+    Melt,
+    /// Paws tucked in, head down: asleep.
+    Loaf,
+    /// Turned away: sulking.
+    Sulk,
 }
 
-#[derive(Debug, Deserialize)]
-pub struct CoatSource {
-    pub name: String,
-    /// Slot name → `#RRGGBB` or `#RRGGBBAA`.
-    pub colors: BTreeMap<String, String>,
-}
+impl PoseId {
+    pub const ALL: [PoseId; 5] = [
+        PoseId::Sit,
+        PoseId::BellyUp,
+        PoseId::Melt,
+        PoseId::Loaf,
+        PoseId::Sulk,
+    ];
 
-#[derive(Debug, Deserialize)]
-pub struct BoneSource {
-    pub name: String,
-    pub parent: Option<String>,
-    pub pivot: (f32, f32),
-}
-
-#[derive(Debug, Deserialize)]
-pub struct PartSource {
-    pub id: String,
-    pub bone: String,
-    pub slot: String,
-}
-
-#[derive(Debug, Deserialize)]
-pub struct ZoneSource {
-    pub name: String,
-    pub parts: Vec<String>,
-}
-
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct CompiledRig {
-    pub format: u16,
-    pub species: String,
-    pub size: (f32, f32),
-    pub ground_y: f32,
-    pub slots: Vec<String>,
-    pub coats: Vec<Coat>,
-    /// Parents always come before their children.
-    pub bones: Vec<Bone>,
-    /// Back to front.
-    pub parts: Vec<Part>,
-    /// In hit-test priority order.
-    pub zones: Vec<Zone>,
-    pub anchors: Vec<(String, (f32, f32))>,
-}
-
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct Coat {
-    pub name: String,
-    /// Premultiplied-free RGBA per slot, indexed like `CompiledRig::slots`.
-    pub colors: Vec<[u8; 4]>,
-}
-
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct Bone {
-    pub name: String,
-    pub parent: Option<u16>,
-    pub pivot: (f32, f32),
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub enum Verb {
-    Move,
-    Line,
-    Quad,
-    Cubic,
-    Close,
-}
-
-impl Verb {
-    pub fn points(self) -> usize {
+    pub fn name(self) -> &'static str {
         match self {
-            Verb::Move | Verb::Line => 1,
-            Verb::Quad => 2,
-            Verb::Cubic => 3,
-            Verb::Close => 0,
+            PoseId::Sit => "sit",
+            PoseId::BellyUp => "belly_up",
+            PoseId::Melt => "melt",
+            PoseId::Loaf => "loaf",
+            PoseId::Sulk => "sulk",
         }
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct Part {
-    pub id: String,
-    pub bone: u16,
-    pub slot: u16,
-    /// Stroke width for line parts (tail, mouth); `None` means filled.
-    pub stroke: Option<f32>,
-    pub verbs: Vec<Verb>,
-    /// Points at body value 0.0 (標準) and 1.0 (麻糬); same length.
-    pub standard: Vec<(f32, f32)>,
-    pub mochi: Vec<(f32, f32)>,
+/// What the face shows.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum Look {
+    Open,
+    /// Mid-blink.
+    Half,
+    Shut,
+    /// Content ^ ^.
+    Happy,
+    /// ^ ^ with the mouth wide open.
+    Laugh,
+    /// Half-lidded and flat-mouthed.
+    FedUp,
+    /// Eyes squeezed shut, mouth a small frown.
+    Pout,
+    /// Closed, relaxed curves.
+    Asleep,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct Zone {
+// ---- the file format ---------------------------------------------------------
+
+#[derive(Deserialize)]
+struct ModelFile {
+    species: String,
+    /// Colour slots.
+    slots: Vec<String>,
+    /// The two slots that stand for a coat in menus and settings; the first
+    /// two slots unless named (a white duck needs a visible outline colour).
+    #[serde(default)]
+    swatch: Option<(String, String)>,
+    coats: Vec<CoatFile>,
+    #[serde(default)]
+    pivots: HashMap<String, [f32; 3]>,
+    parts: Vec<PartFile>,
+    face: FaceFile,
+    /// Species-specific poses, replacing the shared ones by name.
+    #[serde(default)]
+    poses: HashMap<String, PoseFile>,
+}
+
+#[derive(Deserialize)]
+struct CoatFile {
+    name: String,
+    colors: HashMap<String, String>,
+}
+
+#[derive(Deserialize)]
+enum ShapeFile {
+    Ellipsoid([f32; 3]),
+    Capsule {
+        to: [f32; 3],
+        r: f32,
+    },
+    Torus {
+        major: f32,
+        minor: f32,
+    },
+    Cone {
+        r1: f32,
+        r2: f32,
+        h: f32,
+        #[serde(default = "one")]
+        flat: f32,
+    },
+}
+
+fn one() -> f32 {
+    1.0
+}
+
+fn root() -> String {
+    "root".into()
+}
+
+#[derive(Deserialize)]
+struct PartFile {
+    name: String,
+    #[serde(default = "root")]
+    bone: String,
+    shape: ShapeFile,
+    #[serde(default)]
+    at: [f32; 3],
+    /// Degrees: roll (z), then pitch (x), then turn (y).
+    #[serde(default)]
+    rot: [f32; 3],
+    /// Smooth-union radius with the parts before it.
+    #[serde(default)]
+    blend: f32,
+    color: String,
+    #[serde(default)]
+    gloss: f32,
+    /// Plush fuzz: 1.0 for fur and feathers, 0.0 for beaks and noses.
+    #[serde(default = "one")]
+    fuzz: f32,
+    /// How much the body value widens it (0.0 not at all, 1.0 like the belly).
+    #[serde(default)]
+    chonk: f32,
+    /// Also place a copy mirrored across x = 0.
+    #[serde(default)]
+    mirror: bool,
+    zone: String,
+    #[serde(default)]
+    marks: Vec<MarkFile>,
+}
+
+#[derive(Deserialize)]
+struct MarkFile {
+    at: [f32; 3],
+    radii: [f32; 3],
+    color: String,
+    #[serde(default = "soft")]
+    soft: f32,
+    #[serde(default)]
+    zone: Option<String>,
+    #[serde(default)]
+    mirror: bool,
+}
+
+fn soft() -> f32 {
+    0.15
+}
+
+#[derive(Deserialize)]
+struct SpotFile {
+    at: [f32; 2],
+    r: [f32; 2],
+    color: String,
+}
+
+#[derive(Deserialize)]
+struct FaceFile {
+    /// The ellipsoid part the eyes are painted on.
+    on: String,
+    /// The ellipsoid part the mouth is painted on; none for birds.
+    #[serde(default)]
+    mouth_on: Option<String>,
+    /// Where the snot bubble hangs, in the `on` part's frame.
+    nose: [f32; 3],
+    ink: String,
+    eye: EyeFile,
+    #[serde(default)]
+    brows: Option<SpotFile>,
+    blush: SpotFile,
+    #[serde(default)]
+    whiskers: bool,
+}
+
+#[derive(Deserialize)]
+struct EyeFile {
+    at: [f32; 2],
+    r: [f32; 2],
+    /// A coloured iris and the pupil's size within it (owls, cats).
+    #[serde(default)]
+    iris: Option<(String, f32)>,
+}
+
+#[derive(Deserialize)]
+struct MoveFile {
+    #[serde(default)]
+    shift: [f32; 3],
+    #[serde(default)]
+    rot: [f32; 3],
+    #[serde(default = "ones")]
+    scale: [f32; 3],
+    /// Drop the bone's parts until their lowest point rests on the floor
+    /// (tucked paws), whatever the species' proportions.
+    #[serde(default)]
+    rest: bool,
+}
+
+impl Default for MoveFile {
+    fn default() -> Self {
+        Self {
+            shift: [0.0; 3],
+            rot: [0.0; 3],
+            scale: ones(),
+            rest: false,
+        }
+    }
+}
+
+fn yes() -> bool {
+    true
+}
+
+fn ones() -> [f32; 3] {
+    [1.0; 3]
+}
+
+#[derive(Deserialize, Default)]
+struct PoseFile {
+    #[serde(default)]
+    root: MoveFile,
+    /// Settle the whole pet onto the floor after posing it.
+    #[serde(default = "yes")]
+    rest: bool,
+    #[serde(default)]
+    bones: HashMap<String, MoveFile>,
+}
+
+// ---- resolved ------------------------------------------------------------------
+
+#[derive(Clone, Debug)]
+pub struct Coat {
     pub name: String,
-    pub parts: Vec<u16>,
+    /// One colour per slot, straight RGBA.
+    pub colors: Vec<[u8; 4]>,
+    swatch: (usize, usize),
+}
+
+impl Coat {
+    /// The two colours that stand for this coat in menus and settings.
+    pub fn swatch(&self) -> ([u8; 4], [u8; 4]) {
+        (self.colors[self.swatch.0], self.colors[self.swatch.1])
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct Mark {
+    pub at: V3,
+    pub radii: V3,
+    pub slot: usize,
+    pub soft: f32,
+    pub zone: Option<u8>,
+    pub mirror: bool,
+}
+
+#[derive(Clone, Debug)]
+pub struct Part {
+    pub name: String,
+    pub bone: usize,
+    pub shape: Shape,
+    pub at: V3,
+    pub rot: V3,
+    pub blend: f32,
+    pub slot: usize,
+    pub gloss: f32,
+    pub fuzz: f32,
+    pub chonk: f32,
+    pub mirror: bool,
+    pub zone: u8,
+    pub marks: Vec<Mark>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Spot {
+    pub at: (f32, f32),
+    pub r: (f32, f32),
+    pub slot: usize,
+}
+
+#[derive(Clone, Debug)]
+pub struct Face {
+    pub on: usize,
+    pub mouth_on: Option<usize>,
+    pub nose: V3,
+    pub ink: usize,
+    pub eye_at: (f32, f32),
+    pub eye_r: (f32, f32),
+    /// Iris colour slot and the pupil's share of the eye.
+    pub iris: Option<(usize, f32)>,
+    pub brows: Option<Spot>,
+    pub blush: Spot,
+    pub whiskers: bool,
+}
+
+/// A bone's move in a pose: scale and turn about its pivot, then shift.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Move {
+    pub shift: V3,
+    pub rot: V3,
+    pub scale: V3,
+    /// Lower the bone's parts onto the floor.
+    pub rest: bool,
+}
+
+impl Default for Move {
+    fn default() -> Self {
+        Self {
+            shift: V3::ZERO,
+            rot: V3::ZERO,
+            scale: V3::ONE,
+            rest: false,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct Pose {
+    /// The whole pet, about the origin.
+    pub root: Move,
+    /// One per bone.
+    pub bones: Vec<Move>,
+}
+
+#[derive(Clone, Debug)]
+pub struct Model {
+    pub species: String,
+    pub slots: Vec<String>,
+    pub coats: Vec<Coat>,
+    pub bones: Vec<String>,
+    pub pivots: Vec<V3>,
+    pub parts: Vec<Part>,
+    pub face: Face,
+    pub poses: Vec<Pose>,
+}
+
+impl Model {
+    /// Parse a model and the shared poses it may override.
+    pub fn parse(model: &str, shared_poses: &str) -> Result<Self, Error> {
+        let file: ModelFile = ron::from_str(model).map_err(|e| invalid(format!("model: {e}")))?;
+        let shared: HashMap<String, PoseFile> =
+            ron::from_str(shared_poses).map_err(|e| invalid(format!("poses: {e}")))?;
+        resolve(file, shared)
+    }
+
+    pub fn coat(&self, name: &str) -> Option<usize> {
+        self.coats.iter().position(|c| c.name == name)
+    }
+
+    pub fn pose(&self, id: PoseId) -> &Pose {
+        &self.poses[id as usize]
+    }
+
+    pub fn part(&self, name: &str) -> Option<usize> {
+        self.parts.iter().position(|p| p.name == name)
+    }
+}
+
+fn resolve(file: ModelFile, shared: HashMap<String, PoseFile>) -> Result<Model, Error> {
+    let species = file.species;
+    let ctx = |msg: String| invalid(format!("{species}: {msg}"));
+    let slot = |name: &str| {
+        file.slots
+            .iter()
+            .position(|s| s == name)
+            .ok_or_else(|| ctx(format!("unknown colour slot {name:?}")))
+    };
+    let zone = |name: &str| {
+        ZONES
+            .iter()
+            .position(|z| *z == name)
+            .map(|i| i as u8)
+            .ok_or_else(|| ctx(format!("unknown zone {name:?}")))
+    };
+    if file.slots.len() < 2 {
+        return Err(ctx("needs at least two colour slots".into()));
+    }
+    if file.coats.is_empty() {
+        return Err(ctx("needs at least one coat".into()));
+    }
+
+    let swatch = match &file.swatch {
+        Some((a, b)) => (slot(a)?, slot(b)?),
+        None => (0, 1),
+    };
+    let mut coats = Vec::new();
+    for c in &file.coats {
+        let mut colors = Vec::new();
+        for s in &file.slots {
+            let hex = c
+                .colors
+                .get(s)
+                .ok_or_else(|| ctx(format!("coat {:?} has no {s:?}", c.name)))?;
+            colors.push(parse_hex(hex).ok_or_else(|| ctx(format!("bad colour {hex:?}")))?);
+        }
+        if c.colors.len() != file.slots.len() {
+            return Err(ctx(format!("coat {:?} names an unknown slot", c.name)));
+        }
+        coats.push(Coat {
+            name: c.name.clone(),
+            colors,
+            swatch,
+        });
+    }
+
+    // Bones: root first, then every bone a part or pivot names.
+    let mut bones = vec!["root".to_string()];
+    for name in file.parts.iter().map(|p| &p.bone).chain(file.pivots.keys()) {
+        if !bones.contains(name) {
+            bones.push(name.clone());
+        }
+    }
+    let pivots = bones
+        .iter()
+        .map(|b| file.pivots.get(b).map_or(V3::ZERO, |p| V3::from_array(*p)))
+        .collect();
+
+    let mut parts = Vec::new();
+    for p in &file.parts {
+        let shape = match p.shape {
+            ShapeFile::Ellipsoid(r) => Shape::Ellipsoid(V3::from_array(r)),
+            ShapeFile::Capsule { to, r } => Shape::Capsule {
+                to: V3::from_array(to),
+                r,
+            },
+            ShapeFile::Torus { major, minor } => Shape::Torus { major, minor },
+            ShapeFile::Cone { r1, r2, h, flat } => Shape::Cone { r1, r2, h, flat },
+        };
+        let positive = match shape {
+            Shape::Ellipsoid(r) => r.min_elem() > 0.0,
+            Shape::Capsule { to, r } => r > 0.0 && to.length() > 0.0,
+            Shape::Torus { major, minor } => major > 0.0 && minor > 0.0,
+            Shape::Cone { r1, r2, h, flat } => r1 > 0.0 && r2 > 0.0 && h > 0.0 && flat >= 1.0,
+        };
+        if !positive || p.blend < 0.0 {
+            return Err(ctx(format!("part {:?} has a degenerate shape", p.name)));
+        }
+        let marks = p
+            .marks
+            .iter()
+            .map(|m| {
+                Ok(Mark {
+                    at: V3::from_array(m.at),
+                    radii: V3::from_array(m.radii),
+                    slot: slot(&m.color)?,
+                    soft: m.soft.clamp(0.01, 1.0),
+                    zone: m.zone.as_deref().map(zone).transpose()?,
+                    mirror: m.mirror,
+                })
+            })
+            .collect::<Result<_, Error>>()?;
+        parts.push(Part {
+            name: p.name.clone(),
+            bone: bones.iter().position(|b| *b == p.bone).unwrap_or(0),
+            shape,
+            at: V3::from_array(p.at),
+            rot: V3::from_array(p.rot),
+            blend: p.blend,
+            slot: slot(&p.color)?,
+            gloss: p.gloss,
+            fuzz: p.fuzz,
+            chonk: p.chonk,
+            mirror: p.mirror,
+            zone: zone(&p.zone)?,
+            marks,
+        });
+    }
+    let part = |name: &str| {
+        let i = parts
+            .iter()
+            .position(|p| p.name == name)
+            .ok_or_else(|| ctx(format!("face names unknown part {name:?}")))?;
+        match parts[i].shape {
+            Shape::Ellipsoid(_) => Ok(i),
+            _ => Err(ctx(format!("face part {name:?} must be an ellipsoid"))),
+        }
+    };
+    let f = &file.face;
+    let spot = |s: &SpotFile| -> Result<Spot, Error> {
+        Ok(Spot {
+            at: (s.at[0], s.at[1]),
+            r: (s.r[0], s.r[1]),
+            slot: slot(&s.color)?,
+        })
+    };
+    let face = Face {
+        on: part(&f.on)?,
+        mouth_on: f.mouth_on.as_deref().map(part).transpose()?,
+        nose: V3::from_array(f.nose),
+        ink: slot(&f.ink)?,
+        eye_at: (f.eye.at[0], f.eye.at[1]),
+        eye_r: (f.eye.r[0], f.eye.r[1]),
+        iris: f
+            .eye
+            .iris
+            .as_ref()
+            .map(|(s, k)| slot(s).map(|s| (s, k.clamp(0.1, 1.0))))
+            .transpose()?,
+        brows: f.brows.as_ref().map(spot).transpose()?,
+        blush: spot(&f.blush)?,
+        whiskers: f.whiskers,
+    };
+
+    let mut poses = Vec::new();
+    for id in PoseId::ALL {
+        let pf = file
+            .poses
+            .get(id.name())
+            .or_else(|| shared.get(id.name()))
+            .ok_or_else(|| ctx(format!("no pose {:?}", id.name())))?;
+        let mv = |m: &MoveFile| Move {
+            shift: V3::from_array(m.shift),
+            rot: V3::from_array(m.rot),
+            scale: V3::from_array(m.scale),
+            rest: m.rest,
+        };
+        let mut pose = Pose {
+            root: Move {
+                rest: pf.rest,
+                ..mv(&pf.root)
+            },
+            bones: vec![Move::default(); bones.len()],
+        };
+        for (name, m) in &pf.bones {
+            // Shared poses may move bones this species lacks (a bird's legs).
+            if let Some(i) = bones.iter().position(|b| b == name) {
+                let m = mv(m);
+                if m.scale.min_elem() <= 0.0 {
+                    return Err(ctx(format!(
+                        "pose {:?} scales {name:?} to nothing",
+                        id.name()
+                    )));
+                }
+                pose.bones[i] = m;
+            }
+        }
+        poses.push(pose);
+    }
+
+    Ok(Model {
+        species,
+        slots: file.slots,
+        coats,
+        bones,
+        pivots,
+        parts,
+        face,
+        poses,
+    })
+}
+
+/// `#RRGGBB` or `#RRGGBBAA`.
+pub fn parse_hex(hex: &str) -> Option<[u8; 4]> {
+    let h = hex.strip_prefix('#')?;
+    let byte = |i: usize| u8::from_str_radix(h.get(i..i + 2)?, 16).ok();
+    match h.len() {
+        6 => Some([byte(0)?, byte(2)?, byte(4)?, 255]),
+        8 => Some([byte(0)?, byte(2)?, byte(4)?, byte(6)?]),
+        _ => None,
+    }
+}
+
+pub(crate) fn rgb(c: [u8; 4]) -> V3 {
+    v3(c[0] as f32, c[1] as f32, c[2] as f32) / 255.0
 }

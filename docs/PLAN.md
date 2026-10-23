@@ -16,8 +16,8 @@
 | Platforms | **Windows 10/11 + Linux (x86_64, aarch64)**; no macOS | Requirement |
 | Distribution | **Portable, no installer**: one `.exe` on Windows, one binary on Linux, each in an archive | Requirement; see §2 |
 | Language | **Rust** (edition 2024, latest stable) | Matches gamegene, graphicgene, etc.; memory safety |
-| Pet rendering | **CPU rasterising (tiny-skia)**, one small transparent window per pet | Windows are small (~256 px), so CPU drawing is cheap; avoids per-platform GPU transparency driver issues; no resident GPU context while idle |
-| Pet art | **Parametric vector parts + bones + morph targets** | Coat colour, pattern and body shape are parameters, so no redraw per combination; crisp at any scale |
+| Pet rendering | **3D, ray-marched on the CPU into a few sprites per pet in the background; every frame is a 2D blit (tiny-skia)**, one small transparent window per pet | Roger played the 2D beta (2026-10-23): pets looked flat, not round. Pre-rendering keeps the frame cost of the 2D renderer (§5); CPU only, so no GPU driver, transparency or VM issues, and golden tests stay deterministic |
+| Pet art | **Soft 3D primitives on bones, blended by smooth unions (signed distance fields), with a painted face** | Every seam is round (the plush, 猛獸派對 / 動森 look Roger picked); coat, body, pose and face are parameters; models are text, so no artist tools; costumes later hang on the same bones |
 | Settings UI | **Slint**, run in a separate child process (same executable with `--settings`) | The UI must be very cute and Slint makes that easiest (declarative animation, state transitions); portability rules out a WebView. Comparison in §3.6 |
 | Linux display protocol | v1 always speaks **X11** (native X11 or XWayland) | A normal Wayland window cannot place itself; XWayland exists on GNOME and KDE. Native Wayland is later (§9) |
 | Network | **v1 never touches the network** | No feature needs it; network crates banned with cargo-deny (§6) |
@@ -334,13 +334,12 @@ Every string in the UI follows this section; check the glossary below before add
 | Crate | Responsibility | unsafe |
 |---|---|---|
 | `chonkgene-core` | pet state, action choice, tickle, relationships, skits, spring physics, daily rhythm, affinity and mood. **Pure logic, no IO**; seedable RNG | `forbid` |
-| `chonkgene-rig` | rig format, morph targets, palettes, hit zones, animation clips; pose → paths | `forbid` |
-| `chonkgene-render` | rasterises paths and bubble text with tiny-skia (ab_glyph for text) | `forbid` |
+| `chonkgene-rig` | 3D model format (parts, bones, coats, marks, face, poses), the posed signed distance field and its surface colours, hit zones | `forbid` |
+| `chonkgene-render` | ray-marches poses into sprites on background threads, blits frames, bubble text and the menu with tiny-skia (skrifa for text) | `forbid` |
 | `chonkgene-platform` | transparent window presentation, click-through, work area, full-screen / meeting / idle detection, theme, login item, tray, hotkey | **only crate allowed**, every block commented with its reason |
 | `chonkgene-settings` | Slint settings UI (`.slint` files), cute widgets, theme; runs as the child process | `forbid` |
 | `chonkgene-ipc` | message format and channel between the pet process and the settings process | `forbid` |
 | `chonkgene` (bin) | event loop, wiring, saves, audio (rodio); runs the settings UI when started with `--settings` | `deny` (Slint's generated code allows it locally, which `forbid` would reject) |
-| `xtask` | art build (SVG → rig data), font subsetting, benchmarks | — |
 
 ### 3.2 Windows and event loop
 
@@ -359,11 +358,15 @@ Every string in the UI follows this section; check the glossary below before add
 
 ### 3.3 Art pipeline
 
-- Art is drawn as SVG in Inkscape (or graphicgene), with parts named by convention (`body`, `belly`, `cheek_l`, `paw_fl`, `wing_l`, …).
-- `rig.ron` describes bones and pivots, part-to-bone weights, palette slots (`fur_main`, `fur_belly`, `pattern`, `nose`, `eye`; birds use `feather_main`, `beak`, `comb`), morph targets (standard ↔ mochi as two structurally identical paths), hit zones, and anchors (bubble, accessories).
-- `cargo xtask art` compiles SVG + `rig.ron` into compact binary data embedded in the executable. **No SVG parsing at run time** (fast start, fewer dependencies, smaller attack surface).
-- Build-time checks: morph targets have matching path structure, every palette slot is defined, every hit zone exists, every bone referenced by a clip exists.
-- Two animation layers, blended: **procedural** (breathing, blinking, tail, ear twitch, belly spring) + **keyframed clips** (belly-up, playing dead, uncle sit, etc., in RON).
+The 2D SVG pipeline of the first beta was replaced on 2026-10-23 after Roger played it: the pets looked flat. The look spike (`spikes/blob3d`, a GPU prototype) settled the style; the shipped renderer is CPU only.
+
+- **Models** (`assets/species/<id>/model.ron`, embedded at build time and parsed at start): parts are ellipsoids, capsules, tori and cones hung on named bones (`body`, `head`, `front_legs`, `back_legs`, `tail`, `wings`), listed in blend order with a smooth-union radius each, so the pet reads as one soft bean. A part has a colour slot, gloss, fuzz (plush noise), how much the body value widens it, an optional mirror copy, a hit zone, and **marks**: soft ellipsoidal colour patches in the part's own frame (a Shiba's cream face, tabby bands, an owl's face disc) that can also set the hit zone (belly, cheeks).
+- **Face**: eyes, brows, blush and whiskers are painted onto the head ellipsoid, the mouth onto the muzzle, in "face space"; each **look** (open, half, shut, happy, laugh, fed up, pout, asleep) is drawn there, so expressions cost nothing to add. Eyes may have a coloured iris (owls, black cats).
+- **Poses** (`assets/species/poses.ron`, overridable per model): sit, belly-up, melt, loaf, sulk. A pose turns and shifts bones about their pivots; `rest: true` lowers a bone until it touches the floor and every pose settles the whole pet onto the floor, so poses never hard-code heights for one species' proportions.
+- **Coats** fill the colour slots; the body value (標準 → 麻糬) widens parts by their `chonk` weight. Both are parameters, so no art is redrawn per combination.
+- **Rendering** (`chonkgene-render`): an orthographic camera tilted 9° down; sphere tracing with per-part bounding spheres; wrapped two-tone light, soft occlusion, a fuzzy rim and fine normal noise for the plush look; a contact shadow; extra rays only on silhouette and depth edges. Each pet renders its nine sprites (pose × look) on up to three background threads; frames squash, breathe, sway and mirror a sprite with one 2D transform, and idle breathing is a copy of a few cached images (§5).
+- **Checks**: the model loader rejects unknown slots, zones, bones and degenerate shapes; every built-in model is loaded by a test; golden PNGs cover each pose and look.
+- **Costumes, extra poses and decorations** come next on the same bones: a costume is parts on a bone (a hat on `head`), a pose is a table of bone moves, a decoration is a model of its own.
 
 ### 3.4 Data files
 
@@ -450,7 +453,7 @@ Measured on a mid-range laptop **with the settings window closed**:
 
 - No redraw and no pixel upload when the pose has not changed.
 - Capped at 30 fps on battery.
-- `cargo xtask bench`: headless per-frame simulation + raster timing, tracked in CI.
+- `cargo run --release -p chonkgene-render --example bench`: sprite render time and per-frame cost.
 
 **Phase 0 S2, first numbers (2026-10-22)**: `pet-spike --bench` on the development machine (aarch64 VM under QEMU), 256 px stand-in Shiba, default mix (one in six walking, the rest idle, occasional pokes):
 
@@ -478,6 +481,18 @@ What got it there, all in `chonkgene-render`:
 
 The budget holds at 100% on this machine. If real machines or larger sizes miss it, the next step is caching the body's runs at a few quantised breathing scales.
 
+**3D sprites (2026-10-23)**: same command and machine, Shiba, nine sprites per pet:
+
+| Scale | Window | Sprite, one thread | Per frame | 6 pets (one walking at 30 fps, five idle at 10 fps) |
+|---|---|---|---|---|
+| 100% | 227 × 201 | 35 ms | 70 µs | **0.56%** of one core |
+| 150% | 340 × 301 | 70 ms | 161 µs | 1.29% |
+| 200% | 453 × 401 | 110 ms | 260 µs | 2.08% |
+
+- A pet's nine sprites take about 0.3 s of CPU at 100%, on background threads; the pet appears when its first sprite lands. New coat, body or size re-renders in the background while the old sprites stay up.
+- Frames got cheaper than the 2D renderer: sprites are cropped to what they draw, and frames that only breathe copy one of six cached images.
+- Memory: about 1.6 MB of sprites per pet at 100% (four times that at 200%), plus up to six cached idle frames.
+
 ---
 
 ## 6. Security and privacy
@@ -500,8 +515,8 @@ The budget holds at 100% on this machine. If real machines or larger sizes miss 
 |---|---|---|
 | Behaviour | seeded unit tests: no action more than 2 times in a row, skits always end in making up, no sound while not disturbing, tickle thresholds, shake detection, grudges always end | local + CI |
 | Nurturing | property tests: **no event sequence ever lowers affinity**; the daily cap holds; values are unchanged after days offline | local + CI |
-| Art data | the `xtask art` build checks (§3.3) run as tests too | local + CI |
-| Rendering | **golden PNG snapshots** for each species × body snap point × several palettes; CPU rendering runs headless | local + CI |
+| Art data | every built-in model loads and passes the loader's checks (§3.3) | local + CI |
+| Rendering | **golden PNG snapshots**: the Shiba at each body snap point, coat, pose and look, every species at two bodies; hit zones read through the frame transform; CPU rendering runs headless | local + CI |
 | Settings UI | Slint software-renderer PNG snapshots (no GPU) | local + CI |
 | UI copy | bubble length cap; no "never write" word from the glossary (§1.11) appears | local + CI |
 | Localisation | every key exists in every language | local + CI |
@@ -551,6 +566,20 @@ Roger asked (2026-10-22) for a downloadable test version before the phases are f
 **Done when**: the archives from the tag's release unpack and run on Windows 11 and Ubuntu 24.04, and every row above works there.
 
 **Status (2026-10-22, branch `feat/beta-1`)**: every row above is built and covered by tests where logic allows (affinity property test, skits, lines, saves, IPC, golden PNGs for pets, bubbles and menu, headless settings screenshots). **Not yet run on a real desktop**: the development machine has no display, so window behaviour, the tray, the hotkey, sound output and the settings window under an IME are owed to the first test on Windows 11 and Ubuntu. The release workflow (`.github/workflows/release.yml`) builds the archives from a `v*` tag.
+
+### 3D pets — `v0.5.0-beta.2`
+
+Roger played beta 1 (2026-10-23) and found the pets not cute enough: not round, too flat. He chose 3D in the direction of 猛獸派對 (Party Animals) and 動森 from a look spike, and asked to plan costumes, poses and decorations afterwards.
+
+| Area | In beta 2 | Next |
+|---|---|---|
+| Models | all six species as soft 3D models with their beta-1 coats | tuning each species with Roger |
+| Poses | sit, belly-up (giggling), melt (厭世), loaf (asleep), sulk (turned away) | waving, dangling while lifted, playing dead, eating |
+| Faces | open, blink, shut, happy, laughing, fed up, pout, asleep | — |
+| Costumes | the bones and sockets they will hang on | hats, scarves, bows (§1.6) |
+| Decorations | — | cushions, beds, bowls as their own small models |
+
+**Status (2026-10-23, branch `feat/3d-pets`)**: built and tested headlessly (goldens, hit zones, the settings preview and adoption list); the frame budget is met (§5). Not yet seen on a real desktop. The tail no longer wags (it is part of each sprite); a separate tail layer can bring it back.
 
 ### Phase 1: Shiba prototype (feel) — `v0.1.0`
 
@@ -614,7 +643,7 @@ Roger asked (2026-10-22) for a downloadable test version before the phases are f
 ## 9. Later (not in v1)
 
 - **Native Wayland**: `wlr-layer-shell` + foreign-toplevel for KDE and wlroots compositors to close the §4 gaps; a GNOME Shell extension for GNOME.
-- **Community skin packs**: data only, never code; validated like `xtask art`, with size and resolution caps.
+- **Community skin packs**: data only, never code; validated by the model loader, with size and part-count caps.
 - **Reminders**: knowing your routine (telling you to go to bed), water, pomodoro (all optional).
 - **More interactions**: feather-wand cursor mode, ball throwing.
 - **Japanese**, more species.

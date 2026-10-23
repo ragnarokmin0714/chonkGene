@@ -1,0 +1,66 @@
+// Shiba: a round bean of a dog. Units are roughly head radii; the floor is at
+// y = -1.1, +z faces the camera. Parts are listed in blend order.
+(
+    species: "shiba",
+    slots: ["fur", "light", "ear", "ink", "blush"],
+    coats: [
+        (name: "red", colors: {
+            "fur": "#E8955A", "light": "#FFF3E2", "ear": "#FFD2B5", "ink": "#3B2A22", "blush": "#FF8C94",
+        }),
+        (name: "black", colors: {
+            "fur": "#4A3B36", "light": "#F5E7D6", "ear": "#C9A48A", "ink": "#2A1E18", "blush": "#FF8C94",
+        }),
+        (name: "sesame", colors: {
+            "fur": "#C79A6E", "light": "#FFF3E2", "ear": "#F2CDB0", "ink": "#3B2A22", "blush": "#FF8C94",
+        }),
+        (name: "white", colors: {
+            "fur": "#F1E2CC", "light": "#FFFFFF", "ear": "#F7D3C4", "ink": "#3B2A22", "blush": "#FF8C94",
+        }),
+    ],
+    pivots: {
+        "body": (0, -1.1, 0),
+        "head": (0, 0, 0.05),
+        "front_legs": (0, -0.62, 0.52),
+        "back_legs": (0, -0.84, 0),
+        "tail": (0.25, -0.1, -0.75),
+    },
+    parts: [
+        (name: "body", bone: "body", shape: Ellipsoid((0.84, 0.62, 0.76)), at: (0, -0.48, 0),
+            color: "fur", chonk: 1.0, zone: "bottom",
+            marks: [(at: (0, 0.1, 0.72), radii: (0.5, 0.7, 0.6), color: "light", soft: 0.2, zone: Some("belly"))]),
+        (name: "head", bone: "head", shape: Ellipsoid((1.02, 0.84, 0.88)), at: (0, 0.5, 0.08),
+            blend: 0.2, color: "fur", zone: "head",
+            marks: [
+                // Urajiro: the cream lower face.
+                (at: (0, -0.5, 0.45), radii: (1.12, 0.6, 0.78), color: "light", soft: 0.2),
+                (at: (0.55, -0.15, 0.6), radii: (0.3, 0.25, 0.3), color: "light", soft: 0.4, zone: Some("cheek"), mirror: true),
+            ]),
+        (name: "muzzle", bone: "head", shape: Ellipsoid((0.36, 0.25, 0.26)), at: (0, 0.26, 0.74),
+            blend: 0.16, color: "light", zone: "head"),
+        (name: "ear", bone: "head", shape: Cone(r1: 0.24, r2: 0.06, h: 0.4, flat: 2.0), at: (0.52, 1.06, -0.02),
+            rot: (-10.3, 0, -21.8), blend: 0.1, color: "fur", mirror: true, zone: "head",
+            marks: [(at: (0, 0.17, 0.1), radii: (0.12, 0.2, 0.08), color: "ear", soft: 0.35)]),
+        (name: "front_leg", bone: "front_legs", shape: Capsule(to: (0.01, -0.36, 0.06), r: 0.17), at: (0.3, -0.62, 0.52),
+            blend: 0.12, color: "fur", chonk: 0.3, mirror: true, zone: "paw",
+            marks: [(at: (0.01, -0.36, 0.06), radii: (0.22, 0.14, 0.22), color: "light", soft: 0.3)]),
+        (name: "haunch", bone: "back_legs", shape: Ellipsoid((0.3, 0.27, 0.34)), at: (0.62, -0.84, 0),
+            blend: 0.12, color: "fur", chonk: 1.0, mirror: true, zone: "bottom"),
+        (name: "foot", bone: "back_legs", shape: Ellipsoid((0.17, 0.11, 0.24)), at: (0.62, -1.02, 0.4),
+            blend: 0.12, color: "light", chonk: 1.0, mirror: true, zone: "paw"),
+        (name: "tail", bone: "tail", shape: Torus(major: 0.22, minor: 0.13), at: (0.3, -0.05, -0.8),
+            rot: (0, -28.6, -77.3), blend: 0.06, color: "fur", zone: "bottom",
+            marks: [(at: (0, 0, 0), radii: (0.22, 0.3, 0.22), color: "light", soft: 0.3)]),
+        (name: "nose", bone: "head", shape: Ellipsoid((0.11, 0.075, 0.08)), at: (0, 0.36, 0.99),
+            blend: 0.03, color: "ink", gloss: 1.0, fuzz: 0.0, zone: "head"),
+    ],
+    face: (
+        on: "head",
+        mouth_on: Some("muzzle"),
+        nose: (0.16, -0.2, 0.9),
+        ink: "ink",
+        eye: (at: (0.36, 0.02), r: (0.1, 0.125)),
+        // Maro brows: the two cream dots every Shiba has.
+        brows: Some((at: (0.28, 0.31), r: (0.075, 0.048), color: "light")),
+        blush: (at: (0.53, -0.16), r: (0.14, 0.085), color: "blush"),
+    ),
+)

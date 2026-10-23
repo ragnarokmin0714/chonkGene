@@ -27,7 +27,7 @@ Download the archive for your system from [Releases](https://github.com/ragnarok
 - Right-click a pet for its menu: pat, snacks, sleep, rename, settings.
 - Ctrl+Alt+P hides every pet; press it again to bring them back.
 
-Building from source: `cargo run --release -p chonkgene`. `cargo xtask art` recompiles the rigs after editing `assets/species`.
+Building from source: `cargo run --release -p chonkgene`. The pets are 3D models in `assets/species/<id>/model.ron`; `cargo run --release -p chonkgene-render --example sprites -- shiba out` renders every pose of one into `out/` for a look.
 
 ## Platforms
 

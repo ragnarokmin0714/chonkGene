@@ -1,0 +1,56 @@
+// Duckling: a round head on a plump, slightly long body, a flat bill, a
+// perky tail and webbed feet. Units are roughly head radii; the floor is at
+// y = -1.1, +z faces the camera.
+(
+    species: "duck",
+    slots: ["feather", "belly", "wing", "eye", "bill", "blush", "outline"],
+    // White on a light menu needs a darker edge to be seen.
+    swatch: Some(("outline", "belly")),
+    coats: [
+        (name: "white", colors: {
+            "feather": "#FFFFFF", "belly": "#F6F2EC", "wing": "#F0EAE1",
+            "eye": "#3B2A22", "bill": "#F29B38", "blush": "#FFA3A3", "outline": "#E2DAD0",
+        }),
+        (name: "yellow", colors: {
+            "feather": "#FFE07A", "belly": "#FFF1B8", "wing": "#F5D060",
+            "eye": "#3B2A22", "bill": "#F29B38", "blush": "#FFA3A3", "outline": "#E8C35A",
+        }),
+        (name: "grey", colors: {
+            "feather": "#C9CDD3", "belly": "#E8EBEE", "wing": "#B6BBC3",
+            "eye": "#2F3142", "bill": "#E8952F", "blush": "#FFA3A3", "outline": "#A9AEB6",
+        }),
+    ],
+    pivots: {
+        "body": (0, -1.1, 0),
+        "head": (0, 0.05, 0.05),
+        "back_legs": (0, -1.0, 0.3),
+        "wings": (0, -0.3, 0),
+    },
+    parts: [
+        (name: "body", bone: "body", shape: Ellipsoid((0.84, 0.64, 0.92)), at: (0, -0.46, -0.08),
+            color: "feather", chonk: 1.0, zone: "bottom",
+            marks: [(at: (0, -0.05, 0.62), radii: (0.5, 0.6, 0.45), color: "belly", soft: 0.35, zone: Some("belly"))]),
+        (name: "head", bone: "head", shape: Ellipsoid((0.76, 0.7, 0.72)), at: (0, 0.4, 0.12),
+            blend: 0.26, color: "feather", zone: "head",
+            marks: [(at: (0.45, -0.2, 0.45), radii: (0.25, 0.22, 0.3), color: "feather", soft: 0.4, zone: Some("cheek"), mirror: true)]),
+        (name: "tuft", bone: "head", shape: Capsule(to: (0.04, 0.2, -0.08), r: 0.05), at: (0, 1.05, 0.05),
+            blend: 0.08, color: "feather", zone: "head"),
+        (name: "wing", bone: "wings", shape: Ellipsoid((0.16, 0.32, 0.38)), at: (0.78, -0.38, -0.12),
+            rot: (-15, 0, 20), blend: 0.08, color: "wing", chonk: 0.8, mirror: true, zone: "bottom"),
+        // A perky tail pointing up and back.
+        (name: "tail", bone: "body", shape: Cone(r1: 0.2, r2: 0.05, h: 0.32, flat: 1.8), at: (0, -0.5, -0.88),
+            rot: (-50, 0, 0), blend: 0.12, color: "feather", zone: "bottom"),
+        (name: "foot", bone: "back_legs", shape: Ellipsoid((0.17, 0.045, 0.2)), at: (0.3, -1.06, 0.42),
+            rot: (0, 12, 0), blend: 0.03, color: "bill", fuzz: 0.0, chonk: 0.6, mirror: true, zone: "paw"),
+        // The bill: wide, flat and glossy.
+        (name: "bill", bone: "head", shape: Ellipsoid((0.25, 0.075, 0.2)), at: (0, 0.26, 0.82),
+            rot: (-8, 0, 0), blend: 0.05, color: "bill", gloss: 0.6, fuzz: 0.0, zone: "head"),
+    ],
+    face: (
+        on: "head",
+        nose: (0.18, -0.2, 0.8),
+        ink: "eye",
+        eye: (at: (0.37, 0.1), r: (0.105, 0.125)),
+        blush: (at: (0.56, -0.08), r: (0.14, 0.085), color: "blush"),
+    ),
+)

@@ -1,0 +1,67 @@
+// Owl: one round egg with a face disc, ear tufts, big yellow eyes and a tiny
+// beak. No neck, no visible legs: just toes. Units are roughly head radii;
+// the floor is at y = -1.1, +z faces the camera.
+(
+    species: "owl",
+    slots: ["feather", "belly", "wing", "scallop", "disc", "ring", "eye", "beak", "blush"],
+    coats: [
+        (name: "brown", colors: {
+            "feather": "#A9785A", "belly": "#F3E3CF", "wing": "#8F6246", "scallop": "#D9BFA3",
+            "disc": "#F6E7D2", "ring": "#F2C94C", "eye": "#2F2420", "beak": "#F2B24C", "blush": "#FF9AA6",
+        }),
+        (name: "snowy", colors: {
+            "feather": "#E9E6DF", "belly": "#FFFFFF", "wing": "#D5D0C6", "scallop": "#C9C3B7",
+            "disc": "#FFFFFF", "ring": "#F2C94C", "eye": "#2F2420", "beak": "#4A4540", "blush": "#FF9AA6",
+        }),
+        (name: "grey", colors: {
+            "feather": "#8E8C94", "belly": "#E4E2E8", "wing": "#75737B", "scallop": "#B8B6BE",
+            "disc": "#ECEAF0", "ring": "#F2C94C", "eye": "#2A2830", "beak": "#F2B24C", "blush": "#FF9AA6",
+        }),
+    ],
+    pivots: {
+        "body": (0, -1.1, 0),
+        "head": (0, 0.1, 0),
+        "back_legs": (0, -1.0, 0.3),
+        "wings": (0, 0, 0),
+    },
+    parts: [
+        (name: "body", bone: "body", shape: Ellipsoid((0.92, 0.82, 0.82)), at: (0, -0.3, 0),
+            color: "feather", chonk: 1.0, zone: "bottom",
+            marks: [
+                (at: (0, -0.05, 0.6), radii: (0.6, 0.75, 0.5), color: "belly", soft: 0.3, zone: Some("belly")),
+                // Scalloped breast feathers.
+                (at: (0, 0.18, 0.78), radii: (0.09, 0.05, 0.2), color: "scallop", soft: 0.5),
+                (at: (0.25, 0.0, 0.76), radii: (0.09, 0.05, 0.2), color: "scallop", soft: 0.5, mirror: true),
+                (at: (0, -0.2, 0.8), radii: (0.09, 0.05, 0.2), color: "scallop", soft: 0.5),
+                (at: (0.27, -0.38, 0.72), radii: (0.09, 0.05, 0.2), color: "scallop", soft: 0.5, mirror: true),
+            ]),
+        // The head melts into the body: owls have no neck to speak of.
+        (name: "head", bone: "head", shape: Ellipsoid((0.94, 0.74, 0.82)), at: (0, 0.5, 0.04),
+            blend: 0.45, color: "feather", zone: "head",
+            marks: [
+                // The face disc: two pale rounds around the eyes.
+                (at: (0.33, -0.02, 0.62), radii: (0.38, 0.4, 0.4), color: "disc", soft: 0.25, mirror: true),
+                (at: (0.6, -0.25, 0.5), radii: (0.22, 0.2, 0.3), color: "disc", soft: 0.4, zone: Some("cheek"), mirror: true),
+            ]),
+        (name: "tuft", bone: "head", shape: Cone(r1: 0.17, r2: 0.04, h: 0.32, flat: 2.0), at: (0.52, 1.06, 0.0),
+            rot: (-8, 0, -30), blend: 0.12, color: "feather", mirror: true, zone: "head"),
+        (name: "wing", bone: "wings", shape: Ellipsoid((0.2, 0.55, 0.42)), at: (0.86, -0.25, -0.05),
+            rot: (0, 0, 10), blend: 0.08, color: "wing", chonk: 0.7, mirror: true, zone: "bottom",
+            marks: [(at: (0.1, -0.35, 0), radii: (0.3, 0.12, 0.5), color: "scallop", soft: 0.6)]),
+        (name: "tail", bone: "body", shape: Ellipsoid((0.3, 0.14, 0.25)), at: (0, -0.95, -0.72),
+            rot: (-25, 0, 0), blend: 0.08, color: "wing", zone: "bottom"),
+        (name: "toe", bone: "back_legs", shape: Ellipsoid((0.07, 0.06, 0.13)), at: (0.22, -1.04, 0.62),
+            blend: 0.03, color: "beak", fuzz: 0.0, chonk: 0.6, mirror: true, zone: "paw"),
+        (name: "toe_out", bone: "back_legs", shape: Ellipsoid((0.07, 0.06, 0.12)), at: (0.36, -1.04, 0.56),
+            rot: (0, 25, 0), blend: 0.03, color: "beak", fuzz: 0.0, chonk: 0.6, mirror: true, zone: "paw"),
+        (name: "beak", bone: "head", shape: Cone(r1: 0.09, r2: 0.025, h: 0.2, flat: 1.4), at: (0, 0.44, 0.84),
+            rot: (150, 0, 0), blend: 0.03, color: "beak", gloss: 0.5, fuzz: 0.0, zone: "head"),
+    ],
+    face: (
+        on: "head",
+        nose: (0.14, -0.15, 0.85),
+        ink: "eye",
+        eye: (at: (0.34, 0.0), r: (0.17, 0.18), iris: Some(("ring", 0.58))),
+        blush: (at: (0.6, -0.3), r: (0.12, 0.07), color: "blush"),
+    ),
+)

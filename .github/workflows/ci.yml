@@ -24,8 +24,6 @@ jobs:
       - run: cargo fmt --all --check
       - run: cargo clippy --workspace --all-targets --locked -- -D warnings
       - run: cargo test --workspace --locked
-      # The compiled rigs in the repo must match assets/species (PLAN §3.3).
-      - run: cargo xtask art --check
 
   deny:
     runs-on: ubuntu-24.04

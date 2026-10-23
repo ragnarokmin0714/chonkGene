@@ -1,0 +1,84 @@
+// Munchkin: a long, low tabby loaf on tiny legs. Units are roughly head
+// radii; the floor is at y = -1.1, +z faces the camera.
+(
+    species: "munchkin",
+    slots: ["fur", "light", "stripe", "ear", "eye", "ink", "nose", "blush"],
+    coats: [
+        (name: "milktea", colors: {
+            "fur": "#D9B48F", "light": "#FFF6EA", "stripe": "#B88E66", "ear": "#F6C3B8",
+            "eye": "#3B2A22", "ink": "#3B2A22", "nose": "#F2A0AA", "blush": "#FF9AA6",
+        }),
+        (name: "orange", colors: {
+            "fur": "#F0A35E", "light": "#FFF4E6", "stripe": "#D9823C", "ear": "#F8C4B0",
+            "eye": "#3B2A22", "ink": "#3B2A22", "nose": "#F2A0AA", "blush": "#FF9AA6",
+        }),
+        (name: "grey", colors: {
+            "fur": "#A9ADB5", "light": "#F2F3F5", "stripe": "#868A93", "ear": "#F2C4C8",
+            "eye": "#2F3142", "ink": "#2F3142", "nose": "#F2A0AA", "blush": "#FF9AA6",
+        }),
+        (name: "black", colors: {
+            "fur": "#3F3A3A", "light": "#6E6767", "stripe": "#2A2626", "ear": "#8A6F70",
+            "eye": "#E8C14A", "ink": "#1E1A1A", "nose": "#E8949E", "blush": "#FF9AA6",
+        }),
+    ],
+    pivots: {
+        "body": (0, -1.1, 0),
+        "head": (0, 0, 0.05),
+        "front_legs": (0, -0.78, 0.5),
+        "back_legs": (0, -0.9, 0),
+        "tail": (0.4, -0.9, -0.85),
+    },
+    parts: [
+        (name: "body", bone: "body", shape: Ellipsoid((0.88, 0.56, 0.82)), at: (0, -0.54, -0.05),
+            color: "fur", chonk: 1.0, zone: "bottom",
+            marks: [
+                (at: (0, 0.0, 0.72), radii: (0.46, 0.6, 0.55), color: "light", soft: 0.25, zone: Some("belly")),
+                // Tabby bands across the back.
+                (at: (0, 0.32, -0.55), radii: (1.2, 0.06, 0.55), color: "stripe", soft: 0.6),
+                (at: (0, 0.1, -0.6), radii: (1.2, 0.06, 0.55), color: "stripe", soft: 0.6),
+                (at: (0, -0.12, -0.6), radii: (1.2, 0.06, 0.55), color: "stripe", soft: 0.6),
+            ]),
+        (name: "head", bone: "head", shape: Ellipsoid((1.0, 0.82, 0.86)), at: (0, 0.42, 0.1),
+            blend: 0.22, color: "fur", zone: "head",
+            marks: [
+                (at: (0, -0.5, 0.55), radii: (0.62, 0.42, 0.55), color: "light", soft: 0.3),
+                (at: (0.52, -0.15, 0.6), radii: (0.3, 0.25, 0.3), color: "fur", soft: 0.4, zone: Some("cheek"), mirror: true),
+                // The tabby M on the forehead.
+                (at: (0, 0.6, 0.6), radii: (0.045, 0.17, 0.4), color: "stripe", soft: 0.5),
+                (at: (0.2, 0.56, 0.62), radii: (0.04, 0.15, 0.4), color: "stripe", soft: 0.5, mirror: true),
+                (at: (0.62, 0.15, 0.4), radii: (0.25, 0.04, 0.5), color: "stripe", soft: 0.5, mirror: true),
+            ]),
+        (name: "muzzle", bone: "head", shape: Ellipsoid((0.3, 0.19, 0.2)), at: (0, 0.2, 0.8),
+            blend: 0.14, color: "light", zone: "head"),
+        (name: "ear", bone: "head", shape: Cone(r1: 0.27, r2: 0.05, h: 0.46, flat: 2.2), at: (0.5, 0.98, 0.02),
+            rot: (-6, 0, -20), blend: 0.1, color: "fur", mirror: true, zone: "head",
+            marks: [(at: (0, 0.18, 0.1), radii: (0.13, 0.22, 0.08), color: "ear", soft: 0.35)]),
+        (name: "front_leg", bone: "front_legs", shape: Capsule(to: (0.0, -0.22, 0.04), r: 0.15), at: (0.3, -0.78, 0.52),
+            blend: 0.1, color: "fur", chonk: 0.3, mirror: true, zone: "paw",
+            marks: [(at: (0, -0.22, 0.04), radii: (0.2, 0.12, 0.2), color: "light", soft: 0.3)]),
+        (name: "haunch", bone: "back_legs", shape: Ellipsoid((0.28, 0.22, 0.32)), at: (0.62, -0.9, -0.08),
+            blend: 0.12, color: "fur", chonk: 1.0, mirror: true, zone: "bottom"),
+        (name: "foot", bone: "back_legs", shape: Ellipsoid((0.15, 0.09, 0.2)), at: (0.62, -1.03, 0.26),
+            blend: 0.1, color: "light", chonk: 1.0, mirror: true, zone: "paw"),
+        // The tail stands up behind, curling forward at the tip.
+        (name: "tail", bone: "tail", shape: Capsule(to: (0.28, 0.75, 0.0), r: 0.12), at: (0.4, -0.9, -0.85),
+            blend: 0.08, color: "fur", zone: "bottom",
+            marks: [
+                (at: (0.1, 0.25, 0), radii: (0.3, 0.05, 0.3), color: "stripe", soft: 0.5),
+                (at: (0.2, 0.5, 0), radii: (0.3, 0.05, 0.3), color: "stripe", soft: 0.5),
+            ]),
+        (name: "tail_tip", bone: "tail", shape: Capsule(to: (-0.1, 0.22, 0.12), r: 0.11), at: (0.68, -0.15, -0.85),
+            blend: 0.06, color: "stripe", zone: "bottom"),
+        (name: "nose", bone: "head", shape: Ellipsoid((0.075, 0.05, 0.05)), at: (0, 0.32, 0.97),
+            blend: 0.02, color: "nose", gloss: 0.6, fuzz: 0.0, zone: "head"),
+    ],
+    face: (
+        on: "head",
+        mouth_on: Some("muzzle"),
+        nose: (0.14, -0.22, 0.9),
+        ink: "ink",
+        eye: (at: (0.36, 0.05), r: (0.11, 0.13), iris: Some(("eye", 0.72))),
+        blush: (at: (0.55, -0.17), r: (0.13, 0.08), color: "blush"),
+        whiskers: true,
+    ),
+)

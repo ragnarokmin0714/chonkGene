@@ -1,0 +1,49 @@
+// Poses every species shares; a model's own `poses` replace these by name.
+//
+// `root` moves the whole pet about the origin: roll (z), then pitch (x), then
+// turn (y), in degrees, then `shift`. Each bone scales and turns about its
+// pivot (the model's `pivots`), then shifts. Bones a species lacks are skipped.
+// The camera is fixed, so a pose's root turn is also its viewing angle.
+//
+// Proportions differ by species, so heights are never written here: a bone
+// with `rest: true` is lowered until it touches the floor, and afterwards the
+// whole pet is settled onto the floor (unless the pose says `rest: false`).
+{
+    // The default: sitting, turned a little so the 3D shape reads.
+    "sit": (
+        root: (rot: (0, 20, 0)),
+    ),
+    // Giggling: rolled onto its side and back, paws in the air.
+    "belly_up": (
+        root: (rot: (-20, 0, 80), shift: (0.35, 0, 0)),
+        bones: {
+            "front_legs": (rot: (-90, 0, 0), shift: (0, 0.3, 0)),
+            "back_legs": (rot: (-20, 0, 0)),
+        },
+    ),
+    // 厭世: flattened into a puddle, chin on the floor, paws poking out.
+    "melt": (
+        bones: {
+            "body": (scale: (1.3, 0.62, 1.3)),
+            "head": (shift: (0, -0.5, 0.18)),
+            "front_legs": (rot: (-90, 0, 0), shift: (0, 0, 0.05), rest: true),
+            "back_legs": (scale: (1.0, 0.8, 1.0)),
+        },
+    ),
+    // Asleep: a loaf, paws tucked, head sunk in.
+    "loaf": (
+        root: (rot: (0, 28, 0)),
+        bones: {
+            "body": (scale: (1.05, 0.82, 1.05)),
+            "head": (shift: (0, -0.3, 0.14)),
+            "front_legs": (rot: (-90, 0, 0), rest: true),
+        },
+    ),
+    // Sulking: turned away, head hung.
+    "sulk": (
+        root: (rot: (0, 155, 0)),
+        bones: {
+            "head": (rot: (12, 0, 0), shift: (0, -0.06, 0)),
+        },
+    ),
+}

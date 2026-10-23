@@ -6,13 +6,15 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::rc::Rc;
+use std::sync::Arc;
 use std::time::Duration;
 
 use chonkgene_core::anim::Animator;
 use chonkgene_core::mind::XP_PER_LEVEL;
 use chonkgene_core::species::Species;
-use chonkgene_render::{BoneMap, Renderer};
-use chonkgene_rig::{Pose, Rig, builtin};
+use chonkgene_render::sprites::{Variant, render_one};
+use chonkgene_render::{KEYS, Renderer};
+use chonkgene_rig::{Model, builtin};
 use slint::{
     Color, ComponentHandle, Image, ModelRc, Rgba8Pixel, SharedPixelBuffer, SharedString, Timer,
     TimerMode, VecModel,
@@ -126,17 +128,30 @@ fn image(pm: &tiny_skia::Pixmap) -> Image {
     Image::from_rgba8_premultiplied(buf)
 }
 
+/// A small sitting portrait for the adoption list, rendered now: six of
+/// them take well under 0.1 s on all cores.
+fn portrait(model: &Model) -> Image {
+    let threads = std::thread::available_parallelism().map_or(1, |n| n.get());
+    let variant = Variant {
+        coat: 0,
+        chonk: 0.33,
+        scale: 0.6,
+    };
+    let s = render_one(model, variant, KEYS[0], threads);
+    tiny_skia::IntSize::from_wh(s.width, s.height)
+        .and_then(|size| tiny_skia::Pixmap::from_vec(s.rgba, size))
+        .map(|pm| image(&pm))
+        .unwrap_or_default()
+}
+
 struct Kind {
-    rig: Rig,
-    bones: BoneMap,
+    model: Arc<Model>,
 }
 
 struct Preview {
     pet: u64,
-    species: Species,
     renderer: Renderer,
     anim: Animator,
-    pose: Pose,
 }
 
 struct State {
@@ -165,16 +180,12 @@ impl State {
 
     fn coats(&self, s: Species) -> Vec<(String, [u8; 4], [u8; 4])> {
         self.kinds[&s]
-            .rig
-            .data()
+            .model
             .coats
             .iter()
             .map(|c| {
-                (
-                    c.name.clone(),
-                    c.colors.get(1).copied().unwrap_or([0; 4]),
-                    c.colors.get(2).copied().unwrap_or([0; 4]),
-                )
+                let (a, b) = c.swatch();
+                (c.name.clone(), a, b)
             })
             .collect()
     }
@@ -226,13 +237,13 @@ fn pet_rows(st: &State) -> ModelRc<PetRow> {
         .iter()
         .filter_map(|p| {
             let s = p.species()?;
-            let coat = st.kinds[&s].rig.coat(&p.coat).unwrap_or(0);
-            let colors = &st.kinds[&s].rig.data().coats[coat].colors;
+            let model = &st.kinds[&s].model;
+            let (dot, ring) = model.coats[model.coat(&p.coat).unwrap_or(0)].swatch();
             Some(PetRow {
                 id: p.id.to_string().into(),
                 name: p.name.clone().into(),
-                dot: color(colors.get(1).copied().unwrap_or([0; 4])),
-                ring: color(colors.get(2).copied().unwrap_or([0; 4])),
+                dot: color(dot),
+                ring: color(ring),
                 resting: !p.on_desktop,
             })
         })
@@ -282,14 +293,12 @@ fn show_pet(ui: &SettingsWindow, st: &mut State) {
     ui.set_level_text(format!("親密度 Lv.{}（{progress}%）", p.level).into());
     ui.set_confirm_release(false);
     let kind = &st.kinds[&species];
-    let coat = kind.rig.coat(&p.coat).unwrap_or(0);
-    if let Some(renderer) = Renderer::new(&kind.rig, 1.0, p.chonk, coat) {
+    let coat = kind.model.coat(&p.coat).unwrap_or(0);
+    if let Some(renderer) = Renderer::new(Arc::clone(&kind.model), 1.0, p.chonk, coat) {
         st.preview = Some(Preview {
             pet: p.id,
-            species,
             renderer,
             anim: Animator::new(p.id, p.chonk),
-            pose: kind.rig.rest_pose(),
         });
     }
 }
@@ -298,10 +307,9 @@ fn tick_preview(ui: &SettingsWindow, st: &mut State) {
     let Some(pv) = &mut st.preview else {
         return;
     };
-    let kind = &st.kinds[&pv.species];
     pv.anim.step(1.0 / PREVIEW_FPS as f32);
-    kind.bones.apply(&pv.anim.params(), &mut pv.pose);
-    let frame = pv.renderer.render(&kind.rig, &pv.pose);
+    pv.renderer.poll();
+    let frame = pv.renderer.render(&pv.anim.params(), pv.anim.expression);
     ui.set_preview(image(frame));
 }
 
@@ -318,9 +326,9 @@ fn edit(ui: &SettingsWindow, st: &mut State, f: impl FnOnce(&mut PetSave)) {
         ui.set_preview_line(body_line(species, p.chonk).into());
         let kind = &st.kinds[&species];
         if let Some(pv) = st.preview.as_mut().filter(|pv| pv.pet == p.id) {
-            pv.renderer.set_chonk(&kind.rig, p.chonk);
-            if let Some(coat) = kind.rig.coat(&p.coat) {
-                pv.renderer.set_coat(&kind.rig, coat);
+            pv.renderer.set_chonk(p.chonk);
+            if let Some(coat) = kind.model.coat(&p.coat) {
+                pv.renderer.set_coat(coat);
             }
             pv.anim.set_chonk(p.chonk);
             pv.anim.poke(chonkgene_core::Zone::Belly);
@@ -347,13 +355,11 @@ fn setup(
     pets.sanitise();
     let mut kinds = HashMap::new();
     for s in Species::ALL {
-        let rig = Rig::load(builtin::for_species(s.id()).ok_or("missing rig")?)
-            .map_err(|e| e.to_string())?;
+        let model = builtin::load(s.id()).map_err(|e| e.to_string())?;
         kinds.insert(
             s,
             Kind {
-                bones: BoneMap::new(&rig),
-                rig,
+                model: Arc::new(model),
             },
         );
     }
@@ -393,9 +399,7 @@ fn setup(
             .into_iter()
             .map(|s| {
                 let kind = &st.kinds[&s];
-                let portrait = Renderer::new(&kind.rig, 0.6, 0.33, 0)
-                    .map(|mut r| image(r.render(&kind.rig, &kind.rig.rest_pose())))
-                    .unwrap_or_default();
+                let portrait = portrait(&kind.model);
                 SpeciesRow {
                     id: s.id().into(),
                     label: s.label().into(),
