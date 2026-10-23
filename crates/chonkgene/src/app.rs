@@ -800,6 +800,22 @@ impl App {
     }
 }
 
+/// When the event loop next has work: the earliest of the jobs that are due.
+/// A job that is not pending must be `None`, never an old time: waiting
+/// until a past instant returns at once, and the loop spins at 100% CPU.
+fn wake_at(due: impl IntoIterator<Item = Option<Instant>>) -> Instant {
+    due.into_iter()
+        .flatten()
+        .min()
+        .unwrap_or_else(|| Instant::now() + Duration::from_secs(1))
+}
+
+/// The next save, if anything is unsaved. `save_at` stays behind once a
+/// save is done; only unsaved changes make it a reason to wake.
+fn pending_save(dirty: bool, save_at: Instant) -> Option<Instant> {
+    dirty.then_some(save_at)
+}
+
 /// The pets as the skit director sees them.
 fn actors(pets: &[Pet]) -> Vec<Actor> {
     pets.iter()
@@ -1533,20 +1549,52 @@ impl ApplicationHandler<UserEvent> for App {
             self.report(now);
         }
 
-        let mut wake = self.poll_at.min(self.save_at);
-        if visible && let Some(next) = self.pets.iter().map(|p| p.next).min() {
-            wake = wake.min(next);
-        }
-        if self.menu.is_some() {
-            wake = wake.min(now + Duration::from_millis(33));
-        }
-        if self.stats {
-            wake = wake.min(self.stats_at);
-        }
-        el.set_control_flow(ControlFlow::WaitUntil(wake));
+        let due = [
+            Some(self.poll_at),
+            pending_save(self.dirty, self.save_at),
+            if visible {
+                self.pets.iter().map(|p| p.next).min()
+            } else {
+                None
+            },
+            self.menu.is_some().then(|| now + Duration::from_millis(33)),
+            self.stats.then_some(self.stats_at),
+        ];
+        el.set_control_flow(ControlFlow::WaitUntil(wake_at(due)));
     }
 
     fn exiting(&mut self, _el: &ActiveEventLoop) {
         self.save_now();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The beta-1 bug: five seconds in, with nothing to save, the old save
+    /// time kept the loop waking at once, burning a whole core.
+    #[test]
+    fn a_past_save_time_with_nothing_unsaved_does_not_wake_the_loop() {
+        let now = Instant::now();
+        let poll_at = now + Duration::from_millis(500);
+        let stale = now - Duration::from_secs(3);
+        assert_eq!(
+            wake_at([Some(poll_at), pending_save(false, stale)]),
+            poll_at
+        );
+        // Unsaved changes do make it due: save straight away.
+        assert_eq!(wake_at([Some(poll_at), pending_save(true, stale)]), stale);
+    }
+
+    #[test]
+    fn the_loop_wakes_for_the_earliest_pending_job() {
+        let now = Instant::now();
+        let (a, b) = (
+            now + Duration::from_millis(30),
+            now + Duration::from_millis(80),
+        );
+        assert_eq!(wake_at([Some(b), None, Some(a)]), a);
+        assert!(wake_at([None, None]) > now);
     }
 }
