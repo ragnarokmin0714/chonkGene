@@ -187,7 +187,11 @@ impl Renderer {
             // A different sprite makes the cached images useless.
             self.still
                 .retain(|((k, m, _), _)| *k == key && *m == mirrored);
-            let mut img = self.pixmap.clone();
+            // A blank canvas: the pixmap still holds the previous frame, and
+            // copying it would bake a ghost of the old pose into the cache.
+            let Some(mut img) = Pixmap::new(size.0, size.1) else {
+                return &self.pixmap;
+            };
             let crop = ts.pre_translate(ready.offset.0, ready.offset.1);
             img.draw_pixmap(0, 0, ready.pixmap.as_ref(), &paint, crop, None);
             self.still.push((id, img));

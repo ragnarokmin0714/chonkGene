@@ -170,6 +170,24 @@ fn unchanged_frames_are_not_redrawn() {
     assert!(r.changed());
 }
 
+/// Cached idle frames start from a blank canvas: a pet that moved and then
+/// stood still must look exactly like one that never moved (no afterimage).
+#[test]
+fn standing_still_after_moving_leaves_no_afterimage() {
+    let still = PoseParams::default();
+    let fresh = shiba().render(&still, Expression::Neutral).clone();
+    let mut r = shiba();
+    let squashed = PoseParams {
+        squash: 0.3,
+        sway: 12.0,
+        facing: -1.0,
+        ..still
+    };
+    r.render(&squashed, Expression::Giggle);
+    let after = r.render(&still, Expression::Neutral).clone();
+    assert_eq!(after.data(), fresh.data());
+}
+
 /// Hit-testing reads the zone the ray hit, through the frame's squash and
 /// mirroring, so a poke lands where the pixels are.
 #[test]
