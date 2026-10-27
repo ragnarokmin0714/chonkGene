@@ -310,6 +310,46 @@ pub fn render(scene: &Scene, scale: f32, threads: usize) -> Sprite {
     }
 }
 
+/// The zone the ray through pixel `(x, y)` hits, with the frame's squash,
+/// lean and lift applied: hit-testing for frames drawn on the GPU (one ray
+/// on the CPU costs microseconds).
+pub fn zone_at(
+    scene: &Scene,
+    scale: f32,
+    frame: &crate::gpu::Frame,
+    x: f32,
+    y: f32,
+) -> Option<&'static str> {
+    let cam = Camera::new(scale);
+    let (o, d) = (cam.origin(x, y), cam.fwd);
+    let pet = |p: V3| frame.pet_space(p, cam.anchor, cam.fwd);
+    let k = frame.stretch();
+    // The bounding sphere, grown as in pet.wgsl.
+    let center = scene.center + v3(0.0, frame.lift / PPU, 0.0);
+    let radius = scene.radius * 1.5;
+    let oc = o - center;
+    let b = oc.dot(d);
+    let disc = b * b - (oc.dot(oc) - radius * radius);
+    if disc <= 0.0 {
+        return None;
+    }
+    let sq = disc.sqrt();
+    let (mut t, end) = ((-b - sq).max(0.0), -b + sq);
+    for _ in 0..160 {
+        let p = o + d * t;
+        let dist = scene.distance(pet(p)) * k;
+        if dist < 4e-4 {
+            let zone = scene.surface(pet(p), 1.0 / cam.ppu).zone;
+            return ZONES.get(usize::from(zone)).copied();
+        }
+        t += dist * 0.9;
+        if t > end {
+            return None;
+        }
+    }
+    None
+}
+
 /// The highest solid pixels in the middle of the sprite.
 fn top_of(rgba: &[u8], w: usize, h: usize) -> (f32, f32) {
     let (x0, x1) = (w / 5, w - w / 5);

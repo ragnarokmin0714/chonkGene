@@ -395,7 +395,7 @@ impl Move {
     }
 }
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct Pose {
     /// The whole pet, about the origin.
     pub root: Move,

@@ -35,6 +35,39 @@ pub struct Frame {
     pub lift: f32,
 }
 
+impl Frame {
+    /// World → posed-pet space, as `to_pet` in pet.wgsl: undo the lift,
+    /// the lean about the line of sight through `anchor`, then the squash.
+    pub(crate) fn pet_space(self, p: V3, anchor: V3, fwd: V3) -> V3 {
+        let mut q = p
+            - anchor
+            - V3 {
+                x: 0.0,
+                y: self.lift / crate::raymarch::PPU,
+                z: 0.0,
+            };
+        let (s, c) = (-self.lean.to_radians()).sin_cos();
+        let cross = V3 {
+            x: fwd.y * q.z - fwd.z * q.y,
+            y: fwd.z * q.x - fwd.x * q.z,
+            z: fwd.x * q.y - fwd.y * q.x,
+        };
+        q = q * c + cross * s + fwd * (fwd.dot(q) * (1.0 - c));
+        let sx = 1.0 + self.squash;
+        let sy = (1.0 - self.squash) * (1.0 + 0.015 * self.breath);
+        V3 {
+            x: q.x / sx,
+            y: q.y / sy,
+            z: q.z / sx,
+        } + anchor
+    }
+
+    /// How much `pet_space` stretches distances at most.
+    pub(crate) fn stretch(self) -> f32 {
+        (1.0 + self.squash).min((1.0 - self.squash) * (1.0 + 0.015 * self.breath))
+    }
+}
+
 /// The device and the two pipelines, shared by every pet.
 pub struct Gpu {
     device: wgpu::Device,

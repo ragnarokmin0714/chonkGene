@@ -10,8 +10,9 @@ const BLINK_SECS: f32 = 0.12;
 const GIGGLE_EVERY: f32 = 0.22;
 /// Steps a second at walking pace.
 const STEP_HZ: f32 = 2.2;
-/// A squash-flip turn: squeezed thin, mirrored, filled out again.
-const TURN_SECS: f32 = 0.16;
+/// Turning round: long enough to see a 3D turn through facing you (a
+/// squash-flip when frames are pre-rendered sprites).
+const TURN_SECS: f32 = 0.3;
 /// Hops fall at this many design pixels/s².
 const HOP_GRAVITY: f32 = 1800.0;
 /// How far a held finger squashes the body, in spring units.
@@ -78,6 +79,12 @@ pub struct PoseParams {
     /// Everything else then follows from `act`, `beat` and `facing`, so
     /// frames with the same three look the same.
     pub beat: Option<u8>,
+    /// Where the walk is in its two-step cycle, 0.0 … 2.0: step A, then
+    /// step B (snapped to the beat on a steady walk); 0.0 standing.
+    pub stride: f32,
+    /// Seconds on the animation's clock, for motion drawn from it (a waving
+    /// paw, blending between poses).
+    pub clock: f32,
 }
 
 impl Default for PoseParams {
@@ -93,6 +100,8 @@ impl Default for PoseParams {
             facing: 1.0,
             act: Act::Rest,
             beat: None,
+            stride: 0.0,
+            clock: 0.0,
         }
     }
 }
@@ -442,7 +451,7 @@ impl Animator {
             && !self.turning()
             && !self.hopping()
             && self.sway == 0.0;
-        let mut beat = None;
+        let (mut beat, mut stride) = (None, 0.0);
         if self.walking {
             // Each step lifts the body in an arc and rocks it onto the
             // planted foot; it lands with a small squash.
@@ -454,6 +463,7 @@ impl Animator {
             }
             let side = if a { 1.0 } else { -1.0 };
             act = if a { Act::StepA } else { Act::StepB };
+            stride = if a { p } else { 1.0 + p };
             bob = -(pi * p).sin() * (7.0 + 5.0 * self.waddle);
             roll = side * (pi * p).sin() * (3.0 + 6.0 * self.waddle);
             footfall = (0.06 + 0.12 * self.waddle) * (1.0 - p / 0.22).max(0.0).powi(2);
@@ -496,6 +506,8 @@ impl Animator {
             facing: self.turn,
             act,
             beat,
+            stride,
+            clock: self.t,
         }
     }
 }
@@ -608,6 +620,7 @@ mod tests {
                 assert_eq!(
                     PoseParams {
                         eyes_open: q.eyes_open,
+                        clock: q.clock,
                         ..p
                     },
                     *q

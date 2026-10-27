@@ -27,7 +27,7 @@ fn main() {
         }
         let per_sprite = start.elapsed().as_secs_f64() * 1e3 / KEYS.len() as f64;
 
-        let mut r = Renderer::new(Arc::clone(&model), scale, 0.33, 0).expect("renderer");
+        let mut r = Renderer::sprites(Arc::clone(&model), scale, 0.33, 0).expect("renderer");
         r.finish();
         let idle = run(&mut r, false);
         let walking = run(&mut r, true);

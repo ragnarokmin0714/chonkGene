@@ -1551,7 +1551,13 @@ impl ApplicationHandler<UserEvent> for App {
             *presenting += p.draw(ctx.shared, world.now);
             *drawing += started.elapsed();
             *frames += 1;
-            p.next = now + Duration::from_secs_f64(1.0 / f64::from(p.anim.fps(p.moving())));
+            // A pet blending between poses on the GPU needs frames to
+            // show it, even when its animation is otherwise at rest.
+            let mut fps = p.anim.fps(p.moving());
+            if p.renderer.blending() {
+                fps = fps.max(30);
+            }
+            p.next = now + Duration::from_secs_f64(1.0 / f64::from(fps));
         }
 
         if self.dirty && now >= self.save_at {

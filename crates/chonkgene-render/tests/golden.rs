@@ -85,7 +85,7 @@ fn sprite(id: &str, chonk: f32, coat: &str, key: Key) -> Pixmap {
 
 fn shiba() -> Renderer {
     let model = Arc::new(builtin::load("shiba").unwrap());
-    let mut r = Renderer::new(model, 1.0, 0.33, 0).unwrap();
+    let mut r = Renderer::sprites(model, 1.0, 0.33, 0).unwrap();
     r.finish();
     r
 }
