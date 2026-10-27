@@ -295,10 +295,12 @@ fn show_pet(ui: &SettingsWindow, st: &mut State) {
     let kind = &st.kinds[&species];
     let coat = kind.model.coat(&p.coat).unwrap_or(0);
     if let Some(renderer) = Renderer::new(Arc::clone(&kind.model), 1.0, p.chonk, coat) {
+        // Pops hide cuts between sprites; GPU frames blend instead.
+        let pops = !renderer.is_gpu();
         st.preview = Some(Preview {
             pet: p.id,
             renderer,
-            anim: Animator::new(p.id, p.chonk, species.waddle()),
+            anim: Animator::new(p.id, p.chonk, species.waddle()).with_pops(pops),
         });
     }
 }

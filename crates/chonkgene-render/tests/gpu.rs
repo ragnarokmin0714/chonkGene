@@ -1,6 +1,7 @@
 //! The GPU ray-marcher draws what the CPU one does (PLAN §3.1). Skipped,
 //! with a note, on machines without any GPU adapter (software ones count).
 
+use chonkgene_core::anim::{Expression, PoseParams};
 use chonkgene_render::KEYS;
 use chonkgene_render::gpu::{Frame, Gpu};
 use chonkgene_render::sprites::{Variant, render_layer};
@@ -57,36 +58,63 @@ fn renderer() -> Option<chonkgene_render::Renderer> {
     chonkgene_render::Renderer::gpu(gpu, model, 1.0, 0.33, 0)
 }
 
-fn at(clock: f32) -> chonkgene_core::anim::PoseParams {
-    chonkgene_core::anim::PoseParams {
+fn at(clock: f32) -> PoseParams {
+    PoseParams {
         clock,
         ..Default::default()
     }
 }
 
-/// Lying down blends every bone over a moment instead of cutting.
+/// Render and wait for the picture (frames arrive on a later call).
+fn draw(r: &mut chonkgene_render::Renderer, p: &PoseParams, e: Expression) -> Pixmap {
+    r.render(p, e);
+    r.finish();
+    r.pixmap().clone()
+}
+
+fn differ(a: &Pixmap, b: &Pixmap) -> usize {
+    a.data()
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .zip(b.data().as_chunks::<4>().0)
+        .filter(|(p, q)| p[3].abs_diff(q[3]) > 64)
+        .count()
+}
+
+/// A frame is sent without waiting and shown when it has arrived, on a
+/// later call; until then the last picture stays up.
 #[test]
-fn moving_between_poses_blends() {
-    use chonkgene_core::anim::Expression;
+fn gpu_frames_arrive_later_without_blocking() {
     let Some(mut r) = renderer() else {
         eprintln!("skipped: no GPU");
         return;
     };
-    let sit = r.render(&at(0.0), Expression::Neutral).clone();
-    r.render(&at(0.05), Expression::Asleep);
-    let mid = r.render(&at(0.2), Expression::Asleep).clone();
-    assert!(r.blending(), "still lying down at 0.2 s");
-    let loaf = r.render(&at(1.0), Expression::Asleep).clone();
-    assert!(!r.blending());
-    let differ = |a: &Pixmap, b: &Pixmap| {
-        a.data()
-            .as_chunks::<4>()
-            .0
-            .iter()
-            .zip(b.data().as_chunks::<4>().0)
-            .filter(|(p, q)| p[3].abs_diff(q[3]) > 64)
-            .count()
+    let sit = draw(&mut r, &at(0.0), Expression::Neutral);
+    let squashed = PoseParams {
+        squash: 0.3,
+        ..at(0.1)
     };
+    r.render(&squashed, Expression::Neutral);
+    assert!(r.busy(), "a frame is on its way");
+    assert_eq!(r.pixmap().data(), sit.data(), "the old picture stays up");
+    r.finish();
+    assert!(differ(r.pixmap(), &sit) > 100, "then the new one shows");
+}
+
+/// Lying down blends every bone over a moment instead of cutting.
+#[test]
+fn moving_between_poses_blends() {
+    let Some(mut r) = renderer() else {
+        eprintln!("skipped: no GPU");
+        return;
+    };
+    let sit = draw(&mut r, &at(0.0), Expression::Neutral);
+    draw(&mut r, &at(0.05), Expression::Asleep);
+    let mid = draw(&mut r, &at(0.2), Expression::Asleep);
+    assert!(r.busy(), "still lying down at 0.2 s");
+    let loaf = draw(&mut r, &at(1.0), Expression::Asleep);
+    assert!(!r.busy());
     assert!(differ(&mid, &sit) > 200, "the middle is not the start");
     assert!(differ(&mid, &loaf) > 200, "the middle is not the end");
 }
@@ -94,16 +122,15 @@ fn moving_between_poses_blends() {
 /// Pokes land on the zone under the cursor, through the frame's squash.
 #[test]
 fn gpu_frames_hit_test_their_zones() {
-    use chonkgene_core::anim::Expression;
     let Some(mut r) = renderer() else {
         eprintln!("skipped: no GPU");
         return;
     };
-    let squashed = chonkgene_core::anim::PoseParams {
+    let squashed = PoseParams {
         squash: 0.2,
         ..at(0.0)
     };
-    let frame = r.render(&squashed, Expression::Neutral).clone();
+    let frame = draw(&mut r, &squashed, Expression::Neutral);
     let (ax, ay) = r.anchor();
     assert_eq!(r.hit(ax, ay + 6.0), Some("head"));
     assert_eq!(r.hit(1.0, 1.0), None);
@@ -117,33 +144,39 @@ fn gpu_frames_hit_test_their_zones() {
     }
 }
 
-/// Breathing in place repeats a few frames: the same breath step is not
-/// drawn again, and a frame from the cache matches a fresh one.
+/// At rest, frames repeat: the same breath step is not drawn again, a
+/// cached one shows at once (no GPU), and matches a fresh one. A wag at
+/// rest comes from the cache too once seen (sulking: the tail faces you).
 #[test]
 fn idle_frames_come_from_the_cache() {
-    use chonkgene_core::anim::{Expression, PoseParams};
     let Some(mut r) = renderer() else {
         eprintln!("skipped: no GPU");
         return;
     };
-    let breath = |b: f32, clock: f32| PoseParams {
+    let rest = |b: f32, tail: f32, clock: f32| PoseParams {
         breath: b,
+        tail,
         ..at(clock)
     };
-    let first = r.render(&breath(0.6, 0.0), Expression::Neutral).clone();
-    r.render(&breath(0.61, 0.1), Expression::Neutral);
+    let first = draw(&mut r, &rest(0.6, 0.0, 0.0), Expression::Sulk);
+    r.render(&rest(0.61, 0.0, 0.1), Expression::Sulk);
     assert!(!r.changed(), "the same breath step");
-    r.render(&breath(-1.0, 0.2), Expression::Neutral);
-    assert!(r.changed());
-    let again = r.render(&breath(0.6, 0.3), Expression::Neutral).clone();
-    assert!(r.changed());
-    assert_eq!(first.data(), again.data());
+    draw(&mut r, &rest(-1.0, 0.0, 0.2), Expression::Sulk);
+    let wag = draw(&mut r, &rest(0.6, 9.0, 0.3), Expression::Sulk);
+    assert!(differ(&wag, &first) > 20, "the tail moved");
+    // Breathing at rest is drawn in 2D over the cached frame: no GPU.
+    r.render(&rest(-1.0, 0.0, 0.35), Expression::Sulk);
+    assert!(r.changed() && !r.busy(), "a breath step without the GPU");
+    for (tail, want) in [(0.0, &first), (9.4, &wag)] {
+        r.render(&rest(0.6, tail, 0.4 + tail), Expression::Sulk);
+        assert!(r.changed() && !r.busy(), "shown from the cache at once");
+        assert_eq!(r.pixmap().data(), want.data());
+    }
 }
 
 /// A hop lifts the pet; its shadow stays on the floor.
 #[test]
 fn a_hop_leaves_the_shadow_on_the_floor() {
-    use chonkgene_core::anim::{Expression, PoseParams};
     let Some(mut r) = renderer() else {
         eprintln!("skipped: no GPU");
         return;
@@ -161,16 +194,15 @@ fn a_hop_leaves_the_shadow_on_the_floor() {
             .map(|p| u32::from(p.alpha()))
             .sum::<u32>()
     };
-    let down = r.render(&at(0.0), Expression::Neutral).clone();
-    let up = r
-        .render(
-            &PoseParams {
-                bob: -24.0,
-                ..at(1.0)
-            },
-            Expression::Neutral,
-        )
-        .clone();
+    let down = draw(&mut r, &at(0.0), Expression::Neutral);
+    let up = draw(
+        &mut r,
+        &PoseParams {
+            bob: -24.0,
+            ..at(1.0)
+        },
+        Expression::Neutral,
+    );
     assert!(
         top(&down) >= top(&up) + 20,
         "{} vs {}",

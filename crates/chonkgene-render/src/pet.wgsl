@@ -38,7 +38,7 @@ struct Uniforms {
     fwd: vec4<f32>,
     // xyz: the floor point under the pet; w: number of parts.
     anchor: vec4<f32>,
-    // Sphere around the pet: centre, radius.
+    // Sphere around the pet once the frame has moved it: centre, radius.
     bound: vec4<f32>,
     // Eye part, mouth part (−1 for none), look, ink slot.
     face: vec4<f32>,
@@ -453,9 +453,9 @@ fn occlusion(p: vec3<f32>, n: vec3<f32>) -> f32 {
 
 // Where a ray first meets the pet, or −1.
 fn trace(o: vec3<f32>, d: vec3<f32>) -> f32 {
-    // The bounding sphere, grown to hold any squash, lean and lift.
-    let center = u.bound.xyz + vec3<f32>(0.0, u.frame.w, 0.0);
-    let radius = u.bound.w * 1.5;
+    // The bounding sphere, already moved by the frame.
+    let center = u.bound.xyz;
+    let radius = u.bound.w;
     let oc = o - center;
     let b = dot(oc, d);
     let disc = b * b - (dot(oc, oc) - radius * radius);

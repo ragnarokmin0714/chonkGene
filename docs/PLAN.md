@@ -637,7 +637,13 @@ How it is built:
 - Hit-testing traces one ray on the CPU through the same pose and frame.
 - `chonkgene --gpu-check` (also `--example gpu`) writes a report and sample frames next to the program: the adapter, GPU-vs-CPU difference and cost per frame at 100/150/200%.
 
-Open: real numbers from Roger's Windows machine. Each frame waits for its readback on the UI thread; if several moving pets stall it on an integrated GPU, submit all pets first and read back together, or read the previous frame back (one frame late).
+First numbers from Roger's machine (Intel UHD Graphics 770, 2026-10-27, issue #1): about 9 ms a frame at 100%, of which about 4 ms was waiting for the readback, so one pet moving all the time would have kept the GPU about a quarter busy and stalled the UI thread. Since then:
+- frames are sent without waiting and picked up on a later call (one frame late), so the UI thread never waits on the GPU and a busy GPU skips frames;
+- breathing at rest is drawn in 2D over a cached frame (1.5% stretch), a wag at rest is cached in 3° steps, and the cache drops its oldest frames instead of everything on a change of pose;
+- with frames that blend, the pops that hid cuts between sprites are off (`Animator::pops`);
+- the bounding sphere follows the frame exactly instead of being 1.5 times too big.
+
+`--gpu-check` now also simulates an idle and a walking pet. On this machine (llvmpipe, for proportions) an idle pet sends about 3.4 frames a second to the GPU and a walking one about 1.8; the rest come from the cache. At Roger's measured cost that is roughly 1% of a UHD 770 per idle pet; his next report gives the real figure.
 
 ### Desktop terrain
 

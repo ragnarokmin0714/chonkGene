@@ -13,9 +13,11 @@ use std::time::{Duration, Instant};
 use chonkgene_rig::{Layer, Look, PoseId, Scene, builtin};
 use tiny_skia::{IntSize, Pixmap, PixmapPaint, Transform};
 
-use crate::KEYS;
+use chonkgene_core::anim::Animator;
+
 use crate::gpu::{Frame, Gpu};
 use crate::sprites::{Variant, render_layer};
+use crate::{GpuRenderer, KEYS};
 
 const SPECIES: [&str; 6] = ["shiba", "munchkin", "fold", "owl", "chick", "duck"];
 
@@ -129,6 +131,42 @@ pub fn run(out: &Path) -> Result<String, String> {
         report,
         "\n（「以下」：等畫面傳回來的時間也算進去了，實際更少。）"
     );
+
+    // What pets actually send: most frames come from the cache.
+    let _ = writeln!(report, "\n實際使用（模擬，100% 大小）：");
+    let model = std::sync::Arc::new(model);
+    let gpu: &'static Gpu = Box::leak(Box::new(gpu));
+    for (label, walking, secs) in [("閒著的寵物", false, 60.0), ("一直走路的寵物", true, 20.0)]
+    {
+        let Some(mut r) = GpuRenderer::new(gpu, std::sync::Arc::clone(&model), 1.0, 0.33, 0) else {
+            continue;
+        };
+        let mut anim = Animator::new(7, 0.33, 0.35);
+        anim.pops = false;
+        anim.walking = walking;
+        let (mut t, mut frames) = (0.0f32, 0u32);
+        let started = Instant::now();
+        while t < secs {
+            let mut fps = anim.fps(false);
+            if r.busy() {
+                fps = fps.max(30);
+            }
+            let dt = 1.0 / fps as f32;
+            anim.step(dt);
+            t += dt;
+            r.render(&anim.params(), anim.expression);
+            r.finish();
+            frames += 1;
+        }
+        let busy = started.elapsed().as_secs_f64();
+        let sent = r.frames_sent() as f64 / f64::from(secs);
+        let _ = writeln!(
+            report,
+            "  {label}：每秒 {:.1} 幀，其中 {sent:.1} 幀交給 GPU；GPU 約忙 {:.1}%（上限）",
+            f64::from(frames) / f64::from(secs),
+            busy / f64::from(secs) * 100.0
+        );
+    }
     std::fs::write(out.join("report.txt"), &report).map_err(|e| format!("report: {e}"))?;
     Ok(report)
 }

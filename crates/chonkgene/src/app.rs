@@ -1009,7 +1009,7 @@ fn spawn(
     let seed = save.id.wrapping_mul(0x9E37_79B9_7F4A_7C15) ^ (t * 1000.0) as u64;
     Ok(Pet {
         mind: Mind::new(species, save.personality(), save.affinity()),
-        anim: Animator::new(seed, save.chonk, species.waddle()),
+        anim: Animator::new(seed, save.chonk, species.waddle()).with_pops(!renderer.is_gpu()),
         species,
         window,
         presenter,
@@ -1663,10 +1663,11 @@ impl ApplicationHandler<UserEvent> for App {
             *presenting += p.draw(ctx.shared, world.now);
             *drawing += started.elapsed();
             *frames += 1;
-            // A pet blending between poses on the GPU needs frames to
-            // show it, even when its animation is otherwise at rest.
+            // A pet blending between poses on the GPU, or with a frame on
+            // its way, needs frames to show it, even when its animation is
+            // otherwise at rest.
             let mut fps = p.anim.fps(p.moving());
-            if p.renderer.blending() {
+            if p.renderer.busy() {
                 fps = fps.max(30);
             }
             p.next = now + Duration::from_secs_f64(1.0 / f64::from(fps));

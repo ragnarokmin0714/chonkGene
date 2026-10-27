@@ -122,6 +122,9 @@ pub struct Animator {
     pub sway: f32,
     /// The way the pet wants to face; the shown facing turns towards it.
     pub facing: f32,
+    /// Pop into a new pose to hide the cut: frames cut from pre-rendered
+    /// sprites need it; frames drawn on the GPU blend instead.
+    pub pops: bool,
     turn: f32,
     /// Species gait, 0.0 (trots) – 1.0 (waddles).
     waddle: f32,
@@ -162,6 +165,7 @@ impl Animator {
             pace: 1.0,
             sway: 0.0,
             facing: 1.0,
+            pops: true,
             turn: 1.0,
             waddle: waddle.clamp(0.0, 1.0),
             stride: 0.0,
@@ -171,6 +175,12 @@ impl Animator {
             pressed: false,
             gesture: None,
         }
+    }
+
+    /// The same animator, popping into new poses or not (see `pops`).
+    pub fn with_pops(mut self, pops: bool) -> Self {
+        self.pops = pops;
+        self
     }
 
     pub fn set_chonk(&mut self, chonk: f32) {
@@ -259,8 +269,10 @@ impl Animator {
             Act::Rest | Act::StepA | Act::StepB => return,
         };
         self.gesture = Some((act, self.t, self.t + secs));
-        // A pop hides the cut to the new pose.
-        self.body.kick(0.8);
+        // A pop hides the cut to the new pose, where poses cut.
+        if self.pops {
+            self.body.kick(0.8);
+        }
         self.body.target = match act {
             Act::Yawn => -0.14,
             Act::Stretch => 0.06,

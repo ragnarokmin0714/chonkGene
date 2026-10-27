@@ -126,10 +126,12 @@ impl Renderer {
         }
     }
 
-    /// Wait for every sprite (tests, benchmarks, screenshots).
+    /// Wait for every sprite, or for the GPU frame on its way (tests,
+    /// benchmarks, screenshots).
     pub fn finish(&mut self) {
-        if let Self::Sprites(r) = self {
-            r.finish();
+        match self {
+            Self::Sprites(r) => r.finish(),
+            Self::Gpu(r) => r.finish(),
         }
     }
 
@@ -150,12 +152,12 @@ impl Renderer {
         }
     }
 
-    /// Is the pet moving between poses, so frames should keep coming
-    /// (30 fps) even if its animation is otherwise at rest?
-    pub fn blending(&self) -> bool {
+    /// Should frames keep coming (30 fps) even if the animation is
+    /// otherwise at rest: a blend between poses, or a GPU frame on its way?
+    pub fn busy(&self) -> bool {
         match self {
             Self::Sprites(_) => false,
-            Self::Gpu(r) => r.blending(),
+            Self::Gpu(r) => r.busy(),
         }
     }
 

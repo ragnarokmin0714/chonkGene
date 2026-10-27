@@ -324,9 +324,8 @@ pub fn zone_at(
     let (o, d) = (cam.origin(x, y), cam.fwd);
     let pet = |p: V3| frame.pet_space(p, cam.anchor, cam.fwd);
     let k = frame.stretch();
-    // The bounding sphere, grown as in pet.wgsl.
-    let center = scene.center + v3(0.0, frame.lift / PPU, 0.0);
-    let radius = scene.radius * 1.5;
+    // The bounding sphere, moved by the frame (as for pet.wgsl).
+    let (center, radius) = frame.bound(scene.center, scene.radius, cam.anchor, cam.fwd);
     let oc = o - center;
     let b = oc.dot(d);
     let disc = b * b - (oc.dot(oc) - radius * radius);

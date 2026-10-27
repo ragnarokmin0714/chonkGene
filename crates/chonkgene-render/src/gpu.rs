@@ -10,6 +10,9 @@
 //! Frames are read back into a [`Pixmap`]: the pet windows stay the same
 //! layered/ARGB windows, and no GPU surface ever has to be transparent.
 
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+
 use chonkgene_rig::math::V3;
 use chonkgene_rig::sdf::Shape;
 use chonkgene_rig::{Look, Scene};
@@ -62,6 +65,42 @@ impl Frame {
         } + anchor
     }
 
+    /// Posed-pet space → world: where the frame puts a point of the pet.
+    fn world_space(self, p: V3, anchor: V3, fwd: V3) -> V3 {
+        let sx = 1.0 + self.squash;
+        let sy = (1.0 - self.squash) * (1.0 + 0.015 * self.breath);
+        let q = p - anchor;
+        let q = V3 {
+            x: q.x * sx,
+            y: q.y * sy,
+            z: q.z * sx,
+        };
+        let (s, c) = self.lean.to_radians().sin_cos();
+        let cross = V3 {
+            x: fwd.y * q.z - fwd.z * q.y,
+            y: fwd.z * q.x - fwd.x * q.z,
+            z: fwd.x * q.y - fwd.y * q.x,
+        };
+        let q = q * c + cross * s + fwd * (fwd.dot(q) * (1.0 - c));
+        q + anchor
+            + V3 {
+                x: 0.0,
+                y: self.lift / crate::raymarch::PPU,
+                z: 0.0,
+            }
+    }
+
+    /// The sphere around the pet once the frame has moved it: the pose's
+    /// sphere carried along and grown by the most the squash stretches.
+    pub(crate) fn bound(self, center: V3, radius: f32, anchor: V3, fwd: V3) -> (V3, f32) {
+        let sx = (1.0 + self.squash).abs();
+        let sy = ((1.0 - self.squash) * (1.0 + 0.015 * self.breath)).abs();
+        (
+            self.world_space(center, anchor, fwd),
+            radius * sx.max(sy) * 1.01,
+        )
+    }
+
     /// How much `pet_space` stretches distances at most.
     pub(crate) fn stretch(self) -> f32 {
         (1.0 + self.squash).min((1.0 - self.squash) * (1.0 + 0.015 * self.breath))
@@ -98,6 +137,8 @@ pub struct Canvas {
     bind_edges: wgpu::BindGroup,
     part_cap: usize,
     mark_cap: usize,
+    /// Set while a frame is on its way; turns true when it can be read.
+    pending: Option<Arc<AtomicBool>>,
 }
 
 type Vec4 = [f32; 4];
@@ -243,6 +284,7 @@ impl Gpu {
             bind_edges,
             part_cap: PARTS,
             mark_cap: MARKS,
+            pending: None,
         }
     }
 
@@ -308,8 +350,8 @@ impl Gpu {
         (centre, edges)
     }
 
-    /// Draw `scene` into `out` (the canvas's size, premultiplied RGBA).
-    /// `shadow`: draw the contact shadow (not for a part drawn on its own).
+    /// Draw `scene` into `out` (the canvas's size, premultiplied RGBA),
+    /// waiting for it. `shadow`: draw the contact shadow.
     pub fn render(
         &self,
         canvas: &mut Canvas,
@@ -318,8 +360,22 @@ impl Gpu {
         shadow: bool,
         out: &mut Pixmap,
     ) -> Result<(), String> {
-        if out.width() != canvas.w || out.height() != canvas.h {
-            return Err("canvas and pixmap sizes differ".into());
+        self.submit(canvas, scene, frame, shadow)?;
+        self.collect(canvas, out, true)?;
+        Ok(())
+    }
+
+    /// Start drawing `scene` on `canvas` without waiting; [`Gpu::collect`]
+    /// picks the picture up. A canvas draws one frame at a time.
+    pub fn submit(
+        &self,
+        canvas: &mut Canvas,
+        scene: &Scene,
+        frame: &Frame,
+        shadow: bool,
+    ) -> Result<(), String> {
+        if canvas.pending.is_some() {
+            return Err("a frame is already on its way".into());
         }
         let (parts, marks) = pack(scene);
         if parts.len() / PART_VECS > canvas.part_cap || marks.len() / MARK_VECS > canvas.mark_cap {
@@ -397,12 +453,54 @@ impl Gpu {
             canvas.output.size(),
         );
         self.queue.submit([enc.finish()]);
-        let slice = canvas.readback.slice(..);
-        slice.map_async(wgpu::MapMode::Read, |_| {});
-        self.device
-            .poll(wgpu::PollType::wait_indefinitely())
-            .map_err(|e| format!("GPU: {e}"))?;
+        let arrived = Arc::new(AtomicBool::new(false));
+        let flag = Arc::clone(&arrived);
+        canvas
+            .readback
+            .slice(..)
+            .map_async(wgpu::MapMode::Read, move |r| {
+                flag.store(r.is_ok(), Ordering::Release);
+            });
+        canvas.pending = Some(arrived);
+        Ok(())
+    }
+
+    /// Is a frame on its way to `canvas`?
+    pub fn pending(&self, canvas: &Canvas) -> bool {
+        canvas.pending.is_some()
+    }
+
+    /// Copy the frame on its way into `out` if it has arrived (`wait`: wait
+    /// for it). True if `out` now holds it.
+    pub fn collect(
+        &self,
+        canvas: &mut Canvas,
+        out: &mut Pixmap,
+        wait: bool,
+    ) -> Result<bool, String> {
+        let Some(arrived) = canvas.pending.clone() else {
+            return Ok(false);
+        };
+        if out.width() != canvas.w || out.height() != canvas.h {
+            return Err("canvas and pixmap sizes differ".into());
+        }
+        let poll = if wait {
+            wgpu::PollType::wait_indefinitely()
+        } else {
+            wgpu::PollType::Poll
+        };
+        self.device.poll(poll).map_err(|e| format!("GPU: {e}"))?;
+        if !arrived.load(Ordering::Acquire) {
+            if wait {
+                // Waited and it still failed to map: drop the frame.
+                canvas.pending = None;
+                return Err("GPU readback failed".into());
+            }
+            return Ok(false);
+        }
+        canvas.pending = None;
         {
+            let slice = canvas.readback.slice(..);
             let data = slice
                 .get_mapped_range()
                 .map_err(|e| format!("GPU readback: {e}"))?;
@@ -416,7 +514,7 @@ impl Gpu {
             }
         }
         canvas.readback.unmap();
-        Ok(())
+        Ok(true)
     }
 }
 
@@ -493,7 +591,10 @@ fn uniforms(scene: &Scene, cam: &Camera, frame: &Frame, shadow: bool, n: usize) 
         v4(cam.up, 0.0),
         v4(cam.fwd, 0.0),
         v4(cam.anchor, n as f32),
-        v4(scene.center, scene.radius),
+        {
+            let (c, r) = frame.bound(scene.center, scene.radius, cam.anchor, cam.fwd);
+            v4(c, r)
+        },
         [
             index(eyes),
             index(mouth),
