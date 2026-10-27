@@ -105,37 +105,55 @@ pub fn run(out: &Path) -> Result<String, String> {
         let mut canvas = gpu.canvas(scale);
         let (w, h) = canvas.size();
         let mut pm = Pixmap::new(w, h).ok_or("pixmap")?;
-        let mut times = Vec::new();
+        let (mut times, mut gpu_times) = (Vec::new(), Vec::new());
         for i in 0..60 {
             let t = (i as f32 / 30.0 * std::f32::consts::PI).sin() * 0.5 + 0.5;
             let pose = walk.blend(&turned, t);
             let scene = Scene::posed(&model, 0, 0.33, &pose, Look::Open, Layer::All);
-            let started = Instant::now();
+            let (started, before) = (Instant::now(), canvas.gpu_seconds());
             gpu.render(&mut canvas, &scene, &Frame::default(), true, &mut pm)?;
             times.push(started.elapsed());
+            gpu_times.push(Duration::from_secs_f64(canvas.gpu_seconds() - before));
         }
         // The first frames include warming up the driver.
         times.drain(..5);
+        gpu_times.drain(..5);
         times.sort();
+        gpu_times.sort();
         let median = times[times.len() / 2];
+        let gpu_median = gpu_times[gpu_times.len() / 2];
+        let measured = if gpu.times_frames() {
+            format!("，其中 GPU 實際畫 {}", ms(gpu_median))
+        } else {
+            String::new()
+        };
+        let busy = if gpu.times_frames() {
+            gpu_median
+        } else {
+            median
+        };
         let _ = writeln!(
             report,
-            "  {:.0}%（{w}×{h}）：中位數 {}，最快 {}；一隻持續動作（30 fps）約佔這張顯示卡 {:.1}% 以下",
+            "  {:.0}%（{w}×{h}）：中位數 {}{measured}；一隻持續動作（30 fps）約佔這張顯示卡 {:.1}%",
             scale * 100.0,
             ms(median),
-            ms(times[0]),
-            median.as_secs_f64() * 30.0 * 100.0
+            busy.as_secs_f64() * 30.0 * 100.0
         );
     }
-    let _ = writeln!(
-        report,
-        "\n（「以下」：等畫面傳回來的時間也算進去了，實際更少。）"
-    );
+    if !gpu.times_frames() {
+        let _ = writeln!(
+            report,
+            "\n（這張卡不能計時：「約佔」把等畫面傳回來的時間也算進去了，實際更少。）"
+        );
+    }
 
-    // What pets actually send: most frames come from the cache.
-    let _ = writeln!(report, "\n實際使用（模擬，100% 大小）：");
+    // What pets actually send: most frames come from the cache. Without
+    // the budget, to see what they would ask for.
+    let _ = writeln!(report, "\n實際使用（模擬，100% 大小，不設上限）：");
     let model = std::sync::Arc::new(model);
     let gpu: &'static Gpu = Box::leak(Box::new(gpu));
+    let budget = gpu.budget();
+    gpu.set_budget(1.0);
     for (label, walking, secs) in [("閒著的寵物", false, 60.0), ("一直走路的寵物", true, 20.0)]
     {
         let Some(mut r) = GpuRenderer::new(gpu, std::sync::Arc::clone(&model), 1.0, 0.33, 0) else {
@@ -160,13 +178,29 @@ pub fn run(out: &Path) -> Result<String, String> {
         }
         let busy = started.elapsed().as_secs_f64();
         let sent = r.frames_sent() as f64 / f64::from(secs);
+        let share = if gpu.times_frames() {
+            format!(
+                "GPU 實際忙 {:.1}%",
+                r.gpu_seconds() / f64::from(secs) * 100.0
+            )
+        } else {
+            format!(
+                "GPU 約忙 {:.1}%（上限，這張卡不能計時）",
+                busy / f64::from(secs) * 100.0
+            )
+        };
         let _ = writeln!(
             report,
-            "  {label}：每秒 {:.1} 幀，其中 {sent:.1} 幀交給 GPU；GPU 約忙 {:.1}%（上限）",
+            "  {label}：每秒 {:.1} 幀，其中 {sent:.1} 幀交給 GPU；{share}",
             f64::from(frames) / f64::from(secs),
-            busy / f64::from(secs) * 100.0
         );
     }
+    gpu.set_budget(budget);
+    let _ = writeln!(
+        report,
+        "\n寵物的 GPU 用量上限：{:.0}%（超過時動作的幀數會自動降低）",
+        budget * 100.0
+    );
     std::fs::write(out.join("report.txt"), &report).map_err(|e| format!("report: {e}"))?;
     Ok(report)
 }

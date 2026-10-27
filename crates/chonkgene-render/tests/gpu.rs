@@ -53,7 +53,14 @@ fn gpu_matches_cpu_for_every_pose_and_face() {
 fn renderer() -> Option<chonkgene_render::Renderer> {
     use std::sync::{Arc, OnceLock};
     static GPU: OnceLock<Option<Gpu>> = OnceLock::new();
-    let gpu = GPU.get_or_init(|| Gpu::new().ok()).as_ref()?;
+    let gpu = GPU
+        .get_or_init(|| {
+            let gpu = Gpu::new().ok()?;
+            // No budget: the tests wait for every frame anyway.
+            gpu.set_budget(1.0);
+            Some(gpu)
+        })
+        .as_ref()?;
     let model = Arc::new(builtin::load("shiba").unwrap());
     chonkgene_render::Renderer::gpu(gpu, model, 1.0, 0.33, 0)
 }
@@ -212,4 +219,40 @@ fn a_hop_leaves_the_shadow_on_the_floor() {
     let (a, b) = (floor_shade(&down), floor_shade(&up));
     assert!(b > 0, "the shadow is still on the floor");
     assert!(b < a, "and fainter: {b} vs {a}");
+}
+
+/// Over the GPU budget, frames wait instead of piling onto the GPU: with a
+/// 1% budget a pet moving all the time sends only a few frames a second.
+#[test]
+fn the_gpu_budget_holds_back_frames() {
+    use std::sync::Arc;
+    use std::time::{Duration, Instant};
+    let Ok(gpu) = Gpu::new() else {
+        eprintln!("skipped: no GPU");
+        return;
+    };
+    // Its own GPU, so the budget does not slow the other tests.
+    let gpu: &'static Gpu = Box::leak(Box::new(gpu));
+    gpu.set_budget(0.01);
+    let model = Arc::new(builtin::load("shiba").unwrap());
+    let mut r = chonkgene_render::GpuRenderer::new(gpu, model, 1.0, 0.33, 0).unwrap();
+    let started = Instant::now();
+    let mut i = 0;
+    while started.elapsed() < Duration::from_millis(1000) {
+        // A different squash every call: nothing comes from the cache.
+        let p = PoseParams {
+            squash: 0.1 + (i % 7) as f32 * 0.01,
+            ..at(i as f32 / 60.0)
+        };
+        r.render(&p, Expression::Neutral);
+        std::thread::sleep(Duration::from_millis(16));
+        i += 1;
+    }
+    // 1% of a second is 10 ms: a burst of 50 ms saved up and a few more.
+    assert!(
+        r.frames_sent() <= 12,
+        "{} frames in a second",
+        r.frames_sent()
+    );
+    assert!(r.frames_sent() >= 1);
 }

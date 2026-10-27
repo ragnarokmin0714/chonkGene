@@ -212,6 +212,11 @@ impl GpuRenderer {
         self.sent
     }
 
+    /// GPU seconds its frames took, as measured by the GPU (0 if it cannot).
+    pub fn gpu_seconds(&self) -> f64 {
+        self.canvas.gpu_seconds()
+    }
+
     /// Blending between poses, or a frame still on its way: frames should
     /// keep coming even if the animation is otherwise at rest.
     pub fn busy(&self) -> bool {
@@ -355,7 +360,7 @@ impl GpuRenderer {
             self.wanted = Some((drawn, key));
         }
         if self.unsent && self.pending.is_none() {
-            self.send();
+            self.send(false);
         }
         self.want_breath = breath;
         self.sync_breath();
@@ -394,8 +399,9 @@ impl GpuRenderer {
         self.breathed = self.breath;
     }
 
-    /// Send the wanted picture to the GPU.
-    fn send(&mut self) {
+    /// Send the wanted picture to the GPU, if the budget allows (`force`:
+    /// regardless).
+    fn send(&mut self, force: bool) {
         let Some((drawn, key)) = self.wanted.clone() else {
             return;
         };
@@ -408,11 +414,19 @@ impl GpuRenderer {
             drawn.look,
             Layer::All,
         );
-        match self
-            .gpu
-            .submit(&mut self.canvas, &scene, &drawn.frame, true)
-        {
-            Ok(()) => {
+        let sent = if force {
+            self.gpu
+                .submit(&mut self.canvas, &scene, &drawn.frame, true)
+                .map(|()| true)
+        } else {
+            self.gpu
+                .try_submit(&mut self.canvas, &scene, &drawn.frame, true)
+        };
+        match sent {
+            // Over the GPU budget: try again on a later call (the frame
+            // rate drops instead of the GPU share rising).
+            Ok(false) => {}
+            Ok(true) => {
                 self.sent += 1;
                 self.pending = Some(Pending {
                     seq: self.seq,
@@ -461,7 +475,7 @@ impl GpuRenderer {
     pub fn finish(&mut self) {
         self.collect(true);
         if self.unsent {
-            self.send();
+            self.send(true);
             self.collect(true);
         }
         self.sync_breath();

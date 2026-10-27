@@ -10,8 +10,9 @@
 //! Frames are read back into a [`Pixmap`]: the pet windows stay the same
 //! layered/ARGB windows, and no GPU surface ever has to be transparent.
 
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
+use std::time::Instant;
 
 use chonkgene_rig::math::V3;
 use chonkgene_rig::sdf::Shape;
@@ -107,6 +108,39 @@ impl Frame {
     }
 }
 
+/// The share of GPU time pets may use unless `CHONKGENE_GPU_BUDGET` (a
+/// percentage) says otherwise.
+const DEFAULT_BUDGET: f32 = 0.10;
+/// GPU seconds the budget may save up for a burst (a few frames at once).
+const BURST: f32 = 0.05;
+/// A frame's GPU time before it has been measured, at 100% (Roger's UHD
+/// 770 took ~4 ms of drawing; err high), scaled by area.
+const GUESS: f32 = 0.005;
+const GUESS_PIXELS: f32 = 227.0 * 201.0;
+
+/// Keeps the pets' share of GPU time at or under `share` (PLAN §5): GPU
+/// time builds up at `share` seconds a second, and every frame sent spends
+/// what it is expected to cost; a frame it cannot pay for waits.
+struct Budget {
+    share: f32,
+    saved: f32,
+    at: Instant,
+}
+
+impl Budget {
+    fn try_spend(&mut self, cost: f32) -> bool {
+        let now = Instant::now();
+        let secs = (now - self.at).as_secs_f32();
+        self.at = now;
+        self.saved = (self.saved + secs * self.share).min(BURST);
+        if self.share < 1.0 && self.saved < cost {
+            return false;
+        }
+        self.saved -= cost;
+        true
+    }
+}
+
 /// The device and the two pipelines, shared by every pet.
 pub struct Gpu {
     device: wgpu::Device,
@@ -117,6 +151,9 @@ pub struct Gpu {
     edges: wgpu::RenderPipeline,
     name: String,
     software: bool,
+    /// Nanoseconds a GPU timestamp tick, if the GPU can time its passes.
+    tick_ns: Option<f32>,
+    budget: Mutex<Budget>,
 }
 
 /// One pet's render targets and buffers.
@@ -139,6 +176,14 @@ pub struct Canvas {
     mark_cap: usize,
     /// Set while a frame is on its way; turns true when it can be read.
     pending: Option<Arc<AtomicBool>>,
+    /// Timing the two passes, when the GPU can: timestamps land in the
+    /// readback buffer after the picture.
+    timer: Option<(wgpu::QuerySet, wgpu::Buffer)>,
+    /// Expected GPU seconds a frame, what the frame on its way was charged,
+    /// and all GPU seconds measured so far.
+    cost: f32,
+    charged: f32,
+    measured: f64,
 }
 
 type Vec4 = [f32; 4];
@@ -161,9 +206,17 @@ impl Gpu {
         let info = adapter.get_info();
         let name = format!("{} ({:?}, {:?})", info.name, info.backend, info.device_type);
         let software = info.device_type == wgpu::DeviceType::Cpu;
-        let (device, queue) =
-            pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor::default()))
-                .map_err(|e| format!("GPU device: {e}"))?;
+        let features = adapter.features() & wgpu::Features::TIMESTAMP_QUERY;
+        let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
+            required_features: features,
+            ..Default::default()
+        }))
+        .map_err(|e| format!("GPU device: {e}"))?;
+        let tick_ns = (!features.is_empty()).then(|| queue.get_timestamp_period());
+        let share = std::env::var("CHONKGENE_GPU_BUDGET")
+            .ok()
+            .and_then(|v| v.parse::<f32>().ok())
+            .map_or(DEFAULT_BUDGET, |pct| (pct / 100.0).clamp(0.01, 1.0));
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("pet"),
             source: wgpu::ShaderSource::Wgsl(include_str!("pet.wgsl").into()),
@@ -200,6 +253,12 @@ impl Gpu {
             edges,
             name,
             software,
+            tick_ns,
+            budget: Mutex::new(Budget {
+                share,
+                saved: BURST,
+                at: Instant::now(),
+            }),
         })
     }
 
@@ -212,6 +271,22 @@ impl Gpu {
     /// frames would cost more than the pre-rendered sprites then.
     pub fn is_software(&self) -> bool {
         self.software
+    }
+
+    /// Can the GPU time its frames (else costs are guesses)?
+    pub fn times_frames(&self) -> bool {
+        self.tick_ns.is_some()
+    }
+
+    /// The share of GPU time pets may use (1.0: no limit).
+    pub fn set_budget(&self, share: f32) {
+        if let Ok(mut b) = self.budget.lock() {
+            b.share = share.clamp(0.01, 1.0);
+        }
+    }
+
+    pub fn budget(&self) -> f32 {
+        self.budget.lock().map_or(DEFAULT_BUDGET, |b| b.share)
     }
 
     fn texture(
@@ -253,8 +328,20 @@ impl Gpu {
         );
         let output_view = output.create_view(&Default::default());
         let row = (w * 4).next_multiple_of(wgpu::COPY_BYTES_PER_ROW_ALIGNMENT);
+        let timer = self.tick_ns.map(|_| {
+            let set = self.device.create_query_set(&wgpu::QuerySetDescriptor {
+                label: None,
+                ty: wgpu::QueryType::Timestamp,
+                count: 2,
+            });
+            let resolve = self.buffer(
+                16,
+                wgpu::BufferUsages::QUERY_RESOLVE | wgpu::BufferUsages::COPY_SRC,
+            );
+            (set, resolve)
+        });
         let readback = self.buffer(
-            u64::from(row * h),
+            u64::from(row * h) + if timer.is_some() { 16 } else { 0 },
             wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
         );
         let uniforms = self.buffer(
@@ -285,6 +372,10 @@ impl Gpu {
             part_cap: PARTS,
             mark_cap: MARKS,
             pending: None,
+            timer,
+            cost: GUESS * (w * h) as f32 / GUESS_PIXELS,
+            charged: 0.0,
+            measured: 0.0,
         }
     }
 
@@ -365,6 +456,27 @@ impl Gpu {
         Ok(())
     }
 
+    /// [`Gpu::submit`] if the budget can pay for the frame now; false (and
+    /// nothing sent) if it has to wait.
+    pub fn try_submit(
+        &self,
+        canvas: &mut Canvas,
+        scene: &Scene,
+        frame: &Frame,
+        shadow: bool,
+    ) -> Result<bool, String> {
+        let paid = self
+            .budget
+            .lock()
+            .map_or(true, |mut b| b.try_spend(canvas.cost));
+        if !paid {
+            return Ok(false);
+        }
+        canvas.charged = canvas.cost;
+        self.submit(canvas, scene, frame, shadow)?;
+        Ok(true)
+    }
+
     /// Start drawing `scene` on `canvas` without waiting; [`Gpu::collect`]
     /// picks the picture up. A canvas draws one frame at a time.
     pub fn submit(
@@ -419,21 +531,35 @@ impl Gpu {
             })
         };
         let mut enc = self.device.create_command_encoder(&Default::default());
-        for (pipeline, bind, targets) in [
+        // The first pass stamps its start, the second its end.
+        let stamp = |begin: Option<u32>, end: Option<u32>| {
+            canvas
+                .timer
+                .as_ref()
+                .map(|(set, _)| wgpu::RenderPassTimestampWrites {
+                    query_set: set,
+                    beginning_of_pass_write_index: begin,
+                    end_of_pass_write_index: end,
+                })
+        };
+        for (pipeline, bind, targets, timestamp_writes) in [
             (
                 &self.centre,
                 &canvas.bind_centre,
                 vec![attach(&canvas.centre_color), attach(&canvas.centre_depth)],
+                stamp(Some(0), None),
             ),
             (
                 &self.edges,
                 &canvas.bind_edges,
                 vec![attach(&canvas.output_view)],
+                stamp(None, Some(1)),
             ),
         ] {
             let mut pass = enc.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: None,
                 color_attachments: &targets,
+                timestamp_writes,
                 ..Default::default()
             });
             pass.set_pipeline(pipeline);
@@ -452,6 +578,16 @@ impl Gpu {
             },
             canvas.output.size(),
         );
+        if let Some((set, resolve)) = &canvas.timer {
+            enc.resolve_query_set(set, 0..2, resolve, 0);
+            enc.copy_buffer_to_buffer(
+                resolve,
+                0,
+                &canvas.readback,
+                u64::from(canvas.row * canvas.h),
+                16,
+            );
+        }
         self.queue.submit([enc.finish()]);
         let arrived = Arc::new(AtomicBool::new(false));
         let flag = Arc::clone(&arrived);
@@ -512,6 +648,25 @@ impl Gpu {
             for (y, dst) in out.data_mut().chunks_exact_mut(w).take(h).enumerate() {
                 dst.copy_from_slice(&data[y * row..y * row + w]);
             }
+            if let Some(ns) = self.tick_ns {
+                // What the frame really cost: settle the budget and learn.
+                let at = row * h;
+                let stamp = |i: usize| {
+                    let b: [u8; 8] = data[at + i * 8..at + i * 8 + 8]
+                        .try_into()
+                        .unwrap_or([0; 8]);
+                    u64::from_le_bytes(b)
+                };
+                let ticks = stamp(1).saturating_sub(stamp(0));
+                let secs = (ticks as f64 * f64::from(ns) * 1e-9) as f32;
+                if secs > 0.0 && secs < 1.0 {
+                    canvas.measured += f64::from(secs);
+                    canvas.cost = 0.8 * canvas.cost + 0.2 * secs;
+                    if let Ok(mut b) = self.budget.lock() {
+                        b.saved += canvas.charged - secs;
+                    }
+                }
+            }
         }
         canvas.readback.unmap();
         Ok(true)
@@ -521,6 +676,12 @@ impl Gpu {
 impl Canvas {
     pub fn size(&self) -> (u32, u32) {
         (self.w, self.h)
+    }
+
+    /// GPU seconds measured on this canvas so far (0 if the GPU cannot
+    /// time its frames).
+    pub fn gpu_seconds(&self) -> f64 {
+        self.measured
     }
 }
 

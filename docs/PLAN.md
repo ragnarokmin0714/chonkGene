@@ -643,6 +643,8 @@ First numbers from Roger's machine (Intel UHD Graphics 770, 2026-10-27, issue #1
 - with frames that blend, the pops that hid cuts between sprites are off (`Animator::pops`);
 - the bounding sphere follows the frame exactly instead of being 1.5 times too big.
 
+A **GPU budget** caps the pets' share of GPU time (default 10%, `CHONKGENE_GPU_BUDGET=<percent>` to change): GPU time builds up at that share and every frame sent spends what it is expected to cost; a frame it cannot pay for waits, so motion drops frames rather than the GPU share rising. Costs are measured with GPU timestamps where the GPU supports them (Intel and llvmpipe do) and guessed high otherwise.
+
 `--gpu-check` now also simulates an idle and a walking pet. On this machine (llvmpipe, for proportions) an idle pet sends about 3.4 frames a second to the GPU and a walking one about 1.8; the rest come from the cache. At Roger's measured cost that is roughly 1% of a UHD 770 per idle pet; his next report gives the real figure.
 
 ### Desktop terrain
