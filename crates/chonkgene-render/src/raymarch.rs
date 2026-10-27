@@ -12,7 +12,7 @@ use chonkgene_rig::{FLOOR, Layer, Scene, ZONES};
 
 /// Canvas in world units, and pixels per unit at 100%.
 const UNITS: (f32, f32) = (3.9, 3.45);
-const PPU: f32 = 58.0;
+pub(crate) const PPU: f32 = 58.0;
 /// Pixels below the floor line at 100%, for the contact shadow.
 pub const FLOOR_PX: f32 = 8.0;
 /// Camera tilt: looking slightly down at the pet.
@@ -53,20 +53,20 @@ pub fn pixel_size(scale: f32) -> (u32, u32) {
     )
 }
 
-struct Camera {
-    w: u32,
-    h: u32,
-    ppu: f32,
-    floor_px: f32,
-    right: V3,
-    up: V3,
-    fwd: V3,
+pub(crate) struct Camera {
+    pub w: u32,
+    pub h: u32,
+    pub ppu: f32,
+    pub floor_px: f32,
+    pub right: V3,
+    pub up: V3,
+    pub fwd: V3,
     /// The floor point under the pet; it sits on the floor line.
-    anchor: V3,
+    pub anchor: V3,
 }
 
 impl Camera {
-    fn new(scale: f32) -> Self {
+    pub fn new(scale: f32) -> Self {
         let (w, h) = pixel_size(scale);
         let (s, c) = TILT_DEG.to_radians().sin_cos();
         Self {
@@ -88,7 +88,7 @@ impl Camera {
         self.anchor + self.right * u + self.up * v - self.fwd * 20.0
     }
 
-    fn project(&self, p: V3) -> (f32, f32) {
+    pub fn project(&self, p: V3) -> (f32, f32) {
         let rel = p - self.anchor;
         (
             rel.dot(self.right) * self.ppu + self.w as f32 / 2.0,

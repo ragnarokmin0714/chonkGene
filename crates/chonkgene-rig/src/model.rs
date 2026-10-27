@@ -272,10 +272,11 @@ struct PoseFile {
     /// Settle the whole pet onto the floor after posing it.
     #[serde(default = "yes")]
     rest: bool,
-    /// Keyed by bone name; `"<bone>.mirror"` moves only the mirrored copies
-    /// of that bone's parts (one paw waving), in place of the plain move.
-    /// Mirrored copies mirror their move, so a move is written for the +x
-    /// side and both sides do the same thing.
+    /// Keyed by bone name. Mirrored copies of parts move rigidly with their
+    /// bone, unless `"<bone>.mirror"` gives them a move of their own (one
+    /// paw waving, both wings up). That move is written as if for the +x
+    /// side and applied mirrored, about the mirrored pivot, so the same
+    /// values on both make the two sides do the same thing.
     #[serde(default)]
     bones: HashMap<String, MoveFile>,
 }
@@ -352,8 +353,9 @@ pub struct Move {
     pub shift: V3,
     pub rot: V3,
     pub scale: V3,
-    /// Lower the bone's parts onto the floor.
-    pub rest: bool,
+    /// How far to lower the bone's parts onto the floor: 1.0 all the way,
+    /// 0.0 not at all (in between while blending poses).
+    pub rest: f32,
 }
 
 impl Default for Move {
@@ -362,7 +364,33 @@ impl Default for Move {
             shift: V3::ZERO,
             rot: V3::ZERO,
             scale: V3::ONE,
-            rest: false,
+            rest: 0.0,
+        }
+    }
+}
+
+impl Move {
+    /// The same move seen in a mirror (across x = 0).
+    pub fn mirrored(&self) -> Move {
+        Move {
+            shift: self.shift.flip_x(),
+            rot: V3 {
+                x: self.rot.x,
+                y: -self.rot.y,
+                z: -self.rot.z,
+            },
+            ..*self
+        }
+    }
+
+    /// `t` of the way from `self` to `to`. Turns blend per axis, which is
+    /// fine for the modest angles between poses.
+    pub fn blend(&self, to: &Move, t: f32) -> Move {
+        Move {
+            shift: self.shift.lerp(to.shift, t),
+            rot: self.rot.lerp(to.rot, t),
+            scale: self.scale.lerp(to.scale, t),
+            rest: self.rest + (to.rest - self.rest) * t,
         }
     }
 }
@@ -378,6 +406,47 @@ pub struct Pose {
 }
 
 impl Pose {
+    /// `t` of the way from `self` to `to` (same model): every bone moves
+    /// smoothly, so a pet can turn its head or lie down instead of cutting
+    /// between poses.
+    pub fn blend(&self, to: &Pose, t: f32) -> Pose {
+        let n = self.bones.len().max(to.bones.len());
+        let twins = (0..n)
+            .map(|i| {
+                let either = self.twins.get(i).copied().flatten().is_some()
+                    || to.twins.get(i).copied().flatten().is_some();
+                either.then(|| self.bone(i, true).blend(&to.bone(i, true), t))
+            })
+            .collect();
+        Pose {
+            root: self.root.blend(&to.root, t),
+            bones: (0..n)
+                .map(|i| self.bone(i, false).blend(&to.bone(i, false), t))
+                .collect(),
+            twins,
+        }
+    }
+
+    /// The pose seen in a mirror. Blending a pose into its mirror turns the
+    /// pet round in 3D, through facing you. Paired limbs swap sides; a part
+    /// off to one side (a Shiba's tail) stays on its own side, as on a real
+    /// pet turning round.
+    pub fn mirrored(&self) -> Pose {
+        let n = self.bones.len();
+        let (bones, twins) = (0..n)
+            .map(|i| match self.twins.get(i).copied().flatten() {
+                // Each side takes the other's move, as written for +x.
+                Some(twin) => (twin, Some(self.bones[i])),
+                None => (self.bones[i].mirrored(), None),
+            })
+            .unzip();
+        Pose {
+            root: self.root.mirrored(),
+            bones,
+            twins,
+        }
+    }
+
     /// The move for a part on bone `bone`; `mirrored` for its mirrored copy.
     pub fn bone(&self, bone: usize, mirrored: bool) -> Move {
         let twin = if mirrored {
@@ -584,11 +653,11 @@ fn resolve(file: ModelFile, shared: HashMap<String, PoseFile>) -> Result<Model, 
             shift: V3::from_array(m.shift),
             rot: V3::from_array(m.rot),
             scale: V3::from_array(m.scale),
-            rest: m.rest,
+            rest: if m.rest { 1.0 } else { 0.0 },
         };
         let mut pose = Pose {
             root: Move {
-                rest: pf.rest,
+                rest: if pf.rest { 1.0 } else { 0.0 },
                 ..mv(&pf.root)
             },
             bones: vec![Move::default(); bones.len()],

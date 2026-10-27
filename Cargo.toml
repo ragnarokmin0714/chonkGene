@@ -24,6 +24,10 @@ memory-stats = "1.2.0"
 ron = "0.12.2"
 serde = { version = "1.0.229", features = ["derive"] }
 tiny-skia = "0.12.0"
+bytemuck = "1.25.2"
+pollster = "1.0.1"
+# Real-time 3D pets (chonkgene-render's gpu module).
+wgpu = "30.0.1"
 # X11 only: v1 runs under XWayland on Wayland (PLAN §0), and pet windows have
 # no decorations, so the Wayland and Adwaita-frame code is left out.
 winit = { version = "0.30.13", default-features = false, features = ["rwh_06", "x11"] }

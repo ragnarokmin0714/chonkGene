@@ -2,7 +2,7 @@
 
 use crate::face;
 use crate::math::{M3, V3, mix, smoothstep, v3};
-use crate::model::{Look, Model, Move, PoseId, rgb};
+use crate::model::{Look, Model, Pose, PoseId, rgb};
 use crate::sdf::{Shape, blend_weight, smin};
 
 /// Body value (0.0 標準 … 1.0 麻糬) → how much wider the belly gets.
@@ -79,6 +79,21 @@ impl Placed {
     }
 }
 
+/// A placed part, read-only.
+pub struct PartView<'s> {
+    pub shape: Shape,
+    /// World → part frame: `a · p + b`.
+    pub a: M3,
+    pub b: V3,
+    /// Multiplies the part's distances to keep them safe to march.
+    pub k: f32,
+    pub blend: f32,
+    /// World-space sphere holding the part.
+    pub center: V3,
+    pub radius: f32,
+    pub part: &'s crate::Part,
+}
+
 /// What the surface is like at a point.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Surface {
@@ -116,12 +131,23 @@ impl<'m> Scene<'m> {
         look: Look,
         layer: Layer,
     ) -> Self {
+        Self::posed(model, coat, chonk, model.pose(pose), look, layer)
+    }
+
+    /// A scene in any pose, such as one blended between two of the model's.
+    pub fn posed(
+        model: &'m Model,
+        coat: usize,
+        chonk: f32,
+        pose: &Pose,
+        look: Look,
+        layer: Layer,
+    ) -> Self {
         let palette = model.coats[coat.min(model.coats.len() - 1)]
             .colors
             .iter()
             .map(|c| rgb(*c))
             .collect();
-        let pose = model.pose(pose);
         let fat = fat(chonk);
         let mut placed = Vec::new();
         let (mut face, mut mouth) = (0, None);
@@ -136,25 +162,19 @@ impl<'m> Scene<'m> {
                 if flip && !part.mirror {
                     continue;
                 }
-                let bone = pose.bone(part.bone, flip);
-                // Mirrored copies do the mirror image of the move.
-                let bone = if flip {
-                    Move {
-                        shift: bone.shift.flip_x(),
-                        rot: v3(bone.rot.x, -bone.rot.y, -bone.rot.z),
-                        ..bone
-                    }
-                } else {
-                    bone
-                };
-                // A mirrored copy turns about the mirrored pivot (a wing's
-                // shoulder on its own side).
-                let pivot = if flip {
-                    model.pivots[part.bone].flip_x()
-                } else {
-                    model.pivots[part.bone]
-                };
+                // A mirrored copy moves rigidly with its bone (both ears turn
+                // with the head), unless the pose gives its side a move of
+                // its own: that one is written for the +x side, so it is
+                // mirrored, about the mirrored pivot (a wing's own shoulder).
                 let twin = flip && pose.twins.get(part.bone).is_some_and(Option::is_some);
+                let (bone, pivot) = if twin {
+                    (
+                        pose.bone(part.bone, true).mirrored(),
+                        model.pivots[part.bone].flip_x(),
+                    )
+                } else {
+                    (pose.bone(part.bone, false), model.pivots[part.bone])
+                };
                 let rb = M3::euler(bone.rot);
                 let fx = if flip { -1.0 } else { 1.0 };
                 let local = |p: V3| {
@@ -211,15 +231,24 @@ impl<'m> Scene<'m> {
         // Settle what the pose asks to rest on the floor: bones first (tucked
         // paws), then the whole pet.
         for (bi, mv) in pose.bones.iter().enumerate() {
-            if mv.rest {
-                settle(placed.iter_mut().filter(|p| p.bone == bi && !p.twin));
+            if mv.rest > 0.0 {
+                settle(
+                    placed.iter_mut().filter(|p| p.bone == bi && !p.twin),
+                    mv.rest,
+                );
             }
-            if pose.twins[bi].is_some_and(|m| m.rest) {
-                settle(placed.iter_mut().filter(|p| p.bone == bi && p.twin));
+            if let Some(m) = pose
+                .twins
+                .get(bi)
+                .copied()
+                .flatten()
+                .filter(|m| m.rest > 0.0)
+            {
+                settle(placed.iter_mut().filter(|p| p.bone == bi && p.twin), m.rest);
             }
         }
-        if pose.root.rest {
-            settle(placed.iter_mut());
+        if pose.root.rest > 0.0 {
+            settle(placed.iter_mut(), pose.root.rest);
         }
         let tail_root =
             tail_bone
@@ -410,8 +439,34 @@ impl<'m> Scene<'m> {
         self.palette[slot]
     }
 
-    pub(crate) fn look(&self) -> Look {
+    /// The coat's colours, one per slot.
+    pub fn palette(&self) -> &[V3] {
+        &self.palette
+    }
+
+    pub fn look(&self) -> Look {
         self.look
+    }
+
+    /// Every placed part in blend order, as a ray-marcher elsewhere (the
+    /// GPU) needs it.
+    pub fn parts(&self) -> impl Iterator<Item = PartView<'_>> {
+        self.placed.iter().map(|p| PartView {
+            shape: p.shape,
+            a: p.a,
+            b: p.b,
+            k: p.k,
+            blend: p.blend,
+            center: p.center,
+            radius: p.radius,
+            part: &self.model.parts[p.part],
+        })
+    }
+
+    /// Indices into [`Scene::parts`] of the parts the eyes and the mouth
+    /// are painted on, if this layer holds them.
+    pub fn face_parts(&self) -> (Option<usize>, Option<usize>) {
+        (self.face, self.mouth)
     }
 
     /// Where the snot bubble hangs, in world space.
@@ -420,13 +475,14 @@ impl<'m> Scene<'m> {
     }
 }
 
-/// Lift (or drop) parts together until the lowest touches the floor.
-fn settle<'a>(parts: impl Iterator<Item = &'a mut Placed>) {
+/// Lift (or drop) parts together until the lowest touches the floor, or
+/// `amount` of the way there.
+fn settle<'a>(parts: impl Iterator<Item = &'a mut Placed>, amount: f32) {
     let mut parts: Vec<&mut Placed> = parts.collect();
     let low = parts.iter().map(|p| p.lowest()).fold(f32::MAX, f32::min);
     if low < f32::MAX {
         for p in &mut parts {
-            p.lift(crate::FLOOR - low);
+            p.lift((crate::FLOOR - low) * amount);
         }
     }
 }

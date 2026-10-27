@@ -7,6 +7,7 @@
 //! frame costs a blit or two (PLAN §5).
 
 pub mod bubble;
+pub mod gpu;
 pub mod menu;
 pub mod raymarch;
 pub mod sprites;

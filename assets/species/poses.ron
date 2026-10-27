@@ -3,6 +3,9 @@
 // `root` moves the whole pet about the origin: roll (z), then pitch (x), then
 // turn (y), in degrees, then `shift`. Each bone scales and turns about its
 // pivot (the model's `pivots`), then shifts. Bones a species lacks are skipped.
+// Mirrored parts (both ears, both legs) move rigidly with their bone; a
+// `"<bone>.mirror"` move is the mirrored side's own, written as if for the +x
+// side, so the same values on both make a symmetric pose (both wings up).
 // The camera is fixed, so a pose's root turn is also its viewing angle.
 //
 // Proportions differ by species, so heights are never written here: a bone
@@ -58,6 +61,7 @@
             "back_legs": (rot: (24, 0, 0)),
             "back_legs.mirror": (rot: (-28, 0, 0)),
             "wings": (rot: (0, 0, 12)),
+            "wings.mirror": (rot: (0, 0, 12)),
         },
     ),
     "walk_b": (
@@ -69,6 +73,7 @@
             "back_legs": (rot: (-28, 0, 0)),
             "back_legs.mirror": (rot: (24, 0, 0)),
             "wings": (rot: (0, 0, 12)),
+            "wings.mirror": (rot: (0, 0, 12)),
         },
     ),
     // Idle glances: the head turns and tilts, the body stays put.
@@ -91,7 +96,9 @@
             "body": (scale: (0.94, 1.1, 0.94)),
             "head": (rot: (-12, 0, 0), shift: (0, 0.1, -0.04)),
             "front_legs": (rot: (-160, 0, 22), shift: (0.1, 0.42, 0.06)),
+            "front_legs.mirror": (rot: (-160, 0, 22), shift: (0.1, 0.42, 0.06)),
             "wings": (rot: (0, 0, 125)),
+            "wings.mirror": (rot: (0, 0, 125)),
         },
     ),
     // Sitting tall, head tipped back.
