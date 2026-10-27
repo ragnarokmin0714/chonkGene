@@ -32,17 +32,17 @@ fn gpu_matches_cpu_for_every_pose_and_face() {
             .unwrap();
         let s = render_layer(&model, variant, key, Layer::All, threads);
         let cpu = Pixmap::from_vec(s.rgba, IntSize::from_wh(s.width, s.height).unwrap()).unwrap();
-        // The GPU samples every pixel five times, the CPU only edges, so
-        // the plush noise differs a little inside; faces must not.
+        // Both trace pixel centres and add rays at edges; only rounding
+        // (and the GPU keeping the centre sample in 8 bits) differs.
         let off = pm
             .data()
             .as_chunks::<4>()
             .0
             .iter()
             .zip(cpu.data().as_chunks::<4>().0)
-            .filter(|(p, q)| p.iter().zip(q.iter()).any(|(a, b)| a.abs_diff(*b) > 24))
+            .filter(|(p, q)| p.iter().zip(q.iter()).any(|(a, b)| a.abs_diff(*b) > 8))
             .count();
         let share = off as f64 / f64::from(w * h);
-        assert!(share < 0.002, "{key:?}: {off} pixels differ");
+        assert!(share < 0.001, "{key:?}: {off} pixels differ");
     }
 }

@@ -93,10 +93,20 @@ fn main() {
     }
 
     times.sort();
+    let median = times[times.len() / 2];
     println!(
-        "frame (render + readback) at {w}×{h}: median {:?}, fastest {:?}",
-        times[times.len() / 2],
+        "frame (render + readback) at {w}×{h}: median {median:?}, fastest {:?}",
         times[0]
+    );
+    // Upper bound: the wait for the readback counts as GPU time here.
+    println!(
+        "one pet moving at 30 fps ≈ {:.0}% of this GPU at most{}",
+        median.as_secs_f64() * 30.0 * 100.0,
+        if gpu.is_software() {
+            " (a software GPU: the app would use pre-rendered sprites instead)"
+        } else {
+            ""
+        }
     );
 }
 

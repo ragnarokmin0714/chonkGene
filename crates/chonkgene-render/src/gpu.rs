@@ -35,27 +35,34 @@ pub struct Frame {
     pub lift: f32,
 }
 
-/// The device and the pipeline, shared by every pet.
+/// The device and the two pipelines, shared by every pet.
 pub struct Gpu {
     device: wgpu::Device,
     queue: wgpu::Queue,
-    pipeline: wgpu::RenderPipeline,
+    /// Pass 1: one ray through every pixel centre, with where it hit.
+    centre: wgpu::RenderPipeline,
+    /// Pass 2: more rays only where the silhouette or the depth jumps.
+    edges: wgpu::RenderPipeline,
     name: String,
+    software: bool,
 }
 
-/// One pet's render target and buffers.
+/// One pet's render targets and buffers.
 pub struct Canvas {
     scale: f32,
     w: u32,
     h: u32,
-    texture: wgpu::Texture,
-    view: wgpu::TextureView,
+    centre_color: wgpu::TextureView,
+    centre_depth: wgpu::TextureView,
+    output: wgpu::Texture,
+    output_view: wgpu::TextureView,
     readback: wgpu::Buffer,
     row: u32,
     uniforms: wgpu::Buffer,
     parts: wgpu::Buffer,
     marks: wgpu::Buffer,
-    bind: wgpu::BindGroup,
+    bind_centre: wgpu::BindGroup,
+    bind_edges: wgpu::BindGroup,
     part_cap: usize,
     mark_cap: usize,
 }
@@ -66,19 +73,20 @@ fn v4(v: V3, w: f32) -> Vec4 {
     [v.x, v.y, v.z, w]
 }
 
+const COLOR: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8Unorm;
+const DEPTH: wgpu::TextureFormat = wgpu::TextureFormat::R32Float;
+
 impl Gpu {
-    /// Find a GPU (a software one counts) and build the pipeline.
+    /// Find a GPU (a software one counts) and build the pipelines.
     pub fn new() -> Result<Self, String> {
         let instance =
             wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle_from_env());
         let adapter =
             pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions::default()))
                 .map_err(|e| format!("no GPU: {e}"))?;
-        let name = format!(
-            "{} ({:?})",
-            adapter.get_info().name,
-            adapter.get_info().backend
-        );
+        let info = adapter.get_info();
+        let name = format!("{} ({:?}, {:?})", info.name, info.backend, info.device_type);
+        let software = info.device_type == wgpu::DeviceType::Cpu;
         let (device, queue) =
             pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor::default()))
                 .map_err(|e| format!("GPU device: {e}"))?;
@@ -86,32 +94,38 @@ impl Gpu {
             label: Some("pet"),
             source: wgpu::ShaderSource::Wgsl(include_str!("pet.wgsl").into()),
         });
-        let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("pet"),
-            layout: None,
-            vertex: wgpu::VertexState {
-                module: &shader,
-                entry_point: Some("vs"),
-                compilation_options: Default::default(),
-                buffers: &[],
-            },
-            fragment: Some(wgpu::FragmentState {
-                module: &shader,
-                entry_point: Some("fs"),
-                compilation_options: Default::default(),
-                targets: &[Some(wgpu::TextureFormat::Rgba8Unorm.into())],
-            }),
-            primitive: Default::default(),
-            depth_stencil: None,
-            multisample: Default::default(),
-            multiview_mask: None,
-            cache: None,
-        });
+        let pipeline = |entry: &str, targets: &[Option<wgpu::ColorTargetState>]| {
+            device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label: Some(entry),
+                layout: None,
+                vertex: wgpu::VertexState {
+                    module: &shader,
+                    entry_point: Some("vs"),
+                    compilation_options: Default::default(),
+                    buffers: &[],
+                },
+                fragment: Some(wgpu::FragmentState {
+                    module: &shader,
+                    entry_point: Some(entry),
+                    compilation_options: Default::default(),
+                    targets,
+                }),
+                primitive: Default::default(),
+                depth_stencil: None,
+                multisample: Default::default(),
+                multiview_mask: None,
+                cache: None,
+            })
+        };
+        let centre = pipeline("fs_centre", &[Some(COLOR.into()), Some(DEPTH.into())]);
+        let edges = pipeline("fs_edges", &[Some(COLOR.into())]);
         Ok(Self {
             device,
             queue,
-            pipeline,
+            centre,
+            edges,
             name,
+            software,
         })
     }
 
@@ -120,12 +134,21 @@ impl Gpu {
         &self.name
     }
 
-    /// A canvas for a pet drawn at `scale` (1.0 = 100%).
-    pub fn canvas(&self, scale: f32) -> Canvas {
-        let cam = Camera::new(scale);
-        let (w, h) = (cam.w, cam.h);
-        let texture = self.device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("pet"),
+    /// Is this the CPU pretending to be a GPU (WARP, llvmpipe)? Real-time
+    /// frames would cost more than the pre-rendered sprites then.
+    pub fn is_software(&self) -> bool {
+        self.software
+    }
+
+    fn texture(
+        &self,
+        w: u32,
+        h: u32,
+        format: wgpu::TextureFormat,
+        usage: wgpu::TextureUsages,
+    ) -> wgpu::Texture {
+        self.device.create_texture(&wgpu::TextureDescriptor {
+            label: None,
             size: wgpu::Extent3d {
                 width: w,
                 height: h,
@@ -134,11 +157,27 @@ impl Gpu {
             mip_level_count: 1,
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::Rgba8Unorm,
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+            format,
+            usage,
             view_formats: &[],
-        });
-        let view = texture.create_view(&Default::default());
+        })
+    }
+
+    /// A canvas for a pet drawn at `scale` (1.0 = 100%).
+    pub fn canvas(&self, scale: f32) -> Canvas {
+        let cam = Camera::new(scale);
+        let (w, h) = (cam.w, cam.h);
+        let between = wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING;
+        let view = |t: wgpu::Texture| t.create_view(&Default::default());
+        let centre_color = view(self.texture(w, h, COLOR, between));
+        let centre_depth = view(self.texture(w, h, DEPTH, between));
+        let output = self.texture(
+            w,
+            h,
+            COLOR,
+            wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+        );
+        let output_view = output.create_view(&Default::default());
         let row = (w * 4).next_multiple_of(wgpu::COPY_BYTES_PER_ROW_ALIGNMENT);
         let readback = self.buffer(
             u64::from(row * h),
@@ -152,19 +191,23 @@ impl Gpu {
             self.storage(PARTS * PART_VECS),
             self.storage(MARKS * MARK_VECS),
         );
-        let bind = self.bind(&uniforms, &parts, &marks);
+        let (bind_centre, bind_edges) =
+            self.binds(&uniforms, &parts, &marks, &centre_color, &centre_depth);
         Canvas {
             scale,
             w,
             h,
-            texture,
-            view,
+            centre_color,
+            centre_depth,
+            output,
+            output_view,
             readback,
             row,
             uniforms,
             parts,
             marks,
-            bind,
+            bind_centre,
+            bind_edges,
             part_cap: PARTS,
             mark_cap: MARKS,
         }
@@ -186,30 +229,50 @@ impl Gpu {
         )
     }
 
-    fn bind(
+    /// Bind groups for the two passes; the second also reads the first's
+    /// results.
+    fn binds(
         &self,
         uniforms: &wgpu::Buffer,
         parts: &wgpu::Buffer,
         marks: &wgpu::Buffer,
-    ) -> wgpu::BindGroup {
-        self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+        color: &wgpu::TextureView,
+        depth: &wgpu::TextureView,
+    ) -> (wgpu::BindGroup, wgpu::BindGroup) {
+        let buffers = [
+            wgpu::BindGroupEntry {
+                binding: 0,
+                resource: uniforms.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 1,
+                resource: parts.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 2,
+                resource: marks.as_entire_binding(),
+            },
+        ];
+        let centre = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: None,
-            layout: &self.pipeline.get_bind_group_layout(0),
-            entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: uniforms.as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: parts.as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 2,
-                    resource: marks.as_entire_binding(),
-                },
-            ],
-        })
+            layout: &self.centre.get_bind_group_layout(0),
+            entries: &buffers,
+        });
+        let mut all = buffers.to_vec();
+        all.push(wgpu::BindGroupEntry {
+            binding: 3,
+            resource: wgpu::BindingResource::TextureView(color),
+        });
+        all.push(wgpu::BindGroupEntry {
+            binding: 4,
+            resource: wgpu::BindingResource::TextureView(depth),
+        });
+        let edges = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: None,
+            layout: &self.edges.get_bind_group_layout(0),
+            entries: &all,
+        });
+        (centre, edges)
     }
 
     /// Draw `scene` into `out` (the canvas's size, premultiplied RGBA).
@@ -222,6 +285,9 @@ impl Gpu {
         shadow: bool,
         out: &mut Pixmap,
     ) -> Result<(), String> {
+        if out.width() != canvas.w || out.height() != canvas.h {
+            return Err("canvas and pixmap sizes differ".into());
+        }
         let (parts, marks) = pack(scene);
         if parts.len() / PART_VECS > canvas.part_cap || marks.len() / MARK_VECS > canvas.mark_cap {
             canvas.part_cap = canvas
@@ -234,7 +300,13 @@ impl Gpu {
                 .next_power_of_two();
             canvas.parts = self.storage(canvas.part_cap * PART_VECS);
             canvas.marks = self.storage(canvas.mark_cap * MARK_VECS);
-            canvas.bind = self.bind(&canvas.uniforms, &canvas.parts, &canvas.marks);
+            (canvas.bind_centre, canvas.bind_edges) = self.binds(
+                &canvas.uniforms,
+                &canvas.parts,
+                &canvas.marks,
+                &canvas.centre_color,
+                &canvas.centre_depth,
+            );
         }
         let cam = Camera::new(canvas.scale);
         let uniforms = uniforms(scene, &cam, frame, shadow, parts.len() / PART_VECS);
@@ -246,27 +318,41 @@ impl Gpu {
             self.queue
                 .write_buffer(&canvas.marks, 0, bytemuck::cast_slice(&marks));
         }
+        let attach = |view| {
+            Some(wgpu::RenderPassColorAttachment {
+                view,
+                depth_slice: None,
+                resolve_target: None,
+                ops: wgpu::Operations {
+                    load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
+                    store: wgpu::StoreOp::Store,
+                },
+            })
+        };
         let mut enc = self.device.create_command_encoder(&Default::default());
-        {
+        for (pipeline, bind, targets) in [
+            (
+                &self.centre,
+                &canvas.bind_centre,
+                vec![attach(&canvas.centre_color), attach(&canvas.centre_depth)],
+            ),
+            (
+                &self.edges,
+                &canvas.bind_edges,
+                vec![attach(&canvas.output_view)],
+            ),
+        ] {
             let mut pass = enc.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: None,
-                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: &canvas.view,
-                    depth_slice: None,
-                    resolve_target: None,
-                    ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
-                        store: wgpu::StoreOp::Store,
-                    },
-                })],
+                color_attachments: &targets,
                 ..Default::default()
             });
-            pass.set_pipeline(&self.pipeline);
-            pass.set_bind_group(0, &canvas.bind, &[]);
+            pass.set_pipeline(pipeline);
+            pass.set_bind_group(0, bind, &[]);
             pass.draw(0..3, 0..1);
         }
         enc.copy_texture_to_buffer(
-            canvas.texture.as_image_copy(),
+            canvas.output.as_image_copy(),
             wgpu::TexelCopyBufferInfo {
                 buffer: &canvas.readback,
                 layout: wgpu::TexelCopyBufferLayout {
@@ -275,7 +361,7 @@ impl Gpu {
                     rows_per_image: None,
                 },
             },
-            canvas.texture.size(),
+            canvas.output.size(),
         );
         self.queue.submit([enc.finish()]);
         let slice = canvas.readback.slice(..);
@@ -292,9 +378,6 @@ impl Gpu {
                 canvas.h as usize,
                 canvas.row as usize,
             );
-            if out.width() != canvas.w || out.height() != canvas.h {
-                return Err("canvas and pixmap sizes differ".into());
-            }
             for (y, dst) in out.data_mut().chunks_exact_mut(w).take(h).enumerate() {
                 dst.copy_from_slice(&data[y * row..y * row + w]);
             }

@@ -478,8 +478,14 @@ fn trace(o: vec3<f32>, d: vec3<f32>) -> f32 {
     return -1.0;
 }
 
-// One premultiplied sample through canvas point (x, y).
-fn shade(x: f32, y: f32) -> vec4<f32> {
+// One premultiplied sample, and where the ray hit (−1 for a miss).
+struct Sample {
+    rgba: vec4<f32>,
+    t: f32,
+}
+
+// One sample through canvas point (x, y).
+fn shade(x: f32, y: f32) -> Sample {
     let w = u.cam.x;
     let h = u.cam.y;
     let ppu = u.cam.z;
@@ -490,16 +496,16 @@ fn shade(x: f32, y: f32) -> vec4<f32> {
     let t = trace(o, d);
     if t < 0.0 {
         if u.iris.w < 0.5 {
-            return vec4<f32>(0.0);
+            return Sample(vec4<f32>(0.0), -1.0);
         }
         // A soft contact shadow where the ray meets the floor.
         let tf = (FLOOR - o.y) / d.y;
         let g = o + d * tf;
         if length(g - u.bound.xyz) - u.bound.w > 0.6 + u.frame.w {
-            return vec4<f32>(0.0);
+            return Sample(vec4<f32>(0.0), -1.0);
         }
         let a = 0.20 * (1.0 - ss(0.0, 0.55, distance_at(g)));
-        return vec4<f32>(vec3<f32>(0.25, 0.18, 0.22) * a, a);
+        return Sample(vec4<f32>(vec3<f32>(0.25, 0.18, 0.22) * a, a), -1.0);
     }
     let p = o + d * t;
     let pp = to_pet(p);
@@ -521,25 +527,68 @@ fn shade(x: f32, y: f32) -> vec4<f32> {
     col += mix(vec3<f32>(1.0, 0.96, 0.92), alb, 0.3) * (fres * 0.28 * (0.5 + 0.5 * ao));
     let hv = normalize(l + v);
     col += vec3<f32>(surf.gloss * 0.55 * pow(max(dot(n, hv), 0.0), 40.0));
-    return vec4<f32>(clamp(col, vec3<f32>(0.0), vec3<f32>(1.0)), 1.0);
+    return Sample(vec4<f32>(clamp(col, vec3<f32>(0.0), vec3<f32>(1.0)), 1.0), t);
 }
 
-// Sub-pixel offsets: the CPU's rotated grid plus the centre.
-const SUBS = array<vec2<f32>, 5>(
-    vec2<f32>(0.0, 0.0),
+// ---- two passes, as on the CPU ---------------------------------------------------------
+//
+// Pass 1 traces one ray through every pixel centre and keeps where it hit.
+// Pass 2 adds four more rays only where the silhouette or the depth jumps
+// between neighbours: a few percent of the pixels.
+
+@group(0) @binding(3) var centre_color: texture_2d<f32>;
+@group(0) @binding(4) var centre_depth: texture_2d<f32>;
+
+struct Centre {
+    @location(0) color: vec4<f32>,
+    @location(1) depth: f32,
+}
+
+@fragment
+fn fs_centre(@builtin(position) pos: vec4<f32>) -> Centre {
+    let s = shade(pos.x, pos.y);
+    return Centre(s.rgba, s.t);
+}
+
+// Sub-pixel offsets for edge pixels: a rotated grid around the centre.
+const SUBS = array<vec2<f32>, 4>(
     vec2<f32>(-0.125, -0.375),
     vec2<f32>(0.375, -0.125),
     vec2<f32>(0.125, 0.375),
     vec2<f32>(-0.375, 0.125),
 );
 
+const NEIGHBOURS = array<vec2<i32>, 4>(
+    vec2<i32>(-1, 0),
+    vec2<i32>(1, 0),
+    vec2<i32>(0, -1),
+    vec2<i32>(0, 1),
+);
+
 @fragment
-fn fs(@builtin(position) pos: vec4<f32>) -> @location(0) vec4<f32> {
-    // Every pixel takes all five samples: a GPU has no cheap way to ask its
-    // neighbours whether it sits on an edge, and the extra rays are cheap.
-    var acc = vec4<f32>(0.0);
-    for (var i = 0; i < 5; i++) {
-        acc += shade(pos.x + SUBS[i].x, pos.y + SUBS[i].y);
+fn fs_edges(@builtin(position) pos: vec4<f32>) -> @location(0) vec4<f32> {
+    let at = vec2<i32>(pos.xy);
+    let size = vec2<i32>(textureDimensions(centre_depth));
+    let c = textureLoad(centre_color, at, 0);
+    let t = textureLoad(centre_depth, at, 0).r;
+    let hit = t >= 0.0;
+    var edge = false;
+    for (var i = 0; i < 4; i++) {
+        let n = at + NEIGHBOURS[i];
+        if any(n < vec2<i32>(0)) || any(n >= size) {
+            continue;
+        }
+        let nt = textureLoad(centre_depth, n, 0).r;
+        if (nt >= 0.0) != hit || (hit && abs(nt - t) > 0.15) {
+            edge = true;
+        }
+    }
+    if !edge {
+        return c;
+    }
+    var acc = c;
+    for (var i = 0; i < 4; i++) {
+        acc += shade(pos.x + SUBS[i].x, pos.y + SUBS[i].y).rgba;
     }
     acc /= 5.0;
     return vec4<f32>(min(acc.rgb, vec3<f32>(acc.a)), acc.a);
