@@ -629,6 +629,7 @@ pub fn run(data: Option<PathBuf>, pet: Option<u64>) -> Result<(), String> {
     let data = DataDir::locate(data).map_err(|e| format!("cannot find the data folder: {e}"))?;
     let ui = SettingsWindow::new().map_err(|e| e.to_string())?;
     let (st, _timers) = setup(&ui, data, pet)?;
+    let _repaints = repaint_when_shown(&ui);
     ui.run().map_err(|e| e.to_string())?;
     let mut st = st.borrow_mut();
     if st.settings_dirty {
@@ -640,6 +641,28 @@ pub fn run(data: Option<PathBuf>, pet: Option<u64>) -> Result<(), String> {
         st.send(Msg::Pet(p));
     }
     Ok(())
+}
+
+/// Repaint the whole window a few times just after it opens. On Windows the
+/// software renderer only redraws what changed, and the first frame can be
+/// drawn before the window is on screen and lost, leaving it black until
+/// something scrolled. (A resize or a restore after minimising already gets
+/// a full redraw from Slint.)
+fn repaint_when_shown(ui: &SettingsWindow) -> [Timer; 3] {
+    [100, 600, 1500].map(|ms| {
+        let ui = ui.as_weak();
+        let t = Timer::default();
+        t.start(
+            TimerMode::SingleShot,
+            Duration::from_millis(ms),
+            move || {
+                if let Some(ui) = ui.upgrade() {
+                    ui.set_repaint(ui.get_repaint().wrapping_add(1));
+                }
+            },
+        );
+        t
+    })
 }
 
 fn open_folder(path: &std::path::Path) {
@@ -664,6 +687,38 @@ mod tests {
         fn create_window_adapter(&self) -> Result<Rc<dyn WindowAdapter>, slint::PlatformError> {
             Ok(self.0.clone())
         }
+    }
+
+    /// Bumping `repaint` redraws the whole window, even when the renderer
+    /// otherwise redraws only what changed (see `repaint_when_shown`).
+    #[test]
+    fn a_repaint_redraws_the_whole_window() {
+        let window = MinimalSoftwareWindow::new(RepaintBufferType::ReusedBuffer);
+        slint::platform::set_platform(Box::new(Headless(window.clone()))).unwrap();
+        let (w, h) = (880u32, 620u32);
+        window.set_size(slint::PhysicalSize::new(w, h));
+        let dir = std::env::temp_dir().join(format!("chonkgene-repaint-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let data = DataDir::locate(Some(dir.clone())).unwrap();
+        let ui = SettingsWindow::new().unwrap();
+        let (_st, _timers) = setup(&ui, data, None).unwrap();
+        ui.show().unwrap();
+        let mut buf = vec![slint::Rgb8Pixel::default(); (w * h) as usize];
+        let mut draw = || {
+            let mut size = None;
+            window.request_redraw();
+            window.draw_if_needed(|renderer| {
+                let region = renderer.render(&mut buf, w as usize);
+                size = Some(region.bounding_box_size());
+            });
+            size.map_or((0, 0), |s| (s.width, s.height))
+        };
+        assert_eq!(draw(), (w, h), "the first frame is whole");
+        let (rw, rh) = draw();
+        assert!(rw * rh < w * h / 2, "nothing changed: {rw}×{rh}");
+        ui.set_repaint(ui.get_repaint() + 1);
+        assert_eq!(draw(), (w, h), "a repaint redraws everything");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     /// Renders every settings tab to PNG without a display:
