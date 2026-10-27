@@ -636,7 +636,7 @@ dependencies = [
 
 [[package]]
 name = "chonkgene"
-version = "0.5.0-beta.3"
+version = "0.5.0-beta.4"
 dependencies = [
  "chonkgene-core",
  "chonkgene-platform",
@@ -658,14 +658,14 @@ dependencies = [
 
 [[package]]
 name = "chonkgene-core"
-version = "0.5.0-beta.3"
+version = "0.5.0-beta.4"
 dependencies = [
  "fastrand",
 ]
 
 [[package]]
 name = "chonkgene-platform"
-version = "0.5.0-beta.3"
+version = "0.5.0-beta.4"
 dependencies = [
  "global-hotkey",
  "ksni",
@@ -679,7 +679,7 @@ dependencies = [
 
 [[package]]
 name = "chonkgene-render"
-version = "0.5.0-beta.3"
+version = "0.5.0-beta.4"
 dependencies = [
  "chonkgene-core",
  "chonkgene-rig",
@@ -689,7 +689,7 @@ dependencies = [
 
 [[package]]
 name = "chonkgene-rig"
-version = "0.5.0-beta.3"
+version = "0.5.0-beta.4"
 dependencies = [
  "ron",
  "serde",
