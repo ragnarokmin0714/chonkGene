@@ -618,6 +618,26 @@ Limits: the Shiba's curled tail and the cats' tails are mostly hidden while sitt
 
 **Status (2026-10-27, branch `feat/lively-motion`, version `0.5.0-beta.4`)**: built and tested headlessly (core motion tests, goldens for every new pose, cached frames match fresh ones); ran under Xvfb; within the §5 budget at 100% on this machine. Not yet seen on a real desktop.
 
+### Real-time 3D on the GPU
+
+Roger played beta 4 (2026-10-27): head turns, walking, lying down and above all turning round still looked unnatural, and the shadow was flat. All of it came from drawing with a few pre-rendered poses warped in 2D: they cannot turn in 3D, move between poses, or keep the shadow on the floor. He chose real-time 3D on the GPU, with the sprites kept for machines without one.
+
+| Moment | Sprites (beta 4) | GPU |
+|---|---|---|
+| Turning round | squash-flip of a flat picture | the pose blends into its mirror image: a 3D turn through facing you (0.3 s) |
+| Head turns, lying down, rolling over | a cut, hidden by a pop | every bone blends over 0.22–0.45 s |
+| Walking | two step pictures in turn | the legs swing from one step pose to the other |
+| Hops, squash, lean | the whole picture moves, shadow and all | the pet moves in 3D; the contact shadow stays on the floor, smaller and fainter |
+| Tail, waving | a tail sprite turned in 2D; the body rocks | the tail wags on its bone; the paw waves |
+
+How it is built:
+- `chonkgene-render`: `gpu` + `pet.wgsl` port the CPU ray-marcher (two passes: one ray per pixel, four more at edges), so GPU and sprites look alike (`tests/gpu.rs` compares every pose and face). `GpuRenderer` blends poses (`Pose::blend`, `Pose::mirrored`); `Renderer` picks it when `shared_gpu()` finds a real GPU, an integrated one included; otherwise `SpriteRenderer`. `CHONKGENE_RENDERER=sprites|gpu` overrides.
+- Frames that repeat (breathing in place, a steady walk's beats) are cached, so idle pets rarely use the GPU. The app keeps 30 fps while a blend runs.
+- Hit-testing traces one ray on the CPU through the same pose and frame.
+- `chonkgene --gpu-check` (also `--example gpu`) writes a report and sample frames next to the program: the adapter, GPU-vs-CPU difference and cost per frame at 100/150/200%.
+
+Open: real numbers from Roger's Windows machine. Each frame waits for its readback on the UI thread; if several moving pets stall it on an integrated GPU, submit all pets first and read back together, or read the previous frame back (one frame late).
+
 ### Phase 1: Shiba prototype (feel) — `v0.1.0`
 
 - The art pipeline (§3.3) works end to end for one Shiba, with placeholder art.
