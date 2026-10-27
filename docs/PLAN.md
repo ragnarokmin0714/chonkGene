@@ -447,7 +447,9 @@ Measured on a mid-range laptop **with the settings window closed**:
 |---|---|
 | poked, bouncing, lifted, thrown | 60 |
 | walking, normal actions | 30 |
-| breathing in place | 10 |
+| turning round, hopping, a visible wobble | 60 |
+| a tail wagging, waving | 30 |
+| breathing in place, glancing, stretching, yawning | 10 |
 | asleep | ≤ 5 |
 | hidden, full screen | 0 (only ~1 Hz state detection) |
 
@@ -492,6 +494,19 @@ The budget holds at 100% on this machine. If real machines or larger sizes miss 
 - A pet's nine sprites take about 0.3 s of CPU at 100%, on background threads; the pet appears when its first sprite lands. New coat, body or size re-renders in the background while the old sprites stay up.
 - Frames got cheaper than the 2D renderer: sprites are cropped to what they draw, and frames that only breathe copy one of six cached images.
 - Memory: about 1.6 MB of sprites per pet at 100% (four times that at 200%), plus up to six cached idle frames.
+
+**Lively motion (2026-10-27)**: same command and machine, 18 sprites plus a tail sprite per pose. The bench now runs each pet at the frame rate it asks for for two minutes, so it counts glances, wags and cached frames as they really happen:
+
+| Scale | Sprite, one thread | Idle pet | Walking pet | 6 pets (one walking, five idle) |
+|---|---|---|---|---|
+| 100% | 37 ms | 14.9 fps, 0.14% | 30 fps, 0.02% | **0.71%** of one core |
+| 150% | 80 ms | 0.30% | 0.05% | 1.53% |
+| 200% | 135 ms | 0.49% | 0.09% | 2.55% |
+
+- A filtered, turned blit of a sprite costs about 190 µs here (tiny-skia), so motion that changes every frame is what costs. Two things keep it down: a steady walk snaps to 12 beats a step (the tail wags once a step, in time) and each beat is drawn once and copied after; a wag at rest draws only the small tail over a cached tailless body.
+- What is left of an idle pet's cost is mostly the short wobble after each gesture's pop (60 fps for a moment).
+- Pixels to show: about 10 frames a second for an idle pet (beta 3: about 4) and 26 for a walking one. Under Xvfb, where uploading a frame is slow, 2 pets took 5.6% of a core against beta 3's 2.65%. Real desktops are owed (§0).
+- Sprites now drop their full-size image once cropped, so 18 sprites take about the memory 9 did.
 
 ---
 
@@ -579,7 +594,29 @@ Roger played beta 1 (2026-10-23) and found the pets not cute enough: not round, 
 | Costumes | the bones and sockets they will hang on | hats, scarves, bows (§1.6) |
 | Decorations | — | cushions, beds, bowls as their own small models |
 
-**Status (2026-10-23, branch `feat/3d-pets`, version `0.5.0-beta.3`)**: built and tested headlessly; beta 2 left afterimages behind moving pets (a cached idle frame copied the previous frame), fixed in beta 3; the app ran under Xvfb, where it also showed an event-loop busy spin present since beta 1 (fixed) (goldens, hit zones, the settings preview and adoption list); the frame budget is met (§5). Not yet seen on a real desktop. The tail no longer wags (it is part of each sprite); a separate tail layer can bring it back.
+**Status (2026-10-23, branch `feat/3d-pets`, version `0.5.0-beta.3`, superseded by beta 4 below)**: built and tested headlessly; beta 2 left afterimages behind moving pets (a cached idle frame copied the previous frame), fixed in beta 3; the app ran under Xvfb, where it also showed an event-loop busy spin present since beta 1 (fixed) (goldens, hit zones, the settings preview and adoption list); the frame budget is met (§5). Not yet seen on a real desktop. The tail no longer wags (it is part of each sprite); a separate tail layer can bring it back.
+
+### Lively motion — `v0.5.0-beta.4`
+
+Roger played beta 3 (2026-10-23): cuter, but walking, idling and poke reactions all felt too stiff. Beta 4 adds:
+
+| Moment | Before | Beta 4 |
+|---|---|---|
+| Walking | the sitting sprite sliding along, a small bob | two step poses turned the way it goes, a bounce and a rock onto the planted foot each step (chick and duck waddle most), a small squash on each footfall, the tail wagging in time |
+| Turning round | mirrored in one frame | squash-flip: squeezed thin and a little taller, mirrored, filled out, with a small hop |
+| Idle | breathing and blinking | every 5–12 s a glance left or right, a 伸懶腰 (both paws or wings up), a yawn (eyes squeezed, mouth an O, a head shake after) or a wave; short bursts of tail wagging; a wave hello on start |
+| Poking | a squash when the finger lets go | it squishes in while the finger is down and pops back into a stretch when let go; a poke in the bottom makes it jump; giggling rocks side to side; sulking flicks its tail and huffs |
+| Pats and snacks | the happy face | a double hop when it cheers up |
+
+How it is built:
+- New poses in `assets/species/poses.ron`: `walk_a`, `walk_b`, `look_left`, `look_right`, `stretch`, `yawn`, `wave`. A pose can move one side alone with `"<bone>.mirror"`, and mirrored copies now do the mirror image of a move (written for the +x side).
+- Tails live on a `tail` bone in every species (birds got one) and render as their own small sprite per pose, wagged in 2D about where they join the body, behind or in front of it as the pose has it.
+- `Animator` (chonkgene-core) gained the walk cycle, the turn, presses, hops, gestures and wag bursts; `PoseParams.act` picks the pose and `PoseParams.beat` marks frames that repeat.
+- `cargo run --release -p chonkgene-render --example motion -- <species> <dir>` renders the frames of each moment for checking motion without a desktop.
+
+Limits: the Shiba's curled tail and the cats' tails are mostly hidden while sitting facing you, so their wag shows when walking, sulking or rolling about. Each gesture is one held pose with a pop into and out of it, not a keyframed clip.
+
+**Status (2026-10-27, branch `feat/lively-motion`, version `0.5.0-beta.4`)**: built and tested headlessly (core motion tests, goldens for every new pose, cached frames match fresh ones); ran under Xvfb; within the §5 budget at 100% on this machine. Not yet seen on a real desktop.
 
 ### Phase 1: Shiba prototype (feel) — `v0.1.0`
 
