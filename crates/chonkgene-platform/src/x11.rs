@@ -9,10 +9,11 @@ use winit::window::Window;
 use x11rb::connection::{Connection, RequestConnection};
 use x11rb::image::{BitsPerPixel, Image, ImageOrder, ScanlinePad};
 use x11rb::protocol::Event;
+use x11rb::protocol::randr::ConnectionExt as _;
 use x11rb::protocol::screensaver::{self, ConnectionExt as _};
 use x11rb::protocol::shape::{self, ConnectionExt as _, SK, SO};
 use x11rb::protocol::xproto::{
-    AtomEnum, ClipOrdering, ConnectionExt as _, CreateGCAux, KeyButMask, Rectangle,
+    AtomEnum, ClipOrdering, ConnectionExt as _, CreateGCAux, KeyButMask, MapState, Rectangle,
 };
 use x11rb::rust_connection::RustConnection;
 
@@ -34,6 +35,20 @@ pub struct Shared {
     active_window: u32,
     wm_state: u32,
     fullscreen: u32,
+    terrain: TerrainAtoms,
+}
+
+/// Atoms for reading where windows are (PLAN §1.3).
+struct TerrainAtoms {
+    stacking: u32,
+    hidden: u32,
+    window_type: u32,
+    /// Window types pets may stand on.
+    standable: [u32; 3],
+    desktop: u32,
+    current_desktop: u32,
+    frame_extents: u32,
+    gtk_frame_extents: u32,
 }
 
 fn intern(conn: &RustConnection, name: &[u8]) -> u32 {
@@ -59,6 +74,20 @@ impl Shared {
         let active_window = intern(&conn, b"_NET_ACTIVE_WINDOW");
         let wm_state = intern(&conn, b"_NET_WM_STATE");
         let fullscreen = intern(&conn, b"_NET_WM_STATE_FULLSCREEN");
+        let terrain = TerrainAtoms {
+            stacking: intern(&conn, b"_NET_CLIENT_LIST_STACKING"),
+            hidden: intern(&conn, b"_NET_WM_STATE_HIDDEN"),
+            window_type: intern(&conn, b"_NET_WM_WINDOW_TYPE"),
+            standable: [
+                intern(&conn, b"_NET_WM_WINDOW_TYPE_NORMAL"),
+                intern(&conn, b"_NET_WM_WINDOW_TYPE_DIALOG"),
+                intern(&conn, b"_NET_WM_WINDOW_TYPE_UTILITY"),
+            ],
+            desktop: intern(&conn, b"_NET_WM_DESKTOP"),
+            current_desktop: intern(&conn, b"_NET_CURRENT_DESKTOP"),
+            frame_extents: intern(&conn, b"_NET_FRAME_EXTENTS"),
+            gtk_frame_extents: intern(&conn, b"_GTK_FRAME_EXTENTS"),
+        };
         Ok(Self {
             conn,
             root,
@@ -67,6 +96,7 @@ impl Shared {
             active_window,
             wm_state,
             fullscreen,
+            terrain,
         })
     }
 
@@ -104,6 +134,141 @@ impl Shared {
             .ok()?;
         let v: Vec<u32> = reply.value32()?.collect();
         (v.len() == 4).then(|| (v[0] as i32, v[1] as i32, v[2] as i32, v[3] as i32))
+    }
+
+    /// Every monitor's work area (RandR monitors cut to `_NET_WORKAREA`),
+    /// or the one work area when RandR has nothing to say.
+    pub fn work_areas(&self) -> Vec<(i32, i32, i32, i32)> {
+        let whole = self.work_area();
+        let monitors = self
+            .conn
+            .randr_get_monitors(self.root, true)
+            .ok()
+            .and_then(|c| c.reply().ok())
+            .map(|r| r.monitors)
+            .unwrap_or_default();
+        let mut areas: Vec<(i32, i32, i32, i32)> = monitors
+            .iter()
+            .map(|m| {
+                let r = (
+                    i32::from(m.x),
+                    i32::from(m.y),
+                    i32::from(m.width),
+                    i32::from(m.height),
+                );
+                whole.map_or(Some(r), |w| intersect(r, w))
+            })
+            .collect::<Option<Vec<_>>>()
+            .unwrap_or_default();
+        if areas.is_empty() {
+            areas.extend(whole);
+        }
+        areas
+    }
+
+    /// Windows on the current desktop that pets may stand on, front to
+    /// back, as they are seen (frame included, client-side shadows not).
+    /// `ours` are the pets' windows. Requests go out together and the
+    /// replies are read after, so a refresh costs about one round trip.
+    pub fn windows(&self, ours: &[u32]) -> Vec<crate::WinRect> {
+        let a = &self.terrain;
+        let prop32 = |win: u32, atom: u32, ty: AtomEnum, len: u32| {
+            self.conn.get_property(false, win, atom, ty, 0, len).ok()
+        };
+        let read = |c: Option<
+            x11rb::cookie::Cookie<'_, RustConnection, x11rb::protocol::xproto::GetPropertyReply>,
+        >|
+         -> Vec<u32> {
+            c.and_then(|c| c.reply().ok())
+                .and_then(|r| r.value32().map(Iterator::collect))
+                .unwrap_or_default()
+        };
+        let mut stacking = read(prop32(self.root, a.stacking, AtomEnum::WINDOW, 4096));
+        let managed = !stacking.is_empty();
+        if !managed {
+            // No EWMH window manager (a minimal one, or none): the server's
+            // own stacking order of top-level windows, bottom first.
+            stacking = self
+                .conn
+                .query_tree(self.root)
+                .ok()
+                .and_then(|c| c.reply().ok())
+                .map(|r| r.children)
+                .unwrap_or_default();
+        }
+        let current = read(prop32(self.root, a.current_desktop, AtomEnum::CARDINAL, 1))
+            .first()
+            .copied();
+        let wins: Vec<u32> = stacking
+            .into_iter()
+            .rev()
+            .filter(|w| !ours.contains(w))
+            .collect();
+        // Every request first…
+        let asked: Vec<_> = wins
+            .iter()
+            .map(|&w| {
+                (
+                    w,
+                    self.conn.get_window_attributes(w).ok(),
+                    prop32(w, self.wm_state, AtomEnum::ATOM, 32),
+                    prop32(w, a.window_type, AtomEnum::ATOM, 32),
+                    prop32(w, a.desktop, AtomEnum::CARDINAL, 1),
+                    self.conn.get_geometry(w).ok(),
+                    self.conn.translate_coordinates(w, self.root, 0, 0).ok(),
+                    prop32(w, a.frame_extents, AtomEnum::CARDINAL, 4),
+                    prop32(w, a.gtk_frame_extents, AtomEnum::CARDINAL, 4),
+                )
+            })
+            .collect();
+        // …then every reply.
+        let mut out = Vec::new();
+        for (w, attrs, state, kind, desktop, geometry, at, frame, gtk) in asked {
+            let attrs = attrs.and_then(|c| c.reply().ok());
+            // Unmanaged, override-redirect windows are menus and popups.
+            let viewable = attrs.as_ref().is_some_and(|r| {
+                r.map_state == MapState::VIEWABLE && (managed || !r.override_redirect)
+            });
+            let hidden = read(state).contains(&a.hidden);
+            let kind = read(kind);
+            let standable = kind.is_empty() || kind.iter().any(|k| a.standable.contains(k));
+            let desktop = read(desktop).first().copied();
+            let here = match (desktop, current) {
+                (Some(d), Some(c)) => d == c || d == u32::MAX,
+                _ => true,
+            };
+            let geometry = geometry.and_then(|c| c.reply().ok());
+            let at = at.and_then(|c| c.reply().ok());
+            let (frame, gtk) = (read(frame), read(gtk));
+            let (Some(g), Some(at)) = (geometry, at) else {
+                continue;
+            };
+            if !viewable || hidden || !standable || !here {
+                continue;
+            }
+            let (mut x, mut y) = (i32::from(at.dst_x), i32::from(at.dst_y));
+            let (mut wd, mut ht) = (i32::from(g.width), i32::from(g.height));
+            // Decorations drawn by the window manager count…
+            if let [l, r, t, b] = frame[..] {
+                let [l, r, t, b] = [l, r, t, b].map(|v| v as i32);
+                (x, y, wd, ht) = (x - l, y - t, wd + l + r, ht + t + b);
+            }
+            // …invisible client-side shadows do not.
+            if let [l, r, t, b] = gtk[..] {
+                let [l, r, t, b] = [l, r, t, b].map(|v| v as i32);
+                (x, y, wd, ht) = (x + l, y + t, wd - l - r, ht - t - b);
+            }
+            if wd > 0 && ht > 0 {
+                out.push(crate::WinRect {
+                    id: u64::from(w),
+                    x,
+                    y,
+                    w: wd,
+                    h: ht,
+                });
+            }
+        }
+        out
     }
 
     /// Global cursor position, polled (no input hooks, PLAN §6).
@@ -163,6 +328,13 @@ impl Shared {
             .and_then(|r| r.value32().map(|mut v| v.any(|a| a == self.fullscreen)))
             .unwrap_or(false)
     }
+}
+
+/// The overlap of two x, y, w, h rectangles.
+fn intersect(a: (i32, i32, i32, i32), b: (i32, i32, i32, i32)) -> Option<(i32, i32, i32, i32)> {
+    let (x0, y0) = (a.0.max(b.0), a.1.max(b.1));
+    let (x1, y1) = ((a.0 + a.2).min(b.0 + b.2), (a.1 + a.3).min(b.1 + b.3));
+    (x1 > x0 && y1 > y0).then_some((x0, y0, x1 - x0, y1 - y0))
 }
 
 pub struct Presenter {

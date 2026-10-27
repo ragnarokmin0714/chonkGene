@@ -27,6 +27,16 @@ use winit::dpi::{PhysicalPosition, PhysicalSize};
 use winit::event_loop::EventLoopBuilder;
 use winit::window::{Window, WindowAttributes, WindowLevel};
 
+/// A window pets may stand on, as seen on screen, in physical pixels.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct WinRect {
+    pub id: u64,
+    pub x: i32,
+    pub y: i32,
+    pub w: i32,
+    pub h: i32,
+}
+
 /// v1 speaks X11 on Linux, XWayland included (PLAN §0).
 pub fn configure_event_loop<T>(builder: &mut EventLoopBuilder<T>) {
     #[cfg(target_os = "linux")]

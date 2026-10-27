@@ -11,6 +11,7 @@ pub mod skit;
 pub mod sound;
 pub mod species;
 pub mod spring;
+pub mod terrain;
 pub mod tickle;
 
 /// Where a poke landed (PLAN §1.2).

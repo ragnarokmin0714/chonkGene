@@ -92,7 +92,8 @@ v1 has six species. A species only sets **default personality**; each individual
 - **Cursor curiosity**: when the cursor comes near, sometimes turn the head or chase it a little (low-rate cursor polling, no hooks).
 - **Desktop terrain**:
   - walk along the **bottom of the work area** (top edge of the taskbar), with the taskbar on any side;
-  - sit on **window tops**; fall when the window is dragged away or closed (Windows and native X11; Wayland sessions see §4);
+  - sit on **window tops**, and hop up onto a low one nearby; ride along when the window is dragged, get thrown off when it is yanked, fall when it is closed or minimised (Windows and native X11; Wayland sessions see §4);
+  - walk off the end of a window and land on whatever is below;
   - walk between monitors, with correct per-monitor DPI scaling.
 
 ### 1.4 Irrational mode (on by default)
@@ -574,7 +575,7 @@ Roger asked (2026-10-22) for a downloadable test version before the phases are f
 | Irrational mode | two skits (stare-off and chase, 雞同鴨講), always making up, frequency setting | the other skits, relationship table |
 | Settings | Slint child process: adopt and rest pets, name, 「牠怎麼叫你」, coat, body, size, personality, sound, irrational mode, don't disturb, start at login, data location, remove all traces | growth diary tab, quiet hours |
 | Don't disturb | hide in full screen, global hotkey | meeting detection, quiet hours |
-| Desktop | tray icon (Windows, Linux StatusNotifierItem), single instance, saved settings in the portable folder | sitting on window tops, multi-monitor walking |
+| Desktop | tray icon (Windows, Linux StatusNotifierItem), single instance, saved settings in the portable folder | (window tops and multi-monitor walking came in the terrain work, §8) |
 | Sound | sound mode with **synthesised placeholder sounds**, volume, rate limit | real recorded sounds (§10) |
 | Release | GitHub pre-release from a tag: zip / tar.gz with `chonkGene-data/`, `SHA256SUMS` | code signing |
 
@@ -638,6 +639,16 @@ How it is built:
 
 Open: real numbers from Roger's Windows machine. Each frame waits for its readback on the UI thread; if several moving pets stall it on an integrated GPU, submit all pets first and read back together, or read the previous frame back (one frame late).
 
+### Desktop terrain
+
+Roger asked for terrain to matter (2026-10-27): standing on windows, falling off edges, reacting when windows move or close, and walking across monitors (Windows and X11; under Wayland only XWayland windows are visible, §4).
+
+- `chonkgene-core::terrain`: ledges are each monitor's work-area bottom plus the top edges of windows where no window in front covers them, and with a pet's height of room above (a maximised window's top is not one). Pure and tested.
+- `motion::Body` walks along ledges, walks off their ends and falls, lands on the first ledge below, rides along when its window moves (thrown off above 1500 px/s), falls when the window closes or minimises, and turns back at gaps between monitors. Idle pets now and then hop up onto a window top within reach.
+- `chonkgene-platform`: `Shared::windows` lists windows front to back. On X11 it reads `_NET_CLIENT_LIST_STACKING` (normal, dialog and utility windows on the current desktop, frame extents in, GTK shadows out), and the server's stacking order when there is no EWMH window manager. On Windows it uses `EnumWindows` (visible, not minimised, not cloaked, not tool windows, not the desktop or taskbar) with DWM frame bounds. `Shared::work_areas` gives one work area per monitor (RandR on X11, `GetMonitorInfo` on Windows).
+- The app reads the terrain every 400 ms, or every 100 ms while a pet is on a window or in the air.
+- Checked under Xvfb with a real window: pets hopped onto it, rode two moves exactly, and fell when it closed. The Windows side is type-checked only; it is owed a run on Windows.
+
 ### Phase 1: Shiba prototype (feel) — `v0.1.0`
 
 - The art pipeline (§3.3) works end to end for one Shiba, with placeholder art.
@@ -688,7 +699,7 @@ Open: real numbers from Roger's Windows machine. Each frame waits for its readba
 
 ### Phase 6: polish and release — `v1.0.0`
 
-- Sitting on window tops (Windows, X11), multiple monitors, HiDPI.
+- HiDPI across monitors with different scales (window tops and multiple monitors are in, see "Desktop terrain" in §8).
 - English translation of the UI.
 - Performance tuning on real machines until every §5 target is met.
 - Release pipeline (§2.1), `SHA256SUMS`, code-signing decision (§10).

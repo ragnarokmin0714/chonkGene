@@ -14,6 +14,7 @@ use chonkgene_core::shake::ShakeDetector;
 use chonkgene_core::skit::{Actor, Cmd, Director};
 use chonkgene_core::sound::Sound;
 use chonkgene_core::species::{Grumpiness, Species};
+use chonkgene_core::terrain::{Terrain, Win};
 use chonkgene_platform::tray::{Tray, TrayCommand};
 use chonkgene_platform::{Presenter, Shared, autostart, hotkey};
 use chonkgene_render::menu::{self, Icon, Item};
@@ -35,6 +36,10 @@ use crate::store::{self, DataDir, PetSave, Pets, Settings};
 const STATS_EVERY: Duration = Duration::from_secs(5);
 const SAVE_EVERY: Duration = Duration::from_secs(5);
 const POLL_EVERY: Duration = Duration::from_secs(1);
+/// How often to read the windows pets stand on: calm, and while a pet is on
+/// a window or in the air.
+const TERRAIN_EVERY: Duration = Duration::from_millis(400);
+const TERRAIN_BUSY_EVERY: Duration = Duration::from_millis(100);
 /// A press that moves further than this (pixels) is a lift, not a poke.
 const DRAG_START: f32 = 4.0;
 const HAPPY_SECS: f64 = 3.0;
@@ -161,6 +166,7 @@ struct Ctx<'a> {
     lines: &'a Lines,
     face: &'a mut Face,
     area: Area,
+    terrain: &'a Terrain,
     ui_scale: f32,
     world: World,
     sounds: &'a mut Sounds,
@@ -246,6 +252,11 @@ struct App {
     ui_face: Face,
     shared: Option<Shared>,
     area: Area,
+    /// What pets stand on: floors and window tops (PLAN §1.3).
+    terrain: Terrain,
+    terrain_at: Instant,
+    /// When the terrain was last read, for how fast windows move.
+    terrain_read: Instant,
     ui_scale: f32,
     pets: Vec<Pet>,
     menu: Option<Menu>,
@@ -320,6 +331,9 @@ impl App {
                 w: 1920.0,
                 h: 1080.0,
             },
+            terrain: Terrain::default(),
+            terrain_at: now,
+            terrain_read: now,
             ui_scale: 1.0,
             pets: Vec::new(),
             menu: None,
@@ -392,6 +406,63 @@ impl App {
     /// Copy the live affinity of every pet into the saves. It must run before
     /// any pet is rebuilt or removed, or recent affinity would be lost and
     /// affinity must never go down (PLAN §0).
+    /// Read the desktop again: each monitor's floor and the windows to stand
+    /// on (PLAN §1.3). Pets on a window that moved move with it.
+    fn refresh_terrain(&mut self) {
+        let Some(shared) = &self.shared else {
+            return;
+        };
+        let mut floors: Vec<Area> = shared
+            .work_areas()
+            .into_iter()
+            .map(|(x, y, w, h)| Area {
+                x: x as f32,
+                y: y as f32,
+                w: w as f32,
+                h: h as f32,
+            })
+            .collect();
+        if floors.is_empty() {
+            floors.push(self.area);
+        }
+        let ours: Vec<u32> = self.pets.iter().map(|p| p.presenter.id()).collect();
+        let windows: Vec<Win> = shared
+            .windows(&ours)
+            .into_iter()
+            .map(|r| Win {
+                id: r.id,
+                x: r.x as f32,
+                y: r.y as f32,
+                w: r.w as f32,
+                h: r.h as f32,
+            })
+            .collect();
+        // A window top with less room above it than a pet is tall is no
+        // ledge (a maximised window's).
+        let headroom = self
+            .pets
+            .iter()
+            .map(|p| p.body.size.1)
+            .fold(0.0, f32::max)
+            .max(1.0);
+        let terrain = Terrain::new(floors, &windows, headroom);
+        let now = Instant::now();
+        let dt = (now - self.terrain_read).as_secs_f32();
+        self.terrain_read = now;
+        for (i, p) in self.pets.iter_mut().enumerate() {
+            let was = p.body.pos;
+            p.body.carry(&self.terrain, &terrain, dt);
+            if p.body.pos != was {
+                println!(
+                    "pet {i}: rides its window by ({:.0}, {:.0})",
+                    p.body.pos.0 - was.0,
+                    p.body.pos.1 - was.1
+                );
+            }
+        }
+        self.terrain = terrain;
+    }
+
     fn collect_affinity(&mut self) {
         for p in &self.pets {
             if let Some(s) = self.store.pets.iter_mut().find(|s| s.id == p.save.id) {
@@ -466,6 +537,7 @@ impl App {
                 &self.kinds,
                 save,
                 self.area,
+                &self.terrain,
                 self.ui_scale,
                 slot,
                 t,
@@ -741,6 +813,7 @@ impl App {
             sounds,
             settings,
             area,
+            terrain,
             ui_scale,
             dirty,
             ..
@@ -758,6 +831,7 @@ impl App {
             sound_on: settings.sound,
             volume: f32::from(settings.volume) / 100.0,
             area: *area,
+            terrain,
             ui_scale: *ui_scale,
             world,
         };
@@ -909,6 +983,7 @@ fn spawn(
     kinds: &HashMap<Species, Kind>,
     save: PetSave,
     area: Area,
+    terrain: &Terrain,
     ui_scale: f32,
     slot: usize,
     t: f64,
@@ -921,7 +996,8 @@ fn spawn(
     let size_f = (size.0 as f32, size.1 as f32);
     let span = (area.w - size_f.0).max(1.0);
     let x = area.x + (area.w * 0.55 + slot as f32 * size_f.0 * 0.9) % span;
-    let body = Body::on_ground(&area, x, size_f);
+    let foot = chonkgene_render::raymarch::FLOOR_PX * scale;
+    let body = Body::on_ground(terrain, x, size_f, foot);
     let pos = (body.pos.0.round() as i32, body.pos.1.round() as i32);
     let window = el
         .create_window(chonkgene_platform::pet_window(size, pos, &save.name))
@@ -1096,7 +1172,10 @@ impl Pet {
                 }
             }
         } else {
-            if let Some(landing) = self.body.step(dt, &ctx.area) {
+            if let Some(landing) = self.body.step(dt, ctx.terrain) {
+                if self.body.on_window() && self.body.motion == Motion::Idle {
+                    println!("pet {i}: lands on a window");
+                }
                 self.anim.land(landing.speed);
                 if ctx.sound_on && landing.speed > 600.0 {
                     ctx.sounds.play(
@@ -1119,13 +1198,24 @@ impl Pet {
                 && matches!(self.body.motion, Motion::Idle | Motion::Walk)
                 && t >= self.switch_at
             {
-                self.body.motion = if self.body.motion == Motion::Idle {
-                    Motion::Walk
+                // Now and then, hop up onto a window nearby (PLAN §1.3).
+                let (fx, fy) = self.body.feet();
+                let (w, h) = self.body.size;
+                let above = (self.body.motion == Motion::Idle && self.rng.f32() < 0.35)
+                    .then(|| ctx.terrain.ledge_above(fx, fy, 0.25 * h, 1.6 * h, 1.5 * w))
+                    .flatten();
+                if let Some((ledge, x)) = above {
+                    self.body.leap(x, ledge.y);
+                    self.anim.land(500.0);
                 } else {
-                    Motion::Idle
-                };
-                if self.rng.bool() {
-                    self.body.facing = -self.body.facing;
+                    self.body.motion = if self.body.motion == Motion::Idle {
+                        Motion::Walk
+                    } else {
+                        Motion::Idle
+                    };
+                    if self.rng.bool() {
+                        self.body.facing = -self.body.facing;
+                    }
                 }
                 self.switch_at = t + 3.0 + f64::from(self.rng.f32()) * 5.0;
             }
@@ -1266,12 +1356,14 @@ impl ApplicationHandler<UserEvent> for App {
             w: w as f32,
             h: h as f32,
         };
+        self.terrain = Terrain::flat(self.area);
         println!(
             "肉肉賴桌 · {} · data in {}",
             shared.describe(),
             self.data.path.display()
         );
         self.shared = Some(shared);
+        self.refresh_terrain();
         self.sync_autostart();
         let proxy = std::sync::Arc::new(std::sync::Mutex::new(self.proxy.clone()));
         let send = move |c: TrayCommand| {
@@ -1374,6 +1466,7 @@ impl ApplicationHandler<UserEvent> for App {
                             sounds,
                             settings,
                             area,
+                            terrain,
                             ui_scale,
                             ..
                         } = self;
@@ -1391,6 +1484,7 @@ impl ApplicationHandler<UserEvent> for App {
                                 sound_on: settings.sound,
                                 volume: f32::from(settings.volume) / 100.0,
                                 area: *area,
+                                terrain,
                                 ui_scale: *ui_scale,
                                 world,
                             };
@@ -1422,6 +1516,7 @@ impl ApplicationHandler<UserEvent> for App {
                                 sound_on: settings.sound,
                                 volume: f32::from(settings.volume) / 100.0,
                                 area: *area,
+                                terrain,
                                 ui_scale: *ui_scale,
                                 world,
                             };
@@ -1490,6 +1585,21 @@ impl ApplicationHandler<UserEvent> for App {
             }
         }
 
+        if now >= self.terrain_at {
+            self.refresh_terrain();
+            // Quickly while a pet stands on a window (to ride along when it
+            // moves) or is in the air; otherwise now and then.
+            let busy = self.pets.iter().any(|p| {
+                p.body.on_window() || matches!(p.body.motion, Motion::Fall | Motion::Held)
+            });
+            self.terrain_at = now
+                + if busy {
+                    TERRAIN_BUSY_EVERY
+                } else {
+                    TERRAIN_EVERY
+                };
+        }
+
         let visible = !self.hidden && !self.fullscreen;
         let world = self.world(now);
         let App {
@@ -1499,6 +1609,7 @@ impl ApplicationHandler<UserEvent> for App {
             bubble_face,
             sounds,
             area,
+            terrain,
             ui_scale,
             frames,
             drawing,
@@ -1523,6 +1634,7 @@ impl ApplicationHandler<UserEvent> for App {
             sound_on: settings.sound,
             volume: f32::from(settings.volume) / 100.0,
             area: *area,
+            terrain,
             ui_scale: *ui_scale,
             world,
         };
@@ -1578,6 +1690,8 @@ impl ApplicationHandler<UserEvent> for App {
             },
             self.menu.is_some().then(|| now + Duration::from_millis(33)),
             self.stats.then_some(self.stats_at),
+            // Always ahead of now: it is moved on whenever it is reached.
+            visible.then_some(self.terrain_at),
         ];
         el.set_control_flow(ControlFlow::WaitUntil(wake_at(due)));
     }

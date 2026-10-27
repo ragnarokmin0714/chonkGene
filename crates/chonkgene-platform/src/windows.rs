@@ -6,13 +6,18 @@ use std::mem::{size_of, zeroed};
 use std::ptr::{null, null_mut};
 
 use tiny_skia::Pixmap;
-use windows_sys::Win32::Foundation::{GetLastError, HWND, POINT, RECT, SIZE};
+use windows_sys::Win32::Foundation::{GetLastError, HWND, LPARAM, POINT, RECT, SIZE};
+use windows_sys::Win32::Graphics::Dwm::{
+    DWMWA_CLOAKED, DWMWA_EXTENDED_FRAME_BOUNDS, DwmGetWindowAttribute,
+};
 use windows_sys::Win32::Graphics::Gdi::{
     AC_SRC_ALPHA, AC_SRC_OVER, BI_RGB, BITMAPINFO, BITMAPINFOHEADER, BLENDFUNCTION,
-    CreateCompatibleDC, CreateDIBSection, DIB_RGB_COLORS, DeleteDC, DeleteObject, GetDC, HBITMAP,
-    HDC, HGDIOBJ, ReleaseDC, SelectObject,
+    CreateCompatibleDC, CreateDIBSection, DIB_RGB_COLORS, DeleteDC, DeleteObject,
+    EnumDisplayMonitors, GetDC, GetMonitorInfoW, HBITMAP, HDC, HGDIOBJ, HMONITOR, MONITORINFO,
+    ReleaseDC, SelectObject,
 };
 use windows_sys::Win32::System::SystemInformation::GetTickCount;
+use windows_sys::Win32::System::Threading::GetCurrentProcessId;
 use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
     GetAsyncKeyState, GetLastInputInfo, LASTINPUTINFO, VK_LBUTTON, VK_RBUTTON,
 };
@@ -20,9 +25,10 @@ use windows_sys::Win32::UI::Shell::{
     QUNS_BUSY, QUNS_PRESENTATION_MODE, QUNS_RUNNING_D3D_FULL_SCREEN, SHQueryUserNotificationState,
 };
 use windows_sys::Win32::UI::WindowsAndMessaging::{
-    GWL_EXSTYLE, GetCursorPos, GetWindowLongPtrW, SPI_GETWORKAREA, SetWindowLongPtrW,
-    SystemParametersInfoW, ULW_ALPHA, UpdateLayeredWindow, WS_EX_LAYERED, WS_EX_NOACTIVATE,
-    WS_EX_TOOLWINDOW,
+    EnumWindows, GWL_EXSTYLE, GetClassNameW, GetCursorPos, GetWindowLongPtrW, GetWindowRect,
+    GetWindowTextLengthW, GetWindowThreadProcessId, IsIconic, IsWindowVisible, SPI_GETWORKAREA,
+    SetWindowLongPtrW, SystemParametersInfoW, ULW_ALPHA, UpdateLayeredWindow, WS_EX_LAYERED,
+    WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW,
 };
 use winit::raw_window_handle::{HasWindowHandle, RawWindowHandle};
 use winit::window::Window;
@@ -51,6 +57,56 @@ impl Shared {
         let ok =
             unsafe { SystemParametersInfoW(SPI_GETWORKAREA, 0, (&raw mut r).cast::<c_void>(), 0) };
         (ok != 0).then(|| (r.left, r.top, r.right - r.left, r.bottom - r.top))
+    }
+
+    /// Every monitor's work area: x, y, width, height.
+    pub fn work_areas(&self) -> Vec<(i32, i32, i32, i32)> {
+        unsafe extern "system" fn each(m: HMONITOR, _: HDC, _: *mut RECT, data: LPARAM) -> i32 {
+            // SAFETY: `data` is the `&mut Vec` passed to EnumDisplayMonitors
+            // below, alive for the whole enumeration.
+            let out = unsafe { &mut *(data as *mut Vec<(i32, i32, i32, i32)>) };
+            // SAFETY: zeroed MONITORINFO is valid; cbSize is set before use.
+            let mut info: MONITORINFO = unsafe { zeroed() };
+            info.cbSize = size_of::<MONITORINFO>() as u32;
+            // SAFETY: `m` comes from the enumeration; `info` is sized above.
+            if unsafe { GetMonitorInfoW(m, &mut info) } != 0 {
+                let r = info.rcWork;
+                out.push((r.left, r.top, r.right - r.left, r.bottom - r.top));
+            }
+            1
+        }
+        let mut out: Vec<(i32, i32, i32, i32)> = Vec::new();
+        // SAFETY: the callback only touches `out` through `data`, and the
+        // enumeration finishes before `out` is used again.
+        unsafe {
+            EnumDisplayMonitors(null_mut(), null(), Some(each), (&raw mut out) as LPARAM);
+        }
+        if out.is_empty() {
+            out.extend(self.work_area());
+        }
+        out
+    }
+
+    /// Windows on the current virtual desktop that pets may stand on, front
+    /// to back, as they are seen (DWM's frame bounds, no invisible borders).
+    /// Windows of this process (pets, bubbles, menus) are left out.
+    pub fn windows(&self, _ours: &[u32]) -> Vec<crate::WinRect> {
+        unsafe extern "system" fn each(w: HWND, data: LPARAM) -> i32 {
+            // SAFETY: `data` is the `&mut Vec` passed to EnumWindows below,
+            // alive for the whole enumeration.
+            let out = unsafe { &mut *(data as *mut Vec<HWND>) };
+            out.push(w);
+            1
+        }
+        let mut all: Vec<HWND> = Vec::new();
+        // SAFETY: as above; EnumWindows lists top-level windows in z-order,
+        // front first.
+        unsafe {
+            EnumWindows(Some(each), (&raw mut all) as LPARAM);
+        }
+        // SAFETY: no arguments.
+        let me = unsafe { GetCurrentProcessId() };
+        all.into_iter().filter_map(|w| standable(w, me)).collect()
     }
 
     /// Is a mouse button held anywhere on screen? Polled, for closing menus
@@ -95,6 +151,70 @@ impl Shared {
         // SAFETY: GetCursorPos writes one POINT to the pointer we pass.
         let ok = unsafe { GetCursorPos(&mut p) };
         (ok != 0).then_some((p.x, p.y))
+    }
+}
+
+/// A top-level window pets may stand on, and where it is: shown, not
+/// minimised, not cloaked (another virtual desktop, a suspended app), not a
+/// tool window, with a title, not the desktop or the taskbar, not ours.
+fn standable(w: HWND, me: u32) -> Option<crate::WinRect> {
+    // SAFETY: every call below takes a window handle from EnumWindows (a
+    // stale one only makes the call fail) and writes at most the sizes we
+    // pass.
+    unsafe {
+        if IsWindowVisible(w) == 0 || IsIconic(w) != 0 || GetWindowTextLengthW(w) == 0 {
+            return None;
+        }
+        if GetWindowLongPtrW(w, GWL_EXSTYLE) & WS_EX_TOOLWINDOW as isize != 0 {
+            return None;
+        }
+        let mut pid = 0u32;
+        GetWindowThreadProcessId(w, &mut pid);
+        if pid == me {
+            return None;
+        }
+        let mut cloaked = 0u32;
+        let hr = DwmGetWindowAttribute(
+            w,
+            DWMWA_CLOAKED as u32,
+            (&raw mut cloaked).cast::<c_void>(),
+            size_of::<u32>() as u32,
+        );
+        if hr == 0 && cloaked != 0 {
+            return None;
+        }
+        let mut class = [0u16; 64];
+        let n = GetClassNameW(w, class.as_mut_ptr(), class.len() as i32);
+        let class = String::from_utf16_lossy(&class[..n.max(0) as usize]);
+        if matches!(
+            class.as_str(),
+            "Progman" | "WorkerW" | "Shell_TrayWnd" | "Shell_SecondaryTrayWnd"
+        ) {
+            return None;
+        }
+        let mut r = RECT {
+            left: 0,
+            top: 0,
+            right: 0,
+            bottom: 0,
+        };
+        let hr = DwmGetWindowAttribute(
+            w,
+            DWMWA_EXTENDED_FRAME_BOUNDS as u32,
+            (&raw mut r).cast::<c_void>(),
+            size_of::<RECT>() as u32,
+        );
+        if hr != 0 && GetWindowRect(w, &mut r) == 0 {
+            return None;
+        }
+        let (wd, ht) = (r.right - r.left, r.bottom - r.top);
+        (wd > 0 && ht > 0).then_some(crate::WinRect {
+            id: w as usize as u64,
+            x: r.left,
+            y: r.top,
+            w: wd,
+            h: ht,
+        })
     }
 }
 
