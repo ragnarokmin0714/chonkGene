@@ -23,9 +23,17 @@
     pivots: {
         "body": (0, -1.1, 0),
         "head": (0, 0.05, 0.05),
-        "back_legs": (0, -1.0, 0.3),
+        "back_legs": (0, -0.86, 0.3),
         "wings": (0.68, -0.1, -0.1),
         "tail": (0, -0.5, -0.82),
+    },
+    // Everything hangs from the body, so a waddle carries head, wings and
+    // legs along.
+    parents: {
+        "head": "body",
+        "wings": "body",
+        "tail": "body",
+        "back_legs": "body",
     },
     parts: [
         (name: "body", bone: "body", shape: Ellipsoid((0.84, 0.64, 0.92)), at: (0, -0.46, -0.08),
@@ -41,12 +49,18 @@
         // A perky tail pointing up and back.
         (name: "tail", bone: "tail", shape: Cone(r1: 0.2, r2: 0.05, h: 0.32, flat: 1.8), at: (0, -0.5, -0.88),
             rot: (-50, 0, 0), blend: 0.12, color: "feather", zone: "bottom"),
+        // Little legs from the body to the feet, so the feet stay on as they
+        // step.
+        (name: "leg", bone: "back_legs", shape: Capsule(to: (0.0, -0.17, 0.08), r: 0.045), at: (0.3, -0.86, 0.3),
+            blend: 0.03, color: "bill", fuzz: 0.0, chonk: 0.6, mirror: true, zone: "paw"),
         (name: "foot", bone: "back_legs", shape: Ellipsoid((0.17, 0.045, 0.2)), at: (0.3, -1.06, 0.42),
             rot: (0, 12, 0), blend: 0.03, color: "bill", fuzz: 0.0, chonk: 0.6, mirror: true, zone: "paw"),
         // The bill: wide, flat and glossy.
         (name: "bill", bone: "head", shape: Ellipsoid((0.25, 0.075, 0.2)), at: (0, 0.26, 0.82),
             rot: (-8, 0, 0), blend: 0.05, color: "bill", gloss: 0.6, fuzz: 0.0, zone: "head"),
     ],
+    // Two legs in turn; the body sways rather than twists, the head bobs.
+    gait: (swing: 24, lift: 0.07, roll: 2, twist: 0, nod: 7, diagonal: false),
     face: (
         on: "head",
         nose: (0.18, -0.2, 0.8),

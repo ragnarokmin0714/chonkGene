@@ -21,9 +21,17 @@
     pivots: {
         "body": (0, -1.1, 0),
         "head": (0, 0.1, 0),
-        "back_legs": (0, -1.0, 0.3),
+        "back_legs": (0, -0.82, 0.5),
         "wings": (0.78, 0.25, -0.05),
         "tail": (0, -0.92, -0.62),
+    },
+    // Everything hangs from the body, so a waddle carries head, wings and
+    // legs along.
+    parents: {
+        "head": "body",
+        "wings": "body",
+        "tail": "body",
+        "back_legs": "body",
     },
     parts: [
         (name: "body", bone: "body", shape: Ellipsoid((0.92, 0.82, 0.82)), at: (0, -0.3, 0),
@@ -51,6 +59,10 @@
             marks: [(at: (0.1, -0.35, 0), radii: (0.3, 0.12, 0.5), color: "scallop", soft: 0.6)]),
         (name: "tail", bone: "tail", shape: Ellipsoid((0.3, 0.14, 0.25)), at: (0, -0.95, -0.72),
             rot: (-25, 0, 0), blend: 0.08, color: "wing", zone: "bottom"),
+        // Short feathered legs from the hips to the toes, so the toes stay on
+        // as they step.
+        (name: "leg", bone: "back_legs", shape: Capsule(to: (0.0, -0.17, 0.08), r: 0.075), at: (0.27, -0.82, 0.5),
+            blend: 0.06, color: "feather", chonk: 0.6, mirror: true, zone: "paw"),
         (name: "toe", bone: "back_legs", shape: Ellipsoid((0.07, 0.06, 0.13)), at: (0.22, -1.04, 0.62),
             blend: 0.03, color: "beak", fuzz: 0.0, chonk: 0.6, mirror: true, zone: "paw"),
         (name: "toe_out", bone: "back_legs", shape: Ellipsoid((0.07, 0.06, 0.12)), at: (0.36, -1.04, 0.56),
@@ -58,6 +70,8 @@
         (name: "beak", bone: "head", shape: Cone(r1: 0.09, r2: 0.025, h: 0.2, flat: 1.4), at: (0, 0.44, 0.84),
             rot: (150, 0, 0), blend: 0.03, color: "beak", gloss: 0.5, fuzz: 0.0, zone: "head"),
     ],
+    // Two legs in turn; the body sways rather than twists, the head bobs.
+    gait: (swing: 22, lift: 0.06, roll: 2, twist: 0, nod: 5, diagonal: false),
     face: (
         on: "head",
         nose: (0.14, -0.15, 0.85),

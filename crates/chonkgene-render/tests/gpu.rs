@@ -170,7 +170,16 @@ fn idle_frames_come_from_the_cache() {
     assert!(!r.changed(), "the same breath step");
     draw(&mut r, &rest(-1.0, 0.0, 0.2), Expression::Sulk);
     let wag = draw(&mut r, &rest(0.6, 9.0, 0.3), Expression::Sulk);
-    assert!(differ(&wag, &first) > 20, "the tail moved");
+    // The tail is in front of the body from behind: count colour too.
+    let recoloured = wag
+        .data()
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .zip(first.data().as_chunks::<4>().0)
+        .filter(|(p, q)| p.iter().zip(q.iter()).any(|(a, b)| a.abs_diff(*b) > 24))
+        .count();
+    assert!(recoloured > 20, "the tail moved: {recoloured} px");
     // Breathing at rest is drawn in 2D over the cached frame: no GPU.
     r.render(&rest(-1.0, 0.0, 0.35), Expression::Sulk);
     assert!(r.changed() && !r.busy(), "a breath step without the GPU");
@@ -255,4 +264,48 @@ fn the_gpu_budget_holds_back_frames() {
         r.frames_sent()
     );
     assert!(r.frames_sent() >= 1);
+}
+
+/// Walking is worked out from the gait every frame: through a step the
+/// legs (the bottom of the picture) keep moving, not just two poses.
+#[test]
+fn walking_legs_move_through_each_step() {
+    use chonkgene_core::anim::Act;
+    let Some(mut r) = renderer() else {
+        eprintln!("skipped: no GPU");
+        return;
+    };
+    let walking = |stride: f32, clock: f32| PoseParams {
+        act: if stride < 1.0 { Act::StepA } else { Act::StepB },
+        stride,
+        ..at(clock)
+    };
+    let bottom = |pm: &Pixmap| {
+        let h = pm.height() as usize;
+        let row = pm.width() as usize * 4;
+        pm.data()[row * (h * 2 / 3)..].to_vec()
+    };
+    draw(&mut r, &walking(0.0, 0.0), Expression::Neutral);
+    // Past the blend from sitting into walking.
+    let frames: Vec<Vec<u8>> = [0.0, 0.25, 0.5, 0.75]
+        .iter()
+        .enumerate()
+        .map(|(i, &s)| {
+            bottom(&draw(
+                &mut r,
+                &walking(s, 1.0 + i as f32 * 0.1),
+                Expression::Neutral,
+            ))
+        })
+        .collect();
+    for pair in frames.windows(2) {
+        let moved = pair[0]
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .zip(pair[1].as_chunks::<4>().0)
+            .filter(|(a, b)| a[3].abs_diff(b[3]) > 64)
+            .count();
+        assert!(moved > 40, "legs moved {moved} px between quarter steps");
+    }
 }

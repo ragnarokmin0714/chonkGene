@@ -76,6 +76,49 @@ mod tests {
         }
     }
 
+    const TINY: &str = r##"(
+        species: "tiny",
+        slots: ["fur", "ink"],
+        coats: [(name: "a", colors: {"fur": "#FFFFFF", "ink": "#000000"})],
+        pivots: {"body": (0, 0, 0), "head": (0, 0.5, 0)},
+        parents: {"head": "body"},
+        parts: [
+            (name: "body", bone: "body", shape: Ellipsoid((0.5, 0.5, 0.5)), color: "fur", zone: "belly"),
+            (name: "head", bone: "head", shape: Ellipsoid((0.3, 0.3, 0.3)), at: (0, 1, 0), color: "fur", zone: "head"),
+        ],
+        face: (on: "head", nose: (0, 0, 0.3), ink: "ink", eye: (at: (0.3, 0), r: (0.1, 0.1)),
+            blush: (at: (0.5, 0), r: (0.1, 0.1), color: "fur")),
+    )"##;
+    const TINY_POSES: &str = r#"{
+        "sit": (rest: false), "belly_up": (rest: false), "melt": (rest: false), "loaf": (rest: false),
+        "sulk": (rest: false), "walk_a": (rest: false), "walk_b": (rest: false), "look_left": (rest: false),
+        "look_right": (rest: false), "stretch": (rest: false), "yawn": (rest: false), "wave": (rest: false),
+    }"#;
+
+    #[test]
+    fn a_parent_bone_carries_its_children() {
+        let model = Model::parse(TINY, TINY_POSES).unwrap();
+        let body = model.bone("body").unwrap();
+        let mut pose = model.pose(PoseId::Sit).clone();
+        pose.bones[body].rot = math::v3(0.0, 0.0, 90.0);
+        let scene = Scene::posed(&model, 0, 0.0, &pose, Look::Open, Layer::All);
+        let head = scene.parts().nth(1).unwrap().center;
+        // (0, 1, 0) turned a quarter about z: (−1, 0, 0).
+        assert!(
+            (head - math::v3(-1.0, 0.0, 0.0)).length() < 1e-4,
+            "{head:?}"
+        );
+    }
+
+    #[test]
+    fn a_bone_cannot_hang_from_itself() {
+        let looped = TINY.replace(
+            r#"parents: {"head": "body"}"#,
+            r#"parents: {"head": "body", "body": "head"}"#,
+        );
+        assert!(Model::parse(&looped, TINY_POSES).is_err());
+    }
+
     #[test]
     fn hex_colours_parse() {
         assert_eq!(parse_hex("#E8955A"), Some([0xE8, 0x95, 0x5A, 255]));

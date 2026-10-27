@@ -27,6 +27,16 @@
         "front_legs": (0, -0.78, 0.5),
         "back_legs": (0, -0.9, 0),
         "tail": (0.4, -0.9, -0.85),
+        "hips": (0, -0.75, -0.35),
+    },
+    // The chest (body) carries the head, the front legs and the hips; the hips
+    // carry the back legs and the tail, so the body can twist as it walks.
+    parents: {
+        "head": "body",
+        "front_legs": "body",
+        "hips": "body",
+        "back_legs": "hips",
+        "tail": "hips",
     },
     parts: [
         (name: "body", bone: "body", shape: Ellipsoid((0.88, 0.56, 0.82)), at: (0, -0.54, -0.05),
@@ -72,6 +82,8 @@
         (name: "nose", bone: "head", shape: Ellipsoid((0.075, 0.05, 0.05)), at: (0, 0.32, 0.97),
             blend: 0.02, color: "nose", gloss: 0.6, fuzz: 0.0, zone: "head"),
     ],
+    // Short legs: quick small steps, more roll.
+    gait: (swing: 22, lift: 0.05, roll: 4, twist: 7, nod: 4),
     face: (
         on: "head",
         mouth_on: Some("muzzle"),

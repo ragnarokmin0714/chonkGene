@@ -228,14 +228,7 @@ impl GpuRenderer {
         let walking = matches!(params.act, Act::StepA | Act::StepB)
             && matches!(key.pose, PoseId::WalkA | PoseId::WalkB);
         if walking {
-            // Legs swing from one step pose to the other and back over the
-            // two-step cycle.
-            let s = (1.0 - (params.stride * std::f32::consts::PI).cos()) / 2.0;
-            let pose = self
-                .model
-                .pose(PoseId::WalkB)
-                .blend(self.model.pose(PoseId::WalkA), s);
-            return (Aim::Walk, pose);
+            return (Aim::Walk, self.walk(params.stride));
         }
         let mut pose = self.model.pose(key.pose).clone();
         if key.pose == PoseId::Wave {
@@ -253,6 +246,61 @@ impl GpuRenderer {
             }
         }
         (Aim::Pose(key.pose), pose)
+    }
+
+    /// The walk at `stride` (0 … 2 over a two-step cycle), worked out from
+    /// the species' gait around the walk poses' turned-aside stance: each
+    /// leg swings forward lifted and back planted, in diagonal pairs (or a
+    /// bird's two in turn); the chest rocks onto the planted side and the
+    /// hips twist against it; the head nods a little behind the steps.
+    fn walk(&self, stride: f32) -> Pose {
+        use std::f32::consts::PI;
+        let m = &*self.model;
+        let g = m.gait;
+        let mut pose = m.pose(PoseId::WalkA).blend(m.pose(PoseId::WalkB), 0.5);
+        let th = stride * PI;
+        let legs: &[(&str, f32)] = if g.diagonal {
+            &[("front_legs", 0.0), ("back_legs", PI)]
+        } else {
+            &[("back_legs", 0.0)]
+        };
+        for &(name, phase) in legs {
+            let Some(b) = m.bone(name) else {
+                continue;
+            };
+            let base = pose.bones[b];
+            // Forward is a negative turn about x; a leg lifts while it swings
+            // forward (its angle rising).
+            let step = |a: f32| {
+                let mut mv = base;
+                mv.rot.x -= g.swing * a.cos();
+                mv.shift.y += g.lift * (-a.sin()).max(0.0);
+                mv
+            };
+            pose.bones[b] = step(th + phase);
+            pose.twins[b] = Some(step(th + phase + PI));
+        }
+        let (rock, twist) = (th.sin(), th.sin());
+        if let Some(b) = m.bone("body") {
+            pose.bones[b].rot.z += g.roll * rock;
+            pose.bones[b].rot.y += 0.5 * g.twist * twist;
+        }
+        if let Some(b) = m.bone("hips") {
+            pose.bones[b].rot.y -= g.twist * twist;
+            pose.bones[b].rot.z -= 0.6 * g.roll * rock;
+        }
+        if let Some(b) = m.bone("head") {
+            pose.bones[b].rot.x += g.nod * (2.0 * th - 0.8).sin();
+        }
+        if let Some(b) = m.bone("wings") {
+            // Wings lift a little with each step, both sides.
+            let flap = 6.0 * (2.0 * th).sin().abs();
+            pose.bones[b].rot.z += flap;
+            if let Some(t) = pose.twins.get_mut(b).and_then(Option::as_mut) {
+                t.rot.z += flap;
+            }
+        }
+        pose
     }
 
     /// The pose to draw now: blended from where the body was into the aim,
@@ -290,7 +338,7 @@ impl GpuRenderer {
             && params.tail != 0.0
             && let Some(m) = pose.bones.get_mut(b)
         {
-            m.rot.y += params.tail;
+            wag_tail(m, params.tail);
         }
         (aim, pose)
     }
@@ -326,7 +374,7 @@ impl GpuRenderer {
                 // (drawn in 2D below, from its step).
                 let wag = (params.tail / WAG_STEP).round() as i16;
                 if let Some(m) = self.tail_bone.and_then(|b| pose.bones.get_mut(b)) {
-                    m.rot.y += f32::from(wag) * WAG_STEP - params.tail;
+                    wag_tail(m, f32::from(wag) * WAG_STEP - params.tail);
                 }
                 breath = f32::from(step) / f32::from(BREATH_STEPS - 1) * 2.0 - 1.0;
                 frame.breath = 0.0;
@@ -523,6 +571,13 @@ impl GpuRenderer {
         }
         (w as f32 / 2.0, 0.0)
     }
+}
+
+/// Wag a tail bone `deg` degrees: about its base sideways for a tail held
+/// up (a Shiba's curl), and round to the side for one held back (a duck's).
+fn wag_tail(m: &mut chonkgene_rig::Move, deg: f32) {
+    m.rot.z += deg;
+    m.rot.y += 0.6 * deg;
 }
 
 /// Keep the box around the pixels of `pm`.

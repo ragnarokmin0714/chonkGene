@@ -2,7 +2,7 @@
 
 use crate::face;
 use crate::math::{M3, V3, mix, smoothstep, v3};
-use crate::model::{Look, Model, Pose, PoseId, rgb};
+use crate::model::{Look, Model, Move, Pose, PoseId, rgb};
 use crate::sdf::{Shape, blend_weight, smin};
 
 /// Body value (0.0 標準 … 1.0 麻糬) → how much wider the belly gets.
@@ -149,73 +149,82 @@ impl<'m> Scene<'m> {
             .map(|c| rgb(*c))
             .collect();
         let fat = fat(chonk);
+        let root = Affine::of(pose.root, V3::ZERO);
+        // Every bone's place in the pet: its own move about its pivot, after
+        // its parent's turn and shift (parents come first in `model.order`;
+        // a parent's scale squashes only its own parts, so a melting body
+        // does not flatten the head). A bone's mirrored side may have a move
+        // of its own (a twin): written for +x, applied mirrored about the
+        // mirrored pivot, under the same parent.
+        let n = model.bones.len();
+        let mut plain = vec![Affine::IDENTITY; n];
+        let mut rigid = vec![Affine::IDENTITY; n];
+        let mut twins = vec![None; n];
+        for &b in &model.order {
+            let parent = model.parents[b].map_or(Affine::IDENTITY, |p| rigid[p]);
+            let pivot = model.pivots[b];
+            let mv = pose.bone(b, false);
+            plain[b] = parent.then(&Affine::of(mv, pivot));
+            rigid[b] = parent.then(&Affine::of(
+                Move {
+                    scale: V3::ONE,
+                    ..mv
+                },
+                pivot,
+            ));
+            twins[b] = pose
+                .twins
+                .get(b)
+                .copied()
+                .flatten()
+                .map(|t| parent.then(&Affine::of(t.mirrored(), pivot.flip_x())));
+        }
         let mut placed = Vec::new();
         let (mut face, mut mouth) = (0, None);
         for (i, part) in model.parts.iter().enumerate() {
             let f = 1.0 + part.chonk * (fat - 1.0);
             let shape = part.shape.widen(f);
             let at = v3(part.at.x * f, part.at.y, part.at.z);
-            let root = pose.root;
             let rp = M3::euler(part.rot);
-            let rr = M3::euler(root.rot);
             for flip in [false, true] {
                 if flip && !part.mirror {
                     continue;
                 }
                 // A mirrored copy moves rigidly with its bone (both ears turn
                 // with the head), unless the pose gives its side a move of
-                // its own: that one is written for the +x side, so it is
-                // mirrored, about the mirrored pivot (a wing's own shoulder).
-                let twin = flip && pose.twins.get(part.bone).is_some_and(Option::is_some);
-                let (bone, pivot) = if twin {
-                    (
-                        pose.bone(part.bone, true).mirrored(),
-                        model.pivots[part.bone].flip_x(),
-                    )
-                } else {
-                    (pose.bone(part.bone, false), model.pivots[part.bone])
-                };
-                let rb = M3::euler(bone.rot);
+                // its own.
+                let twin = if flip { twins[part.bone] } else { None };
+                let bone = twin.unwrap_or(plain[part.bone]);
+                // Part frame → world: placed by `at` and `rot`, flipped
+                // across x for the mirrored copy, then the bone, then the
+                // whole pet.
                 let fx = if flip { -1.0 } else { 1.0 };
-                let local = |p: V3| {
-                    let q = rr.transpose().apply(p - root.shift);
-                    let q = rb
-                        .transpose()
-                        .apply(q - pivot - bone.shift)
-                        .div_elem(bone.scale)
-                        + pivot;
-                    let q = v3(q.x * fx, q.y, q.z);
-                    rp.transpose().apply(q - at)
+                let flip_m = M3::diag(v3(fx, 1.0, 1.0));
+                let place = Affine {
+                    m: flip_m.mul(rp),
+                    t: v3(at.x * fx, at.y, at.z),
                 };
-                let b = local(V3::ZERO);
-                let cols =
-                    [v3(1.0, 0.0, 0.0), v3(0.0, 1.0, 0.0), v3(0.0, 0.0, 1.0)].map(|e| local(e) - b);
-                let a = M3 {
-                    r: [cols[0], cols[1], cols[2]],
-                }
-                .transpose();
-                // The part's origin, carried forward to world space.
-                let origin = v3(at.x * fx, at.y, at.z);
-                let in_bone = pivot + rb.apply((origin - pivot).mul_elem(bone.scale)) + bone.shift;
-                let center = rr.apply(in_bone) + root.shift;
+                let world = root.then(&bone).then(&place);
+                let inv = world.inverse();
                 if i == model.face.on && !flip {
                     face = placed.len();
                 }
                 if Some(i) == model.face.mouth_on && !flip {
                     mouth = Some(placed.len());
                 }
+                let (smin, smax) = world.scale_range();
                 placed.push(Placed {
                     part: i,
                     shape,
-                    a,
-                    b,
-                    k: bone.scale.min_elem(),
+                    a: inv.m,
+                    b: inv.t,
+                    k: smin,
                     blend: part.blend,
-                    center,
-                    radius: shape.bound() * bone.scale.max_elem() + part.blend,
+                    center: world.t,
+                    radius: shape.bound() * smax + part.blend,
                     bone: part.bone,
-                    twin,
-                    smax: bone.scale.max_elem(),
+                    twin: twin.is_some(),
+                    smax,
                 });
             }
         }
@@ -255,10 +264,9 @@ impl<'m> Scene<'m> {
                 .zip(unsettled)
                 .zip(tail_part(&placed))
                 .map(|((b, before), after)| {
-                    let mv = pose.bone(b, false);
-                    let rr = M3::euler(pose.root.rot);
-                    rr.apply(model.pivots[b] + mv.shift) + pose.root.shift + (after - before)
+                    root.then(&plain[b]).apply(model.pivots[b]) + (after - before)
                 });
+
         let tail = tail_root.map(|root| {
             let body: Vec<V3> = placed
                 .iter()
@@ -472,6 +480,59 @@ impl<'m> Scene<'m> {
     /// Where the snot bubble hangs, in world space.
     pub fn nose(&self) -> V3 {
         self.nose
+    }
+}
+
+/// An affine map: `m · p + t`.
+#[derive(Clone, Copy, Debug)]
+struct Affine {
+    m: M3,
+    t: V3,
+}
+
+impl Affine {
+    const IDENTITY: Affine = Affine {
+        m: M3::IDENTITY,
+        t: V3::ZERO,
+    };
+
+    /// A pose move: scale and turn about `pivot`, then shift.
+    fn of(mv: Move, pivot: V3) -> Self {
+        let m = M3::euler(mv.rot).mul(M3::diag(mv.scale));
+        Affine {
+            m,
+            t: pivot + mv.shift - m.apply(pivot),
+        }
+    }
+
+    fn apply(&self, p: V3) -> V3 {
+        self.m.apply(p) + self.t
+    }
+
+    /// `self` after `inner`: apply `inner` first.
+    fn then(&self, inner: &Affine) -> Affine {
+        Affine {
+            m: self.m.mul(inner.m),
+            t: self.apply(inner.t),
+        }
+    }
+
+    fn inverse(&self) -> Affine {
+        let m = inverse(&self.m);
+        Affine {
+            m,
+            t: -m.apply(self.t),
+        }
+    }
+
+    /// How much it shrinks and stretches lengths, at most each way (the
+    /// columns' lengths: exact for the turn-then-scale moves bones make).
+    fn scale_range(&self) -> (f32, f32) {
+        let cols = self.m.transpose().r.map(V3::length);
+        (
+            cols.iter().copied().fold(f32::MAX, f32::min),
+            cols.iter().copied().fold(0.0, f32::max),
+        )
     }
 }
 

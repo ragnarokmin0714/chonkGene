@@ -109,11 +109,43 @@ struct ModelFile {
     coats: Vec<CoatFile>,
     #[serde(default)]
     pivots: HashMap<String, [f32; 3]>,
+    /// Bone → the bone it hangs from (head from the body, back legs from
+    /// the hips): a parent's move carries its children. Unlisted bones hang
+    /// from the whole pet.
+    #[serde(default)]
+    parents: HashMap<String, String>,
     parts: Vec<PartFile>,
     face: FaceFile,
     /// Species-specific poses, replacing the shared ones by name.
     #[serde(default)]
     poses: HashMap<String, PoseFile>,
+    #[serde(default)]
+    gait: GaitFile,
+}
+
+/// How a species walks (see [`Gait`]).
+#[derive(Deserialize)]
+#[serde(default)]
+struct GaitFile {
+    swing: f32,
+    lift: f32,
+    roll: f32,
+    twist: f32,
+    nod: f32,
+    diagonal: bool,
+}
+
+impl Default for GaitFile {
+    fn default() -> Self {
+        Self {
+            swing: 26.0,
+            lift: 0.07,
+            roll: 3.0,
+            twist: 7.0,
+            nod: 4.0,
+            diagonal: true,
+        }
+    }
 }
 
 #[derive(Deserialize)]
@@ -347,6 +379,25 @@ pub struct Face {
     pub whiskers: bool,
 }
 
+/// How a species walks: the walk is worked out from these every frame (legs
+/// lifting and planting, the body rocking and twisting, the head nodding),
+/// between the walk poses' turned-aside stance.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Gait {
+    /// How far each leg swings forward and back, degrees.
+    pub swing: f32,
+    /// How high a stepping foot lifts, world units.
+    pub lift: f32,
+    /// The chest rolling onto the planted side, degrees.
+    pub roll: f32,
+    /// The hips turning against the chest, degrees.
+    pub twist: f32,
+    /// The head nodding with each step (a little behind it), degrees.
+    pub nod: f32,
+    /// Four legs in diagonal pairs (a trot); else two legs in turn.
+    pub diagonal: bool,
+}
+
 /// A bone's move in a pose: scale and turn about its pivot, then shift.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Move {
@@ -466,9 +517,14 @@ pub struct Model {
     pub coats: Vec<Coat>,
     pub bones: Vec<String>,
     pub pivots: Vec<V3>,
+    /// One per bone: the bone it hangs from.
+    pub parents: Vec<Option<usize>>,
+    /// Bones, parents before children.
+    pub order: Vec<usize>,
     pub parts: Vec<Part>,
     pub face: Face,
     pub poses: Vec<Pose>,
+    pub gait: Gait,
 }
 
 impl Model {
@@ -544,11 +600,52 @@ fn resolve(file: ModelFile, shared: HashMap<String, PoseFile>) -> Result<Model, 
         });
     }
 
-    // Bones: root first, then every bone a part or pivot names.
+    // Bones: root first, then every bone a part, pivot or parent names.
     let mut bones = vec!["root".to_string()];
-    for name in file.parts.iter().map(|p| &p.bone).chain(file.pivots.keys()) {
+    let mut named: Vec<&String> = file.parts.iter().map(|p| &p.bone).collect();
+    let mut keys: Vec<&String> = file.pivots.keys().chain(file.parents.keys()).collect();
+    keys.sort();
+    named.extend(keys);
+    for name in named {
         if !bones.contains(name) {
             bones.push(name.clone());
+        }
+    }
+    let bone_index = |name: &str| bones.iter().position(|b| b == name);
+    let mut parents = vec![None; bones.len()];
+    for (child, parent) in &file.parents {
+        let (Some(c), Some(p)) = (bone_index(child), bone_index(parent)) else {
+            return Err(ctx(format!("parent {parent:?} of {child:?} is no bone")));
+        };
+        parents[c] = Some(p);
+    }
+    // Parents before children; a loop is an error.
+    let mut order = Vec::new();
+    let mut state = vec![0u8; bones.len()];
+    fn visit(
+        b: usize,
+        parents: &[Option<usize>],
+        state: &mut [u8],
+        order: &mut Vec<usize>,
+    ) -> bool {
+        match state[b] {
+            2 => return true,
+            1 => return false,
+            _ => {}
+        }
+        state[b] = 1;
+        if let Some(p) = parents[b]
+            && !visit(p, parents, state, order)
+        {
+            return false;
+        }
+        state[b] = 2;
+        order.push(b);
+        true
+    }
+    for (b, name) in bones.iter().enumerate() {
+        if !visit(b, &parents, &mut state, &mut order) {
+            return Err(ctx(format!("bone {name:?} hangs from itself")));
         }
     }
     let pivots = bones
@@ -693,6 +790,16 @@ fn resolve(file: ModelFile, shared: HashMap<String, PoseFile>) -> Result<Model, 
         coats,
         bones,
         pivots,
+        parents,
+        order,
+        gait: Gait {
+            swing: file.gait.swing,
+            lift: file.gait.lift,
+            roll: file.gait.roll,
+            twist: file.gait.twist,
+            nod: file.gait.nod,
+            diagonal: file.gait.diagonal,
+        },
         parts,
         face,
         poses,

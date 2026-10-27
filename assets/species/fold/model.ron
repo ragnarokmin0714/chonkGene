@@ -28,6 +28,16 @@
         "front_legs": (0, -0.66, 0.5),
         "back_legs": (0, -0.86, 0),
         "tail": (-0.8, -0.95, -0.3),
+        "hips": (0, -0.7, -0.35),
+    },
+    // The chest (body) carries the head, the front legs and the hips; the hips
+    // carry the back legs and the tail, so the body can twist as it walks.
+    parents: {
+        "head": "body",
+        "front_legs": "body",
+        "hips": "body",
+        "back_legs": "hips",
+        "tail": "hips",
     },
     parts: [
         (name: "body", bone: "body", shape: Ellipsoid((0.9, 0.66, 0.84)), at: (0, -0.44, -0.02),
