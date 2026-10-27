@@ -74,7 +74,10 @@ fn main() {
             // Two physics steps a frame, as at 60 fps.
             a.step(0.5 / FPS);
             a.step(0.5 / FPS);
-            let frame = r.render(&a.params(), a.expression).clone();
+            // GPU frames arrive on a later call; a preview waits for each.
+            r.render(&a.params(), a.expression);
+            r.finish();
+            let frame = r.pixmap().clone();
             let mut canvas = Pixmap::new(wide, h).expect("canvas");
             canvas.fill(Color::TRANSPARENT);
             let left = (wide - w) as f32 / 2.0 + x - if name == "walk" { 50.0 } else { 0.0 };
