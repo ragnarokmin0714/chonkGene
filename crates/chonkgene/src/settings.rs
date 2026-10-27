@@ -665,7 +665,7 @@ fn repaint_when_shown(ui: &SettingsWindow) -> [Timer; 3] {
     })
 }
 
-fn open_folder(path: &std::path::Path) {
+pub fn open_folder(path: &std::path::Path) {
     #[cfg(windows)]
     let cmd = "explorer";
     #[cfg(not(windows))]

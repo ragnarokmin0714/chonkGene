@@ -8,6 +8,7 @@
 
 pub mod bubble;
 pub mod gpu;
+pub mod gpu_check;
 pub mod menu;
 pub mod raymarch;
 pub mod sprites;
