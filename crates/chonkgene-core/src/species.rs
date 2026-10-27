@@ -53,6 +53,17 @@ impl Species {
         Self::ALL.into_iter().find(|s| s.id() == id)
     }
 
+    /// How much it rocks from foot to foot when it walks, 0.0–1.0: birds
+    /// waddle, short legs sway, dogs trot.
+    pub fn waddle(self) -> f32 {
+        match self {
+            Species::Shiba | Species::Fold => 0.35,
+            Species::Munchkin => 0.55,
+            Species::Owl => 0.7,
+            Species::Chick | Species::Duck => 1.0,
+        }
+    }
+
     /// Display name (zh-TW).
     pub fn label(self) -> &'static str {
         match self {

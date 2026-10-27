@@ -2,12 +2,23 @@
 
 use crate::face;
 use crate::math::{M3, V3, mix, smoothstep, v3};
-use crate::model::{Look, Model, PoseId, rgb};
+use crate::model::{Look, Model, Move, PoseId, rgb};
 use crate::sdf::{Shape, blend_weight, smin};
 
 /// Body value (0.0 標準 … 1.0 麻糬) → how much wider the belly gets.
 pub fn fat(chonk: f32) -> f32 {
     0.85 + 0.55 * chonk.clamp(0.0, 1.0)
+}
+
+/// Which parts a scene holds. The tail is drawn as its own layer so a frame
+/// can wag it without ray-marching the pet again (PLAN §5).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum Layer {
+    All,
+    /// Everything but the parts on the `tail` bone.
+    Body,
+    /// Only the parts on the `tail` bone.
+    Tail,
 }
 
 /// One placed copy of a part.
@@ -26,6 +37,8 @@ struct Placed {
     center: V3,
     radius: f32,
     bone: usize,
+    /// Moved by the pose's mirrored-copy move for its bone.
+    twin: bool,
     /// Largest bone scale, for radii that grow with it.
     smax: f32,
 }
@@ -82,15 +95,27 @@ pub struct Scene<'m> {
     palette: Vec<V3>,
     placed: Vec<Placed>,
     look: Look,
-    face: usize,
+    layer: Layer,
+    face: Option<usize>,
     mouth: Option<usize>,
+    nose: V3,
+    /// Where the tail joins the body, and whether it is nearer the camera
+    /// than the body's middle, in world space; none without a tail bone.
+    tail: Option<(V3, bool)>,
     /// Sphere around the whole pet.
     pub center: V3,
     pub radius: f32,
 }
 
 impl<'m> Scene<'m> {
-    pub fn new(model: &'m Model, coat: usize, chonk: f32, pose: PoseId, look: Look) -> Self {
+    pub fn new(
+        model: &'m Model,
+        coat: usize,
+        chonk: f32,
+        pose: PoseId,
+        look: Look,
+        layer: Layer,
+    ) -> Self {
         let palette = model.coats[coat.min(model.coats.len() - 1)]
             .colors
             .iter()
@@ -104,16 +129,33 @@ impl<'m> Scene<'m> {
             let f = 1.0 + part.chonk * (fat - 1.0);
             let shape = part.shape.widen(f);
             let at = v3(part.at.x * f, part.at.y, part.at.z);
-            let bone = pose.bones.get(part.bone).copied().unwrap_or_default();
-            let pivot = model.pivots[part.bone];
             let root = pose.root;
             let rp = M3::euler(part.rot);
-            let rb = M3::euler(bone.rot);
             let rr = M3::euler(root.rot);
             for flip in [false, true] {
                 if flip && !part.mirror {
                     continue;
                 }
+                let bone = pose.bone(part.bone, flip);
+                // Mirrored copies do the mirror image of the move.
+                let bone = if flip {
+                    Move {
+                        shift: bone.shift.flip_x(),
+                        rot: v3(bone.rot.x, -bone.rot.y, -bone.rot.z),
+                        ..bone
+                    }
+                } else {
+                    bone
+                };
+                // A mirrored copy turns about the mirrored pivot (a wing's
+                // shoulder on its own side).
+                let pivot = if flip {
+                    model.pivots[part.bone].flip_x()
+                } else {
+                    model.pivots[part.bone]
+                };
+                let twin = flip && pose.twins.get(part.bone).is_some_and(Option::is_some);
+                let rb = M3::euler(bone.rot);
                 let fx = if flip { -1.0 } else { 1.0 };
                 let local = |p: V3| {
                     let q = rr.transpose().apply(p - root.shift);
@@ -152,20 +194,65 @@ impl<'m> Scene<'m> {
                     center,
                     radius: shape.bound() * bone.scale.max_elem() + part.blend,
                     bone: part.bone,
+                    twin,
                     smax: bone.scale.max_elem(),
                 });
             }
         }
+        // Where the tail bone ends up: where the pose puts its pivot, carried
+        // along by the settling below like the tail's parts.
+        let tail_bone = model.bones.iter().position(|b| b == "tail");
+        let tail_part = |placed: &[Placed]| {
+            tail_bone
+                .and_then(|b| placed.iter().find(|p| p.bone == b))
+                .map(|p| p.center)
+        };
+        let unsettled = tail_part(&placed);
         // Settle what the pose asks to rest on the floor: bones first (tucked
         // paws), then the whole pet.
         for (bi, mv) in pose.bones.iter().enumerate() {
             if mv.rest {
-                settle(placed.iter_mut().filter(|p| p.bone == bi));
+                settle(placed.iter_mut().filter(|p| p.bone == bi && !p.twin));
+            }
+            if pose.twins[bi].is_some_and(|m| m.rest) {
+                settle(placed.iter_mut().filter(|p| p.bone == bi && p.twin));
             }
         }
         if pose.root.rest {
             settle(placed.iter_mut());
         }
+        let tail_root =
+            tail_bone
+                .zip(unsettled)
+                .zip(tail_part(&placed))
+                .map(|((b, before), after)| {
+                    let mv = pose.bone(b, false);
+                    let rr = M3::euler(pose.root.rot);
+                    rr.apply(model.pivots[b] + mv.shift) + pose.root.shift + (after - before)
+                });
+        let tail = tail_root.map(|root| {
+            let body: Vec<V3> = placed
+                .iter()
+                .filter(|p| Some(p.bone) != tail_bone)
+                .map(|p| p.center)
+                .collect();
+            let mid = body.iter().fold(V3::ZERO, |a, c| a + *c) / body.len().max(1) as f32;
+            (root, root.z > mid.z)
+        });
+        let nose = {
+            let fp = &placed[face];
+            inverse(&fp.a).apply(model.face.nose - fp.b)
+        };
+        let keep = |p: &Placed| match layer {
+            Layer::All => true,
+            Layer::Body => Some(p.bone) != tail_bone,
+            Layer::Tail => Some(p.bone) == tail_bone,
+        };
+        let index = |at: usize, placed: &[Placed]| {
+            keep(&placed[at]).then(|| placed[..at].iter().filter(|p| keep(p)).count())
+        };
+        let (face, mouth) = (index(face, &placed), mouth.and_then(|m| index(m, &placed)));
+        placed.retain(keep);
         let (mut lo, mut hi) = (
             v3(f32::MAX, f32::MAX, f32::MAX),
             v3(f32::MIN, f32::MIN, f32::MIN),
@@ -186,11 +273,28 @@ impl<'m> Scene<'m> {
             palette,
             placed,
             look,
+            layer,
             face,
             mouth,
+            nose,
+            tail,
             center,
             radius,
         }
+    }
+
+    pub fn layer(&self) -> Layer {
+        self.layer
+    }
+
+    /// Where the tail joins the body, and whether it is in front of it.
+    pub fn tail(&self) -> Option<(V3, bool)> {
+        self.tail
+    }
+
+    /// Does the scene hold anything to draw?
+    pub fn is_empty(&self) -> bool {
+        self.placed.is_empty()
     }
 
     pub fn model(&self) -> &Model {
@@ -261,10 +365,11 @@ impl<'m> Scene<'m> {
                 zone = z;
             }
         }
-        let fp = &self.placed[self.face];
-        let fq = fp.local(p);
-        if fp.shape.distance(fq).abs() < 0.05 {
-            color = face::eyes(self, fp.shape, fq, color, px);
+        if let Some(fp) = self.face.map(|i| &self.placed[i]) {
+            let fq = fp.local(p);
+            if fp.shape.distance(fq).abs() < 0.05 {
+                color = face::eyes(self, fp.shape, fq, color, px);
+            }
         }
         if let Some(m) = self.mouth.map(|i| &self.placed[i]) {
             let mq = m.local(p);
@@ -311,8 +416,7 @@ impl<'m> Scene<'m> {
 
     /// Where the snot bubble hangs, in world space.
     pub fn nose(&self) -> V3 {
-        let fp = &self.placed[self.face];
-        inverse(&fp.a).apply(self.model.face.nose - fp.b)
+        self.nose
     }
 }
 

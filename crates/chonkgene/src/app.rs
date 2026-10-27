@@ -7,7 +7,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use chonkgene_core::Zone;
-use chonkgene_core::anim::{Animator, Expression};
+use chonkgene_core::anim::{Act, Animator, Expression};
 use chonkgene_core::mind::{Line, Mind, Out, World, XP_PER_LEVEL};
 use chonkgene_core::motion::{Area, Body, Motion};
 use chonkgene_core::shake::ShakeDetector;
@@ -858,6 +858,9 @@ fn direct(pets: &mut [Pet], ctx: &mut Ctx, cmds: Vec<Cmd>) {
             }
             Cmd::Say { line, .. } => p.say(ctx, line),
             Cmd::Express { expression, .. } => {
+                if expression == Expression::Happy && p.anim.expression != Expression::Happy {
+                    p.anim.cheer();
+                }
                 p.anim.expression = expression;
                 if expression == Expression::Happy {
                     p.happy_until = ctx.world.now + HAPPY_SECS;
@@ -930,7 +933,7 @@ fn spawn(
     let seed = save.id.wrapping_mul(0x9E37_79B9_7F4A_7C15) ^ (t * 1000.0) as u64;
     Ok(Pet {
         mind: Mind::new(species, save.personality(), save.affinity()),
-        anim: Animator::new(seed, save.chonk),
+        anim: Animator::new(seed, save.chonk, species.waddle()),
         species,
         window,
         presenter,
@@ -1030,6 +1033,10 @@ impl Pet {
 
     fn apply(&mut self, ctx: &mut Ctx, out: Out) {
         if let Some(e) = out.expression {
+            // Cheered up (a pat, a snack): a happy double hop.
+            if e == Expression::Happy && self.anim.expression != Expression::Happy {
+                self.anim.cheer();
+            }
             self.anim.expression = e;
             if e == Expression::Happy {
                 self.happy_until = ctx.world.now + HAPPY_SECS;
@@ -1063,6 +1070,7 @@ impl Pet {
             self.hello_at = None;
             if !self.mind.asleep() {
                 self.say(ctx, Line::Hello);
+                self.anim.gesture(Act::Wave);
             }
         }
 
@@ -1072,6 +1080,7 @@ impl Pet {
                 let dist = (target.0 - self.body.pos.0).hypot(target.1 - self.body.pos.1);
                 if !press.moved && dist > DRAG_START {
                     press.moved = true;
+                    self.anim.lift();
                 }
                 if press.moved {
                     let held_dt = (now - press.last).as_secs_f32();
@@ -1163,6 +1172,7 @@ impl Pet {
             self.anim.expression = Expression::Neutral;
         }
         self.anim.walking = self.body.motion == Motion::Walk;
+        self.anim.pace = self.body.pace;
         self.anim.facing = self.body.facing;
         self.anim.step(dt);
 
@@ -1342,6 +1352,9 @@ impl ApplicationHandler<UserEvent> for App {
                             last: now,
                         });
                         p.shake = ShakeDetector::default();
+                        // It squishes in under the finger at once.
+                        p.anim.press();
+                        p.next = now;
                     }
                     (MouseButton::Left, ElementState::Released) => {
                         let id = self.pets[i].save.id;

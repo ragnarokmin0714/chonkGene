@@ -1,10 +1,11 @@
 //! Every sprite of a species, for looking at while modelling:
 //! `cargo run --release -p chonkgene-render --example sprites -- <species> <out dir>`
-//! writes each pose and face, each coat sitting, and the 麻糬 body.
+//! writes each pose and face (tail included), each coat sitting, and the
+//! 麻糬 body.
 
 use chonkgene_render::KEYS;
-use chonkgene_render::sprites::{Variant, render_one};
-use chonkgene_rig::builtin;
+use chonkgene_render::sprites::{Variant, render_layer};
+use chonkgene_rig::{Layer, builtin};
 use tiny_skia::{IntSize, Pixmap};
 
 fn main() {
@@ -17,7 +18,7 @@ fn main() {
     std::fs::create_dir_all(out).expect("out dir");
     let threads = std::thread::available_parallelism().map_or(1, |n| n.get());
     let save = |name: String, v: Variant, key| {
-        let s = render_one(&model, v, key, threads);
+        let s = render_layer(&model, v, key, Layer::All, threads);
         let pm = Pixmap::from_vec(s.rgba, IntSize::from_wh(s.width, s.height).unwrap()).unwrap();
         pm.save_png(format!("{out}/{name}.png")).expect("png");
     };

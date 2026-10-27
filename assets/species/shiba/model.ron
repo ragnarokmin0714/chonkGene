@@ -22,7 +22,7 @@
         "head": (0, 0, 0.05),
         "front_legs": (0, -0.62, 0.52),
         "back_legs": (0, -0.84, 0),
-        "tail": (0.25, -0.1, -0.75),
+        "tail": (0.22, 0.02, -0.7),
     },
     parts: [
         (name: "body", bone: "body", shape: Ellipsoid((0.84, 0.62, 0.76)), at: (0, -0.48, 0),
@@ -47,7 +47,7 @@
             blend: 0.12, color: "fur", chonk: 1.0, mirror: true, zone: "bottom"),
         (name: "foot", bone: "back_legs", shape: Ellipsoid((0.17, 0.11, 0.24)), at: (0.62, -1.02, 0.4),
             blend: 0.12, color: "light", chonk: 1.0, mirror: true, zone: "paw"),
-        (name: "tail", bone: "tail", shape: Torus(major: 0.22, minor: 0.13), at: (0.3, -0.05, -0.8),
+        (name: "tail", bone: "tail", shape: Torus(major: 0.22, minor: 0.13), at: (0.3, 0.14, -0.8),
             rot: (0, -28.6, -77.3), blend: 0.06, color: "fur", zone: "bottom",
             marks: [(at: (0, 0, 0), radii: (0.22, 0.3, 0.22), color: "light", soft: 0.3)]),
         (name: "nose", bone: "head", shape: Ellipsoid((0.11, 0.075, 0.08)), at: (0, 0.36, 0.99),

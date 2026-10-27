@@ -8,7 +8,7 @@
 use chonkgene_rig::math::{V3, clamp01, smoothstep, v3};
 use std::f32::consts::FRAC_1_PI;
 
-use chonkgene_rig::{FLOOR, Scene, ZONES};
+use chonkgene_rig::{FLOOR, Layer, Scene, ZONES};
 
 /// Canvas in world units, and pixels per unit at 100%.
 const UNITS: (f32, f32) = (3.9, 3.45);
@@ -30,6 +30,9 @@ pub struct Sprite {
     pub top: (f32, f32),
     /// Beside the nose, in pixels: where the snot bubble hangs.
     pub nose: (f32, f32),
+    /// Where the tail joins the body, in pixels, and whether the tail is in
+    /// front of the body; none for a pet without a tail bone.
+    pub tail: Option<((f32, f32), bool)>,
 }
 
 impl Sprite {
@@ -173,6 +176,10 @@ fn occlusion(scene: &Scene, p: V3, n: V3) -> f32 {
 fn shade(scene: &Scene, cam: &Camera, x: f32, y: f32) -> Sample {
     let (o, d) = (cam.origin(x, y), cam.fwd);
     let Some(t) = trace(scene, o, d) else {
+        // A tail drawn on its own casts no shadow: the body's covers it.
+        if scene.layer() == Layer::Tail {
+            return Sample::default();
+        }
         // Missed: a soft contact shadow where the ray meets the floor.
         let tf = (FLOOR - o.y) / d.y;
         let g = o + d * tf;
@@ -299,6 +306,7 @@ pub fn render(scene: &Scene, scale: f32, threads: usize) -> Sprite {
         zones,
         top,
         nose: cam.project(scene.nose()),
+        tail: scene.tail().map(|(at, front)| (cam.project(at), front)),
     }
 }
 

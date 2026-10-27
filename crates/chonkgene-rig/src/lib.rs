@@ -14,7 +14,7 @@ pub mod sdf;
 use std::fmt;
 
 pub use model::*;
-pub use scene::{Scene, Surface, fat};
+pub use scene::{Layer, Scene, Surface, fat};
 
 /// World height of the floor every pet stands on.
 pub const FLOOR: f32 = -1.1;

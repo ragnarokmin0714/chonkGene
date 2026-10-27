@@ -26,7 +26,8 @@
         "body": (0, -1.1, 0),
         "head": (0, 0.05, 0.05),
         "back_legs": (0, -1.0, 0.3),
-        "wings": (0, -0.3, 0),
+        "wings": (0.68, -0.08, -0.02),
+        "tail": (0, -0.62, -0.64),
     },
     parts: [
         (name: "body", bone: "body", shape: Ellipsoid((0.86, 0.66, 0.8)), at: (0, -0.46, 0),
@@ -42,7 +43,7 @@
             blend: 0.08, color: "tuft", mirror: true, zone: "head"),
         (name: "wing", bone: "wings", shape: Ellipsoid((0.16, 0.34, 0.3)), at: (0.78, -0.35, -0.02),
             rot: (0, 0, 24), blend: 0.08, color: "wing", chonk: 0.8, mirror: true, zone: "bottom"),
-        (name: "tail", bone: "body", shape: Cone(r1: 0.14, r2: 0.04, h: 0.22, flat: 2.0), at: (0, -0.62, -0.7),
+        (name: "tail", bone: "tail", shape: Cone(r1: 0.14, r2: 0.04, h: 0.22, flat: 2.0), at: (0, -0.62, -0.7),
             rot: (-60, 0, 0), blend: 0.08, color: "wing", zone: "bottom"),
         (name: "toe", bone: "back_legs", shape: Ellipsoid((0.06, 0.05, 0.13)), at: (0.22, -1.05, 0.5),
             blend: 0.03, color: "beak", fuzz: 0.0, chonk: 0.6, mirror: true, zone: "paw"),

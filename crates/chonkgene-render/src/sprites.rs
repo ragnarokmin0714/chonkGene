@@ -11,7 +11,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::{Receiver, Sender, channel};
 use std::sync::{Arc, Mutex, OnceLock};
 
-use chonkgene_rig::{Look, Model, PoseId, Scene};
+use chonkgene_rig::{Layer, Look, Model, PoseId, Scene};
 use tiny_skia::{IntSize, Pixmap};
 
 use crate::raymarch::{self, Sprite};
@@ -29,17 +29,47 @@ const fn key(pose: PoseId, look: Look) -> Key {
 
 /// Every sprite a pet needs, most urgent first: it appears once the first
 /// one lands.
-pub const KEYS: [Key; 9] = [
+pub const KEYS: [Key; 18] = [
     key(PoseId::Sit, Look::Open),
-    key(PoseId::Sit, Look::Half),
     key(PoseId::Sit, Look::Shut),
+    key(PoseId::WalkA, Look::Open),
+    key(PoseId::WalkB, Look::Open),
+    key(PoseId::Sit, Look::Half),
     key(PoseId::Sit, Look::Happy),
     key(PoseId::BellyUp, Look::Laugh),
     key(PoseId::Melt, Look::FedUp),
     key(PoseId::Melt, Look::Shut),
     key(PoseId::Loaf, Look::Asleep),
     key(PoseId::Sulk, Look::Pout),
+    key(PoseId::WalkA, Look::Shut),
+    key(PoseId::WalkB, Look::Shut),
+    key(PoseId::LookLeft, Look::Open),
+    key(PoseId::LookRight, Look::Open),
+    key(PoseId::Stretch, Look::Happy),
+    key(PoseId::Yawn, Look::Yawn),
+    key(PoseId::Wave, Look::Happy),
 ];
+
+/// What a background job renders: a pose and face without the tail, or the
+/// tail alone in a pose (frames wag it, PLAN §5).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+enum Slot {
+    Body(Key),
+    Tail(PoseId),
+}
+
+/// Every slot, most urgent first: each pose's tail right after the pose's
+/// first sprite, and only for models with a tail.
+fn slots(tailed: bool) -> Vec<Slot> {
+    let mut out = Vec::new();
+    for key in KEYS {
+        out.push(Slot::Body(key));
+        if tailed && !out.contains(&Slot::Tail(key.pose)) {
+            out.push(Slot::Tail(key.pose));
+        }
+    }
+    out
+}
 
 /// What to render: everything that changes a sprite's pixels.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -98,11 +128,11 @@ pub struct Sprites {
     look: Variant,
     /// Bumped for every new look; jobs from older ones skip their work.
     generation: Arc<AtomicU64>,
-    done: HashMap<Key, Ready>,
-    /// Keys of the current generation still on their way.
+    done: HashMap<Slot, Ready>,
+    /// Slots of the current generation still on their way.
     waiting: usize,
-    tx: Sender<(u64, Key, Sprite)>,
-    rx: Receiver<(u64, Key, Sprite)>,
+    tx: Sender<(u64, Slot, Sprite)>,
+    rx: Receiver<(u64, Slot, Sprite)>,
 }
 
 impl Sprites {
@@ -135,19 +165,23 @@ impl Sprites {
 
     fn request_all(&mut self) {
         let generation = self.generation.fetch_add(1, Ordering::SeqCst) + 1;
-        self.waiting = KEYS.len();
+        let slots = slots(self.model.bone("tail").is_some());
+        self.waiting = slots.len();
         let Ok(farm) = farm().lock() else {
             return;
         };
-        for key in KEYS {
+        for slot in slots {
             let (model, look, tx) = (Arc::clone(&self.model), self.look, self.tx.clone());
             let current = Arc::clone(&self.generation);
             let job: Job = Box::new(move || {
                 if current.load(Ordering::SeqCst) != generation {
                     return;
                 }
-                let sprite = render_one(&model, look, key, 1);
-                let _ = tx.send((generation, key, sprite));
+                let sprite = match slot {
+                    Slot::Body(key) => render_one(&model, look, key, 1),
+                    Slot::Tail(pose) => render_tail(&model, look, pose, 1),
+                };
+                let _ = tx.send((generation, slot, sprite));
             });
             if farm.send(job).is_err() {
                 return;
@@ -159,13 +193,13 @@ impl Sprites {
     pub fn poll(&mut self) -> bool {
         let mut any = false;
         let current = self.generation.load(Ordering::SeqCst);
-        while let Ok((generation, key, sprite)) = self.rx.try_recv() {
+        while let Ok((generation, slot, sprite)) = self.rx.try_recv() {
             if generation != current {
                 continue;
             }
             self.waiting = self.waiting.saturating_sub(1);
             if let Some(ready) = ready(sprite) {
-                self.done.insert(key, ready);
+                self.done.insert(slot, ready);
                 any = true;
             }
         }
@@ -176,7 +210,7 @@ impl Sprites {
     pub fn finish(&mut self) {
         let current = self.generation.load(Ordering::SeqCst);
         while self.waiting > 0 {
-            let Ok((generation, key, sprite)) = self.rx.recv() else {
+            let Ok((generation, slot, sprite)) = self.rx.recv() else {
                 return;
             };
             if generation != current {
@@ -184,7 +218,7 @@ impl Sprites {
             }
             self.waiting -= 1;
             if let Some(ready) = ready(sprite) {
-                self.done.insert(key, ready);
+                self.done.insert(slot, ready);
             }
         }
     }
@@ -205,12 +239,22 @@ impl Sprites {
         ];
         fallbacks
             .into_iter()
-            .find_map(|k| self.done.get(&k).map(|r| (k, r)))
-            .or_else(|| self.done.iter().next().map(|(k, r)| (*k, r)))
+            .find_map(|k| self.done.get(&Slot::Body(k)).map(|r| (k, r)))
+            .or_else(|| {
+                self.done.iter().find_map(|(s, r)| match s {
+                    Slot::Body(k) => Some((*k, r)),
+                    Slot::Tail(_) => None,
+                })
+            })
     }
 
     pub fn get(&self, key: Key) -> Option<&Ready> {
-        self.done.get(&key)
+        self.done.get(&Slot::Body(key))
+    }
+
+    /// The tail drawn on its own for `pose`, if the pet has one and it is in.
+    pub fn tail(&self, pose: PoseId) -> Option<&Ready> {
+        self.done.get(&Slot::Tail(pose))
     }
 }
 
@@ -221,9 +265,31 @@ impl Drop for Sprites {
     }
 }
 
-/// Render one sprite now, on this thread plus `threads - 1` helpers.
+/// Render one sprite now, on this thread plus `threads - 1` helpers: the
+/// pet without its tail, which frames draw separately (see [`render_tail`]).
 pub fn render_one(model: &Model, look: Variant, key: Key, threads: usize) -> Sprite {
-    let scene = Scene::new(model, look.coat, look.chonk, key.pose, key.look);
+    render_layer(model, look, key, Layer::Body, threads)
+}
+
+/// Render just the tail in `pose`.
+pub fn render_tail(model: &Model, look: Variant, pose: PoseId, threads: usize) -> Sprite {
+    let key = Key {
+        pose,
+        look: Look::Open,
+    };
+    render_layer(model, look, key, Layer::Tail, threads)
+}
+
+/// Render one layer of a pose: [`Layer::All`] is the whole pet in one image
+/// (screenshots and the look tool).
+pub fn render_layer(
+    model: &Model,
+    look: Variant,
+    key: Key,
+    layer: Layer,
+    threads: usize,
+) -> Sprite {
+    let scene = Scene::new(model, look.coat, look.chonk, key.pose, key.look, layer);
     raymarch::render(&scene, look.scale, threads)
 }
 
@@ -243,6 +309,11 @@ fn ready(sprite: Sprite) -> Option<Ready> {
         data.extend_from_slice(&sprite.rgba[(y * w + x0) * 4..(y * w + x1 + 1) * 4]);
     }
     let pixmap = Pixmap::from_vec(data, IntSize::from_wh(cw as u32, ch as u32)?)?;
+    // The crop holds every visible pixel; the full image is dead weight.
+    let sprite = Sprite {
+        rgba: Vec::new(),
+        ..sprite
+    };
     Some(Ready {
         sprite,
         pixmap,

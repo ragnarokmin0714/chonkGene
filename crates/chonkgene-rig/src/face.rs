@@ -111,7 +111,7 @@ pub fn eyes(scene: &Scene, shape: Shape, q: V3, base: V3, px: f32) -> V3 {
                     .max(-(uv.1 - (ec.1 - 0.25 * ry)));
                 c = c.lerp(ink_c, ink(d, aa));
             }
-            Look::Pout => {
+            Look::Pout | Look::Yawn => {
                 // > < : squeezed shut.
                 let tip = (ec.0 - 0.45 * rx * side, ec.1);
                 let a = (ec.0 + 0.55 * rx * side, ec.1 + 0.5 * ry);
@@ -136,6 +136,13 @@ pub fn mouth(scene: &Scene, shape: Shape, q: V3, base: V3, px: f32) -> V3 {
             let m = (len(((uv.0) / 1.0, (uv.1 + 0.18) / 0.85)) - 0.30).max(uv.1 + 0.18);
             c = c.lerp(v3(0.55, 0.18, 0.22), ink(m, aa));
             let t = (len(sub(uv, (0.0, -0.48))) - 0.16).max(m);
+            c = c.lerp(v3(1.0, 0.52, 0.56), ink(t, aa));
+        }
+        Look::Yawn => {
+            // A tall O with the tongue at the bottom.
+            let m = len((uv.0 / 0.7, uv.1 + 0.3)) - 0.3;
+            c = c.lerp(v3(0.50, 0.16, 0.20), ink(m, aa));
+            let t = (len(sub(uv, (0.0, -0.58))) - 0.15).max(m);
             c = c.lerp(v3(1.0, 0.52, 0.56), ink(t, aa));
         }
         Look::FedUp => {

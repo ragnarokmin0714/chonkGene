@@ -24,15 +24,36 @@ pub enum PoseId {
     Loaf,
     /// Turned away: sulking.
     Sulk,
+    /// Walking, turned the way it goes: one diagonal pair of legs forward.
+    WalkA,
+    /// Walking: the other pair forward.
+    WalkB,
+    /// Sitting, head turned to the pet's left.
+    LookLeft,
+    /// Sitting, head turned to the pet's right.
+    LookRight,
+    /// A play bow: front low, bottom up.
+    Stretch,
+    /// Sitting up, head tipped back.
+    Yawn,
+    /// Sitting, one front paw (or wing) raised.
+    Wave,
 }
 
 impl PoseId {
-    pub const ALL: [PoseId; 5] = [
+    pub const ALL: [PoseId; 12] = [
         PoseId::Sit,
         PoseId::BellyUp,
         PoseId::Melt,
         PoseId::Loaf,
         PoseId::Sulk,
+        PoseId::WalkA,
+        PoseId::WalkB,
+        PoseId::LookLeft,
+        PoseId::LookRight,
+        PoseId::Stretch,
+        PoseId::Yawn,
+        PoseId::Wave,
     ];
 
     pub fn name(self) -> &'static str {
@@ -42,6 +63,13 @@ impl PoseId {
             PoseId::Melt => "melt",
             PoseId::Loaf => "loaf",
             PoseId::Sulk => "sulk",
+            PoseId::WalkA => "walk_a",
+            PoseId::WalkB => "walk_b",
+            PoseId::LookLeft => "look_left",
+            PoseId::LookRight => "look_right",
+            PoseId::Stretch => "stretch",
+            PoseId::Yawn => "yawn",
+            PoseId::Wave => "wave",
         }
     }
 }
@@ -63,6 +91,8 @@ pub enum Look {
     Pout,
     /// Closed, relaxed curves.
     Asleep,
+    /// Eyes squeezed shut, mouth a tall open O.
+    Yawn,
 }
 
 // ---- the file format ---------------------------------------------------------
@@ -242,6 +272,10 @@ struct PoseFile {
     /// Settle the whole pet onto the floor after posing it.
     #[serde(default = "yes")]
     rest: bool,
+    /// Keyed by bone name; `"<bone>.mirror"` moves only the mirrored copies
+    /// of that bone's parts (one paw waving), in place of the plain move.
+    /// Mirrored copies mirror their move, so a move is written for the +x
+    /// side and both sides do the same thing.
     #[serde(default)]
     bones: HashMap<String, MoveFile>,
 }
@@ -339,6 +373,21 @@ pub struct Pose {
     pub root: Move,
     /// One per bone.
     pub bones: Vec<Move>,
+    /// One per bone: a move for the mirrored copies only, if the pose has one.
+    pub twins: Vec<Option<Move>>,
+}
+
+impl Pose {
+    /// The move for a part on bone `bone`; `mirrored` for its mirrored copy.
+    pub fn bone(&self, bone: usize, mirrored: bool) -> Move {
+        let twin = if mirrored {
+            self.twins.get(bone).copied().flatten()
+        } else {
+            None
+        };
+        twin.or_else(|| self.bones.get(bone).copied())
+            .unwrap_or_default()
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -368,6 +417,10 @@ impl Model {
 
     pub fn pose(&self, id: PoseId) -> &Pose {
         &self.poses[id as usize]
+    }
+
+    pub fn bone(&self, name: &str) -> Option<usize> {
+        self.bones.iter().position(|b| b == name)
     }
 
     pub fn part(&self, name: &str) -> Option<usize> {
@@ -539,18 +592,27 @@ fn resolve(file: ModelFile, shared: HashMap<String, PoseFile>) -> Result<Model, 
                 ..mv(&pf.root)
             },
             bones: vec![Move::default(); bones.len()],
+            twins: vec![None; bones.len()],
         };
-        for (name, m) in &pf.bones {
+        for (key, m) in &pf.bones {
+            let (name, twin) = match key.strip_suffix(".mirror") {
+                Some(name) => (name, true),
+                None => (key.as_str(), false),
+            };
             // Shared poses may move bones this species lacks (a bird's legs).
             if let Some(i) = bones.iter().position(|b| b == name) {
                 let m = mv(m);
                 if m.scale.min_elem() <= 0.0 {
                     return Err(ctx(format!(
-                        "pose {:?} scales {name:?} to nothing",
+                        "pose {:?} scales {key:?} to nothing",
                         id.name()
                     )));
                 }
-                pose.bones[i] = m;
+                if twin {
+                    pose.twins[i] = Some(m);
+                } else {
+                    pose.bones[i] = m;
+                }
             }
         }
         poses.push(pose);

@@ -7,9 +7,9 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use chonkgene_core::anim::{Expression, PoseParams};
-use chonkgene_render::sprites::{Variant, render_one};
+use chonkgene_render::sprites::{Variant, render_layer};
 use chonkgene_render::{KEYS, Key, Renderer};
-use chonkgene_rig::{Look, PoseId, builtin};
+use chonkgene_rig::{Layer, Look, PoseId, builtin};
 use tiny_skia::{IntSize, Pixmap};
 
 /// Largest per-channel difference that still counts as equal: tiny-skia's
@@ -64,12 +64,12 @@ fn compare(name: &str, actual: &Pixmap) {
     );
 }
 
-/// One sprite, rendered now on every core.
+/// One pose of the whole pet, tail included, rendered now on every core.
 fn sprite(id: &str, chonk: f32, coat: &str, key: Key) -> Pixmap {
     let model = builtin::load(id).unwrap();
     let coat = model.coat(coat).unwrap();
     let threads = std::thread::available_parallelism().map_or(1, |n| n.get());
-    let s = render_one(
+    let s = render_layer(
         &model,
         Variant {
             coat,
@@ -77,6 +77,7 @@ fn sprite(id: &str, chonk: f32, coat: &str, key: Key) -> Pixmap {
             scale: 1.0,
         },
         key,
+        Layer::All,
         threads,
     );
     Pixmap::from_vec(s.rgba, IntSize::from_wh(s.width, s.height).unwrap()).unwrap()
@@ -285,4 +286,119 @@ fn shiba_asleep() {
         ..PoseParams::default()
     };
     compare("shiba-asleep", &shiba().render_asleep(&params, 1.6).clone());
+}
+
+/// The tail is its own layer: a wag moves its pixels and only near where it
+/// joins the body, and the body never changes.
+#[test]
+fn a_wag_turns_only_the_tail() {
+    let mut r = shiba();
+    let sulk = PoseParams::default();
+    let rest = r.render(&sulk, Expression::Sulk).clone();
+    let wagged = PoseParams { tail: 20.0, ..sulk };
+    let moved = r.render(&wagged, Expression::Sulk).clone();
+    assert!(r.changed());
+    let off = differing(&rest, &moved);
+    assert!(off > 150, "the tail should visibly move: {off} px");
+    assert!(off < 3000, "only the tail should move: {off} px");
+    // Hit-testing follows the tail: it is drawn in front while sulking.
+    let hits = (0..moved.height())
+        .flat_map(|y| (0..moved.width()).map(move |x| (x, y)))
+        .filter(|&(x, y)| r.hit(x as f32, y as f32).is_some())
+        .count();
+    assert!(hits > 5000);
+}
+
+/// Mid-turn the pet is squeezed thin about its middle, never mirrored at
+/// once.
+#[test]
+fn turning_round_squeezes_the_pet_thin() {
+    let mut r = shiba();
+    let width = |pm: &Pixmap| {
+        let solid =
+            |x: u32| (0..pm.height()).any(|y| pm.pixel(x, y).is_some_and(|p| p.alpha() > 200));
+        (0..pm.width()).filter(|&x| solid(x)).count()
+    };
+    let full = width(
+        &r.render(&PoseParams::default(), Expression::Neutral)
+            .clone(),
+    );
+    let mid = PoseParams {
+        facing: 0.2,
+        ..PoseParams::default()
+    };
+    let thin = width(&r.render(&mid, Expression::Neutral).clone());
+    assert!(thin * 3 < full, "{thin} vs {full}");
+}
+
+/// Steps and gestures pick their own poses; strong feelings win over them.
+#[test]
+fn acts_pick_their_poses() {
+    use chonkgene_core::anim::Act;
+    use chonkgene_render::key_for;
+    let with = |act| PoseParams {
+        act,
+        ..PoseParams::default()
+    };
+    assert_eq!(
+        key_for(Expression::Neutral, &with(Act::StepB)).pose,
+        PoseId::WalkB
+    );
+    assert_eq!(
+        key_for(Expression::Neutral, &with(Act::Yawn)),
+        Key {
+            pose: PoseId::Yawn,
+            look: Look::Yawn
+        }
+    );
+    assert_eq!(
+        key_for(Expression::Happy, &with(Act::Wave)).pose,
+        PoseId::Wave
+    );
+    assert_eq!(
+        key_for(Expression::Giggle, &with(Act::StepA)).pose,
+        PoseId::BellyUp
+    );
+    assert_eq!(
+        key_for(Expression::Asleep, &with(Act::Wave)).pose,
+        PoseId::Loaf
+    );
+}
+
+/// Frames copied from the cache look like the same frame drawn afresh: a
+/// walk beat, and a wag (once cached, then from the cache).
+#[test]
+fn cached_frames_match_fresh_ones() {
+    use chonkgene_core::anim::Act;
+    let walk = PoseParams {
+        act: Act::StepB,
+        beat: Some(5),
+        bob: -6.0,
+        sway: -4.0,
+        squash: 0.02,
+        tail: 9.0,
+        ..PoseParams::default()
+    };
+    let wag = PoseParams {
+        tail: 11.0,
+        breath: 0.4,
+        ..PoseParams::default()
+    };
+    for (params, expression) in [(walk, Expression::Neutral), (wag, Expression::Sulk)] {
+        let fresh = shiba()
+            .render(
+                &PoseParams {
+                    beat: None,
+                    ..params
+                },
+                expression,
+            )
+            .clone();
+        let mut r = shiba();
+        r.render(&params, expression);
+        r.render(&PoseParams::default(), Expression::Neutral);
+        let cached = r.render(&params, expression).clone();
+        assert!(r.changed());
+        assert_eq!(differing(&fresh, &cached), 0, "{params:?}");
+    }
 }

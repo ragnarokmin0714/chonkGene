@@ -46,4 +46,70 @@
             "head": (rot: (12, 0, 0), shift: (0, -0.06, 0)),
         },
     ),
+    // Walking, turned the way it goes (the frame mirrors it for going
+    // left), face still towards you. Two steps: one diagonal pair of legs
+    // forward, then the other; birds step one foot, then the other.
+    "walk_a": (
+        root: (rot: (0, 52, 0)),
+        bones: {
+            "head": (rot: (0, -22, 0)),
+            "front_legs": (rot: (-32, 0, 0)),
+            "front_legs.mirror": (rot: (26, 0, 0)),
+            "back_legs": (rot: (24, 0, 0)),
+            "back_legs.mirror": (rot: (-28, 0, 0)),
+            "wings": (rot: (0, 0, 12)),
+        },
+    ),
+    "walk_b": (
+        root: (rot: (0, 52, 0)),
+        bones: {
+            "head": (rot: (0, -22, 0)),
+            "front_legs": (rot: (26, 0, 0)),
+            "front_legs.mirror": (rot: (-32, 0, 0)),
+            "back_legs": (rot: (-28, 0, 0)),
+            "back_legs.mirror": (rot: (24, 0, 0)),
+            "wings": (rot: (0, 0, 12)),
+        },
+    ),
+    // Idle glances: the head turns and tilts, the body stays put.
+    "look_left": (
+        root: (rot: (0, 20, 0)),
+        bones: {
+            "head": (rot: (0, 38, -9)),
+        },
+    ),
+    "look_right": (
+        root: (rot: (0, 20, 0)),
+        bones: {
+            "head": (rot: (0, -48, 10)),
+        },
+    ),
+    // 伸懶腰: sitting up tall, both front paws (or wings) up high.
+    "stretch": (
+        root: (rot: (0, 20, 0)),
+        bones: {
+            "body": (scale: (0.94, 1.1, 0.94)),
+            "head": (rot: (-12, 0, 0), shift: (0, 0.1, -0.04)),
+            "front_legs": (rot: (-160, 0, 22), shift: (0.1, 0.42, 0.06)),
+            "wings": (rot: (0, 0, 125)),
+        },
+    ),
+    // Sitting tall, head tipped back.
+    "yawn": (
+        root: (rot: (0, 20, 0)),
+        bones: {
+            "body": (scale: (0.96, 1.06, 0.96)),
+            "head": (rot: (-22, 0, 0), shift: (0, 0.06, -0.05)),
+        },
+    ),
+    // One paw (or wing) up beside the face, on the side nearer you.
+    "wave": (
+        root: (rot: (0, 20, 0)),
+        bones: {
+            "front_legs": (),
+            "front_legs.mirror": (rot: (-155, 0, 25), shift: (0.1, 0.34, 0.14)),
+            "wings": (),
+            "wings.mirror": (rot: (0, 0, 115)),
+        },
+    ),
 }
