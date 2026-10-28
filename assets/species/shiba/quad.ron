@@ -27,7 +27,9 @@
         "leg_fr": (-0.3, -0.52, 0.48),
         "leg_bl": (0.3, -0.5, -0.58),
         "leg_br": (-0.3, -0.5, -0.58),
-        "tail": (0, 0.0, -0.88),
+        "tail": (0.02, -0.02, -0.88),
+        "tail_mid": (0.04, 0.28, -1.0),
+        "tail_tip": (0.07, 0.47, -0.8),
     },
     parents: {
         "head": "body",
@@ -37,14 +39,26 @@
         "leg_bl": "hips",
         "leg_br": "hips",
         "tail": "hips",
+        "tail_mid": "tail",
+        "tail_tip": "tail_mid",
     },
+    // Soft spots that wobble: the round belly, the bottom, the chin.
+    jiggles: [
+        (name: "belly", parent: "body", at: (0, -0.66, 0.0), radius: 0.6, share: 0.85),
+        (name: "butt", parent: "hips", at: (0, -0.3, -1.02), radius: 0.52, share: 0.8),
+        (name: "chin", parent: "head", at: (0, -0.2, 1.4), radius: 0.55, share: 0.8),
+    ],
     parts: [
-        (name: "chest", bone: "body", shape: Ellipsoid((0.56, 0.46, 0.64)), at: (0, -0.3, 0.3),
+        (name: "chest", bone: "body", shape: Ellipsoid((0.6, 0.48, 0.64)), at: (0, -0.3, 0.3),
             color: "fur", chonk: 1.0, zone: "bottom",
             marks: [(at: (0, -0.3, 0.3), radii: (0.38, 0.3, 0.5), color: "light", soft: 0.25, zone: Some("belly"))]),
-        (name: "rump", bone: "hips", shape: Ellipsoid((0.54, 0.46, 0.56)), at: (0, -0.32, -0.48),
+        (name: "rump", bone: "hips", shape: Ellipsoid((0.58, 0.48, 0.56)), at: (0, -0.32, -0.48),
             blend: 0.35, color: "fur", chonk: 1.0, zone: "bottom",
             marks: [(at: (0, -0.32, 0.1), radii: (0.36, 0.26, 0.5), color: "light", soft: 0.25, zone: Some("belly"))]),
+        // The round tummy hanging between the legs.
+        (name: "belly", bone: "body", shape: Ellipsoid((0.56, 0.36, 0.66)), at: (0, -0.5, -0.06),
+            blend: 0.3, color: "fur", chonk: 1.0, zone: "belly",
+            marks: [(at: (0, -0.22, 0.05), radii: (0.42, 0.24, 0.56), color: "light", soft: 0.35)]),
         (name: "head", bone: "head", shape: Ellipsoid((0.86, 0.72, 0.75)), at: (0, 0.42, 0.95),
             blend: 0.2, color: "fur", zone: "head",
             marks: [
@@ -73,10 +87,15 @@
         (name: "leg_br", bone: "leg_br", shape: Capsule(to: (0, -0.38, 0.05), r: 0.15), at: (-0.3, -0.57, -0.6),
             blend: 0.12, color: "fur", chonk: 0.3, zone: "paw",
             marks: [(at: (0, -0.38, 0.07), radii: (0.2, 0.13, 0.2), color: "light", soft: 0.3)]),
-        // The curl lies on the back, its ring seen side on.
-        (name: "tail", bone: "tail", shape: Torus(major: 0.2, minor: 0.12), at: (0.06, 0.22, -0.86),
-            rot: (0, 12, 90), blend: 0.08, color: "fur", zone: "bottom",
-            marks: [(at: (0, 0, 0), radii: (0.18, 0.3, 0.18), color: "light", soft: 0.3)]),
+        // The curl: up off the rump, over and onto the back, a bone a
+        // segment so it can swish.
+        (name: "tail", bone: "tail", shape: Capsule(to: (0.02, 0.3, -0.12), r: 0.17), at: (0.02, -0.02, -0.88),
+            blend: 0.1, color: "fur", zone: "bottom"),
+        (name: "tail_mid", bone: "tail_mid", shape: Capsule(to: (0.03, 0.19, 0.2), r: 0.19), at: (0.04, 0.28, -1.0),
+            blend: 0.1, color: "fur", zone: "bottom"),
+        (name: "tail_tip", bone: "tail_tip", shape: Capsule(to: (0.02, -0.14, 0.18), r: 0.16), at: (0.07, 0.47, -0.8),
+            blend: 0.08, color: "fur", zone: "bottom",
+            marks: [(at: (0.02, -0.16, 0.18), radii: (0.2, 0.18, 0.2), color: "light", soft: 0.45)]),
         (name: "nose", bone: "head", shape: Ellipsoid((0.094, 0.064, 0.068)), at: (0, 0.3, 1.72),
             blend: 0.03, color: "ink", gloss: 1.0, fuzz: 0.0, zone: "head"),
     ],

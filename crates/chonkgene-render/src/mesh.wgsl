@@ -26,7 +26,7 @@ struct Uniforms {
     // The shadow: centre x and z on the floor, radii across and along the pet.
     shadow: vec4<f32>,
     // Three rows of [m | t] per bone.
-    bones: array<vec4<f32>, 48>,
+    bones: array<vec4<f32>, 192>,
 }
 
 @group(0) @binding(0) var<uniform> u: Uniforms;

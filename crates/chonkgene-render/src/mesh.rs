@@ -5,10 +5,10 @@
 
 use chonkgene_rig::math::{V3, smoothstep, v3};
 use chonkgene_rig::sdf::Shape;
-use chonkgene_rig::{Layer, Look, Model, Pose, Scene};
+use chonkgene_rig::{FLOOR, Layer, Look, Model, Pose, Scene};
 
 use crate::raymarch::occlusion;
-use crate::skin::Skeleton;
+use crate::skin::{ROOT_PIVOT, Skeleton};
 
 /// One vertex as `mesh.wgsl` reads it.
 #[repr(C)]
@@ -34,6 +34,9 @@ pub struct Mesh {
     /// Radii of the parts the eyes and mouth are painted on.
     pub eye_r: V3,
     pub mouth_r: V3,
+    /// The shadow's radii across and along the body: what stands on the
+    /// floor (legs, belly), a little wider.
+    pub shadow: (f32, f32),
 }
 
 /// Bake `model` at rest (coat `coat`, body value `chonk`) with grid cells
@@ -151,7 +154,7 @@ pub fn bake(
         let on = parts[i].shape.distance(q).abs() < within;
         [q.x, q.y, q.z, if on { 1.0 } else { 0.0 }]
     };
-    let vertices = points
+    let vertices: Vec<Vertex> = points
         .iter()
         .map(|&p0| {
             let mut p = p0;
@@ -172,7 +175,19 @@ pub fn bake(
             }
         })
         .collect();
+    let low: Vec<&Vertex> = vertices
+        .iter()
+        .filter(|v: &&Vertex| v.pos[1] < FLOOR + 0.5)
+        .collect();
+    let reach = |axis: usize, centre: f32| {
+        low.iter()
+            .map(|v| (v.pos[axis] - centre).abs())
+            .fold(0.3f32, f32::max)
+            * 1.15
+    };
+    let shadow = (reach(0, ROOT_PIVOT.x), reach(2, ROOT_PIVOT.z));
     Ok(Mesh {
+        shadow,
         vertices,
         indices,
         eye_r: radii(eyes),
@@ -222,12 +237,6 @@ fn weigh(parts: &[chonkgene_rig::PartView], sk: &Skeleton, p: V3) -> ([u32; 4], 
         // not the front paws.
         let seam = parts[i.max(near)].blend.max(0.04);
         w[pv.part.bone] += 1.0 - smoothstep(0.0, seam, dp - dmin);
-    }
-    for &(from, to, near, far) in &sk.tips {
-        let f = smoothstep(near, far, (p - sk.pivots[from]).length());
-        let moved = w[from] * f;
-        w[from] -= moved;
-        w[to] += moved;
     }
     // A soft spot takes its share from the bone it hangs on only: a belly
     // wobbles the chest's skin, never the legs beside it.

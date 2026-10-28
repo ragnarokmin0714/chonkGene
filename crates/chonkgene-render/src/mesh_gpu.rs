@@ -15,7 +15,7 @@ const COLOR: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8Unorm;
 const DEPTH: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
 const SAMPLES: u32 = 4;
 /// Bones the shader holds (mesh.wgsl).
-pub const MAX_BONES: usize = 16;
+pub const MAX_BONES: usize = 64;
 
 /// One pet's mesh on the GPU, and where it draws.
 pub struct MeshCanvas {
@@ -36,6 +36,8 @@ pub struct MeshCanvas {
     timer: Option<(wgpu::QuerySet, wgpu::Buffer)>,
     eye_r: V3,
     mouth_r: V3,
+    /// The shadow's radii (see [`Mesh::shadow`]).
+    shadow_r: (f32, f32),
     /// GPU seconds measured so far, and frames drawn.
     pub measured: f64,
     pub frames: u32,
@@ -229,6 +231,7 @@ impl MeshCanvas {
             timer,
             eye_r: mesh.eye_r,
             mouth_r: mesh.mouth_r,
+            shadow_r: mesh.shadow,
             measured: 0.0,
             frames: 0,
         }
@@ -240,15 +243,14 @@ impl MeshCanvas {
 
     /// Draw the mesh posed by `bones` (one per skeleton bone) into `out`
     /// and wait for it. `scene` gives the face (look, palette); `yaw`, in
-    /// degrees, turns the shadow under the root's pivot, radii `shadow_r`
-    /// (across, along the body). The GPU seconds it took, if measured.
+    /// degrees, turns the shadow under the root's pivot. The GPU seconds it
+    /// took, if measured.
     pub fn draw(
         &mut self,
         gpu: &Gpu,
         scene: &Scene,
         bones: &[Affine],
         yaw: f32,
-        shadow_r: (f32, f32),
         out: &mut Pixmap,
     ) -> Result<Option<f32>, String> {
         if bones.len() > MAX_BONES {
@@ -263,7 +265,7 @@ impl MeshCanvas {
         let mut u = uniforms(scene, &self.cam, &Frame::default(), true, 0);
         u.push(v4(self.eye_r, yaw.to_radians()));
         u.push(v4(self.mouth_r, 0.0));
-        u.push([ROOT_PIVOT.x, ROOT_PIVOT.z, shadow_r.0, shadow_r.1]);
+        u.push([ROOT_PIVOT.x, ROOT_PIVOT.z, self.shadow_r.0, self.shadow_r.1]);
         for i in 0..MAX_BONES {
             let rows = bones.get(i).unwrap_or(&Affine::IDENTITY).rows();
             u.extend(rows);

@@ -3,9 +3,9 @@
 
 use chonkgene_render::gpu::Gpu;
 use chonkgene_render::mesh::bake;
-use chonkgene_render::mesh_gpu::MeshCanvas;
+use chonkgene_render::mesh_gpu::{MAX_BONES, MeshCanvas};
 use chonkgene_render::raymarch;
-use chonkgene_render::skin::{SHIBA_SHADOW, Skeleton, Walk, shiba_quad};
+use chonkgene_render::skin::{QUAD_SPECIES, Skeleton, Walk, quad};
 use chonkgene_rig::math::{V3, v3};
 use chonkgene_rig::{Layer, Look, Model, Pose, Scene};
 use tiny_skia::Pixmap;
@@ -15,7 +15,7 @@ const PPU: f32 = 58.0;
 const WALK_SPEED: f32 = 60.0;
 
 fn shiba() -> (Model, Skeleton) {
-    shiba_quad().unwrap()
+    quad("shiba").unwrap()
 }
 
 #[test]
@@ -119,9 +119,7 @@ fn the_mesh_draws_the_same_pet_as_the_ray_marcher() {
     let mut canvas = MeshCanvas::new(&gpu, &mesh, s.width, s.height, 1.0);
     let mut pm = Pixmap::new(s.width, s.height).unwrap();
     let rest = sk.pose(&[]);
-    canvas
-        .draw(&gpu, &scene, &rest, 0.0, SHIBA_SHADOW, &mut pm)
-        .unwrap();
+    canvas.draw(&gpu, &scene, &rest, 0.0, &mut pm).unwrap();
     // The pet's own pixels (not its shadow) in both: they cover the same
     // ground, and where both draw the pet, the colours agree.
     let solid = |a: u8| a > 200;
@@ -171,4 +169,105 @@ fn a_poke_wobbles_the_belly_and_it_settles() {
     assert!(dip < -0.02, "the belly never sprang back: {dip:.3}");
     let late = wobble[150..].iter().map(|y| y.abs()).fold(0.0f32, f32::max);
     assert!(late < 0.005, "still wobbling {late:.3} after 2.5 s");
+}
+
+#[test]
+fn every_four_legged_pet_fits_the_shader_and_stands_on_its_paws() {
+    for id in QUAD_SPECIES {
+        let (model, sk) = quad(id).unwrap();
+        assert!(
+            sk.names.len() <= MAX_BONES,
+            "{id}: {} bones",
+            sk.names.len()
+        );
+        let mesh = bake(&model, &sk, 0, 0.33, 0.025).unwrap();
+        // The shadow covers the four paws (x ±0.3, z 0.5 and −0.6 from
+        // the middle) but stays under the pet.
+        let (across, along) = mesh.shadow;
+        assert!((0.4..1.0).contains(&across), "{id}: shadow across {across}");
+        assert!((0.7..1.5).contains(&along), "{id}: shadow along {along}");
+        Walk::new(&sk, 1.0).unwrap();
+    }
+}
+
+/// Where each tail's base and tip are over `secs` of standing or walking,
+/// sampled every frame.
+fn tail_paths(sk: &Skeleton, walking: bool, secs: f32) -> Vec<(Vec<V3>, Vec<V3>)> {
+    let tails = sk.tails();
+    let mut walk = Walk::new(sk, 1.0).unwrap();
+    let mut paths = vec![(Vec::new(), Vec::new()); tails.len()];
+    let dt = 1.0 / 60.0;
+    for _ in 0..(secs / dt) as usize {
+        let pose = sk.pose(&walk.step(dt, walking, 1.0));
+        for (t, chain) in tails.iter().enumerate() {
+            // A point a little way out along the first and last bones.
+            let (base, tip) = (chain[0], chain[chain.len() - 1]);
+            let near = |b: usize| sk.pivots[b] + v3(0.0, 0.1, -0.05);
+            paths[t].0.push(pose[base].apply(near(base)));
+            paths[t].1.push(pose[tip].apply(near(tip)));
+        }
+    }
+    paths
+}
+
+fn sweep(path: &[V3]) -> f32 {
+    let mut worst = 0.0f32;
+    for a in path {
+        for b in path {
+            worst = worst.max((*a - *b).length());
+        }
+    }
+    worst
+}
+
+#[test]
+fn tails_swish_like_a_whip_standing_or_walking() {
+    for id in QUAD_SPECIES {
+        let (_, sk) = quad(id).unwrap();
+        assert!(!sk.tails().is_empty(), "{id} has no tail");
+        for walking in [false, true] {
+            // Past the first second, once the walk has got going.
+            for (base, tip) in tail_paths(&sk, walking, 4.0) {
+                let (base, tip) = (sweep(&base[60..]), sweep(&tip[60..]));
+                // The tip swings visibly: 0.1 world units is 6 px at 100%.
+                assert!(
+                    tip > 0.1,
+                    "{id}: tail tip swings {tip:.3} (walking {walking})"
+                );
+                assert!(tip > base, "{id}: tip {tip:.3} vs base {base:.3}");
+            }
+            // And the tail bends as it goes, not swinging stiff from the
+            // root: the last segment turns against the one before it.
+            let mut walk = Walk::new(&sk, 1.0).unwrap();
+            let tips: Vec<usize> = sk.tails().iter().map(|c| c[c.len() - 1]).collect();
+            let (mut lo, mut hi) = (f32::MAX, f32::MIN);
+            for f in 0..240 {
+                let joints = walk.step(1.0 / 60.0, walking, 1.0);
+                if f >= 60 {
+                    lo = lo.min(joints[tips[0]].rot.z);
+                    hi = hi.max(joints[tips[0]].rot.z);
+                }
+            }
+            assert!(hi - lo > 4.0, "{id}: the tip bends only {:.1}°", hi - lo);
+        }
+    }
+}
+
+#[test]
+fn nine_tails_ripple_rather_than_sway_as_one() {
+    let (_, sk) = quad("fox").unwrap();
+    assert_eq!(sk.tails().len(), 9);
+    let paths = tail_paths(&sk, false, 3.0);
+    // Each tip's sideways offset from its own average, at one moment: in
+    // step they would all share a sign.
+    let at = paths[0].1.len() - 1;
+    let sides: Vec<f32> = paths
+        .iter()
+        .map(|(_, tip)| {
+            let mean = tip.iter().map(|p| p.x).sum::<f32>() / tip.len() as f32;
+            tip[at].x - mean
+        })
+        .collect();
+    let left = sides.iter().filter(|s| **s < 0.0).count();
+    assert!((2..=7).contains(&left), "tails swing together: {sides:?}");
 }

@@ -121,6 +121,18 @@ struct ModelFile {
     poses: HashMap<String, PoseFile>,
     #[serde(default)]
     gait: GaitFile,
+    /// Soft spots that wobble on spring bones of their own.
+    #[serde(default)]
+    jiggles: Vec<JiggleFile>,
+}
+
+#[derive(Deserialize)]
+struct JiggleFile {
+    name: String,
+    parent: String,
+    at: [f32; 3],
+    radius: f32,
+    share: f32,
 }
 
 /// How a species walks (see [`Gait`]).
@@ -398,6 +410,18 @@ pub struct Gait {
     pub diagonal: bool,
 }
 
+/// A soft spot (a belly, a bottom, a chin) that wobbles on a spring bone
+/// of its own, hung from bone `parent`: skin within `radius` of `at` passes
+/// up to `share` of its weight on the parent to it.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Jiggle {
+    pub name: String,
+    pub parent: usize,
+    pub at: V3,
+    pub radius: f32,
+    pub share: f32,
+}
+
 /// A bone's move in a pose: scale and turn about its pivot, then shift.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Move {
@@ -525,6 +549,7 @@ pub struct Model {
     pub face: Face,
     pub poses: Vec<Pose>,
     pub gait: Gait,
+    pub jiggles: Vec<Jiggle>,
 }
 
 impl Model {
@@ -784,6 +809,26 @@ fn resolve(file: ModelFile, shared: HashMap<String, PoseFile>) -> Result<Model, 
         poses.push(pose);
     }
 
+    let mut jiggles = Vec::new();
+    for j in &file.jiggles {
+        let parent = bones.iter().position(|b| *b == j.parent).ok_or_else(|| {
+            ctx(format!(
+                "jiggle {:?} hangs from no bone {:?}",
+                j.name, j.parent
+            ))
+        })?;
+        if bones.contains(&j.name) || jiggles.iter().any(|o: &Jiggle| o.name == j.name) {
+            return Err(ctx(format!("jiggle {:?} is already a bone", j.name)));
+        }
+        jiggles.push(Jiggle {
+            name: j.name.clone(),
+            parent,
+            at: V3::from_array(j.at),
+            radius: j.radius,
+            share: j.share.clamp(0.0, 1.0),
+        });
+    }
+
     Ok(Model {
         species,
         slots: file.slots,
@@ -803,6 +848,7 @@ fn resolve(file: ModelFile, shared: HashMap<String, PoseFile>) -> Result<Model, 
         parts,
         face,
         poses,
+        jiggles,
     })
 }
 

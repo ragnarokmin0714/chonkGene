@@ -2,7 +2,8 @@
 //! four-legged walk worked out every frame. The legs step one at a time
 //! (left hind, left fore, right hind, right fore) with each planted foot
 //! keeping pace with the floor, the chest and hips rock against each other,
-//! and the tail, belly, bottom and chin ride springs of their own.
+//! tails swish as chains of springy segments, and the belly, bottom and
+//! chin wobble on springs of their own.
 
 use chonkgene_rig::math::{M3, V3, v3};
 use chonkgene_rig::{FLOOR, Model, builtin};
@@ -49,74 +50,20 @@ impl Affine {
     }
 }
 
-/// A soft spot (a belly, a bottom, a chin) that wobbles on a spring bone of
-/// its own, hung from `parent`; vertices within `radius` of `at` pass up to
-/// `share` of their weight to it.
-pub struct Jiggle {
-    pub name: &'static str,
-    pub parent: &'static str,
-    pub at: V3,
-    pub radius: f32,
-    pub share: f32,
-}
+/// Four-legged models for the spike, by species id.
+pub const QUAD_SPECIES: [&str; 2] = ["shiba", "fox"];
 
-/// The far end of a bone (a tail's tip) as a bone of its own, turning about
-/// `pivot`: weight passes to it from `near` to `far` away from the parent's
-/// pivot.
-pub struct Tip {
-    pub name: &'static str,
-    pub parent: &'static str,
-    pub pivot: V3,
-    pub near: f32,
-    pub far: f32,
-}
-
-/// The four-legged Shiba and its skeleton.
-pub fn shiba_quad() -> Result<(Model, Skeleton), String> {
-    let model = Model::parse(
-        include_str!("../../../assets/species/shiba/quad.ron"),
-        builtin::POSES,
-    )
-    .map_err(|e| e.to_string())?;
-    let sk = Skeleton::new(&model, SHIBA_TIPS, SHIBA_JIGGLES)?;
+/// A four-legged model (`shiba`, `fox`) and its skeleton.
+pub fn quad(id: &str) -> Result<(Model, Skeleton), String> {
+    let src = match id {
+        "shiba" => include_str!("../../../assets/species/shiba/quad.ron"),
+        "fox" => include_str!("../../../assets/species/fox/quad.ron"),
+        _ => return Err(format!("no four-legged model {id:?}")),
+    };
+    let model = Model::parse(src, builtin::POSES).map_err(|e| e.to_string())?;
+    let sk = Skeleton::new(&model);
     Ok((model, sk))
 }
-
-/// The four-legged Shiba's extra bones.
-pub const SHIBA_TIPS: &[Tip] = &[Tip {
-    name: "tail_tip",
-    parent: "tail",
-    pivot: v3(0.06, 0.22, -0.86),
-    near: 0.14,
-    far: 0.36,
-}];
-
-pub const SHIBA_JIGGLES: &[Jiggle] = &[
-    Jiggle {
-        name: "belly",
-        parent: "body",
-        at: v3(0.0, -0.72, 0.2),
-        radius: 0.55,
-        share: 0.85,
-    },
-    Jiggle {
-        name: "butt",
-        parent: "hips",
-        at: v3(0.0, -0.3, -1.0),
-        radius: 0.52,
-        share: 0.8,
-    },
-    Jiggle {
-        name: "chin",
-        parent: "head",
-        at: v3(0.0, -0.2, 1.4),
-        radius: 0.55,
-        share: 0.8,
-    },
-];
-
-/// The four-legged Shiba's shadow: radii across and along its body.
-pub const SHIBA_SHADOW: (f32, f32) = (0.62, 1.15);
 
 /// Where the whole pet turns: the floor under the middle of its body.
 pub const ROOT_PIVOT: V3 = v3(0.0, FLOOR, -0.1);
@@ -127,15 +74,13 @@ pub struct Skeleton {
     pub pivots: Vec<V3>,
     /// Parents before children.
     order: Vec<usize>,
-    /// Bone, centre, radius, share.
+    /// Jiggle bone, centre, radius, share (see [`chonkgene_rig::Jiggle`]).
     pub jiggles: Vec<(usize, V3, f32, f32)>,
-    /// Parent bone, tip bone, near, far.
-    pub tips: Vec<(usize, usize, f32, f32)>,
 }
 
 impl Skeleton {
-    /// The model's bones and pivots, plus `tips` and `jiggles`.
-    pub fn new(model: &Model, tips: &[Tip], jiggles: &[Jiggle]) -> Result<Self, String> {
+    /// The model's bones and pivots, then a bone for each of its jiggles.
+    pub fn new(model: &Model) -> Self {
         let mut names = model.bones.clone();
         let mut parents = model.parents.clone();
         let mut pivots = model.pivots.clone();
@@ -147,39 +92,40 @@ impl Skeleton {
         }
         let mut order = vec![0];
         order.extend(model.order.iter().copied().filter(|&b| b != 0));
-        let find = |names: &[String], n: &str| {
-            names
-                .iter()
-                .position(|b| b == n)
-                .ok_or_else(|| format!("no bone {n:?}"))
-        };
-        let mut add = |names: &mut Vec<String>, name: &str, parent: usize, pivot: V3| {
-            names.push(name.to_string());
-            parents.push(Some(parent));
-            pivots.push(pivot);
+        let mut jiggles = Vec::new();
+        for j in &model.jiggles {
+            names.push(j.name.clone());
+            parents.push(Some(j.parent));
+            pivots.push(j.at);
             order.push(names.len() - 1);
-            names.len() - 1
-        };
-        let mut tip_bones = Vec::new();
-        for t in tips {
-            let p = find(&names, t.parent)?;
-            let b = add(&mut names, t.name, p, t.pivot);
-            tip_bones.push((p, b, t.near, t.far));
+            jiggles.push((names.len() - 1, j.at, j.radius, j.share));
         }
-        let mut jiggle_bones = Vec::new();
-        for j in jiggles {
-            let p = find(&names, j.parent)?;
-            let b = add(&mut names, j.name, p, j.at);
-            jiggle_bones.push((b, j.at, j.radius, j.share));
-        }
-        Ok(Self {
+        Self {
             names,
             parents,
             pivots,
             order,
-            jiggles: jiggle_bones,
-            tips: tip_bones,
-        })
+            jiggles,
+        }
+    }
+
+    /// Tails as chains of bones, base first: each starts at a bone named
+    /// `tail…` hanging from a bone that is not, and runs on through its one
+    /// `tail…` child.
+    pub fn tails(&self) -> Vec<Vec<usize>> {
+        let is_tail = |b: usize| self.names[b].starts_with("tail");
+        let child =
+            |b: usize| (0..self.names.len()).find(|&c| self.parents[c] == Some(b) && is_tail(c));
+        (0..self.names.len())
+            .filter(|&b| is_tail(b) && !self.parents[b].is_some_and(is_tail))
+            .map(|base| {
+                let mut chain = vec![base];
+                while let Some(c) = child(*chain.last().unwrap_or(&base)) {
+                    chain.push(c);
+                }
+                chain
+            })
+            .collect()
     }
 
     pub fn bone(&self, name: &str) -> Option<usize> {
@@ -245,15 +191,36 @@ const TWIST: f32 = 4.0;
 const WALK_YAW: f32 = 72.0;
 const REST_YAW: f32 = 28.0;
 
+/// Tail swish either way at the base, degrees, standing and walking; each
+/// segment further out swings with its parent, a beat late, so the swish
+/// travels down the tail like a whip.
+const SWISH_REST: f32 = 9.0;
+const SWISH_WALK: f32 = 14.0;
+/// Swishes a second, standing and at full pace.
+const SWISH_HZ: (f32, f32) = (0.7, 2.0);
+/// How much of its parent's swing a segment carries on.
+const FOLLOW: f32 = 0.6;
+
+/// A tail: its bones from the base out, with a sideways swish and an
+/// up-and-down bounce spring for each, and where in the swish it starts.
+struct Tail {
+    bones: Vec<usize>,
+    swish: Vec<Spring>,
+    bounce: Vec<Spring>,
+    /// The base's turn about the vertical: flung out by the body turning.
+    fling: Spring,
+    offset: f32,
+}
+
 /// A four-legged walk, worked out frame by frame.
 pub struct Walk {
     phase: f32,
     /// 0 standing … 1 full pace.
     pub speed: f32,
     yaw: Spring,
-    clock: f32,
-    tail: Spring,
-    tip: Spring,
+    /// Where the tails are in their swish, cycles.
+    swish: f32,
+    tails: Vec<Tail>,
     belly: Spring,
     butt: Spring,
     butt_z: Spring,
@@ -263,7 +230,7 @@ pub struct Walk {
     bob: [f32; 2],
     nod: [f32; 2],
     pace: f32,
-    /// The turn's speed last frame: turning flings the tail the other way.
+    /// The turn's speed last frame: turning flings the tails the other way.
     yaw_v: f32,
     legs: [(usize, f32); 4],
     bones: Bones,
@@ -274,8 +241,6 @@ struct Bones {
     body: usize,
     hips: usize,
     head: usize,
-    tail: usize,
-    tail_tip: Option<usize>,
     belly: Option<usize>,
     butt: Option<usize>,
     chin: Option<usize>,
@@ -288,6 +253,20 @@ impl Walk {
         for (l, (name, offset)) in legs.iter_mut().zip(LEGS) {
             *l = (need(name)?, offset);
         }
+        // Several tails swish out of step, so they ripple rather than
+        // sway as one.
+        let tails = sk
+            .tails()
+            .into_iter()
+            .enumerate()
+            .map(|(i, bones)| Tail {
+                swish: vec![Spring::default(); bones.len()],
+                bounce: vec![Spring::default(); bones.len()],
+                bones,
+                fling: Spring::default(),
+                offset: i as f32 * 0.37,
+            })
+            .collect();
         Ok(Self {
             phase: 0.0,
             speed: 0.0,
@@ -295,9 +274,8 @@ impl Walk {
                 x: facing * REST_YAW,
                 v: 0.0,
             },
-            clock: 0.0,
-            tail: Spring::default(),
-            tip: Spring::default(),
+            swish: 0.0,
+            tails,
             belly: Spring::default(),
             butt: Spring::default(),
             butt_z: Spring::default(),
@@ -311,8 +289,6 @@ impl Walk {
                 body: need("body")?,
                 hips: need("hips")?,
                 head: need("head")?,
-                tail: need("tail")?,
-                tail_tip: sk.bone("tail_tip"),
                 belly: sk.bone("belly"),
                 butt: sk.bone("butt"),
                 chin: sk.bone("chin"),
@@ -339,7 +315,6 @@ impl Walk {
     pub fn step(&mut self, dt: f32, walking: bool, facing: f32) -> Vec<Joint> {
         use std::f32::consts::{PI, TAU};
         let dt = dt.max(1e-4);
-        self.clock += dt;
         let goal = if walking { 1.0 } else { 0.0 };
         self.speed += (goal - self.speed).clamp(-dt * 4.0, dt * 4.0);
         let s = self.speed;
@@ -410,23 +385,35 @@ impl Walk {
         let yaw_acc = (self.yaw.v - self.yaw_v) / dt;
         self.yaw_v = self.yaw.v;
 
-        let tail = self.tail.step(
-            16.0 * s * (TAU * ph - 0.6).sin() + 6.0 * (1.0 - s) * (TAU * 0.4 * self.clock).sin(),
-            -yaw_acc,
-            2.6,
-            0.3,
-            dt,
-        );
-        j[b.tail] = Joint {
-            rot: v3(0.0, tail, 0.0),
-            shift: V3::ZERO,
-        };
-        if let Some(t) = b.tail_tip {
-            let tip = self.tip.step(0.7 * tail, 0.0, 3.2, 0.25, dt);
-            j[t] = Joint {
-                rot: v3(0.0, tip, 0.0),
-                shift: V3::ZERO,
-            };
+        // Tails: the base swishes side to side (faster and wider at pace)
+        // and bounces with the steps; each segment chases its parent's
+        // swing, pushed the other way as the parent speeds up, so the tip
+        // whips. Turning flings the base out.
+        self.swish = (self.swish + dt * (SWISH_HZ.0 + (SWISH_HZ.1 - SWISH_HZ.0) * s)).fract();
+        let amp = SWISH_REST + (SWISH_WALK - SWISH_REST) * s;
+        for tail in &mut self.tails {
+            let fling = tail.fling.step(0.0, -0.5 * yaw_acc, 1.8, 0.35, dt);
+            let mut parent: Option<(f32, f32, f32)> = None;
+            for (k, &bone) in tail.bones.iter().enumerate() {
+                let (sw_target, sw_push, bo_target) = match parent {
+                    None => (
+                        amp * (TAU * (self.swish + tail.offset)).sin(),
+                        0.0,
+                        5.0 * s * (2.0 * TAU * ph - 0.8).sin(),
+                    ),
+                    Some((sw, sw_acc, bo)) => (FOLLOW * sw, -0.4 * sw_acc, FOLLOW * bo),
+                };
+                let hz = 2.4 + 0.5 * k as f32;
+                let before = tail.swish[k].v;
+                let sw = tail.swish[k].step(sw_target, sw_push, hz, 0.3, dt);
+                let sw_acc = (tail.swish[k].v - before) / dt;
+                let bo = tail.bounce[k].step(bo_target, 0.0, hz, 0.35, dt);
+                j[bone] = Joint {
+                    rot: v3(bo, if k == 0 { fling } else { 0.0 }, sw),
+                    shift: V3::ZERO,
+                };
+                parent = Some((sw, sw_acc, bo));
+            }
         }
         if let Some(i) = b.belly {
             let y = self.belly.step(0.0, -acc, 3.6, 0.16, dt);

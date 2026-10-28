@@ -1,9 +1,10 @@
-//! Skinned-mesh spike: the four-legged Shiba baked into a mesh and walked.
+//! Skinned-mesh spike: a four-legged pet (`shiba`, `fox`) baked into a mesh
+//! and walked.
 //!
-//! `cargo run --release -p chonkgene-render --example mesh -- peek <out dir>`
+//! `cargo run --release -p chonkgene-render --example mesh -- peek <species> <out dir>`
 //! ray-marches the model from a few angles, to check its shape.
 //!
-//! `... -- walk <out dir> [scale]` bakes the mesh, then writes
+//! `... -- walk <species> <out dir> [scale] [coat]` bakes the mesh, then writes
 //! `walk-<frame>.png` at 30 fps: walking right, turning, walking left,
 //! stopping, and a poke in the belly. It prints the bake time, the mesh
 //! size and what each frame cost.
@@ -14,7 +15,7 @@ use chonkgene_render::gpu::Gpu;
 use chonkgene_render::mesh::bake;
 use chonkgene_render::mesh_gpu::MeshCanvas;
 use chonkgene_render::raymarch;
-use chonkgene_render::skin::{SHIBA_SHADOW, Skeleton, Walk, shiba_quad};
+use chonkgene_render::skin::{Skeleton, Walk, quad};
 use chonkgene_rig::math::v3;
 use chonkgene_rig::{Layer, Look, Model, Pose, PoseId, Scene};
 use tiny_skia::{Color, IntSize, Pixmap, PixmapPaint, Transform};
@@ -27,16 +28,20 @@ const PPU: f32 = 58.0;
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
-    let (Some(mode), Some(out)) = (args.first(), args.get(1)) else {
-        eprintln!("usage: mesh peek|walk <out dir> [scale]");
+    let (Some(mode), Some(id), Some(out)) = (args.first(), args.get(1), args.get(2)) else {
+        eprintln!("usage: mesh peek|walk <species> <out dir> [scale] [coat]");
         std::process::exit(2);
     };
-    let scale: f32 = args.get(2).and_then(|s| s.parse().ok()).unwrap_or(1.0);
-    let (model, sk) = shiba_quad().unwrap_or_else(|e| panic!("{e}"));
+    let scale: f32 = args.get(3).and_then(|s| s.parse().ok()).unwrap_or(1.0);
+    let (model, sk) = quad(id).unwrap_or_else(|e| panic!("{e}"));
+    let coat = args
+        .get(4)
+        .map(|c| model.coat(c).unwrap_or_else(|| panic!("no coat {c:?}")))
+        .unwrap_or(0);
     std::fs::create_dir_all(out).expect("out dir");
     match mode.as_str() {
         "peek" => peek(&model, out),
-        "walk" => walk(&model, &sk, out, scale),
+        "walk" => walk(&model, &sk, coat, out, scale),
         _ => panic!("no mode {mode:?}"),
     }
 }
@@ -54,9 +59,9 @@ fn peek(model: &Model, out: &str) {
     }
 }
 
-fn walk(model: &Model, sk: &Skeleton, out: &str, scale: f32) {
+fn walk(model: &Model, sk: &Skeleton, coat: usize, out: &str, scale: f32) {
     let t0 = Instant::now();
-    let mesh = bake(model, sk, 0, 0.33, 0.025).expect("bake");
+    let mesh = bake(model, sk, coat, 0.33, 0.025).expect("bake");
     println!(
         "baked {} vertices, {} triangles in {:.2} s",
         mesh.vertices.len(),
@@ -70,7 +75,7 @@ fn walk(model: &Model, sk: &Skeleton, out: &str, scale: f32) {
         (3.3 * PPU * scale).ceil() as u32,
     );
     let mut canvas = MeshCanvas::new(&gpu, &mesh, w, h, scale);
-    let face = Scene::posed(model, 0, 0.33, &Pose::default(), Look::Open, Layer::All);
+    let face = Scene::posed(model, coat, 0.33, &Pose::default(), Look::Open, Layer::All);
     let mut frame = Pixmap::new(w, h).expect("frame");
     let mut walker = Walk::new(sk, 1.0).expect("walk");
     let mut x = 0.0f32;
@@ -92,7 +97,7 @@ fn walk(model: &Model, sk: &Skeleton, out: &str, scale: f32) {
         let bones = sk.pose(&joints);
         let start = Instant::now();
         let secs = canvas
-            .draw(&gpu, &face, &bones, walker.yaw(), SHIBA_SHADOW, &mut frame)
+            .draw(&gpu, &face, &bones, walker.yaw(), &mut frame)
             .expect("draw");
         wall += start.elapsed().as_secs_f64();
         gpu_secs.extend(secs);
