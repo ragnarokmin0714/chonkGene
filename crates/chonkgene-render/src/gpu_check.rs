@@ -4,18 +4,23 @@
 //!
 //! Writes into `out`: the report, every species drawn by the GPU and the
 //! CPU side by side, and frames of a real 3D turn, a hop (the shadow stays
-//! on the floor) and lying down.
+//! on the floor) and lying down; and what the skinned-mesh spike costs, with
+//! frames of its four-legged walk.
 
 use std::fmt::Write as _;
 use std::path::Path;
 use std::time::{Duration, Instant};
 
-use chonkgene_rig::{Layer, Look, PoseId, Scene, builtin};
+use chonkgene_rig::{Layer, Look, Pose, PoseId, Scene, builtin};
 use tiny_skia::{IntSize, Pixmap, PixmapPaint, Transform};
 
 use chonkgene_core::anim::Animator;
 
 use crate::gpu::{Frame, Gpu};
+use crate::mesh::bake;
+use crate::mesh_gpu::MeshCanvas;
+use crate::raymarch::PPU;
+use crate::skin::{SHIBA_SHADOW, Walk, shiba_quad};
 use crate::sprites::{Variant, render_layer};
 use crate::{GpuRenderer, KEYS};
 
@@ -147,6 +152,8 @@ pub fn run(out: &Path) -> Result<String, String> {
         );
     }
 
+    mesh_check(&gpu, out, &mut report)?;
+
     // What pets actually send: most frames come from the cache. Without
     // the budget, to see what they would ask for.
     let _ = writeln!(report, "\n實際使用（模擬，100% 大小，不設上限）：");
@@ -203,6 +210,74 @@ pub fn run(out: &Path) -> Result<String, String> {
     );
     std::fs::write(out.join("report.txt"), &report).map_err(|e| format!("report: {e}"))?;
     Ok(report)
+}
+
+/// The skinned-mesh spike (mesh.rs, skin.rs): the four-legged Shiba
+/// walking, a new pose every frame (nothing cached), at each size.
+fn mesh_check(gpu: &Gpu, out: &Path, report: &mut String) -> Result<(), String> {
+    let (model, sk) = shiba_quad()?;
+    let started = Instant::now();
+    let mesh = bake(&model, &sk, 0, 0.33, 0.025)?;
+    let baked = started.elapsed();
+    let _ = writeln!(
+        report,
+        "\n網格試驗（四腳走路的柴犬，每幀都是新姿勢、不用快取）："
+    );
+    let _ = writeln!(
+        report,
+        "  烘焙網格 {}（{} 個頂點、{} 個三角形；每隻寵物只在開始時做一次）",
+        ms(baked),
+        mesh.vertices.len(),
+        mesh.indices.len() / 3
+    );
+    let face = Scene::posed(&model, 0, 0.33, &Pose::default(), Look::Open, Layer::All);
+    for scale in [1.0, 1.5, 2.0] {
+        let (w, h) = (
+            (4.5 * PPU * scale).ceil() as u32,
+            (3.3 * PPU * scale).ceil() as u32,
+        );
+        let mut canvas = MeshCanvas::new(gpu, &mesh, w, h, scale);
+        let mut pm = Pixmap::new(w, h).ok_or("pixmap")?;
+        let mut walker = Walk::new(&sk, 1.0)?;
+        let (mut times, mut gpu_times) = (Vec::new(), Vec::new());
+        for i in 0..60 {
+            let bones = sk.pose(&walker.step(1.0 / 30.0, true, 1.0));
+            let started = Instant::now();
+            let secs = canvas.draw(gpu, &face, &bones, walker.yaw(), SHIBA_SHADOW, &mut pm)?;
+            times.push(started.elapsed());
+            gpu_times.push(Duration::from_secs_f32(secs.unwrap_or(0.0)));
+            if scale == 1.0 && i % 6 == 0 {
+                pm.save_png(out.join(format!("mesh-walk-{:02}.png", i / 6)))
+                    .map_err(|e| format!("mesh frame: {e}"))?;
+            }
+        }
+        times.drain(..5);
+        gpu_times.drain(..5);
+        times.sort();
+        gpu_times.sort();
+        let median = times[times.len() / 2];
+        let gpu_median = gpu_times[gpu_times.len() / 2];
+        let busy = if gpu.times_frames() {
+            gpu_median
+        } else {
+            median
+        };
+        let measured = if gpu.times_frames() {
+            format!("，其中 GPU 實際畫 {}", ms(gpu_median))
+        } else {
+            String::new()
+        };
+        let share = |fps: f64| busy.as_secs_f64() * fps * 100.0;
+        let _ = writeln!(
+            report,
+            "  {:.0}%（{w}×{h}）：中位數 {}{measured}；一隻一直走路約佔這張顯示卡 {:.1}%（30 fps）／{:.1}%（60 fps）",
+            scale * 100.0,
+            ms(median),
+            share(30.0),
+            share(60.0)
+        );
+    }
+    Ok(())
 }
 
 fn ms(d: Duration) -> String {

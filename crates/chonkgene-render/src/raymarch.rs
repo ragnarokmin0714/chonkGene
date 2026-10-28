@@ -163,7 +163,7 @@ fn vnoise(p: V3) -> f32 {
     )
 }
 
-fn occlusion(scene: &Scene, p: V3, n: V3) -> f32 {
+pub(crate) fn occlusion(scene: &Scene, p: V3, n: V3) -> f32 {
     let (mut occ, mut sca) = (0.0, 1.0);
     for i in 0..5 {
         let h = 0.02 + 0.14 * i as f32 / 4.0;

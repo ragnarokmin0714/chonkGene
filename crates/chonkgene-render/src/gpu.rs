@@ -186,9 +186,9 @@ pub struct Canvas {
     measured: f64,
 }
 
-type Vec4 = [f32; 4];
+pub(crate) type Vec4 = [f32; 4];
 
-fn v4(v: V3, w: f32) -> Vec4 {
+pub(crate) fn v4(v: V3, w: f32) -> Vec4 {
     [v.x, v.y, v.z, w]
 }
 
@@ -219,7 +219,9 @@ impl Gpu {
             .map_or(DEFAULT_BUDGET, |pct| (pct / 100.0).clamp(0.01, 1.0));
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("pet"),
-            source: wgpu::ShaderSource::Wgsl(include_str!("pet.wgsl").into()),
+            source: wgpu::ShaderSource::Wgsl(
+                concat!(include_str!("pet.wgsl"), include_str!("paint.wgsl")).into(),
+            ),
         });
         let pipeline = |entry: &str, targets: &[Option<wgpu::ColorTargetState>]| {
             device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
@@ -260,6 +262,19 @@ impl Gpu {
                 at: Instant::now(),
             }),
         })
+    }
+
+    pub(crate) fn device(&self) -> &wgpu::Device {
+        &self.device
+    }
+
+    pub(crate) fn queue(&self) -> &wgpu::Queue {
+        &self.queue
+    }
+
+    /// Nanoseconds a GPU timestamp tick, if the GPU can time its passes.
+    pub(crate) fn tick_ns(&self) -> Option<f32> {
+        self.tick_ns
     }
 
     /// The adapter in use, for logs.
@@ -738,7 +753,13 @@ fn pack(scene: &Scene) -> (Vec<Vec4>, Vec<Vec4>) {
     (parts, marks)
 }
 
-fn uniforms(scene: &Scene, cam: &Camera, frame: &Frame, shadow: bool, n: usize) -> Vec<Vec4> {
+pub(crate) fn uniforms(
+    scene: &Scene,
+    cam: &Camera,
+    frame: &Frame,
+    shadow: bool,
+    n: usize,
+) -> Vec<Vec4> {
     let face = &scene.model().face;
     let (eyes, mouth) = scene.face_parts();
     let index = |i: Option<usize>| i.map_or(-1.0, |i| i as f32);

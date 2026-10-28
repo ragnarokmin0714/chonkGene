@@ -374,6 +374,24 @@ impl<'m> Scene<'m> {
     /// Colour, gloss, fuzz and hit zone at surface point `p`; `px` is the
     /// size of a pixel in world units, for anti-aliasing the painted face.
     pub fn surface(&self, p: V3, px: f32) -> Surface {
+        let mut s = self.coat_at(p);
+        if let Some(fp) = self.face.map(|i| &self.placed[i]) {
+            let fq = fp.local(p);
+            if fp.shape.distance(fq).abs() < 0.05 {
+                s.color = face::eyes(self, fp.shape, fq, s.color, px);
+            }
+        }
+        if let Some(m) = self.mouth.map(|i| &self.placed[i]) {
+            let mq = m.local(p);
+            if m.shape.distance(mq).abs() < 0.04 {
+                s.color = face::mouth(self, m.shape, mq, s.color, px);
+            }
+        }
+        s
+    }
+
+    /// [`Scene::surface`] without the painted face: the coat and its marks.
+    pub fn coat_at(&self, p: V3) -> Surface {
         let mut d = f32::MAX;
         let mut color = V3::ZERO;
         let mut gloss = 0.0;
@@ -400,18 +418,6 @@ impl<'m> Scene<'m> {
             if dp < nearest {
                 nearest = dp;
                 zone = z;
-            }
-        }
-        if let Some(fp) = self.face.map(|i| &self.placed[i]) {
-            let fq = fp.local(p);
-            if fp.shape.distance(fq).abs() < 0.05 {
-                color = face::eyes(self, fp.shape, fq, color, px);
-            }
-        }
-        if let Some(m) = self.mouth.map(|i| &self.placed[i]) {
-            let mq = m.local(p);
-            if m.shape.distance(mq).abs() < 0.04 {
-                color = face::mouth(self, m.shape, mq, color, px);
             }
         }
         Surface {

@@ -1,0 +1,92 @@
+// Shiba on all fours, for the skinned-mesh spike: the body lies along z
+// (+z is forward, toward the camera at rest), the head sits on the front of
+// the chest, and each leg has its own bone so the legs can step in turn.
+// Same head, face and coats as model.ron, the head at 85%.
+(
+    species: "shiba",
+    slots: ["fur", "light", "ear", "ink", "blush"],
+    coats: [
+        (name: "red", colors: {
+            "fur": "#E8955A", "light": "#FFF3E2", "ear": "#FFD2B5", "ink": "#3B2A22", "blush": "#FF8C94",
+        }),
+        (name: "black", colors: {
+            "fur": "#4A3B36", "light": "#F5E7D6", "ear": "#C9A48A", "ink": "#2A1E18", "blush": "#FF8C94",
+        }),
+        (name: "sesame", colors: {
+            "fur": "#C79A6E", "light": "#FFF3E2", "ear": "#F2CDB0", "ink": "#3B2A22", "blush": "#FF8C94",
+        }),
+        (name: "white", colors: {
+            "fur": "#F1E2CC", "light": "#FFFFFF", "ear": "#F7D3C4", "ink": "#3B2A22", "blush": "#FF8C94",
+        }),
+    ],
+    pivots: {
+        "body": (0, -0.3, 0.2),
+        "hips": (0, -0.3, -0.15),
+        "head": (0, 0.0, 0.75),
+        "leg_fl": (0.3, -0.52, 0.48),
+        "leg_fr": (-0.3, -0.52, 0.48),
+        "leg_bl": (0.3, -0.5, -0.58),
+        "leg_br": (-0.3, -0.5, -0.58),
+        "tail": (0, 0.0, -0.88),
+    },
+    parents: {
+        "head": "body",
+        "hips": "body",
+        "leg_fl": "body",
+        "leg_fr": "body",
+        "leg_bl": "hips",
+        "leg_br": "hips",
+        "tail": "hips",
+    },
+    parts: [
+        (name: "chest", bone: "body", shape: Ellipsoid((0.56, 0.46, 0.64)), at: (0, -0.3, 0.3),
+            color: "fur", chonk: 1.0, zone: "bottom",
+            marks: [(at: (0, -0.3, 0.3), radii: (0.38, 0.3, 0.5), color: "light", soft: 0.25, zone: Some("belly"))]),
+        (name: "rump", bone: "hips", shape: Ellipsoid((0.54, 0.46, 0.56)), at: (0, -0.32, -0.48),
+            blend: 0.35, color: "fur", chonk: 1.0, zone: "bottom",
+            marks: [(at: (0, -0.32, 0.1), radii: (0.36, 0.26, 0.5), color: "light", soft: 0.25, zone: Some("belly"))]),
+        (name: "head", bone: "head", shape: Ellipsoid((0.86, 0.72, 0.75)), at: (0, 0.42, 0.95),
+            blend: 0.2, color: "fur", zone: "head",
+            marks: [
+                // Urajiro: the cream lower face.
+                (at: (0, -0.43, 0.38), radii: (0.95, 0.51, 0.66), color: "light", soft: 0.2),
+                (at: (0.47, -0.13, 0.51), radii: (0.26, 0.21, 0.26), color: "light", soft: 0.4, zone: Some("cheek"), mirror: true),
+            ]),
+        (name: "muzzle", bone: "head", shape: Ellipsoid((0.31, 0.21, 0.22)), at: (0, 0.22, 1.51),
+            blend: 0.14, color: "light", zone: "head"),
+        (name: "ear", bone: "head", shape: Cone(r1: 0.2, r2: 0.05, h: 0.34, flat: 2.0), at: (0.44, 0.9, 0.86),
+            rot: (-10.3, 0, -21.8), blend: 0.09, color: "fur", mirror: true, zone: "head",
+            marks: [(at: (0, 0.145, 0.085), radii: (0.1, 0.17, 0.07), color: "ear", soft: 0.35)]),
+        (name: "leg_fl", bone: "leg_fl", shape: Capsule(to: (0, -0.42, 0.02), r: 0.15), at: (0.3, -0.53, 0.48),
+            blend: 0.14, color: "fur", chonk: 0.3, zone: "paw",
+            marks: [(at: (0, -0.42, 0.04), radii: (0.2, 0.13, 0.2), color: "light", soft: 0.3)]),
+        (name: "leg_fr", bone: "leg_fr", shape: Capsule(to: (0, -0.42, 0.02), r: 0.15), at: (-0.3, -0.53, 0.48),
+            blend: 0.14, color: "fur", chonk: 0.3, zone: "paw",
+            marks: [(at: (0, -0.42, 0.04), radii: (0.2, 0.13, 0.2), color: "light", soft: 0.3)]),
+        (name: "thigh_bl", bone: "leg_bl", shape: Ellipsoid((0.2, 0.28, 0.27)), at: (0.32, -0.46, -0.55),
+            blend: 0.16, color: "fur", chonk: 1.0, zone: "bottom"),
+        (name: "thigh_br", bone: "leg_br", shape: Ellipsoid((0.2, 0.28, 0.27)), at: (-0.32, -0.46, -0.55),
+            blend: 0.16, color: "fur", chonk: 1.0, zone: "bottom"),
+        (name: "leg_bl", bone: "leg_bl", shape: Capsule(to: (0, -0.38, 0.05), r: 0.15), at: (0.3, -0.57, -0.6),
+            blend: 0.12, color: "fur", chonk: 0.3, zone: "paw",
+            marks: [(at: (0, -0.38, 0.07), radii: (0.2, 0.13, 0.2), color: "light", soft: 0.3)]),
+        (name: "leg_br", bone: "leg_br", shape: Capsule(to: (0, -0.38, 0.05), r: 0.15), at: (-0.3, -0.57, -0.6),
+            blend: 0.12, color: "fur", chonk: 0.3, zone: "paw",
+            marks: [(at: (0, -0.38, 0.07), radii: (0.2, 0.13, 0.2), color: "light", soft: 0.3)]),
+        // The curl lies on the back, its ring seen side on.
+        (name: "tail", bone: "tail", shape: Torus(major: 0.2, minor: 0.12), at: (0.06, 0.22, -0.86),
+            rot: (0, 12, 90), blend: 0.08, color: "fur", zone: "bottom",
+            marks: [(at: (0, 0, 0), radii: (0.18, 0.3, 0.18), color: "light", soft: 0.3)]),
+        (name: "nose", bone: "head", shape: Ellipsoid((0.094, 0.064, 0.068)), at: (0, 0.3, 1.72),
+            blend: 0.03, color: "ink", gloss: 1.0, fuzz: 0.0, zone: "head"),
+    ],
+    face: (
+        on: "head",
+        mouth_on: Some("muzzle"),
+        nose: (0.16, -0.2, 0.9),
+        ink: "ink",
+        eye: (at: (0.36, 0.02), r: (0.1, 0.125)),
+        brows: Some((at: (0.28, 0.31), r: (0.075, 0.048), color: "light")),
+        blush: (at: (0.53, -0.16), r: (0.14, 0.085), color: "blush"),
+    ),
+)
