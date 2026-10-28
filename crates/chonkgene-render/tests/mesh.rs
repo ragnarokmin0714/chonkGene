@@ -379,3 +379,46 @@ fn each_tail_segment_turns_about_its_own_root() {
         }
     }
 }
+
+#[test]
+fn sitting_brings_the_bottom_down_and_keeps_the_front_paws_planted() {
+    for id in QUAD_SPECIES {
+        let (_, sk) = quad(id).unwrap();
+        let (leg, hips) = (sk.bone("leg_fl").unwrap(), sk.bone("hips").unwrap());
+        let paw = v3(0.3, -1.05, 0.5);
+        let bottom = v3(0.0, -0.78, -0.48);
+        let mut walk = Walk::new(&sk, 1.0).unwrap();
+        let dt = 1.0 / 60.0;
+        let settle = |walk: &mut Walk, secs: f32| {
+            let mut j = Vec::new();
+            for _ in 0..(secs / dt) as usize {
+                j = walk.step(dt, false, 1.0);
+            }
+            sk.pose(&j)
+        };
+        let stand = settle(&mut walk, 2.0);
+        walk.sit(true);
+        let sat = settle(&mut walk, 2.0);
+        assert!(
+            walk.sat() > 0.95,
+            "{id}: only {:.2} of the way down",
+            walk.sat()
+        );
+        // The paw stays on the floor (the body tips back about it), and
+        // the bottom comes down most of the way to the floor.
+        let paw_moved = (sat[leg].apply(paw).y - stand[leg].apply(paw).y).abs();
+        assert!(
+            paw_moved < 0.03,
+            "{id}: the front paw moved {paw_moved:.3} up or down"
+        );
+        let drop = stand[hips].apply(bottom).y - sat[hips].apply(bottom).y;
+        assert!(drop > 0.25, "{id}: the bottom came down only {drop:.2}");
+        walk.sit(false);
+        let up = settle(&mut walk, 2.0);
+        let back = (up[hips].apply(bottom) - stand[hips].apply(bottom)).length();
+        assert!(
+            back < 0.01,
+            "{id}: {back:.3} from standing after getting up"
+        );
+    }
+}

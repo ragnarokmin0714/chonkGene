@@ -4,10 +4,11 @@
 //! `cargo run --release -p chonkgene-render --example mesh -- peek <species> <out dir>`
 //! ray-marches the model from a few angles, to check its shape.
 //!
-//! `... -- walk <species> <out dir> [scale] [coat]` bakes the mesh, then writes
-//! `walk-<frame>.png` at 30 fps: walking right, turning, walking left,
-//! stopping, and a poke in the belly. It prints the bake time, the mesh
-//! size and what each frame cost.
+//! `... -- walk|sit <species> <out dir> [scale] [coat]` bakes the mesh, then
+//! writes `<mode>-<frame>.png` at 30 fps. `walk`: walking right, turning,
+//! walking left, stopping, and a poke in the belly. `sit`: standing,
+//! sitting down, sitting a while, getting up. It prints the bake time, the
+//! mesh size and what each frame cost.
 
 use std::time::Instant;
 
@@ -26,10 +27,26 @@ const WALK_SPEED: f32 = 60.0;
 /// Pixels a world unit at 100% (raymarch.rs).
 const PPU: f32 = 58.0;
 
+/// What the pet does at time `t`: whether it walks, which way it faces;
+/// it may also poke or sit the walker.
+type Script = fn(f32, &mut Walk) -> (bool, f32);
+
+const WALK: (f32, Script) = (7.4, |t, w| {
+    if (t - 5.6).abs() < 0.01 {
+        w.poke(2.0);
+    }
+    (t < 4.0, if t < 1.9 { 1.0 } else { -1.0 })
+});
+
+const SIT: (f32, Script) = (5.0, |t, w| {
+    w.sit((0.6..3.4).contains(&t));
+    (false, 1.0)
+});
+
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let (Some(mode), Some(id), Some(out)) = (args.first(), args.get(1), args.get(2)) else {
-        eprintln!("usage: mesh peek|walk <species> <out dir> [scale] [coat]");
+        eprintln!("usage: mesh peek|walk|sit <species> <out dir> [scale] [coat]");
         std::process::exit(2);
     };
     let scale: f32 = args.get(3).and_then(|s| s.parse().ok()).unwrap_or(1.0);
@@ -41,7 +58,8 @@ fn main() {
     std::fs::create_dir_all(out).expect("out dir");
     match mode.as_str() {
         "peek" => peek(&model, out),
-        "walk" => walk(&model, &sk, coat, out, scale),
+        "walk" => run(&model, &sk, coat, out, scale, "walk", WALK),
+        "sit" => run(&model, &sk, coat, out, scale, "sit", SIT),
         _ => panic!("no mode {mode:?}"),
     }
 }
@@ -59,7 +77,15 @@ fn peek(model: &Model, out: &str) {
     }
 }
 
-fn walk(model: &Model, sk: &Skeleton, coat: usize, out: &str, scale: f32) {
+fn run(
+    model: &Model,
+    sk: &Skeleton,
+    coat: usize,
+    out: &str,
+    scale: f32,
+    name: &str,
+    (secs, script): (f32, Script),
+) {
     let t0 = Instant::now();
     let mesh = bake(model, sk, coat, 0.33, 0.025).expect("bake");
     println!(
@@ -81,14 +107,10 @@ fn walk(model: &Model, sk: &Skeleton, coat: usize, out: &str, scale: f32) {
     let mut x = 0.0f32;
     let mut wall = 0.0f64;
     let mut gpu_secs = Vec::new();
-    let frames = (7.4 * FPS) as u32;
+    let frames = (secs * FPS) as u32;
     for f in 0..frames {
         let t = f as f32 / FPS;
-        let walking = t < 4.0;
-        let facing = if t < 1.9 { 1.0 } else { -1.0 };
-        if (t - 5.6).abs() < 0.01 {
-            walker.poke(2.0);
-        }
+        let (walking, facing) = script(t, &mut walker);
         let mut joints = Vec::new();
         for _ in 0..2 {
             joints = walker.step(0.5 / FPS, walking, facing);
@@ -113,7 +135,7 @@ fn walk(model: &Model, sk: &Skeleton, coat: usize, out: &str, scale: f32) {
             Transform::identity(),
             None,
         );
-        page.save_png(format!("{out}/walk-{f:03}.png"))
+        page.save_png(format!("{out}/{name}-{f:03}.png"))
             .expect("png");
     }
     let n = frames as f64;

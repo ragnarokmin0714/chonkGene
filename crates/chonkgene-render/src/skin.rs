@@ -176,12 +176,13 @@ const STEP_HZ: f32 = 2.0;
 const SWING: f32 = 20.0;
 const DUTY: f32 = 0.62;
 const LIFT: f32 = 0.07;
-/// Where each leg is in the step cycle: a walk, one foot at a time.
-const LEGS: [(&str, f32); 4] = [
-    ("leg_bl", 0.0),
-    ("leg_fl", 0.25),
-    ("leg_br", 0.5),
-    ("leg_fr", 0.75),
+/// Where each leg is in the step cycle (a walk, one foot at a time), and
+/// whether it is a front leg.
+const LEGS: [(&str, f32, bool); 4] = [
+    ("leg_bl", 0.0, false),
+    ("leg_fl", 0.25, true),
+    ("leg_br", 0.5, false),
+    ("leg_fr", 0.75, true),
 ];
 /// The chest's rise and fall, world units; twice a step cycle.
 const BOB: f32 = 0.02;
@@ -190,6 +191,14 @@ const TWIST: f32 = 4.0;
 /// How far the pet turns side-on while walking, and at rest (toward you).
 const WALK_YAW: f32 = 72.0;
 const REST_YAW: f32 = 28.0;
+
+/// Sitting: the body tips back this far (degrees) about the front paws,
+/// which brings the bottom down onto the floor; the hind legs fold
+/// forward under it.
+const SIT_PITCH: f32 = 24.0;
+const SIT_HIND: f32 = -68.0;
+/// Where the front paws stand, the point the body tips back about.
+const FRONT_PAWS: V3 = v3(0.0, FLOOR, 0.5);
 
 /// Tail swish: how far each segment bends against the one before, degrees,
 /// standing and walking. The bend runs down the tail as a wave, each
@@ -232,7 +241,10 @@ pub struct Walk {
     pace: f32,
     /// The turn's speed last frame: turning flings the tails the other way.
     yaw_v: f32,
-    legs: [(usize, f32); 4],
+    /// Asked to sit, and how far down it is (0 standing … 1 sitting).
+    sitting: bool,
+    sit: Spring,
+    legs: [(usize, f32, bool); 4],
     bones: Bones,
     n: usize,
 }
@@ -249,9 +261,9 @@ struct Bones {
 impl Walk {
     pub fn new(sk: &Skeleton, facing: f32) -> Result<Self, String> {
         let need = |n: &str| sk.bone(n).ok_or_else(|| format!("no bone {n:?}"));
-        let mut legs = [(0, 0.0); 4];
-        for (l, (name, offset)) in legs.iter_mut().zip(LEGS) {
-            *l = (need(name)?, offset);
+        let mut legs = [(0, 0.0, false); 4];
+        for (l, (name, offset, front)) in legs.iter_mut().zip(LEGS) {
+            *l = (need(name)?, offset, front);
         }
         // Several tails swish out of step, so they ripple rather than
         // sway as one.
@@ -284,6 +296,8 @@ impl Walk {
             nod: [0.0; 2],
             pace: 0.0,
             yaw_v: 0.0,
+            sitting: false,
+            sit: Spring::default(),
             legs,
             bones: Bones {
                 body: need("body")?,
@@ -303,6 +317,16 @@ impl Walk {
         self.belly.v += kick;
         self.butt.v += kick * 0.7;
         self.chin.v += kick * 0.6;
+    }
+
+    /// Sit down (or get up); walking gets it up first.
+    pub fn sit(&mut self, on: bool) {
+        self.sitting = on;
+    }
+
+    /// How far down into a sit, 0 standing … 1 sitting.
+    pub fn sat(&self) -> f32 {
+        self.sit.x.clamp(0.0, 1.0)
     }
 
     /// The pet's turn about the vertical, degrees (0: facing you).
@@ -335,7 +359,7 @@ impl Walk {
         // Legs: on the floor, a straight sweep back (the foot stays put
         // while the body passes over it); off it, an eased swing forward
         // with the foot lifted.
-        for &(leg, offset) in &self.legs {
+        for &(leg, offset, _) in &self.legs {
             let psi = (ph + offset).fract();
             let (fwd, lift) = if psi < DUTY {
                 (1.0 - 2.0 * psi / DUTY, 0.0)
@@ -423,6 +447,29 @@ impl Walk {
         if let Some(i) = b.chin {
             let y = self.chin.step(0.0, -acc - 0.02 * nod_acc, 4.0, 0.18, dt);
             j[i].shift = v3(0.0, y.clamp(-0.09, 0.09), 0.0);
+        }
+
+        // Sitting: the body tips back about the front paws until the
+        // bottom is on the floor; the front legs turn back to upright, the
+        // hind legs fold forward under the body, the head lifts to look
+        // ahead. Tipping about the paws (before the turn, so the pet does
+        // not swing round them) is a tip about the root plus a shift.
+        let goal = if self.sitting && !walking { 1.0 } else { 0.0 };
+        let sit = self.sit.step(goal, 0.0, 1.2, 1.0, dt).clamp(0.0, 1.0);
+        if sit > 0.0 {
+            let pitch = -SIT_PITCH * sit;
+            j[0].rot.x += pitch;
+            let d = FRONT_PAWS - ROOT_PIVOT;
+            let tipped = d - M3::rot_x(pitch.to_radians()).apply(d);
+            j[0].shift = j[0].shift + M3::rot_y(yaw.to_radians()).apply(tipped);
+            for &(leg, _, front) in &self.legs {
+                j[leg].rot.x += if front {
+                    0.3 * SIT_PITCH * sit
+                } else {
+                    SIT_HIND * sit
+                };
+            }
+            j[b.head].rot.x += 0.85 * SIT_PITCH * sit;
         }
         j
     }
