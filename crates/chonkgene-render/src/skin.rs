@@ -2,8 +2,8 @@
 //! four-legged walk worked out every frame. The legs step one at a time
 //! (left hind, left fore, right hind, right fore) with each planted foot
 //! keeping pace with the floor, the chest and hips rock against each other,
-//! tails swish as chains of springy segments, and the belly, bottom and
-//! chin wobble on springs of their own.
+//! tails sway like seaweed as a wave runs down their segments, and the
+//! belly, bottom and chin wobble on springs of their own.
 
 use chonkgene_rig::math::{M3, V3, v3};
 use chonkgene_rig::{FLOOR, Model, builtin};
@@ -191,15 +191,15 @@ const TWIST: f32 = 4.0;
 const WALK_YAW: f32 = 72.0;
 const REST_YAW: f32 = 28.0;
 
-/// Tail swish either way at the base, degrees, standing and walking; each
-/// segment further out swings with its parent, a beat late, so the swish
-/// travels down the tail like a whip.
+/// Tail swish: how far each segment bends against the one before, degrees,
+/// standing and walking. The bend runs down the tail as a wave, each
+/// segment `WAVE_LAG` radians behind the one before, so a tail sways like
+/// seaweed in a current rather than swinging stiff from its root.
 const SWISH_REST: f32 = 9.0;
-const SWISH_WALK: f32 = 14.0;
+const SWISH_WALK: f32 = 13.0;
+const WAVE_LAG: f32 = 0.9;
 /// Swishes a second, standing and at full pace.
-const SWISH_HZ: (f32, f32) = (0.7, 2.0);
-/// How much of its parent's swing a segment carries on.
-const FOLLOW: f32 = 0.6;
+const SWISH_HZ: (f32, f32) = (0.6, 1.6);
 
 /// A tail: its bones from the base out, with a sideways swish and an
 /// up-and-down bounce spring for each, and where in the swish it starts.
@@ -385,34 +385,30 @@ impl Walk {
         let yaw_acc = (self.yaw.v - self.yaw_v) / dt;
         self.yaw_v = self.yaw.v;
 
-        // Tails: the base swishes side to side (faster and wider at pace)
-        // and bounces with the steps; each segment chases its parent's
-        // swing, pushed the other way as the parent speeds up, so the tip
-        // whips. Turning flings the base out.
+        // Tails: a wave runs from root to tip, faster and wider at pace;
+        // the root bounces with the steps, and turning flings it out.
         self.swish = (self.swish + dt * (SWISH_HZ.0 + (SWISH_HZ.1 - SWISH_HZ.0) * s)).fract();
         let amp = SWISH_REST + (SWISH_WALK - SWISH_REST) * s;
         for tail in &mut self.tails {
             let fling = tail.fling.step(0.0, -0.5 * yaw_acc, 1.8, 0.35, dt);
-            let mut parent: Option<(f32, f32, f32)> = None;
+            let at = TAU * (self.swish + tail.offset);
             for (k, &bone) in tail.bones.iter().enumerate() {
-                let (sw_target, sw_push, bo_target) = match parent {
-                    None => (
-                        amp * (TAU * (self.swish + tail.offset)).sin(),
-                        0.0,
-                        5.0 * s * (2.0 * TAU * ph - 0.8).sin(),
-                    ),
-                    Some((sw, sw_acc, bo)) => (FOLLOW * sw, -0.4 * sw_acc, FOLLOW * bo),
-                };
-                let hz = 2.4 + 0.5 * k as f32;
-                let before = tail.swish[k].v;
-                let sw = tail.swish[k].step(sw_target, sw_push, hz, 0.3, dt);
-                let sw_acc = (tail.swish[k].v - before) / dt;
-                let bo = tail.bounce[k].step(bo_target, 0.0, hz, 0.35, dt);
+                let lag = WAVE_LAG * k as f32;
+                // Sideways, the travelling wave; up and down, a smaller one
+                // a quarter behind, plus a bounce with the steps at the root.
+                let sw_target = amp * (at - lag).sin();
+                let mut bo_target = 0.4 * amp * (at - lag - 1.6).sin();
+                if k == 0 {
+                    bo_target += 5.0 * s * (2.0 * TAU * ph - 0.8).sin();
+                }
+                // Springs smooth the wave as the pace (and so its speed and
+                // size) changes.
+                let sw = tail.swish[k].step(sw_target, 0.0, 3.0, 0.5, dt);
+                let bo = tail.bounce[k].step(bo_target, 0.0, 3.0, 0.5, dt);
                 j[bone] = Joint {
                     rot: v3(bo, if k == 0 { fling } else { 0.0 }, sw),
                     shift: V3::ZERO,
                 };
-                parent = Some((sw, sw_acc, bo));
             }
         }
         if let Some(i) = b.belly {

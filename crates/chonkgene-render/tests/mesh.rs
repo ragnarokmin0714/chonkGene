@@ -320,3 +320,37 @@ fn nine_tails_ripple_rather_than_sway_as_one() {
     let left = sides.iter().filter(|s| **s < 0.0).count();
     assert!((2..=7).contains(&left), "tails swing together: {sides:?}");
 }
+
+#[test]
+fn a_tail_sways_like_seaweed_with_the_wave_running_root_to_tip() {
+    for id in QUAD_SPECIES {
+        let (_, sk) = quad(id).unwrap();
+        let chain = sk.tails()[0].clone();
+        assert!(chain.len() >= 5, "{id}: a tail of {} segments", chain.len());
+        let mut walk = Walk::new(&sk, 1.0).unwrap();
+        let (mut root, mut mid) = (Vec::new(), Vec::new());
+        for f in 0..600 {
+            let joints = walk.step(1.0 / 60.0, false, 1.0);
+            if f >= 120 {
+                root.push(joints[chain[0]].rot.z);
+                mid.push(joints[chain[2]].rot.z);
+            }
+        }
+        // How many frames later the middle segment repeats the root's
+        // bend: the lag that lines the two up best. A wave running down
+        // the tail puts it a little behind, never ahead or in step.
+        let score = |lag: usize| -> f32 {
+            root.iter()
+                .zip(&mid[lag..])
+                .map(|(a, b)| a * b)
+                .sum::<f32>()
+        };
+        let best = (0..60)
+            .max_by(|a, b| score(*a).total_cmp(&score(*b)))
+            .unwrap();
+        assert!(
+            (10..45).contains(&best),
+            "{id}: the middle of the tail follows the root {best} frames late"
+        );
+    }
+}
