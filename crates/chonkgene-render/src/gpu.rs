@@ -794,7 +794,7 @@ pub(crate) fn uniforms(
         [
             slot(face.brows.map(|b| b.slot)),
             face.blush.slot as f32,
-            0.0,
+            slot(face.liner),
             0.0,
         ],
         [

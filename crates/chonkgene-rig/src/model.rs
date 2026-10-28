@@ -265,6 +265,10 @@ struct FaceFile {
     blush: SpotFile,
     #[serde(default)]
     whiskers: bool,
+    /// A colour slot for a flick of eyeliner at each eye's outer corner
+    /// (a fox spirit's red liner).
+    #[serde(default)]
+    liner: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -389,6 +393,8 @@ pub struct Face {
     pub brows: Option<Spot>,
     pub blush: Spot,
     pub whiskers: bool,
+    /// Eyeliner colour slot.
+    pub liner: Option<usize>,
 }
 
 /// How a species walks: the walk is worked out from these every frame (legs
@@ -762,6 +768,7 @@ fn resolve(file: ModelFile, shared: HashMap<String, PoseFile>) -> Result<Model, 
         brows: f.brows.as_ref().map(spot).transpose()?,
         blush: spot(&f.blush)?,
         whiskers: f.whiskers,
+        liner: f.liner.as_deref().map(slot).transpose()?,
     };
 
     let mut poses = Vec::new();

@@ -112,39 +112,88 @@ fn the_mesh_draws_the_same_pet_as_the_ray_marcher() {
             return;
         }
     };
-    let (model, sk) = shiba();
-    let mesh = bake(&model, &sk, 0, 0.33, 0.025).unwrap();
-    let scene = Scene::posed(&model, 0, 0.33, &Pose::default(), Look::Open, Layer::All);
-    let s = raymarch::render(&scene, 1.0, 4);
-    let mut canvas = MeshCanvas::new(&gpu, &mesh, s.width, s.height, 1.0);
-    let mut pm = Pixmap::new(s.width, s.height).unwrap();
-    let rest = sk.pose(&[]);
-    canvas.draw(&gpu, &scene, &rest, 0.0, &mut pm).unwrap();
-    // The pet's own pixels (not its shadow) in both: they cover the same
-    // ground, and where both draw the pet, the colours agree.
-    let solid = |a: u8| a > 200;
-    let (mut both, mut either, mut diff) = (0u32, 0u32, 0u64);
-    for (m, r) in pm
-        .data()
-        .as_chunks::<4>()
-        .0
-        .iter()
-        .zip(s.rgba.as_chunks::<4>().0)
-    {
-        let (a, b) = (solid(m[3]), solid(r[3]));
-        if a || b {
-            either += 1;
+    for id in QUAD_SPECIES {
+        let (model, sk) = quad(id).unwrap();
+        let (mesh, ray) = draw_both(&gpu, &model, &sk);
+        // The pet's own pixels (not its shadow) in both: they cover the
+        // same ground, and where both draw the pet, the colours agree.
+        let solid = |a: u8| a > 200;
+        let (mut both, mut either, mut diff) = (0u32, 0u32, 0u64);
+        for (m, r) in mesh.iter().zip(&ray) {
+            let (a, b) = (solid(m[3]), solid(r[3]));
+            if a || b {
+                either += 1;
+            }
+            if a && b {
+                both += 1;
+                diff += (0..3).map(|i| m[i].abs_diff(r[i]) as u64).sum::<u64>();
+            }
         }
-        if a && b {
-            both += 1;
-            diff += (0..3).map(|i| m[i].abs_diff(r[i]) as u64).sum::<u64>();
-        }
+        let overlap = both as f32 / either as f32;
+        let mean = diff as f32 / (3 * both) as f32;
+        eprintln!("{id}: overlap {overlap:.3}, colour difference {mean:.2}");
+        assert!(overlap > 0.97, "{id}: silhouettes overlap {overlap:.3}");
+        assert!(mean < 6.0, "{id}: colours differ by {mean:.1} on average");
     }
-    let overlap = both as f32 / either as f32;
-    let mean = diff as f32 / (3 * both) as f32;
-    eprintln!("overlap {overlap:.3}, colour difference {mean:.2}");
-    assert!(overlap > 0.97, "silhouettes overlap {overlap:.3}");
-    assert!(mean < 6.0, "colours differ by {mean:.1} on average");
+}
+
+/// The pet at rest facing you, drawn as a mesh and ray-marched: RGBA pixels
+/// of each, the same size.
+fn draw_both(gpu: &Gpu, model: &Model, sk: &Skeleton) -> (Vec<[u8; 4]>, Vec<[u8; 4]>) {
+    let mesh = bake(model, sk, 0, 0.33, 0.025).unwrap();
+    let scene = Scene::posed(model, 0, 0.33, &Pose::default(), Look::Open, Layer::All);
+    let s = raymarch::render(&scene, 1.0, 4);
+    let mut canvas = MeshCanvas::new(gpu, &mesh, s.width, s.height, 1.0);
+    let mut pm = Pixmap::new(s.width, s.height).unwrap();
+    canvas
+        .draw(gpu, &scene, &sk.pose(&[]), 0.0, &mut pm)
+        .unwrap();
+    (
+        pm.data().as_chunks::<4>().0.to_vec(),
+        s.rgba.as_chunks::<4>().0.to_vec(),
+    )
+}
+
+#[test]
+fn the_fox_eyeliner_lands_in_the_same_place_on_the_gpu_and_the_cpu() {
+    let gpu = match Gpu::new() {
+        Ok(g) => g,
+        Err(e) => {
+            eprintln!("skipped: {e}");
+            return;
+        }
+    };
+    let (model, sk) = quad("fox").unwrap();
+    assert!(model.face.liner.is_some());
+    let mut bare = model.clone();
+    bare.face.liner = None;
+    let (mesh_liner, ray_liner) = draw_both(&gpu, &model, &sk);
+    let (mesh_bare, ray_bare) = draw_both(&gpu, &bare, &sk);
+    // The pixels the liner changes, in each renderer (face.rs on the CPU,
+    // paint.wgsl on the GPU): there are some, and they are the same ones.
+    let changed = |a: &[[u8; 4]], b: &[[u8; 4]]| -> Vec<bool> {
+        a.iter()
+            .zip(b)
+            .map(|(p, q)| (0..3).any(|i| p[i].abs_diff(q[i]) > 40))
+            .collect()
+    };
+    let on_gpu = changed(&mesh_liner, &mesh_bare);
+    let on_cpu = changed(&ray_liner, &ray_bare);
+    let both = on_gpu
+        .iter()
+        .zip(&on_cpu)
+        .filter(|(a, b)| **a && **b)
+        .count();
+    let either = on_gpu
+        .iter()
+        .zip(&on_cpu)
+        .filter(|(a, b)| **a || **b)
+        .count();
+    assert!(both > 10, "the liner shows on {both} pixels");
+    assert!(
+        both as f32 / either as f32 > 0.7,
+        "liner pixels agree on {both} of {either}"
+    );
 }
 
 #[test]

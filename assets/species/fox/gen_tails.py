@@ -34,6 +34,6 @@ for i in range(9):
             # A cone along +y, turned onto d: roll about z, then pitch about x.
             g=-math.degrees(math.asin(max(-1,min(1,d[0]))))
             a=math.degrees(math.atan2(d[2],d[1]))
-            parts.append(f'        (name: "{names[k]}", bone: "{names[k]}", shape: Cone(r1: 0.175, r2: 0.035, h: {LEN[k]}), at: {f(p)},\n            rot: {f([a,0,g])}, blend: 0.07, color: "fur", zone: "bottom",\n            marks: [(at: (0, {LEN[k]}, 0), radii: (0.22, 0.24, 0.22), color: "light", soft: 0.5)]),')
+            parts.append(f'        (name: "{names[k]}", bone: "{names[k]}", shape: Cone(r1: 0.175, r2: 0.035, h: {LEN[k]}), at: {f(p)},\n            rot: {f([a,0,g])}, blend: 0.07, color: "fur", zone: "bottom",\n            marks: [(at: (0, {LEN[k]}, 0), radii: (0.22, 0.24, 0.22), color: "tailtip", soft: 0.5)]),')
         p=add(p,to)
 print("PIVOTS"); print("\n".join(pivots)); print("PARENTS"); print("\n".join(parents)); print("PARTS"); print("\n".join(parts))

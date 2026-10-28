@@ -47,7 +47,7 @@ struct Uniforms {
     // Iris slot (−1 for none), pupil share, whiskers (1.0), shadow (1.0).
     iris: vec4<f32>,
     brows: vec4<f32>,
-    // Brow slot (−1 for none), blush slot.
+    // Brow slot (−1 for none), blush slot, eyeliner slot (−1 for none).
     spots: vec4<f32>,
     blush: vec4<f32>,
     // Squash (> 0 flattens), breath (−1…1), lean (radians), lift (world units).

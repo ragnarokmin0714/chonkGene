@@ -69,6 +69,12 @@ pub fn eyes(scene: &Scene, shape: Shape, q: V3, base: V3, px: f32) -> V3 {
                 c = c.lerp(ink_c, 0.45 * ink(segment(uv, a, b, 0.007), aa));
             }
         }
+        if let Some(slot) = face.liner {
+            // A flick out of the outer corner, up and away, under the eye
+            // so the eye covers where it starts.
+            let (a, b) = liner(ec, (rx, ry), side);
+            c = c.lerp(scene.color(slot), ink(segment(uv, a, b, 0.018), aa));
+        }
         let w = 0.17 * ry;
         // Plain eyes are all pupil; owls and cats can have a coloured iris.
         let (iris_c, pupil) = face
@@ -122,6 +128,15 @@ pub fn eyes(scene: &Scene, shape: Shape, q: V3, base: V3, px: f32) -> V3 {
         }
     }
     c
+}
+
+/// The eyeliner flick by an eye at `ec` with radii `r` on `side`: from the
+/// outer corner, out and up.
+fn liner(ec: (f32, f32), r: (f32, f32), side: f32) -> ((f32, f32), (f32, f32)) {
+    (
+        (ec.0 + 0.85 * r.0 * side, ec.1 + 0.1 * r.1),
+        (ec.0 + (r.0 + 0.13) * side, ec.1 + 0.55 * r.1 + 0.05),
+    )
 }
 
 pub fn mouth(scene: &Scene, shape: Shape, q: V3, base: V3, px: f32) -> V3 {

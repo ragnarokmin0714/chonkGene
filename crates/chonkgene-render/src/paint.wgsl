@@ -64,6 +64,13 @@ fn paint_eyes(q: vec3<f32>, r: vec3<f32>, base: vec3<f32>, px: f32) -> vec3<f32>
                 c = mix(c, ink_c, 0.45 * ink(segment(uv, a, b, 0.007), aa));
             }
         }
+        if u.spots.z >= 0.0 {
+            // Eyeliner: a flick out of the outer corner, under the eye
+            // (face.rs `liner`).
+            let la = vec2<f32>(ec.x + 0.85 * rx * side, ec.y + 0.1 * ry);
+            let lb = vec2<f32>(ec.x + (rx + 0.13) * side, ec.y + 0.55 * ry + 0.05);
+            c = mix(c, u.palette[u32(u.spots.z)].rgb, ink(segment(uv, la, lb, 0.018), aa));
+        }
         // Stroke width scales with the eye (face.rs shadows the part's ry).
         let w = 0.17 * ry;
         var iris_c = ink_c;
