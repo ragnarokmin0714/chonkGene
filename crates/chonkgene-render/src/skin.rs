@@ -195,7 +195,7 @@ const REST_YAW: f32 = 28.0;
 /// standing and walking. The bend runs down the tail as a wave, each
 /// segment `WAVE_LAG` radians behind the one before, so a tail sways like
 /// seaweed in a current rather than swinging stiff from its root.
-const SWISH_REST: f32 = 9.0;
+const SWISH_REST: f32 = 12.0;
 const SWISH_WALK: f32 = 13.0;
 const WAVE_LAG: f32 = 0.9;
 /// Swishes a second, standing and at full pace.

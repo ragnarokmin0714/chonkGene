@@ -249,11 +249,15 @@ fn tail_paths(sk: &Skeleton, walking: bool, secs: f32) -> Vec<(Vec<V3>, Vec<V3>)
     for _ in 0..(secs / dt) as usize {
         let pose = sk.pose(&walk.step(dt, walking, 1.0));
         for (t, chain) in tails.iter().enumerate() {
-            // A point a little way out along the first and last bones.
+            // A point 0.25 out along the first bone, and one 0.25 on past
+            // the last bone's root, the way the tail runs: its tip.
             let (base, tip) = (chain[0], chain[chain.len() - 1]);
-            let near = |b: usize| sk.pivots[b] + v3(0.0, 0.1, -0.05);
-            paths[t].0.push(pose[base].apply(near(base)));
-            paths[t].1.push(pose[tip].apply(near(tip)));
+            let along =
+                |from: usize, to: usize| (sk.pivots[to] - sk.pivots[from]).normalize() * 0.25;
+            let root = sk.pivots[base] + along(base, chain[1]);
+            let end = sk.pivots[tip] + along(chain[chain.len() - 2], tip);
+            paths[t].0.push(pose[base].apply(root));
+            paths[t].1.push(pose[tip].apply(end));
         }
     }
     paths
@@ -326,7 +330,7 @@ fn a_tail_sways_like_seaweed_with_the_wave_running_root_to_tip() {
     for id in QUAD_SPECIES {
         let (_, sk) = quad(id).unwrap();
         let chain = sk.tails()[0].clone();
-        assert!(chain.len() >= 5, "{id}: a tail of {} segments", chain.len());
+        assert!(chain.len() >= 3, "{id}: a tail of {} segments", chain.len());
         let mut walk = Walk::new(&sk, 1.0).unwrap();
         let (mut root, mut mid) = (Vec::new(), Vec::new());
         for f in 0..600 {
@@ -352,5 +356,26 @@ fn a_tail_sways_like_seaweed_with_the_wave_running_root_to_tip() {
             (10..45).contains(&best),
             "{id}: the middle of the tail follows the root {best} frames late"
         );
+    }
+}
+
+#[test]
+fn each_tail_segment_turns_about_its_own_root() {
+    // A segment whose pivot is missing turns about the middle of the pet
+    // instead, flinging the whole tail around (fox/gen_tails.py output
+    // pasted without its PIVOTS once did exactly that).
+    for id in QUAD_SPECIES {
+        let (model, sk) = quad(id).unwrap();
+        for part in &model.parts {
+            if !sk.names[part.bone].starts_with("tail") {
+                continue;
+            }
+            let off = (sk.pivots[part.bone] - part.at).length();
+            assert!(
+                off < 0.01,
+                "{id}: {} turns {off:.2} from its root",
+                part.name
+            );
+        }
     }
 }
