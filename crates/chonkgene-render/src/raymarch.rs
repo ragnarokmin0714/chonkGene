@@ -16,7 +16,7 @@ pub(crate) const PPU: f32 = 58.0;
 /// Pixels below the floor line at 100%, for the contact shadow.
 pub const FLOOR_PX: f32 = 8.0;
 /// Camera tilt: looking slightly down at the pet.
-const TILT_DEG: f32 = 9.0;
+pub(crate) const TILT_DEG: f32 = 9.0;
 
 /// A rendered pose: premultiplied RGBA plus what each pixel would poke.
 #[derive(Clone, Debug)]

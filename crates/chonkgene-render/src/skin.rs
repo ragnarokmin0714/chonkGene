@@ -264,6 +264,9 @@ pub struct Walk {
     yaw_v: f32,
     /// Asked to sit, and how far down it is (0 standing … 1 sitting).
     sitting: bool,
+    /// The head's extra turn, and where it is heading.
+    look: Spring,
+    look_goal: f32,
     sit: Spring,
     legs: [(usize, f32, bool); 4],
     bones: Bones,
@@ -322,6 +325,8 @@ impl Walk {
             pace: 0.0,
             yaw_v: 0.0,
             sitting: false,
+            look: Spring::default(),
+            look_goal: 0.0,
             sit: Spring::default(),
             legs,
             bones: Bones {
@@ -347,6 +352,12 @@ impl Walk {
     /// Sit down (or get up); walking gets it up first.
     pub fn sit(&mut self, on: bool) {
         self.sitting = on;
+    }
+
+    /// Turn the head this far (degrees, + to the pet's left) on top of
+    /// what the walk does with it; it gets there smoothly.
+    pub fn look(&mut self, deg: f32) {
+        self.look_goal = deg;
     }
 
     /// How far down into a sit, 0 standing … 1 sitting.
@@ -430,8 +441,9 @@ impl Walk {
         // The head stays steadier than the body (a little nod, a beat
         // late) and turns toward you, more so at rest.
         let nod = 3.0 * s * (2.0 * TAU * ph - 0.9).sin();
+        let look = self.look.step(self.look_goal, 0.0, 1.6, 1.0, dt);
         j[b.head] = Joint {
-            rot: v3(nod, -yaw * (0.45 - 0.3 * s), -0.6 * roll),
+            rot: v3(nod, -yaw * (0.45 - 0.3 * s) + look, -0.6 * roll),
             shift: V3::ZERO,
         };
 

@@ -57,6 +57,7 @@ fn blurb(s: Species) -> &'static str {
         Species::Owl => "白天打瞌睡，晚上最有精神。",
         Species::Chick => "好奇又急性子，什麼都想啄一下。",
         Species::Duck => "慢半拍，喜歡跟在別人後面走。",
+        Species::Fox => "愛惡作劇的小狐仙，坐下會開屏。",
     }
 }
 
@@ -68,6 +69,7 @@ fn tint(s: Species) -> Color {
         Species::Owl => (0xF1, 0xE6, 0xD8),
         Species::Chick => (0xFF, 0xF3, 0xC9),
         Species::Duck => (0xE1, 0xF0, 0xF5),
+        Species::Fox => (0xFF, 0xEC, 0xF0),
     };
     Color::from_rgb_u8(r, g, b)
 }
@@ -115,6 +117,12 @@ fn body_line(s: Species, chonk: f32) -> &'static str {
             "肚子好像變大了？",
             "我是一顆麻糬。",
         ],
+        Species::Fox => [
+            "輕飄飄，像一陣風～",
+            "剛剛好，嘻嘻",
+            "尾巴……變胖了？",
+            "九條尾巴的麻糬！",
+        ],
     };
     lines[stop]
 }
@@ -146,6 +154,8 @@ fn portrait(model: &Model) -> Image {
 
 struct Kind {
     model: Arc<Model>,
+    /// The species on all fours, if it has a four-legged model.
+    quad: Option<Arc<Model>>,
 }
 
 struct Preview {
@@ -294,7 +304,13 @@ fn show_pet(ui: &SettingsWindow, st: &mut State) {
     ui.set_confirm_release(false);
     let kind = &st.kinds[&species];
     let coat = kind.model.coat(&p.coat).unwrap_or(0);
-    if let Some(renderer) = Renderer::new(Arc::clone(&kind.model), 1.0, p.chonk, coat) {
+    if let Some(renderer) = Renderer::new(
+        Arc::clone(&kind.model),
+        kind.quad.clone(),
+        1.0,
+        p.chonk,
+        coat,
+    ) {
         // Pops hide cuts between sprites; GPU frames blend instead.
         let pops = !renderer.is_gpu();
         st.preview = Some(Preview {
@@ -358,10 +374,14 @@ fn setup(
     let mut kinds = HashMap::new();
     for s in Species::ALL {
         let model = builtin::load(s.id()).map_err(|e| e.to_string())?;
+        let quad = chonkgene_render::skin::quad(s.id())
+            .ok()
+            .map(|(m, _)| Arc::new(m));
         kinds.insert(
             s,
             Kind {
                 model: Arc::new(model),
+                quad,
             },
         );
     }

@@ -1,7 +1,8 @@
 // Pet lines, zh-TW (PLAN §1.11). One voice per species:
 // Shiba warm and clingy · Munchkin tries hard, a little hard done by ·
 // Fold opens with 「……」, aloof but fond · Owl 咕 · Chick short bursts 「啾」 ·
-// Duckling half a beat slow, ends in 「呱」.
+// Duckling half a beat slow, ends in 「呱」 · Fox a playful trickster,
+// 「嘻嘻」 and tails everywhere.
 // {you} is 「牠怎麼叫你」 (up to 8 characters), {name} the pet's name (up to 12).
 // A line may be at most 14 characters with those filled in at full length.
 {
@@ -178,5 +179,34 @@
         "skit_make_up": ["……呱，和好。"],
         "skit_talk": ["呱呱。", "呱、呱呱。", "……呱？"],
         "skit_shrug": ["（聳肩）呱。"],
+    },
+    "fox": {
+        "hello": ["{you}，小九來囉～", "嘻嘻，又見面了"],
+        "welcome_back": ["{you}去哪玩了？"],
+        "poke_small": ["嘻？", "癢癢的～", "抓不到我喔"],
+        "laugh": ["嘻嘻嘻！不要啦～", "哈哈！尾巴打結了"],
+        "fed_up": ["……哼，不玩了。"],
+        "overdone": ["（用尾巴把自己包起來）"],
+        "still_overdone": ["（還包著）"],
+        "made_up": ["好吧，再陪你玩～"],
+        "pat": ["呼嚕……再摸摸嘛", "尾巴也要摸喔"],
+        "turn_over": ["（翻身）……嗯……"],
+        "woke": ["呼啊……{you}早～", "嗯……天亮了？"],
+        "dizzy": ["尾巴……轉暈了……"],
+        "grumpy": ["嚶嚶嚶——！"],
+        "after_grumpy": ["……好啦，醒了。"],
+        "eat": ["豆皮壽司！最喜歡了！"],
+        "full": ["吃不下了……嗝"],
+        "sleep_talk": ["……豆皮……", "……第十條尾巴……", "……{you}……"],
+        "grudge_poke": ["哼，記住你了喔。"],
+        "grudge_pat": ["（甩尾巴走開）"],
+        "forgive": ["好吧，原諒你啦～"],
+        "level_up": ["小九最喜歡{you}！"],
+        "skit_glare": ["嗯？看什麼？"],
+        "skit_huff": ["哼～"],
+        "skit_chase": ["別跑——！"],
+        "skit_make_up": ["和好吧，嘻嘻"],
+        "skit_talk": ["嚶嚶！嚶～"],
+        "skit_shrug": ["（尾巴一甩）"],
     },
 }

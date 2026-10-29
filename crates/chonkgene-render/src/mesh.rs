@@ -37,6 +37,12 @@ pub struct Mesh {
     /// The shadow's radii across and along the body: what stands on the
     /// floor (legs, belly), a little wider.
     pub shadow: (f32, f32),
+    /// Each vertex's hit zone (an index into [`chonkgene_rig::ZONES`]), for
+    /// telling where a click lands; kept on the CPU only.
+    pub zones: Vec<u8>,
+    /// The vertex at the top of the head (ears and all), where a speech
+    /// bubble points.
+    pub crown: usize,
 }
 
 /// Bake `model` at rest (coat `coat`, body value `chonk`) with grid cells
@@ -154,6 +160,7 @@ pub fn bake(
         let on = parts[i].shape.distance(q).abs() < within;
         [q.x, q.y, q.z, if on { 1.0 } else { 0.0 }]
     };
+    let mut zones = Vec::with_capacity(points.len());
     let vertices: Vec<Vertex> = points
         .iter()
         .map(|&p0| {
@@ -163,6 +170,7 @@ pub fn bake(
             }
             let nrm = scene.normal(p);
             let s = scene.coat_at(p);
+            zones.push(s.zone);
             let (bones, weights) = weigh(&parts, skeleton, p);
             Vertex {
                 pos: [p.x, p.y, p.z, occlusion(&scene, p, nrm)],
@@ -186,8 +194,15 @@ pub fn bake(
             * 1.15
     };
     let shadow = (reach(0, ROOT_PIVOT.x), reach(2, ROOT_PIVOT.z));
+    let head = chonkgene_rig::ZONES.iter().position(|z| *z == "head");
+    let crown = (0..vertices.len())
+        .filter(|&i| head.is_some_and(|h| usize::from(zones[i]) == h))
+        .max_by(|&a, &b| vertices[a].pos[1].total_cmp(&vertices[b].pos[1]))
+        .unwrap_or(0);
     Ok(Mesh {
         shadow,
+        zones,
+        crown,
         vertices,
         indices,
         eye_r: radii(eyes),

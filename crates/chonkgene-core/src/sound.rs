@@ -27,6 +27,8 @@ fn voice_of(s: Species) -> (f32, Timbre) {
         Species::Owl => (360.0, Timbre::Hoot),
         Species::Chick => (1900.0, Timbre::Chirp),
         Species::Duck => (430.0, Timbre::Quack),
+        // A fox's yip: a bark, higher.
+        Species::Fox => (840.0, Timbre::Bark),
     }
 }
 

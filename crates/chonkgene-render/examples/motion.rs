@@ -29,7 +29,7 @@ fn main() {
     let species = Species::from_id(id).unwrap_or_else(|| panic!("no species {id:?}"));
     let model = Arc::new(builtin::load(id).unwrap_or_else(|e| panic!("{e}")));
     std::fs::create_dir_all(out).expect("out dir");
-    let mut r = Renderer::new(model, 1.0, 0.33, 0).expect("renderer");
+    let mut r = Renderer::new(model, None, 1.0, 0.33, 0).expect("renderer");
     r.finish();
 
     let scenes: [(&str, f32, Script); 10] = [

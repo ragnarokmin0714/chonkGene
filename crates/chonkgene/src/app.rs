@@ -91,6 +91,8 @@ fn local_time() -> (f32, i64) {
 
 struct Kind {
     model: Arc<Model>,
+    /// The species on all fours, drawn as a skinned mesh on a real GPU.
+    quad: Option<Arc<Model>>,
 }
 
 struct Press {
@@ -290,10 +292,14 @@ impl App {
         for species in Species::ALL {
             let model =
                 builtin::load(species.id()).map_err(|e| format!("{}: {e}", species.id()))?;
+            let quad = chonkgene_render::skin::quad(species.id())
+                .ok()
+                .map(|(m, _)| Arc::new(m));
             kinds.insert(
                 species,
                 Kind {
                     model: Arc::new(model),
+                    quad,
                 },
             );
         }
@@ -992,7 +998,17 @@ fn spawn(
     let species = save.species().ok_or("unknown species")?;
     let kind = &kinds[&species];
     let scale = save.size * ui_scale;
-    let size = Renderer::pixel_size(scale);
+    let coat = kind.model.coat(&save.coat).unwrap_or(0);
+    // The renderer first: a pet on all fours needs a wider window.
+    let renderer = Renderer::new(
+        Arc::clone(&kind.model),
+        kind.quad.clone(),
+        scale,
+        save.chonk,
+        coat,
+    )
+    .ok_or("cannot allocate a pixmap")?;
+    let size = renderer.size();
     let size_f = (size.0 as f32, size.1 as f32);
     let span = (area.w - size_f.0).max(1.0);
     let x = area.x + (area.w * 0.55 + slot as f32 * size_f.0 * 0.9) % span;
@@ -1003,9 +1019,6 @@ fn spawn(
         .create_window(chonkgene_platform::pet_window(size, pos, &save.name))
         .map_err(|e| e.to_string())?;
     let presenter = Presenter::new(shared, &window)?;
-    let coat = kind.model.coat(&save.coat).unwrap_or(0);
-    let renderer = Renderer::new(Arc::clone(&kind.model), scale, save.chonk, coat)
-        .ok_or("cannot allocate a pixmap")?;
     let seed = save.id.wrapping_mul(0x9E37_79B9_7F4A_7C15) ^ (t * 1000.0) as u64;
     Ok(Pet {
         mind: Mind::new(species, save.personality(), save.affinity()),

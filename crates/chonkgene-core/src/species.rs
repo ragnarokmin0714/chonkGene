@@ -10,6 +10,7 @@ pub enum Species {
     Owl,
     Chick,
     Duck,
+    Fox,
 }
 
 /// What a species does when shaken awake (PLAN §1.12).
@@ -28,13 +29,14 @@ pub enum Grumpiness {
 }
 
 impl Species {
-    pub const ALL: [Species; 6] = [
+    pub const ALL: [Species; 7] = [
         Species::Shiba,
         Species::Munchkin,
         Species::Fold,
         Species::Owl,
         Species::Chick,
         Species::Duck,
+        Species::Fox,
     ];
 
     /// Stable id used in rigs, saves and line tables.
@@ -46,6 +48,7 @@ impl Species {
             Species::Owl => "owl",
             Species::Chick => "chick",
             Species::Duck => "duck",
+            Species::Fox => "fox",
         }
     }
 
@@ -57,7 +60,7 @@ impl Species {
     /// waddle, short legs sway, dogs trot.
     pub fn waddle(self) -> f32 {
         match self {
-            Species::Shiba | Species::Fold => 0.35,
+            Species::Shiba | Species::Fold | Species::Fox => 0.35,
             Species::Munchkin => 0.55,
             Species::Owl => 0.7,
             Species::Chick | Species::Duck => 1.0,
@@ -73,6 +76,7 @@ impl Species {
             Species::Owl => "貓頭鷹",
             Species::Chick => "小雞",
             Species::Duck => "小鴨",
+            Species::Fox => "九尾狐",
         }
     }
 
@@ -84,6 +88,7 @@ impl Species {
             Species::Owl => "咕咕",
             Species::Chick => "蛋黃",
             Species::Duck => "湯圓",
+            Species::Fox => "小九",
         }
     }
 
@@ -96,6 +101,7 @@ impl Species {
             Species::Owl => "同學",
             Species::Chick => "老大",
             Species::Duck => "領隊",
+            Species::Fox => "小主人",
         }
     }
 
@@ -107,6 +113,8 @@ impl Species {
             Species::Owl => (0.5, 0.5, 0.5),
             Species::Chick => (0.5, 0.2, 0.9),
             Species::Duck => (0.5, 0.8, 0.3),
+            // A trickster: quick to giggle, quick to tire of you, lively.
+            Species::Fox => (0.6, 0.4, 0.7),
         };
         Personality {
             ticklish,
@@ -120,6 +128,8 @@ impl Species {
         match self {
             Species::Owl => (9.0, 16.0),
             Species::Chick => (21.0, 5.5),
+            // A fox spirit keeps late hours.
+            Species::Fox => (1.0, 9.0),
             _ => (23.0, 7.0),
         }
     }
@@ -130,7 +140,7 @@ impl Species {
             Species::Munchkin => Grumpiness::Dizzy,
             Species::Fold => Grumpiness::Swat,
             Species::Owl | Species::Chick => Grumpiness::PuffUp,
-            Species::Duck => Grumpiness::Spin,
+            Species::Duck | Species::Fox => Grumpiness::Spin,
         }
     }
 
@@ -147,6 +157,8 @@ impl Species {
             Species::Owl => "小餅乾",
             Species::Chick => "玉米粒",
             Species::Duck => "豌豆",
+            // Fried tofu, the fox's favourite in Japanese lore.
+            Species::Fox => "豆皮壽司",
         }
     }
 }

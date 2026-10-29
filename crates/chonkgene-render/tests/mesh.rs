@@ -516,3 +516,76 @@ fn the_shiba_tail_tip_stays_clear_of_the_body() {
         }
     }
 }
+
+/// The app's mesh renderer for a four-legged species, on any GPU (a
+/// software one counts here); none without a GPU.
+fn app_renderer(id: &str) -> Option<chonkgene_render::MeshRenderer> {
+    use std::sync::OnceLock;
+    static GPU: OnceLock<Option<Gpu>> = OnceLock::new();
+    let gpu = GPU.get_or_init(|| Gpu::new().ok()).as_ref()?;
+    let (model, _) = quad(id).unwrap();
+    chonkgene_render::MeshRenderer::new(gpu, std::sync::Arc::new(model), 1.0, 0.33, 0)
+}
+
+fn opaque(pm: &Pixmap) -> usize {
+    pm.data()
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .filter(|p| p[3] > 200)
+        .count()
+}
+
+#[test]
+fn the_app_draws_four_legged_pets_walking_and_answers_clicks() {
+    use chonkgene_core::anim::{Act, Expression, PoseParams};
+    for id in QUAD_SPECIES {
+        let Some(mut r) = app_renderer(id) else {
+            eprintln!("skipped: no GPU");
+            return;
+        };
+        let at = |clock: f32, act: Act| PoseParams {
+            clock,
+            act,
+            ..Default::default()
+        };
+        let still = r.render(&at(0.0, Act::Rest), Expression::Neutral).clone();
+        assert!(
+            opaque(&still) > 5_000,
+            "{id}: drew {} pixels",
+            opaque(&still)
+        );
+        // Walking, the legs keep moving: frames a beat apart differ.
+        let mut frames = Vec::new();
+        for f in 1..=30 {
+            let act = if f % 2 == 0 { Act::StepA } else { Act::StepB };
+            frames.push(
+                r.render(&at(f as f32 / 30.0, act), Expression::Neutral)
+                    .clone(),
+            );
+        }
+        let moved = frames[10]
+            .data()
+            .iter()
+            .zip(frames[20].data())
+            .filter(|(a, b)| a.abs_diff(**b) > 40)
+            .count();
+        assert!(
+            moved > 500,
+            "{id}: walking frames differ by only {moved} bytes"
+        );
+        // A click just under the top of the head lands on the head; one on
+        // the empty corner lands on nothing.
+        r.render(&at(2.0, Act::Rest), Expression::Neutral);
+        let (x, y) = r.anchor();
+        let head = (0..40)
+            .map(|d| r.hit(x, y + d as f32))
+            .find(Option::is_some)
+            .flatten();
+        assert_eq!(head, Some("head"), "{id}: under the crown at ({x}, {y})");
+        assert_eq!(r.hit(1.0, 1.0), None);
+        // Asleep: sitting, eyes shut, and the snot bubble drawn over it.
+        let asleep = r.render_asleep(&at(3.0, Act::Rest), 1.0).clone();
+        assert!(opaque(&asleep) > 5_000);
+    }
+}

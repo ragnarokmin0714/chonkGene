@@ -35,6 +35,8 @@ pub mod builtin {
             "owl" => include_str!("../../../assets/species/owl/model.ron"),
             "chick" => include_str!("../../../assets/species/chick/model.ron"),
             "duck" => include_str!("../../../assets/species/duck/model.ron"),
+            // Drawn on all fours only (the skinned-mesh pets).
+            "fox" => include_str!("../../../assets/species/fox/quad.ron"),
             _ => return None,
         })
     }

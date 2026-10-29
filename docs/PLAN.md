@@ -657,6 +657,26 @@ Roger asked for terrain to matter (2026-10-27): standing on windows, falling off
 - The app reads the terrain every 400 ms, or every 100 ms while a pet is on a window or in the air.
 - Checked under Xvfb with a real window: pets hopped onto it, rode two moves exactly, and fell when it closed. The Windows side is type-checked only; it is owed a run on Windows.
 
+### Pets on all fours: skinned meshes
+
+Roger played the gait walk (2026-10-27) and still found it stiff: a body standing upright cannot walk like a cat or a dog. He wanted the body level with the ground, legs stepping in turn, a tail that sways with the steps, and later wobbling bellies, bottoms and chins, flying, ball games and fights. Live2D was considered and dropped (it needs hand-drawn art per pet and a paid runtime; the pets are already 3D). Instead the SDF models are baked once into a mesh and drawn by a raster pass, which costs a fraction of ray-marching, so every frame can be a new pose.
+
+| | Ray-marched (above) | Skinned mesh |
+|---|---|---|
+| A frame | a ray per pixel through every part | one raster pass over a mesh baked once |
+| Roger's UHD 770, 100% | 7.95 ms GPU | 1.15 ms GPU (Shiba walking, nothing cached) |
+| Poses | blends of a few posed poses | worked out every frame from the walk |
+| Tails, bellies | a bone each | bone chains with springs; jiggle bones |
+
+How it is built (all in `chonkgene-render`):
+- `assets/species/<id>/quad.ron`: the pet on all fours, in the same model format (one bone per leg, tail chains named `tail…`, `jiggles:` for soft spots). The Shiba has one (its upright `model.ron` stays for the sprites); the fox has only this one. Tail shapes come from `shiba/gen_tail.py` and `fox/gen_tails.py`.
+- `mesh`: bakes the SDF into a mesh by surface nets (0.025 cells, 0.2–0.8 s on the CPU): per vertex the coat colour, occlusion, where it sits on the face (the face is still painted per pixel, `paint.wgsl`, shared with `pet.wgsl`), its hit zone, and four bone weights that fade across each seam's blend.
+- `skin`: the skeleton and `Walk`: a four-beat walk with planted paws, the spine rocking, a 3D turn through facing you; tails sway as a wave run from root to tip; belly, bottom and chin on springs (a poke, a plop into a sit, a waddle); sitting tips the body back about the front paws, and several tails fan out behind on both sides of the head.
+- `mesh_gpu`: one 4× multisampled pass, the shadow first; `mesh_frames::MeshRenderer` drives a `Walk` from the animator's params and answers clicks (the nearest vertex under the cursor) and speech-bubble anchors (the top of the head).
+- `Renderer::new` picks the mesh on a real GPU when the species has a four-legged model; other species stay ray-marched; without a GPU everyone is drawn from sprites (the fox's sprites come from its four-legged model and its tails are cut at the edge of the upright canvas while walking).
+
+Checked: the mesh matches the ray-marcher at rest (silhouettes overlap 98.9% for the Shiba and 98.7% for the fox, colours 0.4 and 0.55 apart out of 255), planted paws slide under 0.5 px, the tail tip stays clear of the body, and the app ran under Xvfb with both pets walking. Owed: Roger's look on Windows, the fox's cost on his UHD 770, frames drawn without waiting (now each frame waits for its readback, about 0.5 ms there), baking off the UI thread, lying down, and the other species.
+
 ### Phase 1: Shiba prototype (feel) — `v0.1.0`
 
 - The art pipeline (§3.3) works end to end for one Shiba, with placeholder art.

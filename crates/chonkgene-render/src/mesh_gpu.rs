@@ -241,6 +241,11 @@ impl MeshCanvas {
         (self.cam.w, self.cam.h)
     }
 
+    /// Where world point `p` lands on the canvas, in pixels.
+    pub fn project(&self, p: V3) -> (f32, f32) {
+        self.cam.project(p)
+    }
+
     /// Draw the mesh posed by `bones` (one per skeleton bone) into `out`
     /// and wait for it. `scene` gives the face (look, palette); `yaw`, in
     /// degrees, turns the shadow under the root's pivot. The GPU seconds it

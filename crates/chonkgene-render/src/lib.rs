@@ -3,7 +3,9 @@
 //! Two ways to draw the same 3D pets: with a real GPU, every frame is the
 //! pet ray-marched in whatever pose its animation has blended to
 //! (`gpu_frames`); without one, frames are cut from a few pre-rendered
-//! sprites and warped in 2D (`sprite_frames`). [`Renderer`] picks one.
+//! sprites and warped in 2D (`sprite_frames`). Pets with a four-legged
+//! model are drawn instead as skinned meshes on the GPU (`mesh_frames`).
+//! [`Renderer`] picks one.
 
 pub mod bubble;
 pub mod gpu;
@@ -11,6 +13,7 @@ pub mod gpu_check;
 mod gpu_frames;
 pub mod menu;
 pub mod mesh;
+mod mesh_frames;
 pub mod mesh_gpu;
 pub mod raymarch;
 pub mod skin;
@@ -26,6 +29,7 @@ use tiny_skia::{FillRule, LineCap, LineJoin, Paint, Pixmap, Stroke, Transform};
 
 use crate::gpu::Gpu;
 pub use crate::gpu_frames::GpuRenderer;
+pub use crate::mesh_frames::MeshRenderer;
 pub use crate::sprite_frames::{SpriteRenderer, frame_transform};
 pub use crate::sprites::{KEYS, Key, Variant};
 
@@ -62,20 +66,41 @@ pub fn shared_gpu() -> Option<&'static Gpu> {
 pub enum Renderer {
     Sprites(Box<SpriteRenderer>),
     Gpu(Box<GpuRenderer>),
+    /// On all fours, as a skinned mesh (a species with a four-legged
+    /// model, on a real GPU).
+    Mesh(Box<MeshRenderer>),
 }
 
 impl Renderer {
-    /// Pixel size of a pet drawn at `scale` (1.0 = 100%).
+    /// Pixel size of an upright pet drawn at `scale` (1.0 = 100%); one on
+    /// all fours is wider (see [`Renderer::size`]).
     pub fn pixel_size(scale: f32) -> (u32, u32) {
         raymarch::pixel_size(scale)
     }
 
-    /// The best renderer this machine has.
-    pub fn new(model: Arc<Model>, scale: f32, chonk: f32, coat: usize) -> Option<Self> {
-        match shared_gpu() {
-            Some(gpu) => Self::gpu(gpu, model, scale, chonk, coat),
-            None => Self::sprites(model, scale, chonk, coat),
+    /// The best renderer this machine has: on a real GPU, the pet on all
+    /// fours if it has a four-legged model (`quad`), else ray-marched;
+    /// without one, sprites of `model`.
+    pub fn new(
+        model: Arc<Model>,
+        quad: Option<Arc<Model>>,
+        scale: f32,
+        chonk: f32,
+        coat: usize,
+    ) -> Option<Self> {
+        match (shared_gpu(), quad) {
+            (Some(gpu), Some(quad)) => MeshRenderer::new(gpu, quad, scale, chonk, coat)
+                .map(|r| Self::Mesh(Box::new(r)))
+                .or_else(|| Self::gpu(gpu, model, scale, chonk, coat)),
+            (Some(gpu), None) => Self::gpu(gpu, model, scale, chonk, coat),
+            (None, _) => Self::sprites(model, scale, chonk, coat),
         }
+    }
+
+    /// The pet's window size, pixels.
+    pub fn size(&self) -> (u32, u32) {
+        let pm = self.pixmap();
+        (pm.width(), pm.height())
     }
 
     /// Frames cut from pre-rendered sprites; they render in the background
@@ -96,13 +121,14 @@ impl Renderer {
     }
 
     pub fn is_gpu(&self) -> bool {
-        matches!(self, Self::Gpu(_))
+        matches!(self, Self::Gpu(_) | Self::Mesh(_))
     }
 
     pub fn pixmap(&self) -> &Pixmap {
         match self {
             Self::Sprites(r) => r.pixmap(),
             Self::Gpu(r) => r.pixmap(),
+            Self::Mesh(r) => r.pixmap(),
         }
     }
 
@@ -110,6 +136,7 @@ impl Renderer {
         match self {
             Self::Sprites(r) => r.set_chonk(chonk),
             Self::Gpu(r) => r.set_chonk(chonk),
+            Self::Mesh(r) => r.set_chonk(chonk),
         }
     }
 
@@ -117,6 +144,7 @@ impl Renderer {
         match self {
             Self::Sprites(r) => r.set_coat(coat),
             Self::Gpu(r) => r.set_coat(coat),
+            Self::Mesh(r) => r.set_coat(coat),
         }
     }
 
@@ -125,7 +153,7 @@ impl Renderer {
     pub fn poll(&mut self) -> bool {
         match self {
             Self::Sprites(r) => r.poll(),
-            Self::Gpu(_) => false,
+            Self::Gpu(_) | Self::Mesh(_) => false,
         }
     }
 
@@ -135,6 +163,8 @@ impl Renderer {
         match self {
             Self::Sprites(r) => r.finish(),
             Self::Gpu(r) => r.finish(),
+            // Mesh frames are drawn while you wait.
+            Self::Mesh(_) => {}
         }
     }
 
@@ -142,7 +172,7 @@ impl Renderer {
     pub fn ready(&self) -> bool {
         match self {
             Self::Sprites(r) => r.ready(),
-            Self::Gpu(_) => true,
+            Self::Gpu(_) | Self::Mesh(_) => true,
         }
     }
 
@@ -152,6 +182,7 @@ impl Renderer {
         match self {
             Self::Sprites(r) => r.changed(),
             Self::Gpu(r) => r.changed(),
+            Self::Mesh(r) => r.changed(),
         }
     }
 
@@ -161,6 +192,8 @@ impl Renderer {
         match self {
             Self::Sprites(_) => false,
             Self::Gpu(r) => r.busy(),
+            // Tails sway and bottoms settle all the time.
+            Self::Mesh(_) => true,
         }
     }
 
@@ -168,6 +201,7 @@ impl Renderer {
         match self {
             Self::Sprites(r) => r.render(params, expression),
             Self::Gpu(r) => r.render(params, expression),
+            Self::Mesh(r) => r.render(params, expression),
         }
     }
 
@@ -177,6 +211,7 @@ impl Renderer {
         match self {
             Self::Sprites(r) => r.render_asleep(params, phase),
             Self::Gpu(r) => r.render_asleep(params, phase),
+            Self::Mesh(r) => r.render_asleep(params, phase),
         }
     }
 
@@ -185,6 +220,7 @@ impl Renderer {
         match self {
             Self::Sprites(r) => r.hit(x, y),
             Self::Gpu(r) => r.hit(x, y),
+            Self::Mesh(r) => r.hit(x, y),
         }
     }
 
@@ -193,6 +229,7 @@ impl Renderer {
         match self {
             Self::Sprites(r) => r.anchor(),
             Self::Gpu(r) => r.anchor(),
+            Self::Mesh(r) => r.anchor(),
         }
     }
 }
