@@ -2,10 +2,11 @@
 # then paste the PIVOTS, PARENTS and PARTS sections over the tail entries
 # there.
 #
-# A doughnut that does not close: a short stalk up off the rump, then a
-# ring 270 degrees round, seen side on, the hole showing, cream on
-# the inside. The tip stops short of the stalk and stays clear of the back,
-# so the end of the tail never melts into the body.
+# The first version's fat doughnut sitting on the rump, seen side on, the
+# hole showing, cream on the inside, but open: only its root, sunk into
+# the rump, joins the body. The ring sits just above the back and goes 270
+# degrees round; the tip stops a gap short of the root and of the back, so
+# the end of the tail never melts into the body.
 import math
 
 
@@ -13,14 +14,16 @@ def f(v):
     return "(" + ", ".join((f"{c:.3f}".rstrip("0").rstrip(".") if abs(c) >= 5e-4 else "0") for c in v) + ")"
 
 
-R = 0.22  # the ring's radius
+R = 0.2  # the ring's radius, as the first version's torus
 SWEEP = 270.0  # degrees round from the bottom, back first, over and forward
-ARCS = 6
-stalk_from = [0.03, 0.04, -0.85]
-stalk_to = [0.03, 0.2, -0.88]
-centre = [0.04, stalk_to[1] + R, stalk_to[2]]
-# Tube radius from the stalk to the tip: fat at the root, thin at the end.
-radii = [0.13, 0.14, 0.14, 0.135, 0.125, 0.11, 0.09]
+ARCS = 8
+# The root: from inside the rump up to the bottom of the ring.
+stalk_from = [0.06, -0.02, -0.86]
+stalk_to = [0.06, 0.1, -0.86]
+centre = [0.06, stalk_to[1] + R, stalk_to[2]]
+# Tube radius: as fat as the first version's (0.12) all the way round,
+# rounding off a little at the tip.
+radii = [0.12] * ARCS + [0.105]
 points = [stalk_from, stalk_to]
 for k in range(1, ARCS + 1):
     t = math.radians(SWEEP * k / ARCS)
@@ -33,9 +36,10 @@ for k, name in enumerate(names):
     inner = [c - x for c, x in zip(centre, a)]
     pivots.append(f'        "{name}": {f(a)},')
     parents.append(f'        "{name}": "{"hips" if k == 0 else names[k - 1]}",')
-    # The stalk blends into the rump; the ring's segments only into each
-    # other, so the tip stays a gap away from the stalk and the back.
-    blend = 0.1 if k == 0 else 0.05
+    # The root blends into the rump; the ring's segments only into each
+    # other, and the tip hardly at all, so it stays a gap away from the
+    # root and the back.
+    blend = 0.1 if k == 0 else 0.03 if k == len(names) - 1 else 0.06
     parts.append(
         f'        (name: "{name}", bone: "{name}", shape: Capsule(to: {f(to)}, r: {radii[k]}), at: {f(a)},\n'
         f'            blend: {blend}, color: "fur", zone: "bottom",\n'

@@ -249,15 +249,20 @@ fn tail_paths(sk: &Skeleton, walking: bool, secs: f32) -> Vec<(Vec<V3>, Vec<V3>)
     for _ in 0..(secs / dt) as usize {
         let pose = sk.pose(&walk.step(dt, walking, 1.0));
         for (t, chain) in tails.iter().enumerate() {
-            // A point 0.25 out along the first bone, and one 0.25 on past
-            // the last bone's root, the way the tail runs: its tip.
-            let (base, tip) = (chain[0], chain[chain.len() - 1]);
+            // A point 0.25 out along the first bone, and the part of the
+            // tail farthest from its root: the tip of a straight tail,
+            // the top of a ring (whose tip curls back near the root).
+            let base = chain[0];
             let along =
                 |from: usize, to: usize| (sk.pivots[to] - sk.pivots[from]).normalize() * 0.25;
             let root = sk.pivots[base] + along(base, chain[1]);
-            let end = sk.pivots[tip] + along(chain[chain.len() - 2], tip);
+            let reach = |b: &usize| (sk.pivots[*b] - sk.pivots[base]).length();
+            let far = *chain
+                .iter()
+                .max_by(|a, b| reach(a).total_cmp(&reach(b)))
+                .unwrap();
             paths[t].0.push(pose[base].apply(root));
-            paths[t].1.push(pose[tip].apply(end));
+            paths[t].1.push(pose[far].apply(sk.pivots[far]));
         }
     }
     paths
@@ -485,5 +490,29 @@ fn the_bottom_plops_into_a_sit_and_waddles_on_the_walk() {
         let sway = xs[120..].iter().copied().fold(f32::MIN, f32::max)
             - xs[120..].iter().copied().fold(f32::MAX, f32::min);
         assert!(sway > 0.05, "{id}: the bottom waddles only {sway:.3}");
+    }
+}
+
+#[test]
+fn the_shiba_tail_tip_stays_clear_of_the_body() {
+    // Roger: a doughnut like the first version's, but its end must not
+    // join the body. Only the root may touch the rump; the tip keeps a gap
+    // from the body and from the root, wider than the blend that would
+    // melt them together.
+    let (model, _) = quad("shiba").unwrap();
+    let scene = Scene::posed(&model, 0, 0.33, &Pose::default(), Look::Open, Layer::All);
+    let tip = &model.parts[model.part("tail_tip").unwrap()];
+    let chonkgene_rig::sdf::Shape::Capsule { to, r } = tip.shape else {
+        panic!("the tip is a capsule");
+    };
+    for p in [tip.at + to * 0.5, tip.at + to] {
+        for pv in scene.parts() {
+            let name = &pv.part.name;
+            if name.starts_with("tail") && name != "tail" {
+                continue;
+            }
+            let gap = pv.shape.distance(pv.a.apply(p) + pv.b) * pv.k - r;
+            assert!(gap > 0.04, "the tail tip is {gap:.3} from {name}");
+        }
     }
 }
