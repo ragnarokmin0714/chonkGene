@@ -677,6 +677,21 @@ How it is built (all in `chonkgene-render`):
 
 Checked: the mesh matches the ray-marcher at rest (silhouettes overlap 98.9% for the Shiba and 98.7% for the fox, colours 0.4 and 0.55 apart out of 255), planted paws slide under 0.5 px, the tail tip stays clear of the body, and the app ran under Xvfb with both pets walking. Owed: Roger's look on Windows, the fox's cost on his UHD 770, frames drawn without waiting (now each frame waits for its readback, about 0.5 ms there), baking off the UI thread, lying down, and the other species.
 
+### Next: Roger's feedback on the mesh pets (2026-10-29)
+
+Roger played the mesh build on Windows (`feat/mesh-pets`) and asked for these to be noted and fixed later.
+
+1. **Cost (issue #1, `--gpu-check`, Intel UHD Graphics 770).** A walking pet, every frame a new pose:
+
+   | | Bake | GPU a frame, 100% | Share at 30 fps, 100% | Share at 30 fps, 150% |
+   |---|---|---|---|---|
+   | Shiba (35k vertices, 20 bones) | 0.20 s | 0.94 ms | 2.8% | 3.8% |
+   | Fox (68k vertices, 47 bones) | 0.76 s | 2.84 ms | 8.5% | 11.7% |
+
+   Two walking foxes are over the 10% budget, and mesh frames do not go through the budget yet (`MeshRenderer` draws and waits every frame). To do: send mesh frames through the GPU budget and without waiting; make the fox cheaper (its tails are most of its vertices: a coarser bake for them, or fewer samples); bake off the UI thread (the fox stalls the app for 0.76 s when it appears, and again on a coat or body change).
+2. **Pets vanish after 「全部收起來」.** Reported as: 縮小視窗時，將寵物全部收起來再放出，寵物實體會全部看不見，只剩視窗在移動 — after hiding all pets (Ctrl+Alt+P or the menu) and showing them again, the pets cannot be seen though their windows still move. Not reproduced yet; to check on Windows, with mesh and ray-marched pets: whether the window's picture is sent again after it is shown (`set_visible` only marks the pets due; the frame is presented only when the renderer reports a change), and what 「縮小視窗」 refers to (a minimised settings window, or another app's).
+3. **The other species are still upright.** Munchkin, fold, owl, chick and duck still use the ray-marched upright models. Each needs a four-legged (`quad.ron`) or, for the birds, a two-legged mesh model and a walk to match; the birds' flying comes later.
+
 ### Phase 1: Shiba prototype (feel) — `v0.1.0`
 
 - The art pipeline (§3.3) works end to end for one Shiba, with placeholder art.
