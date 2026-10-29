@@ -6,7 +6,7 @@ use chonkgene_render::mesh::bake;
 use chonkgene_render::mesh_gpu::{MAX_BONES, MeshCanvas};
 use chonkgene_render::raymarch;
 use chonkgene_render::skin::{QUAD_SPECIES, Skeleton, Walk, quad};
-use chonkgene_rig::math::{V3, v3};
+use chonkgene_rig::math::{M3, V3, v3};
 use chonkgene_rig::{Layer, Look, Model, Pose, Scene};
 use tiny_skia::Pixmap;
 
@@ -420,5 +420,70 @@ fn sitting_brings_the_bottom_down_and_keeps_the_front_paws_planted() {
             back < 0.01,
             "{id}: {back:.3} from standing after getting up"
         );
+    }
+}
+
+#[test]
+fn a_sitting_fox_fans_all_nine_tails_out_where_they_show() {
+    let (_, sk) = quad("fox").unwrap();
+    let mut walk = Walk::new(&sk, 1.0).unwrap();
+    walk.sit(true);
+    let mut joints = Vec::new();
+    for _ in 0..240 {
+        joints = walk.step(1.0 / 60.0, false, 1.0);
+    }
+    let pose = sk.pose(&joints);
+    // Each tail's root, in the pet's own frame (the turn toward you taken
+    // back out): off to one side or the other, clear of the head that
+    // would hide a tail pointing straight up behind it, and both sides
+    // used.
+    let unturn = M3::rot_y(-walk.yaw().to_radians());
+    let (mut left, mut right) = (0, 0);
+    for chain in sk.tails() {
+        let (a, b) = (chain[0], chain[1]);
+        let dir = unturn
+            .apply(pose[b].apply(sk.pivots[b]) - pose[a].apply(sk.pivots[a]))
+            .normalize();
+        assert!(
+            dir.x.abs() > 0.3,
+            "{}: points {dir:?}, behind the head",
+            sk.names[a]
+        );
+        if dir.x < 0.0 {
+            left += 1;
+        } else {
+            right += 1;
+        }
+    }
+    assert!(left >= 4 && right >= 4, "{left} tails left, {right} right");
+}
+
+#[test]
+fn the_bottom_plops_into_a_sit_and_waddles_on_the_walk() {
+    for id in QUAD_SPECIES {
+        let (_, sk) = quad(id).unwrap();
+        let butt = sk.bone("butt").unwrap();
+        let dt = 1.0 / 60.0;
+        let mut walk = Walk::new(&sk, 1.0).unwrap();
+        for _ in 0..60 {
+            walk.step(dt, false, 1.0);
+        }
+        walk.sit(true);
+        let ys: Vec<f32> = (0..180)
+            .map(|_| walk.step(dt, false, 1.0)[butt].shift.y)
+            .collect();
+        // Squashed down as it lands, then springing back up past rest.
+        let low = ys.iter().copied().fold(f32::MAX, f32::min);
+        let low_at = ys.iter().position(|y| *y == low).unwrap();
+        let high = ys[low_at..].iter().copied().fold(f32::MIN, f32::max);
+        assert!(low < -0.04, "{id}: the bottom squashed only {low:.3}");
+        assert!(high > 0.01, "{id}: no bounce back ({high:.3})");
+        let mut walk = Walk::new(&sk, 1.0).unwrap();
+        let xs: Vec<f32> = (0..240)
+            .map(|_| walk.step(dt, true, 1.0)[butt].shift.x)
+            .collect();
+        let sway = xs[120..].iter().copied().fold(f32::MIN, f32::max)
+            - xs[120..].iter().copied().fold(f32::MAX, f32::min);
+        assert!(sway > 0.05, "{id}: the bottom waddles only {sway:.3}");
     }
 }

@@ -191,6 +191,9 @@ const TWIST: f32 = 4.0;
 /// How far the pet turns side-on while walking, and at rest (toward you).
 const WALK_YAW: f32 = 72.0;
 const REST_YAW: f32 = 28.0;
+/// Sitting, it turns almost to face you, so the tails fanned out behind it
+/// show on both sides of its head.
+const SIT_YAW: f32 = 8.0;
 
 /// Sitting: the body tips back this far (degrees) about the front paws,
 /// which brings the bottom down onto the floor; the hind legs fold
@@ -199,6 +202,20 @@ const SIT_PITCH: f32 = 24.0;
 const SIT_HIND: f32 = -68.0;
 /// Where the front paws stand, the point the body tips back about.
 const FRONT_PAWS: V3 = v3(0.0, FLOOR, 0.5);
+/// Sitting, several tails open behind the pet like a fan, so all of them
+/// show: spread up to this far either side of straight up (degrees), and
+/// leaning back this much. A single tail just keeps its place against the
+/// body tipping back.
+const SIT_FAN: f32 = 95.0;
+const SIT_FAN_BACK: f32 = 0.35;
+/// The fan leaves a gap this wide either side of straight up, where the
+/// head and ears would hide a tail.
+const SIT_FAN_GAP: f32 = 24.0;
+/// The bottom's waddle side to side at full pace, world units, and the
+/// bounce it gets plopping down into a sit (and a smaller one getting up),
+/// world units a second.
+const BUTT_WADDLE: f32 = 0.05;
+const BUTT_PLOP: f32 = 1.8;
 
 /// Tail swish: how far each segment bends against the one before, degrees,
 /// standing and walking. The bend runs down the tail as a wave, each
@@ -219,6 +236,9 @@ struct Tail {
     /// The base's turn about the vertical: flung out by the body turning.
     fling: Spring,
     offset: f32,
+    /// The turn (degrees, as [`M3::euler`]) that takes the root from where
+    /// it rests to its place in the fan, sitting.
+    sit_turn: V3,
 }
 
 /// A four-legged walk, worked out frame by frame.
@@ -233,6 +253,7 @@ pub struct Walk {
     belly: Spring,
     butt: Spring,
     butt_z: Spring,
+    butt_x: Spring,
     chin: Spring,
     /// The chest's height the last two frames, and the pace last frame, for
     /// the shakes they give the soft parts.
@@ -267,16 +288,19 @@ impl Walk {
         }
         // Several tails swish out of step, so they ripple rather than
         // sway as one.
-        let tails = sk
-            .tails()
+        let chains = sk.tails();
+        let turns = fan(sk, &chains);
+        let tails = chains
             .into_iter()
+            .zip(turns)
             .enumerate()
-            .map(|(i, bones)| Tail {
+            .map(|(i, (bones, sit_turn))| Tail {
                 swish: vec![Spring::default(); bones.len()],
                 bounce: vec![Spring::default(); bones.len()],
                 bones,
                 fling: Spring::default(),
                 offset: i as f32 * 0.37,
+                sit_turn,
             })
             .collect();
         Ok(Self {
@@ -291,6 +315,7 @@ impl Walk {
             belly: Spring::default(),
             butt: Spring::default(),
             butt_z: Spring::default(),
+            butt_x: Spring::default(),
             chin: Spring::default(),
             bob: [0.0; 2],
             nod: [0.0; 2],
@@ -346,13 +371,25 @@ impl Walk {
             self.phase = (self.phase + dt * STEP_HZ * (0.4 + 0.6 * s)).fract();
         }
         let yaw = self.yaw.step(
-            facing * if walking { WALK_YAW } else { REST_YAW },
+            facing
+                * if walking {
+                    WALK_YAW
+                } else if self.sitting {
+                    SIT_YAW
+                } else {
+                    REST_YAW
+                },
             0.0,
             1.3,
             1.0,
             dt,
         );
         let ph = self.phase;
+        // How far into a sit, worked out first: the tails and the bottom
+        // need it too.
+        let was_sat = self.sit.x;
+        let goal = if self.sitting && !walking { 1.0 } else { 0.0 };
+        let sit = self.sit.step(goal, 0.0, 1.2, 1.0, dt).clamp(0.0, 1.0);
         let mut j = vec![Joint::default(); self.n];
         let b = &self.bones;
 
@@ -416,6 +453,10 @@ impl Walk {
         for tail in &mut self.tails {
             let fling = tail.fling.step(0.0, -0.5 * yaw_acc, 1.8, 0.35, dt);
             let at = TAU * (self.swish + tail.offset);
+            // The bend is shared out over the segments, so a long tail (a
+            // Shiba's seven-segment ring) bends no more in all than a short
+            // one and keeps its shape.
+            let amp = amp * 3.0 / tail.bones.len().max(3) as f32;
             for (k, &bone) in tail.bones.iter().enumerate() {
                 let lag = WAVE_LAG * k as f32;
                 // Sideways, the travelling wave; up and down, a smaller one
@@ -433,6 +474,9 @@ impl Walk {
                     rot: v3(bo, if k == 0 { fling } else { 0.0 }, sw),
                     shift: V3::ZERO,
                 };
+                if k == 0 {
+                    j[bone].rot = j[bone].rot + tail.sit_turn * sit;
+                }
             }
         }
         if let Some(i) = b.belly {
@@ -440,9 +484,24 @@ impl Walk {
             j[i].shift = v3(0.0, y.clamp(-0.12, 0.12), 0.0);
         }
         if let Some(i) = b.butt {
+            // Plopping down into a sit squashes the bottom, and it bounces;
+            // getting up gives it a smaller one.
+            if was_sat < 0.85 && sit >= 0.85 {
+                self.butt.v -= BUTT_PLOP;
+            } else if was_sat > 0.5 && sit <= 0.5 {
+                self.butt.v += 0.5 * BUTT_PLOP;
+            }
             let y = self.butt.step(0.0, -acc, 3.2, 0.16, dt);
             let z = self.butt_z.step(0.0, -0.6 * pace_acc, 3.0, 0.2, dt);
-            j[i].shift = v3(0.0, y.clamp(-0.12, 0.12), z.clamp(-0.08, 0.08));
+            // Walking, it waddles side to side a beat behind the hips.
+            let x = self
+                .butt_x
+                .step(BUTT_WADDLE * s * (TAU * ph).sin(), 0.0, 2.6, 0.15, dt);
+            j[i].shift = v3(
+                x.clamp(-0.1, 0.1),
+                y.clamp(-0.12, 0.12),
+                z.clamp(-0.08, 0.08),
+            );
         }
         if let Some(i) = b.chin {
             let y = self.chin.step(0.0, -acc - 0.02 * nod_acc, 4.0, 0.18, dt);
@@ -450,12 +509,12 @@ impl Walk {
         }
 
         // Sitting: the body tips back about the front paws until the
-        // bottom is on the floor; the front legs turn back to upright, the
-        // hind legs fold forward under the body, the head lifts to look
-        // ahead. Tipping about the paws (before the turn, so the pet does
-        // not swing round them) is a tip about the root plus a shift.
-        let goal = if self.sitting && !walking { 1.0 } else { 0.0 };
-        let sit = self.sit.step(goal, 0.0, 1.2, 1.0, dt).clamp(0.0, 1.0);
+        // bottom is on the floor, so the paws stay where they stand (the
+        // front legs lean back a little, turning only a third of the way
+        // back to upright); the hind legs fold forward under the body, and
+        // the head lifts to look up. Tipping about the paws (before the
+        // turn, so the pet does not swing round them) is a tip about the
+        // root plus a shift.
         if sit > 0.0 {
             let pitch = -SIT_PITCH * sit;
             j[0].rot.x += pitch;
@@ -472,5 +531,113 @@ impl Walk {
             j[b.head].rot.x += 0.85 * SIT_PITCH * sit;
         }
         j
+    }
+}
+
+/// Where each tail's root turns to when the pet sits (see [`SIT_FAN`]),
+/// degrees as [`M3::euler`], in the hips' frame. Several tails take places
+/// in a fan in the order they lie left to right, so none cross; one tail
+/// only rises against the body tipping back.
+fn fan(sk: &Skeleton, chains: &[Vec<usize>]) -> Vec<V3> {
+    let dirs: Vec<V3> = chains
+        .iter()
+        .map(|c| match c[..] {
+            [a, b, ..] => (sk.pivots[b] - sk.pivots[a]).normalize(),
+            _ => v3(0.0, 1.0, 0.0),
+        })
+        .collect();
+    if chains.len() < 2 {
+        return vec![v3(SIT_PITCH, 0.0, 0.0); chains.len()];
+    }
+    let mut order: Vec<usize> = (0..chains.len()).collect();
+    order.sort_by(|&a, &b| {
+        dirs[a]
+            .x
+            .atan2(dirs[a].y)
+            .total_cmp(&dirs[b].x.atan2(dirs[b].y))
+    });
+    let mut turns = vec![V3::ZERO; chains.len()];
+    // Evenly along the two arcs either side of the gap.
+    let arc = SIT_FAN - SIT_FAN_GAP;
+    for (slot, &t) in order.iter().enumerate() {
+        let along = 2.0 * arc * slot as f32 / (chains.len() - 1) as f32;
+        let across = if along <= arc {
+            -SIT_FAN + along
+        } else {
+            SIT_FAN_GAP + along - arc
+        };
+        let (s, c) = across.to_radians().sin_cos();
+        // Where it should point with the body tipped back, in the body's
+        // own frame: tipped forward by as much.
+        let world = v3(s, c, -SIT_FAN_BACK).normalize();
+        let want = M3::rot_x(SIT_PITCH.to_radians()).apply(world);
+        turns[t] = aim(dirs[t], want);
+    }
+    turns
+}
+
+fn cross(a: V3, b: V3) -> V3 {
+    v3(
+        a.y * b.z - a.z * b.y,
+        a.z * b.x - a.x * b.z,
+        a.x * b.y - a.y * b.x,
+    )
+}
+
+/// The turn (degrees, as [`M3::euler`]) that points `from` along `to`:
+/// the shortest turn between them (Rodrigues), read back as Euler angles.
+fn aim(from: V3, to: V3) -> V3 {
+    let (from, to) = (from.normalize(), to.normalize());
+    let axis = cross(from, to);
+    let (sin, cos) = (axis.length(), from.dot(to));
+    let k = if sin > 1e-6 {
+        axis / sin
+    } else if cos > 0.0 {
+        return V3::ZERO;
+    } else {
+        // Opposite ways: half a turn about any axis square to `from`.
+        let other = if from.x.abs() < 0.9 {
+            v3(1.0, 0.0, 0.0)
+        } else {
+            v3(0.0, 1.0, 0.0)
+        };
+        cross(from, other).normalize()
+    };
+    let kk = |i: usize, j: usize| [k.x, k.y, k.z][i] * [k.x, k.y, k.z][j];
+    let skew = [[0.0, -k.z, k.y], [k.z, 0.0, -k.x], [-k.y, k.x, 0.0]];
+    let m = |i: usize, j: usize| {
+        let id = if i == j { 1.0 } else { 0.0 };
+        id * cos + sin * skew[i][j] + (1.0 - cos) * kk(i, j)
+    };
+    // M3::euler is Ry · Rx · Rz: m12 = −sin x, (m10, m11) ∝ (sin z, cos z),
+    // (m02, m22) ∝ (sin y, cos y).
+    let x = (-m(1, 2)).clamp(-1.0, 1.0).asin();
+    let z = m(1, 0).atan2(m(1, 1));
+    let y = m(0, 2).atan2(m(2, 2));
+    v3(x.to_degrees(), y.to_degrees(), z.to_degrees())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn aim_turns_any_direction_onto_any_other() {
+        // Straight back onto sideways is the case two angles cannot reach.
+        let dirs = [
+            v3(0.0, 0.0, -1.0),
+            v3(1.0, 0.0, 0.0),
+            v3(0.0, 1.0, 0.0),
+            v3(0.16, -0.01, -0.99),
+            v3(-0.86, 0.24, -0.46),
+            v3(0.7, 0.62, 0.36),
+        ];
+        for from in dirs {
+            for to in dirs.iter().map(|d| v3(d.z, d.x, -d.y)).chain(dirs) {
+                let got = M3::euler(aim(from, to)).apply(from.normalize());
+                let miss = (got - to.normalize()).length();
+                assert!(miss < 1e-3, "{from:?} → {to:?} landed {got:?}");
+            }
+        }
     }
 }

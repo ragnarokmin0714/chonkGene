@@ -30,9 +30,9 @@ axis = norm([0.0, 0.9, -0.42])
 u = norm(cross(axis, [1, 0, 0]))  # in the y-z plane, perpendicular to axis
 v = [1.0, 0.0, 0.0]
 HALF = math.radians(66)
-LEN = [0.22, 0.34, 0.32, 0.36]
+LEN = [0.3, 0.46, 0.43, 0.48]
 # Thin root, fat middle: a teardrop, not a finger.
-R = [0.11, 0.24, 0.22]
+R = [0.12, 0.27, 0.25]
 # How each segment bends from the last: along `out` (away from the
 # axis) and up; the tip curls up and out.
 BEND = [None, (0.15, 0.0), (0.3, 0.1), (0.55, 0.35)]
@@ -63,7 +63,7 @@ for i in range(9):
             a = math.degrees(math.atan2(d[2], d[1]))
             h = LEN[k] * size
             parts.append(
-                f'        (name: "{names[k]}", bone: "{names[k]}", shape: Cone(r1: 0.21, r2: 0.025, h: {h:.3f}), at: {f(p)},\n'
+                f'        (name: "{names[k]}", bone: "{names[k]}", shape: Cone(r1: 0.24, r2: 0.03, h: {h:.3f}), at: {f(p)},\n'
                 f'            rot: {f([a, 0, g])}, blend: 0.08, color: "fur", zone: "bottom",\n'
                 f'            marks: [(at: (0, {h * 0.55:.3f}, 0), radii: (0.22, 0.2, 0.22), color: "tailmid", soft: 0.8),\n'
                 f'                (at: (0, {h:.3f}, 0), radii: (0.2, 0.22, 0.2), color: "tailtip", soft: 0.6)]),'
