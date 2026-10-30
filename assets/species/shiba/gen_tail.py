@@ -7,6 +7,7 @@
 # the rump, joins the body. The ring sits just above the back and goes 270
 # degrees round; the tip stops a gap short of the root and of the back, so
 # the end of the tail never melts into the body.
+# Sixteen short segments, blended wide, so no joint shows.
 import math
 
 
@@ -16,7 +17,7 @@ def f(v):
 
 R = 0.2  # the ring's radius, as the first version's torus
 SWEEP = 270.0  # degrees round from the bottom, back first, over and forward
-ARCS = 8
+ARCS = 16
 # The root: from inside the rump up to the bottom of the ring.
 stalk_from = [0.06, -0.02, -0.86]
 stalk_to = [0.06, 0.1, -0.86]
@@ -39,7 +40,7 @@ for k, name in enumerate(names):
     # The root blends into the rump; the ring's segments only into each
     # other, and the tip hardly at all, so it stays a gap away from the
     # root and the back.
-    blend = 0.1 if k == 0 else 0.03 if k == len(names) - 1 else 0.06
+    blend = 0.1 if k == 0 else 0.04 if k == len(names) - 1 else 0.1
     parts.append(
         f'        (name: "{name}", bone: "{name}", shape: Capsule(to: {f(to)}, r: {radii[k]}), at: {f(a)},\n'
         f'            blend: {blend}, color: "fur", zone: "bottom",\n'

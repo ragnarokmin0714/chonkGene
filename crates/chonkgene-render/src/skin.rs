@@ -224,6 +224,9 @@ const BUTT_PLOP: f32 = 1.8;
 const SWISH_REST: f32 = 12.0;
 const SWISH_WALK: f32 = 13.0;
 const WAVE_LAG: f32 = 0.9;
+/// A long tail's wave still spans this many radians from root to tip, so
+/// a tail of many short segments ripples no more than one of a few.
+const WAVE_SPAN: f32 = 7.5;
 /// Swishes a second, standing and at full pace.
 const SWISH_HZ: (f32, f32) = (0.6, 1.6);
 
@@ -470,7 +473,7 @@ impl Walk {
             // one and keeps its shape.
             let amp = amp * 3.0 / tail.bones.len().max(3) as f32;
             for (k, &bone) in tail.bones.iter().enumerate() {
-                let lag = WAVE_LAG * k as f32;
+                let lag = WAVE_LAG.min(WAVE_SPAN / tail.bones.len() as f32) * k as f32;
                 // Sideways, the travelling wave; up and down, a smaller one
                 // a quarter behind, plus a bounce with the steps at the root.
                 let sw_target = amp * (at - lag).sin();
