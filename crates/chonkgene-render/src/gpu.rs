@@ -10,7 +10,7 @@
 //! Frames are read back into a [`Pixmap`]: the pet windows stay the same
 //! layered/ARGB windows, and no GPU surface ever has to be transparent.
 
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
@@ -108,6 +108,12 @@ impl Frame {
     }
 }
 
+/// Where a frame's readback is: still being mapped, mapped (its picture
+/// can be read), or the map failed.
+pub(crate) const MAPPING: u8 = 0;
+pub(crate) const MAPPED: u8 = 1;
+pub(crate) const MAP_FAILED: u8 = 2;
+
 /// The share of GPU time pets may use unless `CHONKGENE_GPU_BUDGET` (a
 /// percentage) says otherwise.
 const DEFAULT_BUDGET: f32 = 0.10;
@@ -175,7 +181,7 @@ pub struct Canvas {
     part_cap: usize,
     mark_cap: usize,
     /// Set while a frame is on its way; turns true when it can be read.
-    pending: Option<Arc<AtomicBool>>,
+    pending: Option<Arc<AtomicU8>>,
     /// Timing the two passes, when the GPU can: timestamps land in the
     /// readback buffer after the picture.
     timer: Option<(wgpu::QuerySet, wgpu::Buffer)>,
@@ -613,13 +619,16 @@ impl Gpu {
             );
         }
         self.queue.submit([enc.finish()]);
-        let arrived = Arc::new(AtomicBool::new(false));
+        let arrived = Arc::new(AtomicU8::new(MAPPING));
         let flag = Arc::clone(&arrived);
         canvas
             .readback
             .slice(..)
             .map_async(wgpu::MapMode::Read, move |r| {
-                flag.store(r.is_ok(), Ordering::Release);
+                flag.store(
+                    if r.is_ok() { MAPPED } else { MAP_FAILED },
+                    Ordering::Release,
+                );
             });
         canvas.pending = Some(arrived);
         Ok(())
@@ -650,13 +659,24 @@ impl Gpu {
             wgpu::PollType::Poll
         };
         self.device.poll(poll).map_err(|e| format!("GPU: {e}"))?;
-        if !arrived.load(Ordering::Acquire) {
-            if wait {
-                // Waited and it still failed to map: drop the frame.
+        // Waiting, the map can still land a moment after the poll returns
+        // when another thread polls the same device: poll again a little.
+        let mut tries = 0;
+        while wait && arrived.load(Ordering::Acquire) == MAPPING && tries < 200 {
+            std::thread::yield_now();
+            self.device
+                .poll(wgpu::PollType::Poll)
+                .map_err(|e| format!("GPU: {e}"))?;
+            tries += 1;
+        }
+        match arrived.load(Ordering::Acquire) {
+            MAPPED => {}
+            MAPPING if !wait => return Ok(false),
+            _ => {
+                // Failed to map (or never did): drop the frame.
                 canvas.pending = None;
                 return Err("GPU readback failed".into());
             }
-            return Ok(false);
         }
         canvas.pending = None;
         {

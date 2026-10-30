@@ -272,6 +272,8 @@ pub fn key_for(expression: Expression, params: &PoseParams) -> Key {
         Act::Stretch => (PoseId::Stretch, Look::Happy),
         Act::Yawn => (PoseId::Yawn, Look::Yawn),
         Act::Wave => (PoseId::Wave, Look::Happy),
+        // Sprites have no eating pose: a happy sit (meshes bite and chew).
+        Act::Eat => (PoseId::Sit, Look::Happy),
     };
     let (pose, look) = match expression {
         Expression::Neutral => gesture(eyes),
@@ -296,6 +298,47 @@ pub fn key_for(expression: Expression, params: &PoseParams) -> Key {
 
 /// Draw the snot bubble beside the nose and a drifting 「z」 over a sleeping
 /// pet. `nose` is mapped into `pm` by `ts`; `s` is the pet's scale.
+/// A round cookie on the floor at `at` (under its middle, pixels), `eaten` of it
+/// gone (0 … 1): it shrinks and loses a bite out of its top with each bite.
+fn snack_overlay(pm: &mut Pixmap, at: (f32, f32), s: f32, eaten: f32) {
+    let r = (9.0 * s * (1.0 - 0.7 * eaten.clamp(0.0, 1.0))).max(0.5);
+    // Resting on the floor: the rim's bottom on `at`.
+    let (x, y) = (at.0, at.1 - 1.25 * r);
+    let mut paint = Paint {
+        anti_alias: true,
+        ..Paint::default()
+    };
+    let mut fill = |pm: &mut Pixmap, cx: f32, cy: f32, rr: f32, c: [u8; 4]| {
+        if let Some(p) = tiny_skia::PathBuilder::from_circle(cx, cy, rr) {
+            paint.set_color_rgba8(c[0], c[1], c[2], c[3]);
+            pm.fill_path(&p, &paint, FillRule::Winding, Transform::identity(), None);
+        }
+    };
+    // A flattened disc: a darker rim under a golden top.
+    fill(pm, x, y + 0.25 * r, r, [0xC9, 0x84, 0x4A, 255]);
+    fill(pm, x, y, r, [0xEC, 0xB0, 0x6A, 255]);
+    for (dx, dy) in [(-0.35, -0.2), (0.3, 0.1), (-0.05, 0.4)] {
+        fill(
+            pm,
+            x + dx * r,
+            y + dy * r,
+            0.16 * r,
+            [0x6B, 0x41, 0x2C, 255],
+        );
+    }
+    if eaten > 0.05 {
+        // The bite: a scoop out of the top edge, cleared to transparent.
+        if let Some(p) = tiny_skia::PathBuilder::from_circle(x + 0.45 * r, y - 0.75 * r, 0.55 * r) {
+            let clear = Paint {
+                anti_alias: true,
+                blend_mode: tiny_skia::BlendMode::Clear,
+                ..Paint::default()
+            };
+            pm.fill_path(&p, &clear, FillRule::Winding, Transform::identity(), None);
+        }
+    }
+}
+
 fn sleep_overlay(pm: &mut Pixmap, nose: (f32, f32), ts: Transform, s: f32, phase: f32) {
     let (nx, ny) = nose;
     let tau = std::f32::consts::TAU;

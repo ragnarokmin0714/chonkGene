@@ -1,23 +1,18 @@
 # Prints the Fold's tail for quad.ron: python3 gen_tail.py | python3
 # ../splice.py quad.ron
 #
-# A thick tail wrapped round its left side from the rump toward the front,
-# the end a shade darker.
-import math
+# A thick, relaxed cat's tail out of the middle of the rump: back and a
+# little down, then curving up at the end, a stripe band or two on the way
+# and the tip a shade darker.
 import sys
 
 sys.path.insert(0, "..")
-from tailgen import emit
+from tailgen import emit, turn_path
 
 N = 8
-# Out of the rump, round the side (x about 0.72), to just behind the front
-# leg; a quarter ring seen from above, hugging the body.
-points = []
-for k in range(N + 1):
-    t = math.radians(100 * k / N)
-    points.append([0.0 + 0.78 * math.sin(t) * 0.9, -0.5, -0.92 + 1.0 * (1 - math.cos(t)) * 1.05])
+points = turn_path([0.0, -0.22, -0.98], heading=-120, bend=95, length=1.05, n=N)
 names = ["tail"] + [f"tail_{k}" for k in range(2, N)] + ["tail_tip"]
-radii = [0.13] * N + [0.12]
+radii = [0.15] * N + [0.13]
 
 
 def mark(k, h):

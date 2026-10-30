@@ -1159,9 +1159,20 @@ impl Pet {
     }
 
     fn apply(&mut self, ctx: &mut Ctx, out: Out) {
+        // A snack is eaten on the spot: stop, bite, chew (no hop).
+        let eating = out.line == Some(Line::Eat);
+        if eating {
+            if self.body.motion == Motion::Walk {
+                self.body.motion = Motion::Idle;
+            }
+            self.anim.eat();
+            // Not off for a walk before the snack is gone.
+            let done = ctx.world.now + f64::from(chonkgene_core::anim::EAT_SECS) + 1.0;
+            self.switch_at = self.switch_at.max(done);
+        }
         if let Some(e) = out.expression {
-            // Cheered up (a pat, a snack): a happy double hop.
-            if e == Expression::Happy && self.anim.expression != Expression::Happy {
+            // Cheered up (a pat): a happy double hop.
+            if e == Expression::Happy && self.anim.expression != Expression::Happy && !eating {
                 self.anim.cheer();
             }
             self.anim.expression = e;

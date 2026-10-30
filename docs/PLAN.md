@@ -726,6 +726,16 @@ Roger ran `feat/mesh-pets` on Windows again and reported seven things; each is f
 6. **A pet just called out cannot be seen.** Same cause as 1 (a new pet's window is hidden and shown as it is placed).
 7. **The cats' legs look short.** Both cats stand taller with longer legs (Fold like the Shiba; the Munchkin still short-legged, but its legs now show under a slimmer tummy); a front leg leaning back as the pet sits is lifted by as much as the lean would sink its paw.
 
+### Sitting, sleeping and eating on the meshes (2026-10-30)
+
+Roger: the Fold's tail sat oddly, pets slept standing, eating had no motion of its own, and pets never seemed to sit.
+
+- **Sitting.** It worked, but only while a feeling showed (a few seconds), so a mesh pet stood about all day where the sprites always sat. Now a pet that has stood still doing nothing for `IDLE_SIT` (1.5 s) sits down, and gets up quickly when it walks off; gestures are done standing.
+- **Sleeping.** Asleep it now lies down (`Walk::lie`): the body sinks until the belly rests on the floor, front legs forward along it, hind legs folded, the head down on the paws, the tails hardly stirring. A bird settles down, tucks its head and folds its wings.
+- **Eating.** `Act::Eat` (`anim::EAT_SECS`, three bites of `BITE_SECS`): a snack from the menu stops the pet (no happy hop, no walk off until it is done), its head dips for each bite (a bird pecks) and comes up chewing, mouth opening and closing, over a cookie on the floor under its nose that loses a bite each time (`snack_overlay`). Sprites show a happy sit.
+- **The Fold's tail** now comes out of the middle of the rump, held low behind and curving up at the end. Tail swish is shared between turning about z (a tail held up) and the vertical (one held out behind), from which way the tail's root points, so a tail held out behind sways too.
+- A frame's readback now tells "still mapping" from "failed", and waiting polls again for a moment before giving up (two threads polling one device could make a waited-for frame look lost).
+
 ### Phase 1: Shiba prototype (feel) — `v0.1.0`
 
 - The art pipeline (§3.3) works end to end for one Shiba, with placeholder art.

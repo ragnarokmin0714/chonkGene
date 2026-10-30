@@ -53,7 +53,13 @@ pub enum Act {
     Stretch,
     Yawn,
     Wave,
+    /// Eating a snack: a few bites and some chewing.
+    Eat,
 }
+
+/// How long a snack takes, and each bite of it.
+pub const EAT_SECS: f32 = 2.4;
+pub const BITE_SECS: f32 = 0.8;
 
 /// How long a gesture that has a fixed length lasts, seconds: the idle
 /// stretch, yawn and wave. None for the rest (looks vary, steps and rest
@@ -63,6 +69,7 @@ pub fn gesture_secs(act: Act) -> Option<f32> {
         Act::Stretch => Some(1.9),
         Act::Yawn => Some(1.7),
         Act::Wave => Some(1.6),
+        Act::Eat => Some(EAT_SECS),
         _ => None,
     }
 }
@@ -261,6 +268,13 @@ impl Animator {
         self.turn != self.facing.signum()
     }
 
+    /// Eat a snack now: stops whatever gesture was under way. The caller
+    /// stops the pet walking first.
+    pub fn eat(&mut self) {
+        self.walking = false;
+        self.start(Act::Eat);
+    }
+
     /// Start a gesture now if the pet is free for it (a wave hello).
     pub fn gesture(&mut self, act: Act) {
         if self.free() {
@@ -327,7 +341,9 @@ impl Animator {
 
     /// Frames per second this pet needs now (PLAN §5).
     pub fn fps(&self, moving: bool) -> u32 {
-        let waving = self.gesture.is_some_and(|(act, ..)| act == Act::Wave);
+        let waving = self
+            .gesture
+            .is_some_and(|(act, ..)| matches!(act, Act::Wave | Act::Eat));
         if moving
             || self.is_wobbling()
             || self.expression == Expression::Giggle
@@ -774,5 +790,17 @@ mod tests {
         });
         assert!(wag > 60, "wags now and then: {wag}");
         assert!(still > wag, "rests more than it wags: {still} vs {wag}");
+    }
+
+    #[test]
+    fn a_snack_is_eaten_on_the_spot() {
+        let mut a = Animator::new(5, 0.33, 0.35);
+        a.walking = true;
+        a.eat();
+        let p = a.params();
+        assert_eq!(p.act, Act::Eat);
+        assert!(!a.walking);
+        run(&mut a, EAT_SECS + 0.2, |_| {});
+        assert_ne!(a.params().act, Act::Eat, "still eating after {EAT_SECS} s");
     }
 }

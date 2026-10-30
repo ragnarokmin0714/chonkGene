@@ -323,8 +323,11 @@ fn tails_swish_like_a_whip_standing_or_walking() {
             for f in 0..240 {
                 let joints = walk.step(1.0 / 60.0, walking, 1.0);
                 if f >= 60 {
-                    lo = lo.min(joints[tips[0]].rot.z);
-                    hi = hi.max(joints[tips[0]].rot.z);
+                    // Sideways: about z for a tail held up, about the
+                    // vertical for one held out behind, or some of each.
+                    let r = joints[tips[0]].rot;
+                    lo = lo.min(r.y + r.z);
+                    hi = hi.max(r.y + r.z);
                 }
             }
             assert!(hi - lo > 4.0, "{id}: the tip bends only {:.1}°", hi - lo);
@@ -768,14 +771,15 @@ fn idle_gestures_move_every_mesh_pet() {
         for _ in 0..60 {
             rest_joints = rest.step(1.0 / 60.0, false, 1.0);
         }
-        for act in [Act::Stretch, Act::Yawn, Act::Wave] {
+        for act in [Act::Stretch, Act::Yawn, Act::Wave, Act::Eat] {
             let mut walk = Mover::new(&sk, 1.0, &model).unwrap();
             let mut joints = Vec::new();
             for _ in 0..60 {
+                // 0.18 s in: a bite's head right down.
                 walk.gesture(Some(Gesture {
                     act,
                     e: 1.0,
-                    t: 0.4,
+                    t: 0.18,
                 }));
                 joints = walk.step(1.0 / 60.0, false, 1.0);
             }
@@ -800,4 +804,71 @@ fn idle_gestures_move_every_mesh_pet() {
             assert!(left < 1.0, "{id}: {act:?} left a bone {left:.1}° off");
         }
     }
+}
+
+#[test]
+fn asleep_every_mesh_pet_lies_down_and_gets_up_again() {
+    for id in QUAD_SPECIES.iter().chain(&BIPED_SPECIES) {
+        let (model, sk) = mesh_model(id).unwrap();
+        let head = sk.bone("head").unwrap();
+        let mut walk = Mover::new(&sk, 1.0, &model).unwrap();
+        let settle = |walk: &mut Mover, secs: f32| {
+            let mut j = Vec::new();
+            for _ in 0..(secs * 60.0) as usize {
+                j = walk.step(1.0 / 60.0, false, 1.0);
+            }
+            sk.pose(&j)[head].apply(sk.pivots[head])
+        };
+        let up = settle(&mut walk, 2.0);
+        walk.lie(true);
+        let down = settle(&mut walk, 4.0);
+        // The head comes down: onto the paws, or tucked into the chest.
+        assert!(
+            up.y - down.y > 0.08,
+            "{id}: the head came down only {:.3}",
+            up.y - down.y
+        );
+        walk.lie(false);
+        let again = settle(&mut walk, 4.0);
+        assert!((again - up).length() < 0.02, "{id}: did not get up again");
+    }
+}
+
+#[test]
+fn a_mesh_pet_sits_down_after_standing_about() {
+    use chonkgene_core::anim::{Expression, PoseParams};
+    let Some(mut r) = app_renderer("shiba") else {
+        eprintln!("skipped: no GPU");
+        return;
+    };
+    // How tall the picture stands: sitting up, the pet is taller.
+    let tall = |pm: &Pixmap| {
+        let w = pm.width() as usize;
+        let d = pm.data();
+        let rows: Vec<usize> = (0..pm.height() as usize)
+            .filter(|y| (0..w).any(|x| d[(y * w + x) * 4 + 3] > 200))
+            .collect();
+        rows.last().unwrap() - rows[0]
+    };
+    let mut at = |clock: f32| {
+        let p = PoseParams {
+            clock,
+            ..Default::default()
+        };
+        r.render(&p, Expression::Neutral);
+        r.finish();
+        tall(r.pixmap())
+    };
+    let mut standing = 0;
+    for f in 0..90 {
+        let h = at(f as f32 / 30.0);
+        if f == 15 {
+            standing = h;
+        }
+    }
+    let sitting = at(3.0);
+    assert!(
+        sitting > standing + 3,
+        "standing {standing} px tall, after 3 s still {sitting} px"
+    );
 }

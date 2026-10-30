@@ -224,6 +224,18 @@ pub(crate) const TURN_HZ: (f32, f32) = (1.3, 2.8);
 /// The widest a leg swings, degrees, however fast the pet goes.
 pub(crate) const MAX_SWING: f32 = 45.0;
 
+/// Where a snack is at `t` seconds into eating it: how far the head is
+/// down for a bite (0 … 1), and the chewing after it (−1 … 1).
+pub(crate) fn bite(t: f32) -> (f32, f32) {
+    use chonkgene_core::anim::BITE_SECS;
+    let b = (t / BITE_SECS).fract();
+    if b < 0.45 {
+        ((std::f32::consts::PI * b / 0.45).sin(), 0.0)
+    } else {
+        (0.0, (std::f32::consts::TAU * 3.0 * (b - 0.45) / 0.55).sin())
+    }
+}
+
 /// Splits a pace (1 usual) into how much quicker and how much longer the
 /// steps get: both grow, so zoomies neither blur into a flicker of legs
 /// nor stride absurdly; their product is about the pace, for the sine of
@@ -255,6 +267,9 @@ pub(crate) const SIT_YAW: f32 = 8.0;
 /// which brings the bottom down onto the floor; the hind legs fold
 /// forward under it.
 const SIT_PITCH: f32 = 24.0;
+/// Lying down, the body sinks this share of the legs' length: the belly
+/// comes to rest on the floor.
+const LIE_DROP: f32 = 0.42;
 const SIT_HIND: f32 = -68.0;
 /// Where the front paws stand, the point the body tips back about.
 const FRONT_PAWS: V3 = v3(0.0, FLOOR, 0.5);
@@ -298,6 +313,10 @@ struct Tail {
     /// The turn (degrees, as [`M3::euler`]) that takes the root from where
     /// it rests to its place in the fan, sitting.
     sit_turn: V3,
+    /// How the sideways swish is shared between turning about z (a tail
+    /// held up, as the Shiba's) and about the vertical (one held out
+    /// behind, as the Fold's), from which way its root points.
+    swish_axes: (f32, f32),
 }
 
 /// A four-legged walk, worked out frame by frame.
@@ -323,6 +342,9 @@ pub struct Walk {
     yaw_v: f32,
     /// Asked to sit, and how far down it is (0 standing … 1 sitting).
     sitting: bool,
+    /// Asked to lie down (asleep), and how far down it is.
+    lying: bool,
+    lie: Spring,
     /// The head's extra turn, and where it is heading.
     look: Spring,
     look_goal: f32,
@@ -366,13 +388,21 @@ impl Walk {
             .into_iter()
             .zip(turns)
             .enumerate()
-            .map(|(i, (bones, sit_turn))| Tail {
+            .map(|(i, (bones, sit_turn))| {
+                let up = match bones[..] {
+                    [a, b, ..] => (sk.pivots[b] - sk.pivots[a]).normalize().y.abs(),
+                    _ => 1.0,
+                };
+                (i, bones, sit_turn, (up, (1.0 - up * up).max(0.0).sqrt()))
+            })
+            .map(|(i, bones, sit_turn, swish_axes)| Tail {
                 swish: vec![Spring::default(); bones.len()],
                 bounce: vec![Spring::default(); bones.len()],
                 bones,
                 fling: Spring::default(),
                 offset: i as f32 * 0.37,
                 sit_turn,
+                swish_axes,
             })
             .collect();
         Ok(Self {
@@ -394,6 +424,8 @@ impl Walk {
             pace: 0.0,
             yaw_v: 0.0,
             sitting: false,
+            lying: false,
+            lie: Spring::default(),
             look: Spring::default(),
             look_goal: 0.0,
             sit: Spring::default(),
@@ -438,6 +470,11 @@ impl Walk {
         self.sitting = on;
     }
 
+    /// Lie down to sleep (or get up); walking gets it up first.
+    pub fn lie(&mut self, on: bool) {
+        self.lying = on;
+    }
+
     /// Turn the head this far (degrees, + to the pet's left) on top of
     /// what the walk does with it; it gets there smoothly.
     pub fn look(&mut self, deg: f32) {
@@ -471,7 +508,7 @@ impl Walk {
             facing
                 * if walking {
                     WALK_YAW
-                } else if self.sitting {
+                } else if self.sitting || self.lying {
                     SIT_YAW
                 } else {
                     REST_YAW
@@ -485,8 +522,19 @@ impl Walk {
         // How far into a sit, worked out first: the tails and the bottom
         // need it too.
         let was_sat = self.sit.x;
-        let goal = if self.sitting && !walking { 1.0 } else { 0.0 };
-        let sit = self.sit.step(goal, 0.0, 1.2, 1.0, dt).clamp(0.0, 1.0);
+        // Walking, it gets up quickly: the window is already moving.
+        let up_hz = if walking { 2.5 } else { 1.2 };
+        let goal = if self.sitting && !self.lying && !walking {
+            1.0
+        } else {
+            0.0
+        };
+        let sit = self.sit.step(goal, 0.0, up_hz, 1.0, dt).clamp(0.0, 1.0);
+        let goal = if self.lying && !walking { 1.0 } else { 0.0 };
+        let lie = self
+            .lie
+            .step(goal, 0.0, if walking { 2.5 } else { 0.8 }, 1.0, dt)
+            .clamp(0.0, 1.0);
         let mut j = vec![Joint::default(); self.n];
         let b = &self.bones;
 
@@ -547,7 +595,8 @@ impl Walk {
         // Tails: a wave runs from root to tip, faster and wider at pace;
         // the root bounces with the steps, and turning flings it out.
         self.swish = (self.swish + dt * (SWISH_HZ.0 + (SWISH_HZ.1 - SWISH_HZ.0) * s)).fract();
-        let amp = SWISH_REST + (SWISH_WALK - SWISH_REST) * s;
+        // Asleep, the tails hardly stir.
+        let amp = (SWISH_REST + (SWISH_WALK - SWISH_REST) * s) * (1.0 - 0.75 * lie);
         for tail in &mut self.tails {
             let fling = tail.fling.step(0.0, -0.5 * yaw_acc, 1.8, 0.35, dt);
             let at = TAU * (self.swish + tail.offset);
@@ -569,7 +618,11 @@ impl Walk {
                 let sw = tail.swish[k].step(sw_target, 0.0, 3.0, 0.5, dt);
                 let bo = tail.bounce[k].step(bo_target, 0.0, 3.0, 0.5, dt);
                 j[bone] = Joint {
-                    rot: v3(bo, if k == 0 { fling } else { 0.0 }, sw),
+                    rot: v3(
+                        bo,
+                        sw * tail.swish_axes.1 + if k == 0 { fling } else { 0.0 },
+                        sw * tail.swish_axes.0,
+                    ),
                     shift: V3::ZERO,
                 };
                 if k == 0 {
@@ -636,6 +689,17 @@ impl Walk {
             }
             j[b.head].rot.x += 0.85 * SIT_PITCH * sit;
         }
+        // Lying down (asleep): the body sinks until the belly rests on the
+        // floor, the front legs reach forward along it, the hind legs fold
+        // under, and the head drops onto the paws.
+        if lie > 0.0 {
+            j[0].shift.y -= LIE_DROP * self.leg_len * lie;
+            for &(leg, _, front) in &self.legs {
+                j[leg].rot.x += if front { -80.0 } else { SIT_HIND } * lie;
+            }
+            j[b.head].rot.x += 16.0 * lie;
+            j[b.head].shift.y -= 0.06 * lie;
+        }
         if let Some(g) = self.gesture.filter(|_| s < 0.5 && sit < 0.5) {
             use chonkgene_core::anim::Act;
             let e = g.e;
@@ -656,6 +720,13 @@ impl Walk {
                 Act::Yawn => {
                     j[b.head].rot.x -= 16.0 * e;
                     self.chin.v += 0.5 * e * dt;
+                }
+                // Bites: the head dips to the snack on the floor, the body
+                // leaning after it, and comes up to chew.
+                Act::Eat => {
+                    let (dip, chew) = bite(g.t);
+                    j[b.head].rot.x += e * (30.0 * dip + 3.0 * chew);
+                    j[b.body].rot.x += e * 8.0 * dip;
                 }
                 // A front paw up, waving.
                 Act::Wave => {

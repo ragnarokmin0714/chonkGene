@@ -16,18 +16,18 @@
 use std::sync::Arc;
 use std::sync::mpsc::{Receiver, TryRecvError, channel};
 
-use chonkgene_core::anim::{Act, Expression, PoseParams, gesture_secs};
+use chonkgene_core::anim::{Act, BITE_SECS, EAT_SECS, Expression, PoseParams, gesture_secs};
 use chonkgene_rig::math::{V3, v3};
-use chonkgene_rig::{Layer, Look, Model, Pose, Scene, ZONES};
+use chonkgene_rig::{FLOOR, Layer, Look, Model, Pose, Scene, ZONES};
 use tiny_skia::{Pixmap, Transform};
 
 use crate::gpu::Gpu;
 use crate::mesh::{Mesh, bake};
 use crate::mesh_gpu::MeshCanvas;
 use crate::raymarch::PPU;
-use crate::skin::{Affine, Gesture, Skeleton};
+use crate::skin::{Affine, Gesture, Skeleton, bite};
 use crate::waddle::Mover;
-use crate::{key_for, sleep_overlay};
+use crate::{key_for, sleep_overlay, snack_overlay};
 
 /// The canvas, world units: wider than an upright pet's, for a body lying
 /// along the floor and a fox's fan of tails.
@@ -35,6 +35,8 @@ const UNITS: (f32, f32) = (4.5, 3.3);
 /// The longest step the walk takes at once, seconds: its springs stay
 /// steady however slowly frames come.
 const MAX_STEP: f32 = 1.0 / 60.0;
+/// Standing still doing nothing this long (seconds), a pet sits down.
+const IDLE_SIT: f32 = 1.5;
 
 /// Pixel size of a pet on all fours at `scale` (1.0 = 100%).
 pub fn pixel_size(scale: f32) -> (u32, u32) {
@@ -82,6 +84,8 @@ pub struct MeshRenderer {
     belly: f32,
     /// The idle gesture under way and the animator's clock when it began.
     gesture: Option<(Act, f32)>,
+    /// Since when (the animator's clock) it has stood still, doing nothing.
+    rest_since: Option<f32>,
     changed: bool,
 }
 
@@ -123,6 +127,7 @@ impl MeshRenderer {
             clock: None,
             belly: 0.0,
             gesture: None,
+            rest_since: None,
             changed: false,
         })
     }
@@ -229,11 +234,47 @@ impl MeshRenderer {
     }
 
     pub fn render(&mut self, params: &PoseParams, expression: Expression) -> &Pixmap {
-        let look = key_for(expression, params).look;
-        if self.draw(params, expression, look) {
+        let mut look = key_for(expression, params).look;
+        let eating = (params.act == Act::Eat)
+            .then_some(self.gesture)
+            .flatten()
+            .map(|(_, since)| (params.clock - since).max(0.0));
+        if let Some(t) = eating {
+            // Mouth open for each bite and, quickly, while chewing.
+            let (dip, chew) = bite(t);
+            if dip > 0.6 || chew > 0.3 {
+                look = Look::Yawn;
+            }
+        }
+        let arrived = self.draw(params, expression, look);
+        if let Some(t) = eating {
+            // The snack on the floor before it, a bite smaller each bite.
+            self.pixmap.data_mut().copy_from_slice(self.base.data());
+            let eaten = (t / BITE_SECS).floor() / (EAT_SECS / BITE_SECS);
+            if let Some(at) = self.snack_spot() {
+                snack_overlay(&mut self.pixmap, at, self.scale, eaten);
+            }
+            self.changed = true;
+        } else if arrived {
             self.pixmap.data_mut().copy_from_slice(self.base.data());
         }
         &self.pixmap
+    }
+
+    /// Where a snack lies: on the floor just under the nose (or beak
+    /// or bill) of the pose shown, pixels.
+    fn snack_spot(&self) -> Option<(f32, f32)> {
+        let live = self.live.as_ref()?;
+        let part = ["nose", "beak", "bill"]
+            .iter()
+            .find_map(|n| self.model.part(n))
+            .map(|i| &self.model.parts[i])?;
+        let nose = self.shown_bones[part.bone].apply(part.at);
+        let (x, y) = live.canvas.project(v3(nose.x, FLOOR, nose.z));
+        // The floor under a nose held toward you lies below the canvas's
+        // floor line (the camera looks down a little): keep it in view.
+        let bottom = self.pixmap.height() as f32 - 2.0 * self.scale;
+        Some((x, y.min(bottom)))
     }
 
     pub fn render_asleep(&mut self, params: &PoseParams, phase: f32) -> &Pixmap {
@@ -262,18 +303,34 @@ impl MeshRenderer {
     fn draw(&mut self, params: &PoseParams, expression: Expression, look: Look) -> bool {
         let walking = matches!(params.act, Act::StepA | Act::StepB);
         let facing = if params.facing < 0.0 { -1.0 } else { 1.0 };
-        // Feelings sit it down; the face shows which.
-        self.walk.sit(!walking && expression != Expression::Neutral);
+        // Idle gestures: stretch, yawn, wave and eating, eased in and out
+        // over their length.
+        if self.gesture.map(|g| g.0) != Some(params.act) {
+            self.gesture = gesture_secs(params.act).map(|_| (params.act, params.clock));
+        }
+        // How it holds itself: asleep it lies down; resting a moment, or
+        // with a feeling on its face, it sits; a gesture is done standing.
+        let asleep = expression == Expression::Asleep;
+        if walking || self.gesture.is_some() || asleep {
+            self.rest_since = None;
+        } else {
+            self.rest_since.get_or_insert(params.clock);
+        }
+        let rested = self
+            .rest_since
+            .is_some_and(|since| params.clock - since > IDLE_SIT);
+        self.walk.lie(asleep && !walking);
+        self.walk.sit(
+            !walking
+                && !asleep
+                && self.gesture.is_none()
+                && (rested || expression != Expression::Neutral),
+        );
         self.walk.look(match params.act {
             Act::LookLeft => 35.0,
             Act::LookRight => -35.0,
             _ => 0.0,
         });
-        // Idle gestures: stretch, yawn and wave, eased in and out over
-        // their length.
-        if self.gesture.map(|g| g.0) != Some(params.act) {
-            self.gesture = gesture_secs(params.act).map(|_| (params.act, params.clock));
-        }
         self.walk.gesture(self.gesture.and_then(|(act, since)| {
             let secs = gesture_secs(act)?;
             let t = (params.clock - since).max(0.0);

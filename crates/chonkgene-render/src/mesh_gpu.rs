@@ -3,13 +3,13 @@
 //! and reads the picture back into a pixmap as gpu.rs does.
 
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicU8, Ordering};
 
 use chonkgene_rig::Scene;
 use chonkgene_rig::math::V3;
 use tiny_skia::Pixmap;
 
-use crate::gpu::{Frame, Gpu, Vec4, uniforms, v4};
+use crate::gpu::{Frame, Gpu, MAP_FAILED, MAPPED, MAPPING, Vec4, uniforms, v4};
 use crate::mesh::{Mesh, Vertex};
 use crate::raymarch::Camera;
 use crate::skin::{Affine, ROOT_PIVOT};
@@ -47,7 +47,7 @@ pub struct MeshCanvas {
     /// The shadow's radii (see [`Mesh::shadow`]).
     shadow_r: (f32, f32),
     /// A frame on its way: set once its picture can be read.
-    pending: Option<Arc<AtomicBool>>,
+    pending: Option<Arc<AtomicU8>>,
     /// Expected GPU seconds a frame, what the frame on its way was charged
     /// to the budget, and what the last measured frame took.
     cost: f32,
@@ -399,12 +399,15 @@ impl MeshCanvas {
             );
         }
         queue.submit([enc.finish()]);
-        let arrived = Arc::new(AtomicBool::new(false));
+        let arrived = Arc::new(AtomicU8::new(MAPPING));
         let flag = Arc::clone(&arrived);
         self.readback
             .slice(..)
             .map_async(wgpu::MapMode::Read, move |r| {
-                flag.store(r.is_ok(), Ordering::Release);
+                flag.store(
+                    if r.is_ok() { MAPPED } else { MAP_FAILED },
+                    Ordering::Release,
+                );
             });
         self.pending = Some(arrived);
         Ok(())
@@ -426,13 +429,24 @@ impl MeshCanvas {
             wgpu::PollType::Poll
         };
         gpu.device().poll(poll).map_err(|e| format!("GPU: {e}"))?;
-        if !arrived.load(Ordering::Acquire) {
-            if wait {
-                // Waited and it still failed to map: drop the frame.
+        // Waiting, the map can still land a moment after the poll returns
+        // when another thread polls the same device: poll again a little.
+        let mut tries = 0;
+        while wait && arrived.load(Ordering::Acquire) == MAPPING && tries < 200 {
+            std::thread::yield_now();
+            gpu.device()
+                .poll(wgpu::PollType::Poll)
+                .map_err(|e| format!("GPU: {e}"))?;
+            tries += 1;
+        }
+        match arrived.load(Ordering::Acquire) {
+            MAPPED => {}
+            MAPPING if !wait => return Ok(false),
+            _ => {
+                // Failed to map (or never did): drop the frame.
                 self.pending = None;
                 return Err("GPU readback failed".into());
             }
-            return Ok(false);
         }
         self.pending = None;
         self.last_secs = None;

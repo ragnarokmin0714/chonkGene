@@ -9,12 +9,12 @@
 
 use std::f32::consts::{PI, TAU};
 
-use chonkgene_rig::math::{V3, v3};
+use chonkgene_rig::math::v3;
 use chonkgene_rig::{FLOOR, Model};
 
 use crate::skin::{
     Gesture, Joint, MAX_SWING, REST_YAW, SIT_YAW, SPEED_UP, Skeleton, Spring, TURN_HZ, WALK_YAW,
-    Walk, tempo_split,
+    Walk, bite, tempo_split,
 };
 
 /// The pace the pet's window moves at, world units a second (60 px/s at
@@ -51,6 +51,14 @@ impl Mover {
         match self {
             Self::Quad(w) => w.poke(kick),
             Self::Biped(w) => w.poke(kick),
+        }
+    }
+
+    /// Lie down to sleep (or get up).
+    pub fn lie(&mut self, on: bool) {
+        match self {
+            Self::Quad(w) => w.lie(on),
+            Self::Biped(w) => w.lie(on),
         }
     }
 
@@ -115,6 +123,8 @@ pub struct Waddle {
     yaw: Spring,
     sitting: bool,
     sit: Spring,
+    lying: bool,
+    lie: Spring,
     gesture: Option<Gesture>,
     tempo: f32,
     look: Spring,
@@ -162,6 +172,8 @@ impl Waddle {
             },
             sitting: false,
             sit: Spring::default(),
+            lying: false,
+            lie: Spring::default(),
             gesture: None,
             tempo: 1.0,
             look: Spring::default(),
@@ -200,6 +212,10 @@ impl Waddle {
         self.sitting = on;
     }
 
+    pub fn lie(&mut self, on: bool) {
+        self.lying = on;
+    }
+
     pub fn look(&mut self, deg: f32) {
         self.look_goal = deg;
     }
@@ -231,7 +247,7 @@ impl Waddle {
             facing
                 * if walking {
                     WALK_YAW
-                } else if self.sitting {
+                } else if self.sitting || self.lying {
                     SIT_YAW
                 } else {
                     REST_YAW
@@ -242,8 +258,19 @@ impl Waddle {
             dt,
         );
         let ph = self.phase;
-        let sit_goal = if self.sitting && !walking { 1.0 } else { 0.0 };
-        let sit = self.sit.step(sit_goal, 0.0, 1.2, 1.0, dt).clamp(0.0, 1.0);
+        // Asleep, a bird settles down just as it sits, and tucks its head.
+        let up_hz = if walking { 2.5 } else { 1.2 };
+        let sit_goal = if (self.sitting || self.lying) && !walking {
+            1.0
+        } else {
+            0.0
+        };
+        let sit = self.sit.step(sit_goal, 0.0, up_hz, 1.0, dt).clamp(0.0, 1.0);
+        let lie_goal = if self.lying && !walking { 1.0 } else { 0.0 };
+        let lie = self
+            .lie
+            .step(lie_goal, 0.0, up_hz * 0.7, 1.0, dt)
+            .clamp(0.0, 1.0);
         let mut j = vec![Joint::default(); self.n];
 
         // Legs, in turn: on the floor a straight sweep back, off it an
@@ -286,12 +313,18 @@ impl Waddle {
         let nod = self.nod_amp * s * (2.0 * TAU * ph - 0.9).sin();
         let look = self.look.step(self.look_goal, 0.0, 1.6, 1.0, dt);
         j[self.head] = Joint {
-            rot: v3(nod, -yaw * (0.45 - 0.3 * s) + look, -0.7 * roll),
-            shift: V3::ZERO,
+            rot: v3(
+                nod + 18.0 * lie,
+                -yaw * (0.45 - 0.3 * s) + look,
+                -0.7 * roll,
+            ),
+            shift: v3(0.0, -0.05 * lie, 0.0),
         };
 
         // Wings: out a little, more with each step, puffed up sitting.
-        let flap = 5.0 + 12.0 * s * (0.5 + 0.5 * (2.0 * TAU * ph + 1.0).sin()) + 8.0 * sit;
+        // Asleep, the wings fold in close.
+        let flap = (5.0 + 12.0 * s * (0.5 + 0.5 * (2.0 * TAU * ph + 1.0).sin()) + 8.0 * sit)
+            * (1.0 - 0.8 * lie);
         for (side, wing) in self.wings.iter().enumerate() {
             if let Some(w) = *wing {
                 let sign = if side == 0 { 1.0 } else { -1.0 };
@@ -348,6 +381,12 @@ impl Waddle {
                 Act::Yawn => {
                     j[self.head].rot.x -= 14.0 * e;
                     self.chin.v += 0.5 * e * dt;
+                }
+                // Pecks at the snack on the floor, chewing in between.
+                Act::Eat => {
+                    let (dip, chew) = bite(g.t);
+                    j[self.body].rot.x += e * 12.0 * dip;
+                    j[self.head].rot.x += e * (35.0 * dip + 3.0 * chew);
                 }
                 // One wing up, waving.
                 Act::Wave => {
