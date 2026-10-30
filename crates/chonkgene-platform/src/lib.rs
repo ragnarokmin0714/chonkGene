@@ -70,6 +70,26 @@ pub fn pet_window(size: (u32, u32), pos: (i32, i32), title: &str) -> WindowAttri
     attrs
 }
 
+/// Bring one of our own windows (the settings window) to the front,
+/// restoring it first if it was minimised. Windows only: elsewhere the
+/// toolkit's own restore is all there is.
+pub fn bring_to_front(window: &dyn winit::raw_window_handle::HasWindowHandle) {
+    #[cfg(windows)]
+    windows::bring_to_front(window);
+    #[cfg(not(windows))]
+    let _ = window;
+}
+
+/// Let process `pid` take the foreground next (Windows only): only the
+/// process that got the last input may hand that on, which is us when a
+/// pet's menu was just clicked.
+pub fn allow_foreground(pid: u32) {
+    #[cfg(windows)]
+    windows::allow_foreground(pid);
+    #[cfg(not(windows))]
+    let _ = pid;
+}
+
 /// tiny-skia stores premultiplied RGBA; both platforms take premultiplied BGRA.
 fn swizzle(src: &[u8], dst: &mut [u8]) {
     let (src, _) = src.as_chunks::<4>();

@@ -499,6 +499,8 @@ impl App {
         if let Some(child) = &mut self.child
             && matches!(child.try_wait(), Ok(None))
         {
+            // We just got the click, so we may hand the foreground on.
+            chonkgene_platform::allow_foreground(child.id());
             let line = match pet {
                 Some(id) => format!("show {id}\n"),
                 None => "show\n".into(),

@@ -25,9 +25,10 @@ use windows_sys::Win32::UI::Shell::{
     QUNS_BUSY, QUNS_PRESENTATION_MODE, QUNS_RUNNING_D3D_FULL_SCREEN, SHQueryUserNotificationState,
 };
 use windows_sys::Win32::UI::WindowsAndMessaging::{
-    EnumWindows, GWL_EXSTYLE, GetClassNameW, GetCursorPos, GetWindowLongPtrW, GetWindowRect,
-    GetWindowTextLengthW, GetWindowThreadProcessId, IsIconic, IsWindowVisible, SPI_GETWORKAREA,
-    SetWindowLongPtrW, SystemParametersInfoW, ULW_ALPHA, UpdateLayeredWindow, WS_EX_LAYERED,
+    AllowSetForegroundWindow, BringWindowToTop, EnumWindows, GWL_EXSTYLE, GetClassNameW,
+    GetCursorPos, GetWindowLongPtrW, GetWindowRect, GetWindowTextLengthW, GetWindowThreadProcessId,
+    IsIconic, IsWindowVisible, SPI_GETWORKAREA, SW_RESTORE, SetForegroundWindow, SetWindowLongPtrW,
+    ShowWindow, SystemParametersInfoW, ULW_ALPHA, UpdateLayeredWindow, WS_EX_LAYERED,
     WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW,
 };
 use winit::raw_window_handle::{HasWindowHandle, RawWindowHandle};
@@ -227,6 +228,33 @@ pub struct Presenter {
     bits: *mut u8,
     width: i32,
     height: i32,
+}
+
+/// See [`crate::bring_to_front`].
+pub fn bring_to_front(window: &dyn HasWindowHandle) {
+    let Ok(handle) = window.window_handle() else {
+        return;
+    };
+    let RawWindowHandle::Win32(h) = handle.as_raw() else {
+        return;
+    };
+    let hwnd = h.hwnd.get() as HWND;
+    // SAFETY: plain Win32 calls on a live window of this process.
+    unsafe {
+        if IsIconic(hwnd) != 0 {
+            ShowWindow(hwnd, SW_RESTORE);
+        }
+        BringWindowToTop(hwnd);
+        SetForegroundWindow(hwnd);
+    }
+}
+
+/// See [`crate::allow_foreground`].
+pub fn allow_foreground(pid: u32) {
+    // SAFETY: takes a process id; fails harmlessly if we may not.
+    unsafe {
+        AllowSetForegroundWindow(pid);
+    }
 }
 
 /// The extended styles a pet window needs: layered (per-pixel alpha and

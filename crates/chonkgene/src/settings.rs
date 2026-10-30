@@ -692,12 +692,8 @@ fn come_forward_when_asked(ui: &SettingsWindow, st: &Rc<RefCell<State>>) -> Time
     timer.start(TimerMode::Repeated, Duration::from_millis(150), move || {
         let Some(ui) = weak.upgrade() else { return };
         while let Ok(pet) = rx.try_recv() {
-            use slint::winit_030::WinitWindowAccessor;
             ui.window().set_minimized(false);
-            ui.window().with_winit_window(|w| {
-                w.set_minimized(false);
-                w.focus_window();
-            });
+            chonkgene_platform::bring_to_front(&ui.window().window_handle());
             if let Some(id) = pet {
                 let mut st = st.borrow_mut();
                 st.selected = Some(id);
