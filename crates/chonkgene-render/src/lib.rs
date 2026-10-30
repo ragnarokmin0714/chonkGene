@@ -153,7 +153,8 @@ impl Renderer {
     pub fn poll(&mut self) -> bool {
         match self {
             Self::Sprites(r) => r.poll(),
-            Self::Gpu(_) | Self::Mesh(_) => false,
+            Self::Gpu(_) => false,
+            Self::Mesh(r) => r.poll(),
         }
     }
 
@@ -163,8 +164,7 @@ impl Renderer {
         match self {
             Self::Sprites(r) => r.finish(),
             Self::Gpu(r) => r.finish(),
-            // Mesh frames are drawn while you wait.
-            Self::Mesh(_) => {}
+            Self::Mesh(r) => r.finish(),
         }
     }
 
@@ -172,7 +172,8 @@ impl Renderer {
     pub fn ready(&self) -> bool {
         match self {
             Self::Sprites(r) => r.ready(),
-            Self::Gpu(_) | Self::Mesh(_) => true,
+            Self::Gpu(_) => true,
+            Self::Mesh(r) => r.ready(),
         }
     }
 

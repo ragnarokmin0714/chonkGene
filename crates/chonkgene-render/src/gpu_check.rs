@@ -219,7 +219,7 @@ fn mesh_check(gpu: &Gpu, out: &Path, report: &mut String) -> Result<(), String> 
     for id in QUAD_SPECIES {
         let (model, sk) = quad(id)?;
         let started = Instant::now();
-        let mesh = bake(&model, &sk, 0, 0.33, 0.025)?;
+        let mesh = bake(&model, &sk, 0, 0.33, model.bake_cell)?;
         let baked = started.elapsed();
         let name = match id {
             "fox" => "九尾狐",

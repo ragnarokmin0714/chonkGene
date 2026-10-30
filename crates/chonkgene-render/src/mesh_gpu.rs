@@ -2,6 +2,9 @@
 //! (skin.rs) in one raster pass with 4× multisampling, its shadow first,
 //! and reads the picture back into a pixmap as gpu.rs does.
 
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+
 use chonkgene_rig::Scene;
 use chonkgene_rig::math::V3;
 use tiny_skia::Pixmap;
@@ -16,6 +19,11 @@ const DEPTH: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
 const SAMPLES: u32 = 4;
 /// Bones the shader holds (mesh.wgsl).
 pub const MAX_BONES: usize = 64;
+/// A frame's GPU time before it has been measured, at the canvas size of
+/// a pet at 100% (Roger's UHD 770 took 0.9 ms for the Shiba and 2.8 ms for
+/// the fox; err high), scaled by area.
+const GUESS: f32 = 0.004;
+const GUESS_PIXELS: f32 = 261.0 * 192.0;
 
 /// One pet's mesh on the GPU, and where it draws.
 pub struct MeshCanvas {
@@ -38,6 +46,13 @@ pub struct MeshCanvas {
     mouth_r: V3,
     /// The shadow's radii (see [`Mesh::shadow`]).
     shadow_r: (f32, f32),
+    /// A frame on its way: set once its picture can be read.
+    pending: Option<Arc<AtomicBool>>,
+    /// Expected GPU seconds a frame, what the frame on its way was charged
+    /// to the budget, and what the last measured frame took.
+    cost: f32,
+    charged: f32,
+    last_secs: Option<f32>,
     /// GPU seconds measured so far, and frames drawn.
     pub measured: f64,
     pub frames: u32,
@@ -232,6 +247,10 @@ impl MeshCanvas {
             eye_r: mesh.eye_r,
             mouth_r: mesh.mouth_r,
             shadow_r: mesh.shadow,
+            pending: None,
+            cost: GUESS * (w * h) as f32 / GUESS_PIXELS,
+            charged: 0.0,
+            last_secs: None,
             measured: 0.0,
             frames: 0,
         }
@@ -258,14 +277,55 @@ impl MeshCanvas {
         yaw: f32,
         out: &mut Pixmap,
     ) -> Result<Option<f32>, String> {
+        self.charged = 0.0;
+        self.submit(gpu, scene, bones, yaw)?;
+        self.collect(gpu, out, true)?;
+        Ok(self.last_secs)
+    }
+
+    /// Is a frame on its way?
+    pub fn pending(&self) -> bool {
+        self.pending.is_some()
+    }
+
+    /// [`MeshCanvas::submit`] if the GPU budget can pay for the frame now;
+    /// false (and nothing sent) if it has to wait.
+    pub fn try_submit(
+        &mut self,
+        gpu: &Gpu,
+        scene: &Scene,
+        bones: &[Affine],
+        yaw: f32,
+    ) -> Result<bool, String> {
+        if !gpu.try_spend(self.cost) {
+            return Ok(false);
+        }
+        self.charged = self.cost;
+        if let Err(e) = self.submit(gpu, scene, bones, yaw) {
+            gpu.settle(self.charged, 0.0);
+            self.charged = 0.0;
+            return Err(e);
+        }
+        Ok(true)
+    }
+
+    /// Start drawing the mesh posed by `bones` without waiting;
+    /// [`MeshCanvas::collect`] picks the picture up. One frame at a time.
+    pub fn submit(
+        &mut self,
+        gpu: &Gpu,
+        scene: &Scene,
+        bones: &[Affine],
+        yaw: f32,
+    ) -> Result<(), String> {
+        if self.pending.is_some() {
+            return Err("a frame is already on its way".into());
+        }
         if bones.len() > MAX_BONES {
             return Err(format!(
                 "{} bones, the shader holds {MAX_BONES}",
                 bones.len()
             ));
-        }
-        if out.width() != self.cam.w || out.height() != self.cam.h {
-            return Err("canvas and pixmap sizes differ".into());
         }
         let mut u = uniforms(scene, &self.cam, &Frame::default(), true, 0);
         u.push(v4(self.eye_r, yaw.to_radians()));
@@ -339,13 +399,43 @@ impl MeshCanvas {
             );
         }
         queue.submit([enc.finish()]);
+        let arrived = Arc::new(AtomicBool::new(false));
+        let flag = Arc::clone(&arrived);
         self.readback
             .slice(..)
-            .map_async(wgpu::MapMode::Read, |_| {});
-        gpu.device()
-            .poll(wgpu::PollType::wait_indefinitely())
-            .map_err(|e| format!("GPU: {e}"))?;
-        let mut secs = None;
+            .map_async(wgpu::MapMode::Read, move |r| {
+                flag.store(r.is_ok(), Ordering::Release);
+            });
+        self.pending = Some(arrived);
+        Ok(())
+    }
+
+    /// Copy the frame on its way into `out` if it has arrived (`wait`: wait
+    /// for it). True if `out` now holds it. Learns what frames cost and
+    /// settles the budget when the GPU can time them.
+    pub fn collect(&mut self, gpu: &Gpu, out: &mut Pixmap, wait: bool) -> Result<bool, String> {
+        let Some(arrived) = self.pending.clone() else {
+            return Ok(false);
+        };
+        if out.width() != self.cam.w || out.height() != self.cam.h {
+            return Err("canvas and pixmap sizes differ".into());
+        }
+        let poll = if wait {
+            wgpu::PollType::wait_indefinitely()
+        } else {
+            wgpu::PollType::Poll
+        };
+        gpu.device().poll(poll).map_err(|e| format!("GPU: {e}"))?;
+        if !arrived.load(Ordering::Acquire) {
+            if wait {
+                // Waited and it still failed to map: drop the frame.
+                self.pending = None;
+                return Err("GPU readback failed".into());
+            }
+            return Ok(false);
+        }
+        self.pending = None;
+        self.last_secs = None;
         {
             let data = self
                 .readback
@@ -371,13 +461,16 @@ impl MeshCanvas {
                 let t = (stamp(1).saturating_sub(stamp(0)) as f64 * f64::from(ns) * 1e-9) as f32;
                 if t > 0.0 && t < 1.0 {
                     self.measured += f64::from(t);
-                    secs = Some(t);
+                    self.last_secs = Some(t);
+                    self.cost = 0.8 * self.cost + 0.2 * t;
+                    gpu.settle(self.charged, t);
                 }
             }
         }
         self.readback.unmap();
+        self.charged = 0.0;
         self.frames += 1;
-        Ok(secs)
+        Ok(true)
     }
 }
 

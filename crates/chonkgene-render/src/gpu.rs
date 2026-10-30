@@ -471,6 +471,19 @@ impl Gpu {
         Ok(())
     }
 
+    /// Pay `cost` GPU seconds out of the pets' share, if it has them now.
+    pub(crate) fn try_spend(&self, cost: f32) -> bool {
+        self.budget.lock().map_or(true, |mut b| b.try_spend(cost))
+    }
+
+    /// A frame charged `charged` GPU seconds really took `secs`: give back
+    /// (or take) the difference.
+    pub(crate) fn settle(&self, charged: f32, secs: f32) {
+        if let Ok(mut b) = self.budget.lock() {
+            b.saved += charged - secs;
+        }
+    }
+
     /// [`Gpu::submit`] if the budget can pay for the frame now; false (and
     /// nothing sent) if it has to wait.
     pub fn try_submit(
@@ -480,11 +493,7 @@ impl Gpu {
         frame: &Frame,
         shadow: bool,
     ) -> Result<bool, String> {
-        let paid = self
-            .budget
-            .lock()
-            .map_or(true, |mut b| b.try_spend(canvas.cost));
-        if !paid {
+        if !self.try_spend(canvas.cost) {
             return Ok(false);
         }
         canvas.charged = canvas.cost;
@@ -677,9 +686,7 @@ impl Gpu {
                 if secs > 0.0 && secs < 1.0 {
                     canvas.measured += f64::from(secs);
                     canvas.cost = 0.8 * canvas.cost + 0.2 * secs;
-                    if let Ok(mut b) = self.budget.lock() {
-                        b.saved += canvas.charged - secs;
-                    }
+                    self.settle(canvas.charged, secs);
                 }
             }
         }

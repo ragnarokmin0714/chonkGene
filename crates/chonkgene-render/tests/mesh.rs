@@ -243,7 +243,7 @@ fn every_four_legged_pet_fits_the_shader_and_stands_on_its_paws() {
             "{id}: {} bones",
             sk.names.len()
         );
-        let mesh = bake(&model, &sk, 0, 0.33, 0.025).unwrap();
+        let mesh = bake(&model, &sk, 0, 0.33, model.bake_cell).unwrap();
         // The shadow covers the four paws (x ±0.3, z 0.5 and −0.6 from
         // the middle) but stays under the pet.
         let (across, along) = mesh.shadow;
@@ -558,12 +558,19 @@ fn the_app_draws_four_legged_pets_walking_and_answers_clicks() {
             eprintln!("skipped: no GPU");
             return;
         };
+        // Frames come back one call late and are paid for out of the GPU
+        // budget: wait for each one so every render here shows its pose.
+        let shot = |r: &mut chonkgene_render::MeshRenderer, p: &PoseParams, e| {
+            r.render(p, e);
+            r.finish();
+            r.pixmap().clone()
+        };
         let at = |clock: f32, act: Act| PoseParams {
             clock,
             act,
             ..Default::default()
         };
-        let still = r.render(&at(0.0, Act::Rest), Expression::Neutral).clone();
+        let still = shot(&mut r, &at(0.0, Act::Rest), Expression::Neutral);
         assert!(
             opaque(&still) > 5_000,
             "{id}: drew {} pixels",
@@ -573,10 +580,7 @@ fn the_app_draws_four_legged_pets_walking_and_answers_clicks() {
         let mut frames = Vec::new();
         for f in 1..=30 {
             let act = if f % 2 == 0 { Act::StepA } else { Act::StepB };
-            frames.push(
-                r.render(&at(f as f32 / 30.0, act), Expression::Neutral)
-                    .clone(),
-            );
+            frames.push(shot(&mut r, &at(f as f32 / 30.0, act), Expression::Neutral));
         }
         let moved = frames[10]
             .data()
@@ -590,7 +594,7 @@ fn the_app_draws_four_legged_pets_walking_and_answers_clicks() {
         );
         // A click just under the top of the head lands on the head; one on
         // the empty corner lands on nothing.
-        r.render(&at(2.0, Act::Rest), Expression::Neutral);
+        shot(&mut r, &at(2.0, Act::Rest), Expression::Neutral);
         let (x, y) = r.anchor();
         let head = (0..40)
             .map(|d| r.hit(x, y + d as f32))
@@ -599,7 +603,66 @@ fn the_app_draws_four_legged_pets_walking_and_answers_clicks() {
         assert_eq!(head, Some("head"), "{id}: under the crown at ({x}, {y})");
         assert_eq!(r.hit(1.0, 1.0), None);
         // Asleep: sitting, eyes shut, and the snot bubble drawn over it.
+        r.render_asleep(&at(3.0, Act::Rest), 1.0);
+        r.finish();
         let asleep = r.render_asleep(&at(3.0, Act::Rest), 1.0).clone();
         assert!(opaque(&asleep) > 5_000);
     }
+}
+
+/// A mesh renderer of its own on a GPU of its own (so a budget set here
+/// touches no other test); none without a GPU.
+fn lone_renderer(id: &str, budget: f32) -> Option<chonkgene_render::MeshRenderer> {
+    let gpu: &'static Gpu = Box::leak(Box::new(Gpu::new().ok()?));
+    gpu.set_budget(budget);
+    let (model, _) = quad(id).unwrap();
+    chonkgene_render::MeshRenderer::new(gpu, std::sync::Arc::new(model), 1.0, 0.33, 0)
+}
+
+#[test]
+fn the_mesh_bakes_on_its_own_thread_and_shows_when_it_lands() {
+    use chonkgene_core::anim::{Expression, PoseParams};
+    let Some(mut r) = lone_renderer("fox", 1.0) else {
+        eprintln!("skipped: no GPU");
+        return;
+    };
+    // The fox takes most of a second to bake: `new` returned without it.
+    assert!(!r.ready());
+    assert!(!r.changed());
+    assert_eq!(r.hit(100.0, 100.0), None);
+    let start = std::time::Instant::now();
+    while !r.poll() {
+        assert!(start.elapsed().as_secs() < 60, "the bake never landed");
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    assert!(r.ready());
+    r.render(&PoseParams::default(), Expression::Neutral);
+    r.finish();
+    assert!(opaque(r.pixmap()) > 5_000);
+}
+
+#[test]
+fn mesh_frames_wait_for_the_gpu_budget_instead_of_overspending_it() {
+    use chonkgene_core::anim::{Expression, PoseParams};
+    // A share of nothing: only what the budget starts with (a burst of
+    // 50 ms of GPU time) can pay for frames, and frames are guessed to
+    // cost at least 4 ms each, so a dozen at most, however many are asked.
+    let Some(mut r) = lone_renderer("shiba", 0.0) else {
+        eprintln!("skipped: no GPU");
+        return;
+    };
+    r.finish();
+    assert!(r.ready());
+    let mut drawn = 0;
+    for f in 1..=60 {
+        let params = PoseParams {
+            clock: f as f32 / 30.0,
+            ..Default::default()
+        };
+        r.render(&params, Expression::Neutral);
+        drawn += usize::from(r.changed());
+        // Time for a frame on its way to land.
+        std::thread::sleep(std::time::Duration::from_millis(30));
+    }
+    assert!(drawn <= 13, "{drawn} frames came out of a 50 ms burst");
 }

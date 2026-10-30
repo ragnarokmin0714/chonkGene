@@ -10,6 +10,8 @@
 // output back in.
 (
     species: "fox",
+    // Nine tails make a lot of surface: bake it coarser than the Shiba.
+    bake_cell: 0.03,
     slots: ["fur", "light", "ear", "ink", "blush", "mark", "tip", "tailmid", "tailtip", "sock", "rope", "bell", "iris"],
     coats: [
         (name: "white", colors: {

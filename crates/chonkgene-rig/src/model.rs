@@ -124,6 +124,9 @@ struct ModelFile {
     /// Soft spots that wobble on spring bones of their own.
     #[serde(default)]
     jiggles: Vec<JiggleFile>,
+    /// Grid cell baking the skinned mesh, world units (see [`Model::bake_cell`]).
+    #[serde(default = "default_cell")]
+    bake_cell: f32,
 }
 
 #[derive(Deserialize)]
@@ -188,6 +191,10 @@ enum ShapeFile {
 
 fn one() -> f32 {
     1.0
+}
+
+fn default_cell() -> f32 {
+    0.025
 }
 
 fn root() -> String {
@@ -562,6 +569,10 @@ pub struct Model {
     pub poses: Vec<Pose>,
     pub gait: Gait,
     pub jiggles: Vec<Jiggle>,
+    /// The grid cell the skinned mesh is baked on, world units: coarser
+    /// means fewer vertices to draw and a quicker bake. A species with
+    /// many parts (the fox's nine tails) takes a coarser one.
+    pub bake_cell: f32,
 }
 
 impl Model {
@@ -863,6 +874,7 @@ fn resolve(file: ModelFile, shared: HashMap<String, PoseFile>) -> Result<Model, 
         face,
         poses,
         jiggles,
+        bake_cell: file.bake_cell.clamp(0.015, 0.06),
     })
 }
 

@@ -6,8 +6,15 @@
 //! The animator's params drive the walk: stepping walks, any strong feeling
 //! sits the pet down (its face shows the feeling), a poke jolts the belly,
 //! a hop lifts the whole pet, glances turn the head.
+//!
+//! The UI thread never waits on the GPU or the CPU for a pet: the mesh is
+//! baked on its own thread (the pet shows once it lands), frames are sent
+//! to the GPU without waiting and picked up on a later call (one frame
+//! late), and a frame the GPU budget cannot pay for waits, so a busy GPU
+//! drops frames instead of its share rising.
 
 use std::sync::Arc;
+use std::sync::mpsc::{Receiver, TryRecvError, channel};
 
 use chonkgene_core::anim::{Act, Expression, PoseParams};
 use chonkgene_rig::math::{V3, v3};
@@ -24,8 +31,6 @@ use crate::{key_for, sleep_overlay};
 /// The canvas, world units: wider than an upright pet's, for a body lying
 /// along the floor and a fox's fan of tails.
 const UNITS: (f32, f32) = (4.5, 3.3);
-/// Grid cells baking the mesh, world units.
-const CELL: f32 = 0.025;
 /// The longest step the walk takes at once, seconds: its springs stay
 /// steady however slowly frames come.
 const MAX_STEP: f32 = 1.0 / 60.0;
@@ -38,6 +43,12 @@ pub fn pixel_size(scale: f32) -> (u32, u32) {
     )
 }
 
+/// The baked mesh, on the GPU.
+struct Live {
+    mesh: Mesh,
+    canvas: MeshCanvas,
+}
+
 pub struct MeshRenderer {
     gpu: &'static Gpu,
     model: Arc<Model>,
@@ -45,11 +56,26 @@ pub struct MeshRenderer {
     scale: f32,
     chonk: f32,
     coat: usize,
-    mesh: Mesh,
-    canvas: MeshCanvas,
+    /// None until the first bake has landed.
+    live: Option<Live>,
+    /// A bake on its own thread, and whether the body or coat changed
+    /// since it started (so it needs another).
+    baking: Option<Receiver<Result<Mesh, String>>>,
+    rebake: bool,
+    /// What shows: the picture that last arrived, and the sleep overlay.
     pixmap: Pixmap,
+    /// The picture that last arrived from the GPU.
+    base: Pixmap,
     walk: Walk,
+    /// The pose being worked out now, the one sent to the GPU, and the one
+    /// in the picture shown (hits and the bubble go by that).
     bones: Vec<Affine>,
+    sent_bones: Vec<Affine>,
+    shown_bones: Vec<Affine>,
+    look: Look,
+    /// The wanted frame has not gone to the GPU yet (it was busy, or over
+    /// its budget).
+    unsent: bool,
     /// The animator's clock at the last frame, and its belly jiggle then.
     clock: Option<f32>,
     belly: f32,
@@ -57,8 +83,10 @@ pub struct MeshRenderer {
 }
 
 impl MeshRenderer {
-    /// Bake `model` (a four-legged one, see [`crate::skin::quad`]) and get
-    /// ready to draw it; none if it has no legs to walk on or no pixmap.
+    /// Start baking `model` (a four-legged one, see [`crate::skin::quad`])
+    /// on its own thread and get ready to draw it; none if it has no legs
+    /// to walk on or no pixmap. The pet shows once the bake lands
+    /// ([`MeshRenderer::poll`]).
     pub fn new(
         gpu: &'static Gpu,
         model: Arc<Model>,
@@ -68,10 +96,9 @@ impl MeshRenderer {
     ) -> Option<Self> {
         let sk = Skeleton::new(&model);
         let walk = Walk::new(&sk, 1.0).ok()?;
-        let mesh = bake(&model, &sk, coat, chonk, CELL).ok()?;
         let (w, h) = pixel_size(scale);
-        let canvas = MeshCanvas::new(gpu, &mesh, w, h, scale);
         let bones = sk.pose(&[]);
+        let baking = Some(spawn_bake(&model, &sk, coat, chonk));
         Some(Self {
             gpu,
             model,
@@ -79,14 +106,20 @@ impl MeshRenderer {
             scale,
             chonk,
             coat,
-            mesh,
-            canvas,
+            live: None,
+            baking,
+            rebake: false,
             pixmap: Pixmap::new(w, h)?,
+            base: Pixmap::new(w, h)?,
             walk,
+            sent_bones: bones.clone(),
+            shown_bones: bones.clone(),
             bones,
+            look: Look::Open,
+            unsent: false,
             clock: None,
             belly: 0.0,
-            changed: true,
+            changed: false,
         })
     }
 
@@ -94,30 +127,75 @@ impl MeshRenderer {
         &self.pixmap
     }
 
-    /// Bake again for a new body value or coat: the mesh carries both.
-    fn rebake(&mut self) {
-        match bake(&self.model, &self.sk, self.coat, self.chonk, CELL) {
-            Ok(mesh) => {
-                let (w, h) = self.canvas.size();
-                self.canvas = MeshCanvas::new(self.gpu, &mesh, w, h, self.scale);
-                self.mesh = mesh;
-                self.changed = true;
+    /// Can the pet be seen yet: has the bake landed?
+    pub fn ready(&self) -> bool {
+        self.live.is_some()
+    }
+
+    /// Take in a bake that has finished. True if one landed, so the caller
+    /// can redraw.
+    pub fn poll(&mut self) -> bool {
+        let Some(rx) = &self.baking else {
+            return false;
+        };
+        match rx.try_recv() {
+            Ok(baked) => {
+                self.baking = None;
+                self.install(baked)
             }
-            Err(e) => eprintln!("baking the mesh failed: {e}"),
+            Err(TryRecvError::Empty) => false,
+            Err(TryRecvError::Disconnected) => {
+                self.baking = None;
+                eprintln!("baking the mesh failed: the thread died");
+                false
+            }
+        }
+    }
+
+    /// Put a baked mesh on the GPU, replacing the old one (the frame on
+    /// its way with it), and bake again if the body or coat has moved on.
+    fn install(&mut self, baked: Result<Mesh, String>) -> bool {
+        let landed = match baked {
+            Ok(mesh) => {
+                let (w, h) = (self.base.width(), self.base.height());
+                let canvas = MeshCanvas::new(self.gpu, &mesh, w, h, self.scale);
+                self.live = Some(Live { mesh, canvas });
+                self.unsent = true;
+                self.changed = true;
+                true
+            }
+            Err(e) => {
+                eprintln!("baking the mesh failed: {e}");
+                false
+            }
+        };
+        if std::mem::take(&mut self.rebake) {
+            self.baking = Some(spawn_bake(&self.model, &self.sk, self.coat, self.chonk));
+        }
+        landed
+    }
+
+    /// Bake again for a new body value or coat: the mesh carries both. The
+    /// old mesh keeps drawing until the new one lands.
+    fn request_bake(&mut self) {
+        if self.baking.is_some() {
+            self.rebake = true;
+        } else {
+            self.baking = Some(spawn_bake(&self.model, &self.sk, self.coat, self.chonk));
         }
     }
 
     pub fn set_chonk(&mut self, chonk: f32) {
         if chonk != self.chonk {
             self.chonk = chonk;
-            self.rebake();
+            self.request_bake();
         }
     }
 
     pub fn set_coat(&mut self, coat: usize) {
         if coat != self.coat {
             self.coat = coat;
-            self.rebake();
+            self.request_bake();
         }
     }
 
@@ -125,14 +203,33 @@ impl MeshRenderer {
         self.changed
     }
 
+    /// Wait for the bake and for the frame on its way (tests, screenshots),
+    /// sending the wanted one first if it has not gone yet.
+    pub fn finish(&mut self) {
+        if let Some(rx) = self.baking.take()
+            && let Ok(baked) = rx.recv()
+        {
+            self.install(baked);
+        }
+        if self.live.as_ref().is_some_and(|l| !l.canvas.pending()) && self.unsent {
+            self.send(true);
+        }
+        self.collect(true);
+        self.pixmap.data_mut().copy_from_slice(self.base.data());
+    }
+
     pub fn render(&mut self, params: &PoseParams, expression: Expression) -> &Pixmap {
         let look = key_for(expression, params).look;
-        self.draw(params, expression, look);
+        if self.draw(params, expression, look) {
+            self.pixmap.data_mut().copy_from_slice(self.base.data());
+        }
         &self.pixmap
     }
 
     pub fn render_asleep(&mut self, params: &PoseParams, phase: f32) -> &Pixmap {
         self.draw(params, Expression::Asleep, Look::Asleep);
+        // The bubble and the z move every frame, over the picture shown.
+        self.pixmap.data_mut().copy_from_slice(self.base.data());
         let nose = self.project_on(self.model.part("nose"), V3::ZERO);
         sleep_overlay(
             &mut self.pixmap,
@@ -141,10 +238,14 @@ impl MeshRenderer {
             self.scale,
             phase,
         );
+        self.changed = true;
         &self.pixmap
     }
 
-    fn draw(&mut self, params: &PoseParams, expression: Expression, look: Look) {
+    /// Work out the pose for this moment and send it to the GPU if it is
+    /// free and the budget allows; take in a picture that has arrived.
+    /// True if a new picture is in `base`.
+    fn draw(&mut self, params: &PoseParams, expression: Expression, look: Look) -> bool {
         let walking = matches!(params.act, Act::StepA | Act::StepB);
         let facing = if params.facing < 0.0 { -1.0 } else { 1.0 };
         // Feelings sit it down; the face shows which.
@@ -173,24 +274,67 @@ impl MeshRenderer {
             root.shift.y += (-params.bob).max(0.0) / PPU;
         }
         self.bones = self.sk.pose(&joints);
+        self.look = look;
+        self.changed = false;
+        let arrived = self.collect(false);
+        if self.live.as_ref().is_some_and(|l| !l.canvas.pending()) {
+            self.send(false);
+        }
+        arrived
+    }
+
+    /// Send the wanted frame to the GPU (`force`: whatever the budget
+    /// says). The canvas must be free.
+    fn send(&mut self, force: bool) {
+        let Some(live) = self.live.as_mut() else {
+            return;
+        };
         let scene = Scene::posed(
             &self.model,
             self.coat,
             self.chonk,
             &Pose::default(),
-            look,
+            self.look,
             Layer::All,
         );
-        if let Err(e) = self.canvas.draw(
-            self.gpu,
-            &scene,
-            &self.bones,
-            self.walk.yaw(),
-            &mut self.pixmap,
-        ) {
-            eprintln!("drawing the mesh failed: {e}");
+        let yaw = self.walk.yaw();
+        let sent = if force {
+            live.canvas
+                .submit(self.gpu, &scene, &self.bones, yaw)
+                .map(|()| true)
+        } else {
+            live.canvas.try_submit(self.gpu, &scene, &self.bones, yaw)
+        };
+        match sent {
+            Ok(true) => {
+                self.sent_bones.clone_from(&self.bones);
+                self.unsent = false;
+            }
+            // Over the budget: try again on a later call, with a newer
+            // pose (the frame rate drops instead of the GPU share rising).
+            Ok(false) => self.unsent = true,
+            Err(e) => eprintln!("drawing the mesh failed: {e}"),
         }
-        self.changed = true;
+    }
+
+    /// Take in the frame on its way if it has arrived (`wait`: wait for
+    /// it): it becomes the picture shown. True if one did.
+    fn collect(&mut self, wait: bool) -> bool {
+        let Some(live) = self.live.as_mut() else {
+            return false;
+        };
+        match live.canvas.collect(self.gpu, &mut self.base, wait) {
+            Ok(true) => {
+                self.shown_bones.clone_from(&self.sent_bones);
+                self.changed = true;
+                true
+            }
+            Ok(false) => false,
+            Err(e) => {
+                eprintln!("drawing the mesh failed: {e}");
+                false
+            }
+        }
     }
 
     /// Where a point given in part `part`'s rest frame (offset `at` from
@@ -199,18 +343,21 @@ impl MeshRenderer {
         let Some(part) = part.map(|i| &self.model.parts[i]) else {
             return self.anchor();
         };
-        let p = self.bones[part.bone].apply(part.at + at);
-        self.canvas.project(p)
+        let Some(live) = &self.live else {
+            return self.anchor();
+        };
+        let p = self.shown_bones[part.bone].apply(part.at + at);
+        live.canvas.project(p)
     }
 
-    /// Where vertex `i` is now, in the world.
-    fn skinned(&self, i: usize) -> V3 {
-        let v = &self.mesh.vertices[i];
+    /// Where vertex `i` of the mesh shown is now, in the world.
+    fn skinned(&self, mesh: &Mesh, i: usize) -> V3 {
+        let v = &mesh.vertices[i];
         let rest = v3(v.pos[0], v.pos[1], v.pos[2]);
         let mut p = V3::ZERO;
         for (b, w) in v.bones.iter().zip(v.weights) {
             if w > 0.0 {
-                p = p + self.bones[*b as usize].apply(rest) * w;
+                p = p + self.shown_bones[*b as usize].apply(rest) * w;
             }
         }
         p
@@ -219,6 +366,7 @@ impl MeshRenderer {
     /// The hit zone under pixel `(x, y)`: of the vertices drawn within a
     /// couple of pixels of it, the one nearest the camera.
     pub fn hit(&self, x: f32, y: f32) -> Option<&'static str> {
+        let live = self.live.as_ref()?;
         let (w, h) = (self.pixmap.width() as f32, self.pixmap.height() as f32);
         if !(0.0..w).contains(&x) || !(0.0..h).contains(&y) {
             return None;
@@ -233,15 +381,15 @@ impl MeshRenderer {
         let reach = 2.5 * self.scale;
         let fwd = self.canvas_forward();
         let mut best: Option<(f32, u8)> = None;
-        for i in 0..self.mesh.vertices.len() {
-            let p = self.skinned(i);
-            let (px, py) = self.canvas.project(p);
+        for i in 0..live.mesh.vertices.len() {
+            let p = self.skinned(&live.mesh, i);
+            let (px, py) = live.canvas.project(p);
             if (px - x).abs() > reach || (py - y).abs() > reach {
                 continue;
             }
             let depth = p.dot(fwd);
             if best.is_none_or(|(d, _)| depth < d) {
-                best = Some((depth, self.mesh.zones[i]));
+                best = Some((depth, live.mesh.zones[i]));
             }
         }
         best.and_then(|(_, z)| ZONES.get(usize::from(z)).copied())
@@ -253,8 +401,28 @@ impl MeshRenderer {
         v3(0.0, -s, -c)
     }
 
-    /// Where a speech bubble points: the top of the head.
+    /// Where a speech bubble points: the top of the head (the middle of
+    /// the canvas, top, until the bake has landed).
     pub fn anchor(&self) -> (f32, f32) {
-        self.canvas.project(self.skinned(self.mesh.crown))
+        match &self.live {
+            Some(l) => l.canvas.project(self.skinned(&l.mesh, l.mesh.crown)),
+            None => (self.pixmap.width() as f32 / 2.0, 0.0),
+        }
     }
+}
+
+/// Bake on a thread of its own: the fox takes most of a second.
+fn spawn_bake(
+    model: &Arc<Model>,
+    sk: &Skeleton,
+    coat: usize,
+    chonk: f32,
+) -> Receiver<Result<Mesh, String>> {
+    let (tx, rx) = channel();
+    let (model, sk) = (Arc::clone(model), sk.clone());
+    std::thread::spawn(move || {
+        // The receiver is gone if the pet was; nobody to tell then.
+        let _ = tx.send(bake(&model, &sk, coat, chonk, model.bake_cell));
+    });
+    rx
 }

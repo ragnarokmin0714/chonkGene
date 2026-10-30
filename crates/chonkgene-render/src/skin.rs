@@ -68,6 +68,7 @@ pub fn quad(id: &str) -> Result<(Model, Skeleton), String> {
 /// Where the whole pet turns: the floor under the middle of its body.
 pub const ROOT_PIVOT: V3 = v3(0.0, FLOOR, -0.1);
 
+#[derive(Clone)]
 pub struct Skeleton {
     pub names: Vec<String>,
     pub parents: Vec<Option<usize>>,

@@ -87,7 +87,12 @@ fn run(
     (secs, script): (f32, Script),
 ) {
     let t0 = Instant::now();
-    let mesh = bake(model, sk, coat, 0.33, 0.025).expect("bake");
+    // `CELL=0.03` overrides the model's own grid cell.
+    let cell: f32 = std::env::var("CELL")
+        .ok()
+        .and_then(|c| c.parse().ok())
+        .unwrap_or(model.bake_cell);
+    let mesh = bake(model, sk, coat, 0.33, cell).expect("bake");
     println!(
         "baked {} vertices, {} triangles in {:.2} s",
         mesh.vertices.len(),
