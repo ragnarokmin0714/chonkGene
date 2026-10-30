@@ -694,6 +694,15 @@ Roger played the mesh build on Windows (`feat/mesh-pets`) and asked for these to
    - whether minimising the settings window (a child process) flips `fullscreen_active` (`SHQueryUserNotificationState` reporting busy), which hides and re-shows every pet through the same path.
 3. **The other species are still upright.** Munchkin, fold, owl, chick and duck still use the ray-marched upright models. Each needs a four-legged (`quad.ron`) or, for the birds, a two-legged mesh model and a walk to match; the birds' flying comes later.
 
+Looks, for the afternoon of 2026-10-30 (Roger likes the Shiba's tail; the rest is the fox):
+
+4. **Shiba tail: smoother.** Keep the open doughnut, but the joints between its segments still show. Options: more, shorter segments with wider blends, or one curved part (an arc of a torus) skinned along its length so the ring is a single smooth surface.
+5. **Fox ears: bigger and less pointed.** Wider at the base, a rounded tip instead of a sharp cone.
+6. **Fox tails: little flames.** Sway like small flames flickering, but smooth (no visible segments or lumps), and long enough that, sitting, the fan's tips rise a little above the ear tips.
+7. **Fox: a fluffy tuft between the chest and the bell.**
+8. **Fox bell: bigger, with more detail** (for instance the slit, a cap where the cord meets it, a highlight).
+9. **Fox forehead mark: less plain.** It is a single red dot now; a proper flame (or a richer kitsune mark) instead, which likely needs a painted shape rather than an ellipsoid colour mark.
+
 ### Phase 1: Shiba prototype (feel) — `v0.1.0`
 
 - The art pipeline (§3.3) works end to end for one Shiba, with placeholder art.
