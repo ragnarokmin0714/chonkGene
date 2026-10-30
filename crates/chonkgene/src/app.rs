@@ -124,6 +124,9 @@ struct Pet {
     press: Option<Press>,
     placed: (i32, i32),
     next: Instant,
+    /// The window was just shown again: present the picture even if it has
+    /// not changed, since a hidden window may have dropped it.
+    repaint: bool,
     last: Instant,
     switch_at: f64,
     happy_until: f64,
@@ -591,6 +594,7 @@ impl App {
             if !visible {
                 p.bubble = None;
             }
+            p.repaint = true;
             p.next = Instant::now();
         }
         if !visible {
@@ -1034,6 +1038,7 @@ fn spawn(
         press: None,
         placed: pos,
         next: now,
+        repaint: true,
         last: now,
         switch_at: t + 2.0 + slot as f64,
         happy_until: 0.0,
@@ -1317,9 +1322,10 @@ impl Pet {
         } else {
             self.renderer.render(&params, self.anim.expression);
         }
-        if !self.renderer.changed() {
+        if !self.renderer.changed() && !self.repaint {
             return Duration::ZERO;
         }
+        self.repaint = false;
         let started = Instant::now();
         if let Err(e) = self.presenter.present(shared, self.renderer.pixmap()) {
             eprintln!("present failed: {e}");
