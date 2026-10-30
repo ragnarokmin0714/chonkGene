@@ -51,13 +51,15 @@ impl Affine {
 }
 
 /// Four-legged models for the spike, by species id.
-pub const QUAD_SPECIES: [&str; 2] = ["shiba", "fox"];
+pub const QUAD_SPECIES: [&str; 4] = ["shiba", "fox", "munchkin", "fold"];
 
-/// A four-legged model (`shiba`, `fox`) and its skeleton.
+/// A four-legged model (`shiba`, `fox`, `munchkin`, `fold`) and its skeleton.
 pub fn quad(id: &str) -> Result<(Model, Skeleton), String> {
     let src = match id {
         "shiba" => include_str!("../../../assets/species/shiba/quad.ron"),
         "fox" => include_str!("../../../assets/species/fox/quad.ron"),
+        "munchkin" => include_str!("../../../assets/species/munchkin/quad.ron"),
+        "fold" => include_str!("../../../assets/species/fold/quad.ron"),
         _ => return Err(format!("no four-legged model {id:?}")),
     };
     let model = Model::parse(src, builtin::POSES).map_err(|e| e.to_string())?;
@@ -175,6 +177,10 @@ const STEP_HZ: f32 = 2.0;
 /// on the floor, a planted foot slides back at 1.0 world units a second,
 /// the pace the pet's window moves (60 px/s at 100%).
 const SWING: f32 = 20.0;
+/// How long the legs are the swing is set for (floor to hip pivot, world
+/// units; the Shiba's): shorter legs swing wider to keep pace with the
+/// window, longer ones narrower.
+const LEG_REF: f32 = 0.59;
 const DUTY: f32 = 0.62;
 const LIFT: f32 = 0.07;
 /// Where each leg is in the step cycle (a walk, one foot at a time), and
@@ -273,6 +279,9 @@ pub struct Walk {
     look_goal: f32,
     sit: Spring,
     legs: [(usize, f32, bool); 4],
+    /// Leg swing either way at full pace, degrees: [`SWING`] for the legs
+    /// of [`LEG_REF`], wider for shorter ones.
+    swing: f32,
     bones: Bones,
     n: usize,
 }
@@ -293,6 +302,8 @@ impl Walk {
         for (l, (name, offset, front)) in legs.iter_mut().zip(LEGS) {
             *l = (need(name)?, offset, front);
         }
+        let leg_len = legs.iter().map(|l| sk.pivots[l.0].y - FLOOR).sum::<f32>() / 4.0;
+        let swing = SWING * (LEG_REF / leg_len.max(0.2)).clamp(0.8, 2.0);
         // Several tails swish out of step, so they ripple rather than
         // sway as one.
         let chains = sk.tails();
@@ -333,6 +344,7 @@ impl Walk {
             look_goal: 0.0,
             sit: Spring::default(),
             legs,
+            swing,
             bones: Bones {
                 body: need("body")?,
                 hips: need("hips")?,
@@ -421,7 +433,7 @@ impl Walk {
                 (-1.0 + 2.0 * e, (PI * t).sin())
             };
             j[leg] = Joint {
-                rot: v3(-SWING * s * fwd, 0.0, 0.0),
+                rot: v3(-self.swing * s * fwd, 0.0, 0.0),
                 shift: v3(0.0, LIFT * s * lift, 0.0),
             };
         }
