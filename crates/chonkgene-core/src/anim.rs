@@ -55,6 +55,18 @@ pub enum Act {
     Wave,
 }
 
+/// How long a gesture that has a fixed length lasts, seconds: the idle
+/// stretch, yawn and wave. None for the rest (looks vary, steps and rest
+/// have no length).
+pub fn gesture_secs(act: Act) -> Option<f32> {
+    match act {
+        Act::Stretch => Some(1.9),
+        Act::Yawn => Some(1.7),
+        Act::Wave => Some(1.6),
+        _ => None,
+    }
+}
+
 /// Inputs a renderer maps onto bones by convention (see chonkgene-render).
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct PoseParams {
@@ -263,10 +275,10 @@ impl Animator {
     fn start(&mut self, act: Act) {
         let secs = match act {
             Act::LookLeft | Act::LookRight => 1.4 + self.rng.f32() * 0.8,
-            Act::Stretch => 1.9,
-            Act::Yawn => 1.7,
-            Act::Wave => 1.6,
-            Act::Rest | Act::StepA | Act::StepB => return,
+            _ => match gesture_secs(act) {
+                Some(secs) => secs,
+                None => return,
+            },
         };
         self.gesture = Some((act, self.t, self.t + secs));
         // A pop hides the cut to the new pose, where poses cut.

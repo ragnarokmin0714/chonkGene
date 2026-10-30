@@ -12,11 +12,12 @@
 
 use std::time::Instant;
 
+use chonkgene_core::anim::Act;
 use chonkgene_render::gpu::Gpu;
 use chonkgene_render::mesh::bake;
 use chonkgene_render::mesh_gpu::MeshCanvas;
 use chonkgene_render::raymarch;
-use chonkgene_render::skin::{Skeleton, mesh_model};
+use chonkgene_render::skin::{Gesture, Skeleton, mesh_model};
 use chonkgene_render::waddle::Mover;
 use chonkgene_rig::math::v3;
 use chonkgene_rig::{Layer, Look, Model, Pose, PoseId, Scene};
@@ -44,6 +45,36 @@ const SIT: (f32, Script) = (5.0, |t, w| {
     (false, 1.0)
 });
 
+/// An idle gesture held at its middle for the whole run.
+fn held(act: Act) -> Script {
+    match act {
+        Act::Stretch => |_, w| {
+            w.gesture(Some(Gesture {
+                act: Act::Stretch,
+                e: 1.0,
+                t: 0.5,
+            }));
+            (false, 1.0)
+        },
+        Act::Yawn => |_, w| {
+            w.gesture(Some(Gesture {
+                act: Act::Yawn,
+                e: 1.0,
+                t: 0.5,
+            }));
+            (false, 1.0)
+        },
+        _ => |_, w| {
+            w.gesture(Some(Gesture {
+                act: Act::Wave,
+                e: 1.0,
+                t: 0.1,
+            }));
+            (false, 1.0)
+        },
+    }
+}
+
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let (Some(mode), Some(id), Some(out)) = (args.first(), args.get(1), args.get(2)) else {
@@ -61,6 +92,33 @@ fn main() {
         "peek" => peek(&model, out),
         "walk" => run(&model, &sk, coat, out, scale, "walk", WALK),
         "sit" => run(&model, &sk, coat, out, scale, "sit", SIT),
+        "stretch" => run(
+            &model,
+            &sk,
+            coat,
+            out,
+            scale,
+            "stretch",
+            (1.0, held(Act::Stretch)),
+        ),
+        "yawn" => run(
+            &model,
+            &sk,
+            coat,
+            out,
+            scale,
+            "yawn",
+            (1.0, held(Act::Yawn)),
+        ),
+        "wave" => run(
+            &model,
+            &sk,
+            coat,
+            out,
+            scale,
+            "wave",
+            (1.0, held(Act::Wave)),
+        ),
         _ => panic!("no mode {mode:?}"),
     }
 }

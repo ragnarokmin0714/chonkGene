@@ -176,6 +176,15 @@ impl Skeleton {
     }
 }
 
+/// An idle gesture under way (stretch, yawn, wave) as the walks take it:
+/// how far into it, 0 … 1 … 0 over its length (`e`), and seconds in (`t`).
+#[derive(Clone, Copy, Debug)]
+pub struct Gesture {
+    pub act: chonkgene_core::anim::Act,
+    pub e: f32,
+    pub t: f32,
+}
+
 /// A damped spring: `x` chases `target`, shaken by `push` (an acceleration).
 #[derive(Clone, Copy, Debug, Default)]
 pub(crate) struct Spring {
@@ -301,6 +310,7 @@ pub struct Walk {
     look_goal: f32,
     sit: Spring,
     legs: [(usize, f32, bool); 4],
+    gesture: Option<Gesture>,
     /// Leg swing either way at full pace, degrees: [`SWING`] for the legs
     /// of [`LEG_REF`], wider for shorter ones.
     swing: f32,
@@ -366,6 +376,7 @@ impl Walk {
             look_goal: 0.0,
             sit: Spring::default(),
             legs,
+            gesture: None,
             swing,
             bones: Bones {
                 body: need("body")?,
@@ -385,6 +396,11 @@ impl Walk {
         self.belly.v += kick;
         self.butt.v += kick * 0.7;
         self.chin.v += kick * 0.6;
+    }
+
+    /// The idle gesture under way, if any (set every frame).
+    pub fn gesture(&mut self, g: Option<Gesture>) {
+        self.gesture = g;
     }
 
     /// Sit down (or get up); walking gets it up first.
@@ -579,6 +595,39 @@ impl Walk {
                 };
             }
             j[b.head].rot.x += 0.85 * SIT_PITCH * sit;
+        }
+        if let Some(g) = self.gesture.filter(|_| s < 0.5 && sit < 0.5) {
+            use chonkgene_core::anim::Act;
+            let e = g.e;
+            match g.act {
+                // A play bow: the front goes down, the bottom up, the head
+                // stays up and forward.
+                Act::Stretch => {
+                    j[b.body].rot.x += 20.0 * e;
+                    j[b.head].rot.x -= 24.0 * e;
+                    for &(leg, _, front) in &self.legs {
+                        if front {
+                            j[leg].rot.x -= 20.0 * e;
+                        }
+                    }
+                }
+                // The head tips back for the yawn (the face opens its
+                // mouth), and the chin shakes.
+                Act::Yawn => {
+                    j[b.head].rot.x -= 16.0 * e;
+                    self.chin.v += 0.5 * e * dt;
+                }
+                // A front paw up, waving.
+                Act::Wave => {
+                    let wiggle = (TAU * 2.2 * g.t).sin();
+                    j[b.body].rot.z -= 4.0 * e;
+                    if let Some(&(leg, ..)) = self.legs.iter().find(|l| l.1 == 0.25) {
+                        j[leg].rot.x -= 75.0 * e;
+                        j[leg].rot.z += 14.0 * e * wiggle;
+                    }
+                }
+                _ => {}
+            }
         }
         j
     }

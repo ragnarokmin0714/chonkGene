@@ -753,3 +753,48 @@ fn a_bird_waddles_rolling_onto_each_planted_leg() {
         );
     }
 }
+
+#[test]
+fn idle_gestures_move_every_mesh_pet() {
+    use chonkgene_core::anim::Act;
+    use chonkgene_render::skin::Gesture;
+    for id in QUAD_SPECIES.iter().chain(&BIPED_SPECIES) {
+        let (model, sk) = mesh_model(id).unwrap();
+        let mut rest = Mover::new(&sk, 1.0, &model).unwrap();
+        let mut rest_joints = Vec::new();
+        for _ in 0..60 {
+            rest_joints = rest.step(1.0 / 60.0, false, 1.0);
+        }
+        for act in [Act::Stretch, Act::Yawn, Act::Wave] {
+            let mut walk = Mover::new(&sk, 1.0, &model).unwrap();
+            let mut joints = Vec::new();
+            for _ in 0..60 {
+                walk.gesture(Some(Gesture {
+                    act,
+                    e: 1.0,
+                    t: 0.4,
+                }));
+                joints = walk.step(1.0 / 60.0, false, 1.0);
+            }
+            // (Tails and wings swish on their own clock, so they differ.)
+            let off = |a: &[chonkgene_render::skin::Joint], b: &[chonkgene_render::skin::Joint]| {
+                (0..a.len())
+                    .filter(|&i| !sk.names[i].starts_with("tail"))
+                    .map(|i| (a[i].rot - b[i].rot).length())
+                    .fold(0.0f32, f32::max)
+            };
+            let most = off(&joints, &rest_joints);
+            assert!(
+                most > 10.0,
+                "{id}: {act:?} turned no bone by more than {most:.1}°"
+            );
+            // Over, the pet goes back to rest.
+            walk.gesture(None);
+            for _ in 0..60 {
+                joints = walk.step(1.0 / 60.0, false, 1.0);
+            }
+            let left = off(&joints, &rest_joints);
+            assert!(left < 1.0, "{id}: {act:?} left a bone {left:.1}° off");
+        }
+    }
+}

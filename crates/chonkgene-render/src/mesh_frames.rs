@@ -16,7 +16,7 @@
 use std::sync::Arc;
 use std::sync::mpsc::{Receiver, TryRecvError, channel};
 
-use chonkgene_core::anim::{Act, Expression, PoseParams};
+use chonkgene_core::anim::{Act, Expression, PoseParams, gesture_secs};
 use chonkgene_rig::math::{V3, v3};
 use chonkgene_rig::{Layer, Look, Model, Pose, Scene, ZONES};
 use tiny_skia::{Pixmap, Transform};
@@ -25,7 +25,7 @@ use crate::gpu::Gpu;
 use crate::mesh::{Mesh, bake};
 use crate::mesh_gpu::MeshCanvas;
 use crate::raymarch::PPU;
-use crate::skin::{Affine, Skeleton};
+use crate::skin::{Affine, Gesture, Skeleton};
 use crate::waddle::Mover;
 use crate::{key_for, sleep_overlay};
 
@@ -80,6 +80,8 @@ pub struct MeshRenderer {
     /// The animator's clock at the last frame, and its belly jiggle then.
     clock: Option<f32>,
     belly: f32,
+    /// The idle gesture under way and the animator's clock when it began.
+    gesture: Option<(Act, f32)>,
     changed: bool,
 }
 
@@ -120,6 +122,7 @@ impl MeshRenderer {
             unsent: false,
             clock: None,
             belly: 0.0,
+            gesture: None,
             changed: false,
         })
     }
@@ -260,6 +263,17 @@ impl MeshRenderer {
             Act::LookRight => -35.0,
             _ => 0.0,
         });
+        // Idle gestures: stretch, yawn and wave, eased in and out over
+        // their length.
+        if self.gesture.map(|g| g.0) != Some(params.act) {
+            self.gesture = gesture_secs(params.act).map(|_| (params.act, params.clock));
+        }
+        self.walk.gesture(self.gesture.and_then(|(act, since)| {
+            let secs = gesture_secs(act)?;
+            let t = (params.clock - since).max(0.0);
+            let e = (std::f32::consts::PI * (t / secs).min(1.0)).sin().sqrt();
+            Some(Gesture { act, e, t })
+        }));
         // A poke jiggles the animator's belly: jolt the mesh's.
         if params.belly > 0.15 && self.belly <= 0.15 {
             self.walk.poke(2.0);

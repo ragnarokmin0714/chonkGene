@@ -12,7 +12,7 @@ use std::f32::consts::{PI, TAU};
 use chonkgene_rig::math::{V3, v3};
 use chonkgene_rig::{FLOOR, Model};
 
-use crate::skin::{Joint, REST_YAW, SIT_YAW, Skeleton, Spring, WALK_YAW, Walk};
+use crate::skin::{Gesture, Joint, REST_YAW, SIT_YAW, Skeleton, Spring, WALK_YAW, Walk};
 
 /// The pace the pet's window moves at, world units a second (60 px/s at
 /// 100%): a planted foot slides back at this speed.
@@ -65,6 +65,14 @@ impl Mover {
         }
     }
 
+    /// The idle gesture under way, if any (set every frame).
+    pub fn gesture(&mut self, g: Option<Gesture>) {
+        match self {
+            Self::Quad(w) => w.gesture(g),
+            Self::Biped(w) => w.gesture(g),
+        }
+    }
+
     /// 0 standing … 1 full pace.
     pub fn speed(&self) -> f32 {
         match self {
@@ -96,6 +104,7 @@ pub struct Waddle {
     yaw: Spring,
     sitting: bool,
     sit: Spring,
+    gesture: Option<Gesture>,
     look: Spring,
     look_goal: f32,
     belly: Spring,
@@ -141,6 +150,7 @@ impl Waddle {
             },
             sitting: false,
             sit: Spring::default(),
+            gesture: None,
             look: Spring::default(),
             look_goal: 0.0,
             belly: Spring::default(),
@@ -179,6 +189,10 @@ impl Waddle {
 
     pub fn look(&mut self, deg: f32) {
         self.look_goal = deg;
+    }
+
+    pub fn gesture(&mut self, g: Option<Gesture>) {
+        self.gesture = g;
     }
 
     pub fn yaw(&self) -> f32 {
@@ -294,6 +308,34 @@ impl Waddle {
         if let Some(i) = self.soft[2] {
             let y = self.chin.step(0.0, -acc - 0.02 * nod_acc, 4.0, 0.18, dt);
             j[i].shift = v3(0.0, y.clamp(-0.09, 0.09), 0.0);
+        }
+        if let Some(g) = self.gesture.filter(|_| s < 0.5 && sit < 0.5) {
+            use chonkgene_core::anim::Act;
+            let e = g.e;
+            match g.act {
+                // Wings spread wide and the chest out: a stretch.
+                Act::Stretch => {
+                    j[self.body].rot.x -= 6.0 * e;
+                    j[self.head].rot.x -= 10.0 * e;
+                    for (side, wing) in self.wings.iter().enumerate() {
+                        if let Some(w) = *wing {
+                            j[w].rot.z += if side == 0 { 50.0 } else { -50.0 } * e;
+                        }
+                    }
+                }
+                Act::Yawn => {
+                    j[self.head].rot.x -= 14.0 * e;
+                    self.chin.v += 0.5 * e * dt;
+                }
+                // One wing up, waving.
+                Act::Wave => {
+                    let wiggle = (TAU * 2.2 * g.t).sin();
+                    if let Some(w) = self.wings[0] {
+                        j[w].rot.z += 70.0 * e + 12.0 * e * wiggle;
+                    }
+                }
+                _ => {}
+            }
         }
         j
     }
