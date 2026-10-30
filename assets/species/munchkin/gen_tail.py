@@ -9,7 +9,7 @@ sys.path.insert(0, "..")
 from tailgen import emit, f, turn_path
 
 N = 8
-points = turn_path([0.0, -0.45, -0.98], heading=-20, bend=110, length=1.15, n=N)
+points = turn_path([0.0, -0.29, -0.98], heading=-20, bend=110, length=1.15, n=N)
 names = ["tail"] + [f"tail_{k}" for k in range(2, N)] + ["tail_tip"]
 radii = [0.12] * N + [0.1]
 

@@ -393,7 +393,10 @@ fn each_tail_segment_turns_about_its_own_root() {
     for id in QUAD_SPECIES {
         let (model, sk) = quad(id).unwrap();
         for part in &model.parts {
-            if !sk.names[part.bone].starts_with("tail") {
+            // The first part on each tail bone, named after it, starts at
+            // its root (the fox hangs several cones on a bone, one after
+            // another along it).
+            if !sk.names[part.bone].starts_with("tail") || part.name != sk.names[part.bone] {
                 continue;
             }
             let off = (sk.pivots[part.bone] - part.at).length();

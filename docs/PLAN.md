@@ -714,6 +714,18 @@ Looks (2026-10-30; Roger likes the Shiba's tail; the rest is the fox). **Items 4
    - 9: a painted flame (`face.forehead`, a colour slot; `face.rs` `flame` and `paint.wgsl`, tested to agree on the CPU and the GPU), with a leaning tip, a lick and a paler core. Colour marks baked into vertices were too coarse for it (0.025 cells).
    - Cost: the fox bakes to about 77k vertices (68k before), so item 1's "make the fox cheaper" now has a little further to go.
 
+### Roger's second Windows pass (2026-10-30)
+
+Roger ran `feat/mesh-pets` on Windows again and reported seven things; each is fixed here, checked on this machine only (Windows type-check, tests, renders), so each still owes a look on Windows:
+
+1. **Pets turn into plain windows after hiding them (the settings window minimised, 全部收起來, back again).** Cause found: winit 0.30 rewrites the whole extended window style from its own flags whenever one changes (`apply_diff`, on show and hide among others), which drops the `WS_EX_LAYERED | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE` the presenter added. The window stops being layered and shows as an empty plain window. `Presenter::restyle` puts the styles back; it runs after every `set_visible` and before every present (with the repaint on show from earlier).
+2. **Every pet now and then slides while walking.** Three causes: idle mesh pets drew at 30 fps and used up the GPU budget, so walking pets' frames were skipped (legs still while the window moved); the legs ignored the animator's pace (zoomies run four times as fast); and the turn at a screen edge took half a second while the window already went the other way. Now walking frames skip the budget and are waited for if the last is late, idle mesh pets draw at 15 fps (`Renderer::min_fps`), `PoseParams::pace` reaches both walks (quicker and longer steps, `tempo_split`), and walking turns and starts and stops are quicker (`TURN_HZ`, `SPEED_UP`).
+3. **The fox's tails are not soft-edged like little flames.** Each tail is now a teardrop (thin root, plump a third of the way up, an ogive in to a rounded tip) sampled into 16 round cones, four to a bone, blended only a hair (a wide smooth union swells where cones overlap, which showed as rings). The tips still rise just above the ears when sitting.
+4. **No goodbye from the pet menu.** 「說再見…」 is in the menu (a waving-hand icon); the first click asks 「真的要說再見嗎？」, the second says goodbye for good.
+5. **The settings button sometimes does nothing.** It did nothing whenever settings was already open, minimised or behind other windows. Settings now gets `show` / `show <pet>` on its stdin and restores itself, comes to the front and opens on that pet (Slint's `unstable-winit-030` access to its window).
+6. **A pet just called out cannot be seen.** Same cause as 1 (a new pet's window is hidden and shown as it is placed).
+7. **The cats' legs look short.** Both cats stand taller with longer legs (Fold like the Shiba; the Munchkin still short-legged, but its legs now show under a slimmer tummy); a front leg leaning back as the pet sits is lifted by as much as the lean would sink its paw.
+
 ### Phase 1: Shiba prototype (feel) — `v0.1.0`
 
 - The art pipeline (§3.3) works end to end for one Shiba, with placeholder art.

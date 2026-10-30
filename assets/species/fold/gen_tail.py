@@ -15,7 +15,7 @@ N = 8
 points = []
 for k in range(N + 1):
     t = math.radians(100 * k / N)
-    points.append([0.0 + 0.78 * math.sin(t) * 0.9, -0.62, -0.92 + 1.0 * (1 - math.cos(t)) * 1.05])
+    points.append([0.0 + 0.78 * math.sin(t) * 0.9, -0.5, -0.92 + 1.0 * (1 - math.cos(t)) * 1.05])
 names = ["tail"] + [f"tail_{k}" for k in range(2, N)] + ["tail_tip"]
 radii = [0.13] * N + [0.12]
 

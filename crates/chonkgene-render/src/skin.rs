@@ -334,6 +334,8 @@ pub struct Walk {
     /// Leg swing either way at full pace, degrees: [`SWING`] for the legs
     /// of [`LEG_REF`], wider for shorter ones.
     swing: f32,
+    /// Floor to hip pivot, world units.
+    leg_len: f32,
     bones: Bones,
     n: usize,
 }
@@ -399,6 +401,7 @@ impl Walk {
             gesture: None,
             tempo: 1.0,
             swing,
+            leg_len,
             bones: Bones {
                 body: need("body")?,
                 hips: need("hips")?,
@@ -617,11 +620,19 @@ impl Walk {
             let tipped = d - M3::rot_x(pitch.to_radians()).apply(d);
             j[0].shift = j[0].shift + M3::rot_y(yaw.to_radians()).apply(tipped);
             for &(leg, _, front) in &self.legs {
-                j[leg].rot.x += if front {
-                    0.3 * SIT_PITCH * sit
+                if front {
+                    // Leaning back toward upright swings the paw down
+                    // through the floor (by more on a longer leg): lift the
+                    // leg by as much, so the paw stays on the floor.
+                    let lean = 0.3 * SIT_PITCH * sit;
+                    let tip = SIT_PITCH * sit;
+                    let sink =
+                        self.leg_len * ((tip - lean).to_radians().cos() - tip.to_radians().cos());
+                    j[leg].rot.x += lean;
+                    j[leg].shift.y += sink;
                 } else {
-                    SIT_HIND * sit
-                };
+                    j[leg].rot.x += SIT_HIND * sit;
+                }
             }
             j[b.head].rot.x += 0.85 * SIT_PITCH * sit;
         }
