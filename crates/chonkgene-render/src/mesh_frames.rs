@@ -207,6 +207,12 @@ impl MeshRenderer {
         self.changed
     }
 
+    /// Frames a second this pet needs however still its animation is:
+    /// tails sway and bellies settle all the time, slowly at rest.
+    pub fn min_fps(&self) -> u32 {
+        if self.walk.speed() > 0.0 { 30 } else { 15 }
+    }
+
     /// Wait for the bake and for the frame on its way (tests, screenshots),
     /// sending the wanted one first if it has not gone yet.
     pub fn finish(&mut self) {
@@ -274,6 +280,7 @@ impl MeshRenderer {
             let e = (std::f32::consts::PI * (t / secs).min(1.0)).sin().sqrt();
             Some(Gesture { act, e, t })
         }));
+        self.walk.set_pace(params.pace);
         // A poke jiggles the animator's belly: jolt the mesh's.
         if params.belly > 0.15 && self.belly <= 0.15 {
             self.walk.poke(2.0);
@@ -295,9 +302,17 @@ impl MeshRenderer {
         self.bones = self.sk.pose(&joints);
         self.look = look;
         self.changed = false;
-        let arrived = self.collect(false);
-        if self.live.as_ref().is_some_and(|l| !l.canvas.pending()) {
-            self.send(false);
+        // A walking pet's picture must keep up with its window, which moves
+        // every frame: its frames skip the budget, and if the last one is
+        // still on its way it is waited for rather than skipped (a skipped
+        // frame shows the legs standing still while the window slides on).
+        let mut arrived = self.collect(false);
+        let pending = |r: &Self| r.live.as_ref().is_some_and(|l| l.canvas.pending());
+        if walking && pending(self) {
+            arrived |= self.collect(true);
+        }
+        if self.live.is_some() && !pending(self) {
+            self.send(walking);
         }
         arrived
     }

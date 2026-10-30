@@ -188,14 +188,31 @@ impl Renderer {
         }
     }
 
-    /// Should frames keep coming (30 fps) even if the animation is
-    /// otherwise at rest: a blend between poses, or a GPU frame on its way?
+    /// Should frames keep coming even if the animation is otherwise at
+    /// rest: a blend between poses, or a GPU frame on its way? (Mesh pets
+    /// always: tails sway and bottoms settle all the time.)
     pub fn busy(&self) -> bool {
         match self {
             Self::Sprites(_) => false,
             Self::Gpu(r) => r.busy(),
-            // Tails sway and bottoms settle all the time.
             Self::Mesh(_) => true,
+        }
+    }
+
+    /// Frames a second the pet needs even if its animation is otherwise
+    /// at rest: 30 for a blend between poses or a GPU frame on its way;
+    /// a mesh pet's tails sway and bottoms settle all the time.
+    pub fn min_fps(&self) -> u32 {
+        match self {
+            Self::Sprites(_) => 0,
+            Self::Gpu(r) => {
+                if r.busy() {
+                    30
+                } else {
+                    0
+                }
+            }
+            Self::Mesh(r) => r.min_fps(),
         }
     }
 

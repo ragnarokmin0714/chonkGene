@@ -385,6 +385,11 @@ impl Presenter {
         }
     }
 
+    /// Nothing to do on X11: the window keeps its visual and shape.
+    pub fn restyle(&self) -> bool {
+        false
+    }
+
     pub fn present(&mut self, shared: &Shared, pm: &Pixmap) -> Result<(), String> {
         let conn = &shared.conn;
         super::swizzle(pm.data(), &mut self.buf);

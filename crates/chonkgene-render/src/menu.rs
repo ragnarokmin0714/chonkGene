@@ -18,6 +18,8 @@ pub enum Icon {
     Hide,
     Sliders,
     Exit,
+    /// A hand waving goodbye.
+    Bye,
 }
 
 #[derive(Clone, Debug)]
@@ -403,6 +405,41 @@ fn icon(pm: &mut Pixmap, icon: Icon, ts: Transform, bg: [u8; 4]) {
                 ],
             );
             stroke(pm, &[('M', &[18.0, 12.0]), ('L', &[9.0, 12.0])]);
+        }
+        Icon::Bye => {
+            // A palm with four fingers up, tilted as it waves, and two
+            // little motion marks beside it.
+            stroke(
+                pm,
+                &[
+                    ('M', &[7.0, 13.0]),
+                    ('C', &[6.0, 17.0, 8.5, 20.5, 12.5, 20.0]),
+                    ('C', &[16.0, 19.5, 17.5, 17.0, 17.0, 13.5]),
+                    ('L', &[17.5, 9.5]),
+                ],
+            );
+            for (x0, y0, x1, y1) in [
+                (8.0, 13.0, 7.0, 6.0),
+                (10.5, 12.0, 10.0, 4.0),
+                (13.0, 12.0, 13.5, 4.5),
+                (15.5, 12.5, 16.5, 6.5),
+            ] {
+                stroke(pm, &[('M', &[x0, y0]), ('L', &[x1, y1])]);
+            }
+            stroke(
+                pm,
+                &[
+                    ('M', &[20.0, 5.0]),
+                    ('C', &[21.5, 6.5, 21.5, 8.5, 20.5, 10.0]),
+                ],
+            );
+            stroke(
+                pm,
+                &[
+                    ('M', &[3.5, 15.0]),
+                    ('C', &[2.5, 16.5, 2.8, 18.5, 4.0, 19.5]),
+                ],
+            );
         }
     }
 }

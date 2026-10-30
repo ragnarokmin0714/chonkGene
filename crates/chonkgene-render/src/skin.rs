@@ -214,6 +214,24 @@ const SWING: f32 = 20.0;
 const LEG_REF: f32 = 0.59;
 const DUTY: f32 = 0.62;
 const LIFT: f32 = 0.07;
+/// How quickly the walk gets going or stops, full pace a second. The
+/// window starts and stops at once, so the legs must not lag far behind.
+pub(crate) const SPEED_UP: f32 = 6.0;
+/// How quickly the pet turns to face where it goes (spring hertz), at rest
+/// and walking: walking, the window already moves the new way, so the
+/// turn must be quick or the pet seems to slide backwards.
+pub(crate) const TURN_HZ: (f32, f32) = (1.3, 2.8);
+/// The widest a leg swings, degrees, however fast the pet goes.
+pub(crate) const MAX_SWING: f32 = 45.0;
+
+/// Splits a pace (1 usual) into how much quicker and how much longer the
+/// steps get: both grow, so zoomies neither blur into a flicker of legs
+/// nor stride absurdly; their product is about the pace, for the sine of
+/// the swing grows a little slower than the angle.
+pub(crate) fn tempo_split(tempo: f32) -> (f32, f32) {
+    (tempo.powf(0.6), tempo.powf(0.4))
+}
+
 /// Where each leg is in the step cycle (a walk, one foot at a time), and
 /// whether it is a front leg.
 const LEGS: [(&str, f32, bool); 4] = [
@@ -311,6 +329,8 @@ pub struct Walk {
     sit: Spring,
     legs: [(usize, f32, bool); 4],
     gesture: Option<Gesture>,
+    /// Walking speed against the usual (see [`Walk::set_pace`]).
+    tempo: f32,
     /// Leg swing either way at full pace, degrees: [`SWING`] for the legs
     /// of [`LEG_REF`], wider for shorter ones.
     swing: f32,
@@ -377,6 +397,7 @@ impl Walk {
             sit: Spring::default(),
             legs,
             gesture: None,
+            tempo: 1.0,
             swing,
             bones: Bones {
                 body: need("body")?,
@@ -401,6 +422,12 @@ impl Walk {
     /// The idle gesture under way, if any (set every frame).
     pub fn gesture(&mut self, g: Option<Gesture>) {
         self.gesture = g;
+    }
+
+    /// Walk this much faster than usual (zoomies) or slower: the legs step
+    /// quicker and longer so a planted paw still keeps pace.
+    pub fn set_pace(&mut self, pace: f32) {
+        self.tempo = pace.clamp(0.2, 5.0);
     }
 
     /// Sit down (or get up); walking gets it up first.
@@ -430,10 +457,12 @@ impl Walk {
         use std::f32::consts::{PI, TAU};
         let dt = dt.max(1e-4);
         let goal = if walking { 1.0 } else { 0.0 };
-        self.speed += (goal - self.speed).clamp(-dt * 4.0, dt * 4.0);
+        self.speed += (goal - self.speed).clamp(-dt * SPEED_UP, dt * SPEED_UP);
         let s = self.speed;
+        // Faster walking takes both quicker and longer steps.
+        let (quicker, longer) = tempo_split(self.tempo);
         if s > 0.0 {
-            self.phase = (self.phase + dt * STEP_HZ * (0.4 + 0.6 * s)).fract();
+            self.phase = (self.phase + dt * STEP_HZ * (0.4 + 0.6 * s) * quicker).fract();
         }
         let yaw = self.yaw.step(
             facing
@@ -445,7 +474,7 @@ impl Walk {
                     REST_YAW
                 },
             0.0,
-            1.3,
+            if walking { TURN_HZ.1 } else { TURN_HZ.0 },
             1.0,
             dt,
         );
@@ -471,7 +500,7 @@ impl Walk {
                 (-1.0 + 2.0 * e, (PI * t).sin())
             };
             j[leg] = Joint {
-                rot: v3(-self.swing * s * fwd, 0.0, 0.0),
+                rot: v3(-(self.swing * longer).min(MAX_SWING) * s * fwd, 0.0, 0.0),
                 shift: v3(0.0, LIFT * s * lift, 0.0),
             };
         }

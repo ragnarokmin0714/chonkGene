@@ -2,6 +2,7 @@
 //! window (PLAN §3.2).
 
 use std::collections::HashMap;
+use std::io::Write as _;
 use std::process::{Child, Command};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -148,6 +149,8 @@ enum Action {
     HideAll,
     Settings,
     Quit,
+    /// Say goodbye to this pet for good (asks once more first).
+    Bye,
 }
 
 struct Menu {
@@ -161,6 +164,8 @@ struct Menu {
     pos: (i32, i32),
     /// Outside clicks count only after every button was released once.
     armed: bool,
+    /// The 「說再見」 row was clicked once and now asks to be sure.
+    sure: bool,
 }
 
 /// Everything a pet needs from the app for one step, borrowed apart from
@@ -489,10 +494,23 @@ impl App {
     }
 
     fn open_settings(&mut self, pet: Option<u64>) {
+        // Already open (perhaps minimised or behind other windows): ask it
+        // to come to the front, on this pet if one was asked for.
         if let Some(child) = &mut self.child
             && matches!(child.try_wait(), Ok(None))
         {
-            return;
+            let line = match pet {
+                Some(id) => format!("show {id}\n"),
+                None => "show\n".into(),
+            };
+            let told = child.stdin.as_mut().is_some_and(|i| {
+                i.write_all(line.as_bytes())
+                    .and_then(|()| i.flush())
+                    .is_ok()
+            });
+            if told {
+                return;
+            }
         }
         let Ok(exe) = std::env::current_exe() else {
             return;
@@ -502,6 +520,7 @@ impl App {
         if let Some(id) = pet {
             cmd.arg("--pet").arg(id.to_string());
         }
+        cmd.stdin(std::process::Stdio::piped());
         match cmd.spawn() {
             Ok(child) => self.child = Some(child),
             Err(e) => eprintln!("cannot open settings: {e}"),
@@ -555,6 +574,7 @@ impl App {
                 Ok(pet) => {
                     if self.hidden || self.fullscreen {
                         pet.window.set_visible(false);
+                        pet.presenter.restyle();
                     }
                     self.pets.push(pet);
                 }
@@ -591,6 +611,7 @@ impl App {
         let visible = !self.hidden && !self.fullscreen;
         for p in &mut self.pets {
             p.window.set_visible(visible);
+            p.presenter.restyle();
             if !visible {
                 p.bubble = None;
             }
@@ -717,6 +738,8 @@ impl App {
             items.push(item("讓牠去睡覺", None, Icon::Moon, false));
             actions.push(Action::Sleep);
         }
+        items.push(item("說再見…", None, Icon::Bye, false));
+        actions.push(Action::Bye);
         items.push(item(
             "全部收起來",
             Some("Ctrl+Alt+P".into()),
@@ -781,6 +804,7 @@ impl App {
             hover: None,
             pos,
             armed: false,
+            sure: false,
         });
     }
 
@@ -808,6 +832,13 @@ impl App {
             }
             Action::Settings => return self.open_settings(None),
             Action::Edit => return self.open_settings(Some(pet)),
+            Action::Bye => {
+                self.store.pets.retain(|p| p.id != pet);
+                self.dirty = true;
+                self.sync_desktop(el);
+                self.save_now();
+                return;
+            }
             Action::Quit => {
                 self.save_now();
                 el.exit();
@@ -1436,6 +1467,14 @@ impl ApplicationHandler<UserEvent> for App {
                 } => {
                     if let Some(row) = m.hover {
                         let (pet, action) = (m.pet, m.actions[row]);
+                        // Goodbye is for good: the first click only asks.
+                        if action == Action::Bye && !m.sure {
+                            m.sure = true;
+                            m.model.items[row].label = "真的要說再見嗎？".into();
+                            m.model.items[row].hint = Some("再按一次".into());
+                            self.redraw_menu();
+                            return;
+                        }
                         self.act(el, pet, action);
                     }
                 }
@@ -1685,10 +1724,7 @@ impl ApplicationHandler<UserEvent> for App {
             // A pet blending between poses on the GPU, or with a frame on
             // its way, needs frames to show it, even when its animation is
             // otherwise at rest.
-            let mut fps = p.anim.fps(p.moving());
-            if p.renderer.busy() {
-                fps = fps.max(30);
-            }
+            let fps = p.anim.fps(p.moving()).max(p.renderer.min_fps());
             p.next = now + Duration::from_secs_f64(1.0 / f64::from(fps));
         }
 

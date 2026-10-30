@@ -10,7 +10,7 @@ publish = false
 
 [workspace.dependencies]
 skrifa = "0.49.0"
-slint = { version = "1.18.1", default-features = false, features = ["std", "compat-1-2", "backend-winit-x11", "renderer-software", "accessibility"] }
+slint = { version = "1.18.1", default-features = false, features = ["std", "compat-1-2", "backend-winit-x11", "renderer-software", "accessibility", "unstable-winit-030"] }
 slint-build = "1.18.1"
 chonkgene-core = { path = "crates/chonkgene-core" }
 chonkgene-rig = { path = "crates/chonkgene-rig" }

@@ -229,7 +229,38 @@ pub struct Presenter {
     height: i32,
 }
 
+/// The extended styles a pet window needs: layered (per-pixel alpha and
+/// click-through), a tool window (no taskbar button), never activated.
+const PET_EX_STYLE: isize = (WS_EX_LAYERED | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE) as isize;
+
+/// Put the pet styles back if something took them off. winit rewrites the
+/// whole extended style from its own flags whenever one of them changes
+/// (showing or hiding the window, among others), which drops these: the
+/// window then stops being layered and shows as a plain empty window.
+///
+/// # Safety
+/// `hwnd` must be a live window handle.
+unsafe fn restyle(hwnd: HWND) -> bool {
+    // SAFETY: reading and writing a live window's extended style.
+    unsafe {
+        let ex = GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
+        if ex & PET_EX_STYLE == PET_EX_STYLE {
+            return false;
+        }
+        SetWindowLongPtrW(hwnd, GWL_EXSTYLE, ex | PET_EX_STYLE);
+        true
+    }
+}
+
 impl Presenter {
+    /// Make sure the window is still a layered pet window (call after
+    /// showing or hiding it); true if it had lost the styles, so its
+    /// picture must be presented again.
+    pub fn restyle(&self) -> bool {
+        // SAFETY: `hwnd` lives as long as the presenter.
+        unsafe { restyle(self.hwnd) }
+    }
+
     pub fn new(_shared: &Shared, window: &Window) -> Result<Self, String> {
         let hwnd = match window.window_handle().map_err(|e| e.to_string())?.as_raw() {
             RawWindowHandle::Win32(h) => h.hwnd.get() as HWND,
@@ -240,9 +271,7 @@ impl Presenter {
         // SAFETY: plain Win32 calls on a window and DCs we own; every handle is
         // checked before use and released in Drop.
         unsafe {
-            let ex = GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
-            let add = (WS_EX_LAYERED | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE) as isize;
-            SetWindowLongPtrW(hwnd, GWL_EXSTYLE, ex | add);
+            restyle(hwnd);
 
             let screen_dc = GetDC(null_mut());
             let mem_dc = CreateCompatibleDC(screen_dc);
@@ -294,6 +323,7 @@ impl Presenter {
         if pm.data().len() != len {
             return Err("pixmap size does not match the window".into());
         }
+        self.restyle();
         // SAFETY: `bits` points at the DIB section's width × height × 4 bytes,
         // which live until Drop.
         let dst = unsafe { std::slice::from_raw_parts_mut(self.bits, len) };

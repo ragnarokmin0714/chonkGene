@@ -652,6 +652,7 @@ pub fn run(data: Option<PathBuf>, pet: Option<u64>) -> Result<(), String> {
     let ui = SettingsWindow::new().map_err(|e| e.to_string())?;
     let (st, _timers) = setup(&ui, data, pet)?;
     let _repaints = repaint_when_shown(&ui);
+    let _front = come_forward_when_asked(&ui, &st);
     ui.run().map_err(|e| e.to_string())?;
     let mut st = st.borrow_mut();
     if st.settings_dirty {
@@ -663,6 +664,51 @@ pub fn run(data: Option<PathBuf>, pet: Option<u64>) -> Result<(), String> {
         st.send(Msg::Pet(p));
     }
     Ok(())
+}
+
+/// The pet process asks an open settings window to come to the front (its
+/// 「設定」 or 「幫牠換造型」 was used again) with a line on our stdin:
+/// `show`, or `show <pet id>` to open on that pet. A thread reads the lines;
+/// a timer acts on them in the UI thread: restore the window if it was
+/// minimised, bring it to the front, select the pet.
+fn come_forward_when_asked(ui: &SettingsWindow, st: &Rc<RefCell<State>>) -> Timer {
+    let (tx, rx) = std::sync::mpsc::channel::<Option<u64>>();
+    std::thread::spawn(move || {
+        use std::io::BufRead;
+        for line in std::io::stdin().lock().lines() {
+            let Ok(line) = line else { break };
+            let mut words = line.split_whitespace();
+            if words.next() != Some("show") {
+                continue;
+            }
+            if tx.send(words.next().and_then(|w| w.parse().ok())).is_err() {
+                break;
+            }
+        }
+    });
+    let timer = Timer::default();
+    let weak = ui.as_weak();
+    let st = st.clone();
+    timer.start(TimerMode::Repeated, Duration::from_millis(150), move || {
+        let Some(ui) = weak.upgrade() else { return };
+        while let Ok(pet) = rx.try_recv() {
+            use slint::winit_030::WinitWindowAccessor;
+            ui.window().set_minimized(false);
+            ui.window().with_winit_window(|w| {
+                w.set_minimized(false);
+                w.focus_window();
+            });
+            if let Some(id) = pet {
+                let mut st = st.borrow_mut();
+                st.selected = Some(id);
+                ui.set_adopting(false);
+                show_pet(&ui, &mut st);
+            }
+            // A restored window may come back with its picture lost.
+            ui.set_repaint(ui.get_repaint().wrapping_add(1));
+        }
+    });
+    timer
 }
 
 /// Repaint the whole window a few times just after it opens. On Windows the

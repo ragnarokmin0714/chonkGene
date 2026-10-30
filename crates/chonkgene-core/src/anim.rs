@@ -97,6 +97,9 @@ pub struct PoseParams {
     /// Seconds on the animation's clock, for motion drawn from it (a waving
     /// paw, blending between poses).
     pub clock: f32,
+    /// Walking speed against the usual (zoomies run faster, a skit may
+    /// slow it): legs drawn every frame step to match.
+    pub pace: f32,
 }
 
 impl Default for PoseParams {
@@ -114,6 +117,7 @@ impl Default for PoseParams {
             beat: None,
             stride: 0.0,
             clock: 0.0,
+            pace: 1.0,
         }
     }
 }
@@ -532,6 +536,7 @@ impl Animator {
             beat,
             stride,
             clock: self.t,
+            pace: self.pace,
         }
     }
 }

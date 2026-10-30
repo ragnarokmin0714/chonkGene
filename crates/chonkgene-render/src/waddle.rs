@@ -12,7 +12,10 @@ use std::f32::consts::{PI, TAU};
 use chonkgene_rig::math::{V3, v3};
 use chonkgene_rig::{FLOOR, Model};
 
-use crate::skin::{Gesture, Joint, REST_YAW, SIT_YAW, Skeleton, Spring, WALK_YAW, Walk};
+use crate::skin::{
+    Gesture, Joint, MAX_SWING, REST_YAW, SIT_YAW, SPEED_UP, Skeleton, Spring, TURN_HZ, WALK_YAW,
+    Walk, tempo_split,
+};
 
 /// The pace the pet's window moves at, world units a second (60 px/s at
 /// 100%): a planted foot slides back at this speed.
@@ -65,6 +68,14 @@ impl Mover {
         }
     }
 
+    /// Walk this much faster or slower than usual (see [`Walk::set_pace`]).
+    pub fn set_pace(&mut self, pace: f32) {
+        match self {
+            Self::Quad(w) => w.set_pace(pace),
+            Self::Biped(w) => w.set_pace(pace),
+        }
+    }
+
     /// The idle gesture under way, if any (set every frame).
     pub fn gesture(&mut self, g: Option<Gesture>) {
         match self {
@@ -105,6 +116,7 @@ pub struct Waddle {
     sitting: bool,
     sit: Spring,
     gesture: Option<Gesture>,
+    tempo: f32,
     look: Spring,
     look_goal: f32,
     belly: Spring,
@@ -151,6 +163,7 @@ impl Waddle {
             sitting: false,
             sit: Spring::default(),
             gesture: None,
+            tempo: 1.0,
             look: Spring::default(),
             look_goal: 0.0,
             belly: Spring::default(),
@@ -195,6 +208,10 @@ impl Waddle {
         self.gesture = g;
     }
 
+    pub fn set_pace(&mut self, pace: f32) {
+        self.tempo = pace.clamp(0.2, 5.0);
+    }
+
     pub fn yaw(&self) -> f32 {
         self.yaw.x
     }
@@ -204,10 +221,11 @@ impl Waddle {
     pub fn step(&mut self, dt: f32, walking: bool, facing: f32) -> Vec<Joint> {
         let dt = dt.max(1e-4);
         let goal = if walking { 1.0 } else { 0.0 };
-        self.speed += (goal - self.speed).clamp(-dt * 4.0, dt * 4.0);
+        self.speed += (goal - self.speed).clamp(-dt * SPEED_UP, dt * SPEED_UP);
         let s = self.speed;
+        let (quicker, longer) = tempo_split(self.tempo);
         if s > 0.0 {
-            self.phase = (self.phase + dt * self.hz * (0.4 + 0.6 * s)).fract();
+            self.phase = (self.phase + dt * self.hz * (0.4 + 0.6 * s) * quicker).fract();
         }
         let yaw = self.yaw.step(
             facing
@@ -219,7 +237,7 @@ impl Waddle {
                     REST_YAW
                 },
             0.0,
-            1.3,
+            if walking { TURN_HZ.1 } else { TURN_HZ.0 },
             1.0,
             dt,
         );
@@ -241,7 +259,11 @@ impl Waddle {
                 (-1.0 + 2.0 * e, (PI * t).sin())
             };
             j[leg] = Joint {
-                rot: v3(-self.swing * s * fwd - SIT_LEGS * sit, 0.0, 0.0),
+                rot: v3(
+                    -(self.swing * longer).min(MAX_SWING) * s * fwd - SIT_LEGS * sit,
+                    0.0,
+                    0.0,
+                ),
                 shift: v3(0.0, self.lift * s * up, 0.0),
             };
         }

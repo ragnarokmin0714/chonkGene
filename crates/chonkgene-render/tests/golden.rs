@@ -265,6 +265,7 @@ fn pet_menu() {
             item("改名字…", None, Icon::Pencil, false),
             item("幫牠換造型…", None, Icon::Palette, false),
             item("讓牠去睡覺", None, Icon::Moon, false),
+            item("說再見…", None, Icon::Bye, false),
             item("全部收起來", Some("Ctrl+Alt+P"), Icon::Hide, true),
             item("設定…", None, Icon::Sliders, false),
             item("結束肉肉賴桌", None, Icon::Exit, false),
@@ -272,7 +273,7 @@ fn pet_menu() {
     };
     let mut face = chonkgene_render::text::Face::ui();
     let drawn = menu::draw(&mut face, &model, Some(1), 1.0).unwrap();
-    assert_eq!(drawn.rows.len(), 8);
+    assert_eq!(drawn.rows.len(), 9);
     let r = drawn.rows[4];
     assert_eq!(menu::row_at(&drawn, r.x() + 5.0, r.y() + 5.0), Some(4));
     compare("menu", &drawn.pixmap);
