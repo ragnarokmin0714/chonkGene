@@ -22,6 +22,17 @@ fn segment(uv: vec2<f32>, a: vec2<f32>, b: vec2<f32>, w: f32) -> f32 {
     return length(pa - ba * h) - w;
 }
 
+fn tapered(uv: vec2<f32>, a: vec2<f32>, b: vec2<f32>, r1: f32, r2: f32) -> f32 {
+    let pa = uv - a;
+    let ba = b - a;
+    let h = clamp(dot(pa, ba) / dot(ba, ba), 0.0, 1.0);
+    return length(pa - ba * h) - (r1 + (r2 - r1) * h);
+}
+
+// The forehead flame, as face.rs `flame`.
+const FLAME_AT: vec2<f32> = vec2<f32>(0.0, 0.56);
+const FLAME_R: vec2<f32> = vec2<f32>(0.1, 0.18);
+
 // Looks, as numbered in `look_index`.
 const OPEN: i32 = 0;
 const HALF: i32 = 1;
@@ -114,6 +125,18 @@ fn paint_eyes(q: vec3<f32>, r: vec3<f32>, base: vec3<f32>, px: f32) -> vec3<f32>
             let d = min(segment(uv, a, tip, w), segment(uv, b, tip, w));
             c = mix(c, ink_c, ink(d, aa));
         }
+    }
+    if u.spots.w >= 0.0 {
+        let p0 = (uv - FLAME_AT) / FLAME_R;
+        let t = clamp((p0.y + 0.3) / 1.3, 0.0, 1.0);
+        let p = vec2<f32>(p0.x - 0.35 * t * t, p0.y);
+        let body = tapered(p, vec2<f32>(0.0, -0.45), vec2<f32>(0.0, 0.95), 0.6, 0.03);
+        let lick = tapered(p, vec2<f32>(0.3, -0.2), vec2<f32>(0.72, 0.35), 0.22, 0.02);
+        let core = tapered(p, vec2<f32>(0.0, -0.6), vec2<f32>(0.0, -0.05), 0.2, 0.02);
+        let mark = u.palette[u32(u.spots.w)].rgb;
+        let whole = ink(min(body, lick) * FLAME_R.x, aa);
+        c = mix(c, mark, whole);
+        c = mix(c, mix(mark, white, 0.55), ink(core * FLAME_R.x, aa) * whole);
     }
     return c;
 }

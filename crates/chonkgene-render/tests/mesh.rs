@@ -154,8 +154,11 @@ fn draw_both(gpu: &Gpu, model: &Model, sk: &Skeleton) -> (Vec<[u8; 4]>, Vec<[u8;
     )
 }
 
-#[test]
-fn the_fox_eyeliner_lands_in_the_same_place_on_the_gpu_and_the_cpu() {
+/// Paints the fox with and without a face feature (`strip` takes it off a
+/// copy of the model) and checks the pixels it changes are much the same
+/// ones in the ray-marcher (face.rs) and the mesh (paint.wgsl): there are
+/// some, and they agree.
+fn feature_lands_in_the_same_place(name: &str, strip: fn(&mut chonkgene_rig::Model)) {
     let gpu = match Gpu::new() {
         Ok(g) => g,
         Err(e) => {
@@ -164,21 +167,18 @@ fn the_fox_eyeliner_lands_in_the_same_place_on_the_gpu_and_the_cpu() {
         }
     };
     let (model, sk) = quad("fox").unwrap();
-    assert!(model.face.liner.is_some());
     let mut bare = model.clone();
-    bare.face.liner = None;
-    let (mesh_liner, ray_liner) = draw_both(&gpu, &model, &sk);
+    strip(&mut bare);
+    let (mesh_with, ray_with) = draw_both(&gpu, &model, &sk);
     let (mesh_bare, ray_bare) = draw_both(&gpu, &bare, &sk);
-    // The pixels the liner changes, in each renderer (face.rs on the CPU,
-    // paint.wgsl on the GPU): there are some, and they are the same ones.
     let changed = |a: &[[u8; 4]], b: &[[u8; 4]]| -> Vec<bool> {
         a.iter()
             .zip(b)
             .map(|(p, q)| (0..3).any(|i| p[i].abs_diff(q[i]) > 40))
             .collect()
     };
-    let on_gpu = changed(&mesh_liner, &mesh_bare);
-    let on_cpu = changed(&ray_liner, &ray_bare);
+    let on_gpu = changed(&mesh_with, &mesh_bare);
+    let on_cpu = changed(&ray_with, &ray_bare);
     let both = on_gpu
         .iter()
         .zip(&on_cpu)
@@ -189,11 +189,25 @@ fn the_fox_eyeliner_lands_in_the_same_place_on_the_gpu_and_the_cpu() {
         .zip(&on_cpu)
         .filter(|(a, b)| **a || **b)
         .count();
-    assert!(both > 10, "the liner shows on {both} pixels");
+    assert!(both > 10, "the {name} shows on {both} pixels");
     assert!(
         both as f32 / either as f32 > 0.7,
-        "liner pixels agree on {both} of {either}"
+        "{name} pixels agree on {both} of {either}"
     );
+}
+
+#[test]
+fn the_fox_eyeliner_lands_in_the_same_place_on_the_gpu_and_the_cpu() {
+    let (model, _) = quad("fox").unwrap();
+    assert!(model.face.liner.is_some());
+    feature_lands_in_the_same_place("liner", |m| m.face.liner = None);
+}
+
+#[test]
+fn the_fox_forehead_flame_lands_in_the_same_place_on_the_gpu_and_the_cpu() {
+    let (model, _) = quad("fox").unwrap();
+    assert!(model.face.forehead.is_some());
+    feature_lands_in_the_same_place("forehead flame", |m| m.face.forehead = None);
 }
 
 #[test]

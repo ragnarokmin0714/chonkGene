@@ -694,7 +694,7 @@ Roger played the mesh build on Windows (`feat/mesh-pets`) and asked for these to
    - whether minimising the settings window (a child process) flips `fullscreen_active` (`SHQueryUserNotificationState` reporting busy), which hides and re-shows every pet through the same path.
 3. **The other species are still upright.** Munchkin, fold, owl, chick and duck still use the ray-marched upright models. Each needs a four-legged (`quad.ron`) or, for the birds, a two-legged mesh model and a walk to match; the birds' flying comes later.
 
-Looks, for the afternoon of 2026-10-30 (Roger likes the Shiba's tail; the rest is the fox):
+Looks (2026-10-30; Roger likes the Shiba's tail; the rest is the fox). **Items 4–9 are done**, checked headlessly on llvmpipe; Roger's look on Windows is owed:
 
 4. **Shiba tail: smoother.** Keep the open doughnut, but the joints between its segments still show. Options: more, shorter segments with wider blends, or one curved part (an arc of a torus) skinned along its length so the ring is a single smooth surface.
 5. **Fox ears: bigger and less pointed.** Wider at the base, a rounded tip instead of a sharp cone.
@@ -702,6 +702,15 @@ Looks, for the afternoon of 2026-10-30 (Roger likes the Shiba's tail; the rest i
 7. **Fox: a fluffy tuft between the chest and the bell.**
 8. **Fox bell: bigger, with more detail** (for instance the slit, a cap where the cord meets it, a highlight).
 9. **Fox forehead mark: less plain.** It is a single red dot now; a proper flame (or a richer kitsune mark) instead, which likely needs a painted shape rather than an ellipsoid colour mark.
+
+   What was done:
+   - 4: `gen_tail.py` now makes 16 short segments blended 0.1 wide (the joints no longer show). The tail wave's lag per bone is capped so the whole tail still spans `WAVE_SPAN` radians (skin.rs): a tail of many short segments ripples no more than one of a few.
+   - 5: ears 0.38 wide at the base with a 0.13 rounded tip, a little shorter (0.6).
+   - 6: each tail is four round cones whose radii meet (a thin root, fullest a third up, a point that flicks back in and up), so one smooth surface; longer (0.4–0.64 a segment) so sitting, the top tips rise a little above the ear tips. Still four bones a tail (the fox is at 47 of `MAX_BONES` = 64).
+   - 7: a throat tuft (a cone each side and one in the middle) between the ruff and the bell.
+   - 8: bell 0.14 radius with a cap, a hanging bit of cord, a groove, a slit and a hole, and a highlight. Kept high enough that it stays out of the shadow's paw set (`mesh.rs`).
+   - 9: a painted flame (`face.forehead`, a colour slot; `face.rs` `flame` and `paint.wgsl`, tested to agree on the CPU and the GPU), with a leaning tip, a lick and a paler core. Colour marks baked into vertices were too coarse for it (0.025 cells).
+   - Cost: the fox bakes to about 77k vertices (68k before), so item 1's "make the fox cheaper" now has a little further to go.
 
 ### Phase 1: Shiba prototype (feel) — `v0.1.0`
 

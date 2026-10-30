@@ -1,10 +1,13 @@
 # Prints the fox's nine tails for quad.ron: `python3 gen_tails.py`, then
 # paste the PIVOTS, PARENTS and PARTS sections over the tail entries there.
 #
-# Nine plump teardrops opening behind like the petals of a flower, as chibi
-# kitsune are drawn: each thin at the root, fat in the middle, coming to a
-# point that curls up and out. White at the root, through pink, to the tip
-# colour. Packed close, the nine read as one big fluffy bloom.
+# Nine little flames opening behind like the petals of a flower, as chibi
+# kitsune are drawn: each thin at the root, fullest a third of the way up,
+# then drawn out to a point that flicks back in and up. Four round cones
+# a tail, each starting at the radius the one before ends on and carrying
+# on in the same direction, so the flame is one smooth surface with no
+# lumps at its joints. White at the root, through pink, to the tip colour.
+# The fox has few bones to spare (MAX_BONES), so a tail is four bones.
 import math
 
 
@@ -29,13 +32,13 @@ base = [0.0, 0.1, -0.88]
 axis = norm([0.0, 0.9, -0.42])
 u = norm(cross(axis, [1, 0, 0]))  # in the y-z plane, perpendicular to axis
 v = [1.0, 0.0, 0.0]
-HALF = math.radians(66)
-LEN = [0.3, 0.46, 0.43, 0.48]
-# Thin root, fat middle: a teardrop, not a finger.
-R = [0.12, 0.27, 0.25]
-# How each segment bends from the last: along `out` (away from the
-# axis) and up; the tip curls up and out.
-BEND = [None, (0.15, 0.0), (0.3, 0.1), (0.55, 0.35)]
+HALF = math.radians(60)
+LEN = [0.4, 0.6, 0.6, 0.64]
+# The radius each segment starts on; the last ends on a point.
+R = [0.1, 0.21, 0.24, 0.15, 0.025]
+# How each segment bends from the last: along `out` (away from the axis)
+# and up. Out, then back in and up at the end: a flame's flick.
+BEND = [None, (0.2, 0.1), (0.18, 0.2), (-0.35, 0.5)]
 SEG = ["", "_b", "_c", "_tip"]
 pivots, parents, parts = [], [], []
 for i in range(9):
@@ -49,25 +52,25 @@ for i in range(9):
     for k in range(4):
         if BEND[k]:
             d = norm(add(add(d, out, BEND[k][0]), [0, 1, 0], BEND[k][1]))
-        to = [x * LEN[k] * size for x in d]
+        h = LEN[k] * size
+        to = [x * h for x in d]
         pivots.append(f'        "{names[k]}": {f(p)},')
         parents.append(f'        "{names[k]}": "{"hips" if k == 0 else names[k - 1]}",')
-        if k < 3:
-            parts.append(
-                f'        (name: "{names[k]}", bone: "{names[k]}", shape: Capsule(to: {f(to)}, r: {R[k]}), at: {f(p)},\n'
-                f'            blend: 0.08, color: "fur", zone: "bottom"),'
+        # A cone along +y, turned onto d: roll about z, then pitch about x.
+        g = -math.degrees(math.asin(max(-1, min(1, d[0]))))
+        a = math.degrees(math.atan2(d[2], d[1]))
+        marks = ""
+        if k == 2:
+            marks = f'\n            marks: [(at: (0, {h:.3f}, 0), radii: (0.3, 0.25, 0.3), color: "tailmid", soft: 0.8)]'
+        if k == 3:
+            marks = (
+                f'\n            marks: [(at: (0, {h * 0.3:.3f}, 0), radii: (0.3, 0.25, 0.3), color: "tailmid", soft: 0.8),'
+                f'\n                (at: (0, {h:.3f}, 0), radii: (0.2, 0.3, 0.2), color: "tailtip", soft: 0.6)]'
             )
-        else:
-            # A cone along +y, turned onto d: roll about z, then pitch about x.
-            g = -math.degrees(math.asin(max(-1, min(1, d[0]))))
-            a = math.degrees(math.atan2(d[2], d[1]))
-            h = LEN[k] * size
-            parts.append(
-                f'        (name: "{names[k]}", bone: "{names[k]}", shape: Cone(r1: 0.24, r2: 0.03, h: {h:.3f}), at: {f(p)},\n'
-                f'            rot: {f([a, 0, g])}, blend: 0.08, color: "fur", zone: "bottom",\n'
-                f'            marks: [(at: (0, {h * 0.55:.3f}, 0), radii: (0.22, 0.2, 0.22), color: "tailmid", soft: 0.8),\n'
-                f'                (at: (0, {h:.3f}, 0), radii: (0.2, 0.22, 0.2), color: "tailtip", soft: 0.6)]),'
-            )
+        parts.append(
+            f'        (name: "{names[k]}", bone: "{names[k]}", shape: Cone(r1: {R[k]}, r2: {R[k + 1]}, h: {h:.3f}), at: {f(p)},\n'
+            f'            rot: {f([a, 0, g])}, blend: 0.1, color: "fur", zone: "bottom"{"," if marks else ""}{marks}),'
+        )
         p = add(p, to)
 print("PIVOTS")
 print("\n".join(pivots))
