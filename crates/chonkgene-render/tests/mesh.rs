@@ -5,7 +5,8 @@ use chonkgene_render::gpu::Gpu;
 use chonkgene_render::mesh::bake;
 use chonkgene_render::mesh_gpu::{MAX_BONES, MeshCanvas};
 use chonkgene_render::raymarch;
-use chonkgene_render::skin::{QUAD_SPECIES, Skeleton, Walk, quad};
+use chonkgene_render::skin::{BIPED_SPECIES, QUAD_SPECIES, Skeleton, Walk, mesh_model, quad};
+use chonkgene_render::waddle::Mover;
 use chonkgene_rig::math::{M3, V3, v3};
 use chonkgene_rig::{Layer, Look, Model, Pose, Scene};
 use tiny_skia::Pixmap;
@@ -112,8 +113,8 @@ fn the_mesh_draws_the_same_pet_as_the_ray_marcher() {
             return;
         }
     };
-    for id in QUAD_SPECIES {
-        let (model, sk) = quad(id).unwrap();
+    for id in QUAD_SPECIES.iter().chain(&BIPED_SPECIES) {
+        let (model, sk) = mesh_model(id).unwrap();
         let (mesh, ray) = draw_both(&gpu, &model, &sk);
         // The pet's own pixels (not its shadow) in both: they cover the
         // same ground, and where both draw the pet, the colours agree.
@@ -235,21 +236,27 @@ fn a_poke_wobbles_the_belly_and_it_settles() {
 }
 
 #[test]
-fn every_four_legged_pet_fits_the_shader_and_stands_on_its_paws() {
-    for id in QUAD_SPECIES {
-        let (model, sk) = quad(id).unwrap();
+fn every_mesh_pet_fits_the_shader_and_has_a_walk_and_a_shadow() {
+    for id in QUAD_SPECIES.iter().chain(&BIPED_SPECIES) {
+        let (model, sk) = mesh_model(id).unwrap();
         assert!(
             sk.names.len() <= MAX_BONES,
             "{id}: {} bones",
             sk.names.len()
         );
         let mesh = bake(&model, &sk, 0, 0.33, model.bake_cell).unwrap();
-        // The shadow covers the four paws (x ±0.3, z 0.5 and −0.6 from
-        // the middle) but stays under the pet.
         let (across, along) = mesh.shadow;
-        assert!((0.4..1.0).contains(&across), "{id}: shadow across {across}");
-        assert!((0.7..1.5).contains(&along), "{id}: shadow along {along}");
-        Walk::new(&sk, 1.0).unwrap();
+        if QUAD_SPECIES.contains(id) {
+            // The shadow covers the four paws (x ±0.3, z 0.5 and −0.6 from
+            // the middle) but stays under the pet.
+            assert!((0.4..1.0).contains(&across), "{id}: shadow across {across}");
+            assert!((0.7..1.5).contains(&along), "{id}: shadow along {along}");
+        } else {
+            // A bird sits on its round belly: a shadow about as wide as it.
+            assert!((0.7..1.3).contains(&across), "{id}: shadow across {across}");
+            assert!((0.7..1.3).contains(&along), "{id}: shadow along {along}");
+        }
+        Mover::new(&sk, 1.0, &model).unwrap();
     }
 }
 
@@ -531,13 +538,13 @@ fn the_shiba_tail_tip_stays_clear_of_the_body() {
     }
 }
 
-/// The app's mesh renderer for a four-legged species, on any GPU (a
+/// The app's mesh renderer for a species with a mesh model, on any GPU (a
 /// software one counts here); none without a GPU.
 fn app_renderer(id: &str) -> Option<chonkgene_render::MeshRenderer> {
     use std::sync::OnceLock;
     static GPU: OnceLock<Option<Gpu>> = OnceLock::new();
     let gpu = GPU.get_or_init(|| Gpu::new().ok()).as_ref()?;
-    let (model, _) = quad(id).unwrap();
+    let (model, _) = mesh_model(id).unwrap();
     chonkgene_render::MeshRenderer::new(gpu, std::sync::Arc::new(model), 1.0, 0.33, 0)
 }
 
@@ -551,9 +558,9 @@ fn opaque(pm: &Pixmap) -> usize {
 }
 
 #[test]
-fn the_app_draws_four_legged_pets_walking_and_answers_clicks() {
+fn the_app_draws_every_mesh_pet_walking_and_answers_clicks() {
     use chonkgene_core::anim::{Act, Expression, PoseParams};
-    for id in QUAD_SPECIES {
+    for id in QUAD_SPECIES.iter().chain(&BIPED_SPECIES) {
         let Some(mut r) = app_renderer(id) else {
             eprintln!("skipped: no GPU");
             return;
@@ -665,4 +672,84 @@ fn mesh_frames_wait_for_the_gpu_budget_instead_of_overspending_it() {
         std::thread::sleep(std::time::Duration::from_millis(30));
     }
     assert!(drawn <= 13, "{drawn} frames came out of a 50 ms burst");
+}
+
+/// Screen x (pixels at 100%) of a bird's left foot over a steady waddle,
+/// as the window carries it along, and its height.
+fn foot_track(id: &str) -> Vec<(f32, f32)> {
+    let (model, sk) = mesh_model(id).unwrap();
+    let leg = sk.bone("leg_l").unwrap();
+    let hip = sk.pivots[leg];
+    let sole = v3(hip.x, -1.05, hip.z + 0.1);
+    let mut walk = Mover::new(&sk, 1.0, &model).unwrap();
+    let dt = 1.0 / 60.0;
+    let mut x = 0.0;
+    let mut track = Vec::new();
+    for f in 0..300 {
+        let joints = walk.step(dt, true, 1.0);
+        x += WALK_SPEED * walk.speed() * dt;
+        if f >= 120 {
+            let p: V3 = sk.pose(&joints)[leg].apply(sole);
+            track.push((x + p.x * PPU, p.y));
+        }
+    }
+    track
+}
+
+#[test]
+fn a_planted_bird_foot_stays_put_while_the_body_waddles_over_it() {
+    for id in BIPED_SPECIES {
+        let track = foot_track(id);
+        let low = track.iter().map(|t| t.1).fold(f32::MAX, f32::min);
+        let mut worst = 0.0f32;
+        let mut run: Vec<f32> = Vec::new();
+        for &(x, y) in track.iter().chain([(0.0, f32::MAX)].iter()) {
+            if y < low + 0.02 {
+                run.push(x);
+            } else if run.len() > 3 {
+                let (a, b) = run
+                    .iter()
+                    .fold((f32::MAX, f32::MIN), |(a, b), &x| (a.min(x), b.max(x)));
+                worst = worst.max(b - a);
+                run.clear();
+            } else {
+                run.clear();
+            }
+        }
+        eprintln!("{id}: planted foot slid at most {worst:.2} px");
+        assert!(worst < 4.0, "{id}: a planted foot slid {worst:.1} px");
+        let travel = track.last().unwrap().0 - track[0].0;
+        assert!(travel > 100.0, "{id}: the foot kept up: {travel:.0} px");
+    }
+}
+
+#[test]
+fn a_bird_waddles_rolling_onto_each_planted_leg() {
+    for id in BIPED_SPECIES {
+        let (model, sk) = mesh_model(id).unwrap();
+        let body = sk.bone("body").unwrap();
+        let head = sk.bone("head").unwrap();
+        let mut walk = Mover::new(&sk, 1.0, &model).unwrap();
+        let (mut lo, mut hi, mut head_lo, mut head_hi) = (f32::MAX, f32::MIN, f32::MAX, f32::MIN);
+        for f in 0..360 {
+            let joints = walk.step(1.0 / 60.0, true, 1.0);
+            if f >= 120 {
+                let roll = joints[body].rot.z;
+                lo = lo.min(roll);
+                hi = hi.max(roll);
+                // The head's own roll cancels most of the body's.
+                let h = roll + joints[head].rot.z;
+                head_lo = head_lo.min(h);
+                head_hi = head_hi.max(h);
+            }
+        }
+        assert!(
+            hi > 2.0 && lo < -2.0,
+            "{id}: body rolls only {lo:.1}..{hi:.1}"
+        );
+        assert!(
+            head_hi - head_lo < 0.6 * (hi - lo),
+            "{id}: the head rolls as much as the body"
+        );
+    }
 }

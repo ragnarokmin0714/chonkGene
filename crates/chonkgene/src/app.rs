@@ -295,7 +295,7 @@ impl App {
         for species in Species::ALL {
             let model =
                 builtin::load(species.id()).map_err(|e| format!("{}: {e}", species.id()))?;
-            let quad = chonkgene_render::skin::quad(species.id())
+            let quad = chonkgene_render::skin::mesh_model(species.id())
                 .ok()
                 .map(|(m, _)| Arc::new(m));
             kinds.insert(

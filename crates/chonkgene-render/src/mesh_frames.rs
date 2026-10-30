@@ -25,7 +25,8 @@ use crate::gpu::Gpu;
 use crate::mesh::{Mesh, bake};
 use crate::mesh_gpu::MeshCanvas;
 use crate::raymarch::PPU;
-use crate::skin::{Affine, Skeleton, Walk};
+use crate::skin::{Affine, Skeleton};
+use crate::waddle::Mover;
 use crate::{key_for, sleep_overlay};
 
 /// The canvas, world units: wider than an upright pet's, for a body lying
@@ -66,7 +67,7 @@ pub struct MeshRenderer {
     pixmap: Pixmap,
     /// The picture that last arrived from the GPU.
     base: Pixmap,
-    walk: Walk,
+    walk: Mover,
     /// The pose being worked out now, the one sent to the GPU, and the one
     /// in the picture shown (hits and the bubble go by that).
     bones: Vec<Affine>,
@@ -95,7 +96,7 @@ impl MeshRenderer {
         coat: usize,
     ) -> Option<Self> {
         let sk = Skeleton::new(&model);
-        let walk = Walk::new(&sk, 1.0).ok()?;
+        let walk = Mover::new(&sk, 1.0, &model).ok()?;
         let (w, h) = pixel_size(scale);
         let bones = sk.pose(&[]);
         let baking = Some(spawn_bake(&model, &sk, coat, chonk));
@@ -230,7 +231,11 @@ impl MeshRenderer {
         self.draw(params, Expression::Asleep, Look::Asleep);
         // The bubble and the z move every frame, over the picture shown.
         self.pixmap.data_mut().copy_from_slice(self.base.data());
-        let nose = self.project_on(self.model.part("nose"), V3::ZERO);
+        // The bubble hangs off the nose, or the beak or bill of a bird.
+        let nose = ["nose", "beak", "bill"]
+            .iter()
+            .find_map(|n| self.model.part(n));
+        let nose = self.project_on(nose, V3::ZERO);
         sleep_overlay(
             &mut self.pixmap,
             nose,

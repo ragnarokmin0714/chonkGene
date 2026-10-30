@@ -53,6 +53,28 @@ impl Affine {
 /// Four-legged models for the spike, by species id.
 pub const QUAD_SPECIES: [&str; 4] = ["shiba", "fox", "munchkin", "fold"];
 
+/// Two-legged (bird) models for the skinned mesh, by species id.
+pub const BIPED_SPECIES: [&str; 3] = ["chick", "duck", "owl"];
+
+/// A skinned-mesh model of any species that has one: four-legged
+/// ([`quad`]) or a bird ([`biped`]).
+pub fn mesh_model(id: &str) -> Result<(Model, Skeleton), String> {
+    quad(id).or_else(|_| biped(id))
+}
+
+/// A bird's model (`chick`, `duck`, `owl`) and its skeleton.
+pub fn biped(id: &str) -> Result<(Model, Skeleton), String> {
+    let src = match id {
+        "chick" => include_str!("../../../assets/species/chick/biped.ron"),
+        "duck" => include_str!("../../../assets/species/duck/biped.ron"),
+        "owl" => include_str!("../../../assets/species/owl/biped.ron"),
+        _ => return Err(format!("no two-legged model {id:?}")),
+    };
+    let model = Model::parse(src, builtin::POSES).map_err(|e| e.to_string())?;
+    let sk = Skeleton::new(&model);
+    Ok((model, sk))
+}
+
 /// A four-legged model (`shiba`, `fox`, `munchkin`, `fold`) and its skeleton.
 pub fn quad(id: &str) -> Result<(Model, Skeleton), String> {
     let src = match id {
@@ -156,13 +178,13 @@ impl Skeleton {
 
 /// A damped spring: `x` chases `target`, shaken by `push` (an acceleration).
 #[derive(Clone, Copy, Debug, Default)]
-struct Spring {
-    x: f32,
-    v: f32,
+pub(crate) struct Spring {
+    pub x: f32,
+    pub v: f32,
 }
 
 impl Spring {
-    fn step(&mut self, target: f32, push: f32, hz: f32, damping: f32, dt: f32) -> f32 {
+    pub fn step(&mut self, target: f32, push: f32, hz: f32, damping: f32, dt: f32) -> f32 {
         let w = std::f32::consts::TAU * hz;
         let a = -w * w * (self.x - target) - 2.0 * damping * w * self.v + push;
         self.v += a * dt;
@@ -196,11 +218,11 @@ const BOB: f32 = 0.02;
 const ROLL: f32 = 3.0;
 const TWIST: f32 = 4.0;
 /// How far the pet turns side-on while walking, and at rest (toward you).
-const WALK_YAW: f32 = 72.0;
-const REST_YAW: f32 = 28.0;
+pub(crate) const WALK_YAW: f32 = 72.0;
+pub(crate) const REST_YAW: f32 = 28.0;
 /// Sitting, it turns almost to face you, so the tails fanned out behind it
 /// show on both sides of its head.
-const SIT_YAW: f32 = 8.0;
+pub(crate) const SIT_YAW: f32 = 8.0;
 
 /// Sitting: the body tips back this far (degrees) about the front paws,
 /// which brings the bottom down onto the floor; the hind legs fold

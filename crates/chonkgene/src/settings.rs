@@ -374,7 +374,7 @@ fn setup(
     let mut kinds = HashMap::new();
     for s in Species::ALL {
         let model = builtin::load(s.id()).map_err(|e| e.to_string())?;
-        let quad = chonkgene_render::skin::quad(s.id())
+        let quad = chonkgene_render::skin::mesh_model(s.id())
             .ok()
             .map(|(m, _)| Arc::new(m));
         kinds.insert(

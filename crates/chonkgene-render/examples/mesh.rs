@@ -16,7 +16,8 @@ use chonkgene_render::gpu::Gpu;
 use chonkgene_render::mesh::bake;
 use chonkgene_render::mesh_gpu::MeshCanvas;
 use chonkgene_render::raymarch;
-use chonkgene_render::skin::{Skeleton, Walk, quad};
+use chonkgene_render::skin::{Skeleton, mesh_model};
+use chonkgene_render::waddle::Mover;
 use chonkgene_rig::math::v3;
 use chonkgene_rig::{Layer, Look, Model, Pose, PoseId, Scene};
 use tiny_skia::{Color, IntSize, Pixmap, PixmapPaint, Transform};
@@ -29,7 +30,7 @@ const PPU: f32 = 58.0;
 
 /// What the pet does at time `t`: whether it walks, which way it faces;
 /// it may also poke or sit the walker.
-type Script = fn(f32, &mut Walk) -> (bool, f32);
+type Script = fn(f32, &mut Mover) -> (bool, f32);
 
 const WALK: (f32, Script) = (7.4, |t, w| {
     if (t - 5.6).abs() < 0.01 {
@@ -50,7 +51,7 @@ fn main() {
         std::process::exit(2);
     };
     let scale: f32 = args.get(3).and_then(|s| s.parse().ok()).unwrap_or(1.0);
-    let (model, sk) = quad(id).unwrap_or_else(|e| panic!("{e}"));
+    let (model, sk) = mesh_model(id).unwrap_or_else(|e| panic!("{e}"));
     let coat = args
         .get(4)
         .map(|c| model.coat(c).unwrap_or_else(|| panic!("no coat {c:?}")))
@@ -108,7 +109,7 @@ fn run(
     let mut canvas = MeshCanvas::new(&gpu, &mesh, w, h, scale);
     let face = Scene::posed(model, coat, 0.33, &Pose::default(), Look::Open, Layer::All);
     let mut frame = Pixmap::new(w, h).expect("frame");
-    let mut walker = Walk::new(sk, 1.0).expect("walk");
+    let mut walker = Mover::new(sk, 1.0, model).expect("walk");
     let mut x = 0.0f32;
     let mut wall = 0.0f64;
     let mut gpu_secs = Vec::new();
@@ -119,7 +120,7 @@ fn run(
         let mut joints = Vec::new();
         for _ in 0..2 {
             joints = walker.step(0.5 / FPS, walking, facing);
-            x += WALK_SPEED * scale * walker.speed * facing * 0.5 / FPS;
+            x += WALK_SPEED * scale * walker.speed() * facing * 0.5 / FPS;
         }
         let bones = sk.pose(&joints);
         let start = Instant::now();

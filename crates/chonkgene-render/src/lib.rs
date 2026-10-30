@@ -20,6 +20,7 @@ pub mod skin;
 mod sprite_frames;
 pub mod sprites;
 pub mod text;
+pub mod waddle;
 
 use std::sync::{Arc, OnceLock};
 
