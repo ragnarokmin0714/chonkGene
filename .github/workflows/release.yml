@@ -69,10 +69,12 @@ jobs:
             tar -C pkg -czf "$name.tar.gz" chonkGene
           fi
           ls -la chonkGene-*
+      # Only handed to the publish job; the release keeps the files.
       - uses: actions/upload-artifact@v7
         with:
           name: ${{ matrix.platform }}
           path: chonkGene-*
+          retention-days: 1
 
   publish:
     needs: build

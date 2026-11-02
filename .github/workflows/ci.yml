@@ -70,7 +70,9 @@ jobs:
           cargo install cargo-zigbuild --locked
           cargo zigbuild --release --locked -p chonkgene --target ${{ matrix.target }}.2.31
           cp target/${{ matrix.target }}/release/chonkgene ${{ matrix.file }}
+      # Test builds for trying a push: only the latest few matter.
       - uses: actions/upload-artifact@v7
         with:
           name: ${{ matrix.file }}
           path: ${{ matrix.file }}
+          retention-days: 14
