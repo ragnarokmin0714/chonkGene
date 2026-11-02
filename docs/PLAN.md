@@ -736,6 +736,10 @@ Roger: the Fold's tail sat oddly, pets slept standing, eating had no motion of i
 - **The Fold's tail** now comes out of the middle of the rump, held low behind and curving up at the end. Tail swish is shared between turning about z (a tail held up) and the vertical (one held out behind), from which way the tail's root points, so a tail held out behind sways too.
 - A frame's readback now tells "still mapping" from "failed", and waiting polls again for a moment before giving up (two threads polling one device could make a waited-for frame look lost).
 
+### Queued (2026-11-02)
+
+1. **The GPU check report in English.** `chonkgene --gpu-check` (`crates/chonkgene-render/src/gpu_check.rs`, also `--example gpu`) writes `report.txt` in Chinese (27 lines carry Chinese text: headings, the per-species mesh lines with the species' Chinese names, units and notes). Roger asked for it in English: write every line of the report in English (species by their English names), keep the numbers and the layout, and update anything that reads the report back (tests, the issue #1 notes) to match.
+
 ### Phase 1: Shiba prototype (feel) — `v0.1.0`
 
 - The art pipeline (§3.3) works end to end for one Shiba, with placeholder art.
