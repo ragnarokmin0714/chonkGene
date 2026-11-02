@@ -872,3 +872,187 @@ fn a_mesh_pet_sits_down_after_standing_about() {
         "standing {standing} px tall, after 3 s still {sitting} px"
     );
 }
+
+/// The closest any drawn pixel comes to each edge of the picture (left,
+/// top, right, bottom), pixels; full size if nothing is drawn.
+fn margins(pm: &Pixmap) -> [u32; 4] {
+    let (w, h) = (pm.width(), pm.height());
+    let d = pm.data();
+    let mut m = [w, h, w, h];
+    for y in 0..h {
+        for x in 0..w {
+            if d[((y * w + x) * 4 + 3) as usize] > 8 {
+                m[0] = m[0].min(x);
+                m[1] = m[1].min(y);
+                m[2] = m[2].min(w - 1 - x);
+                m[3] = m[3].min(h - 1 - y);
+            }
+        }
+    }
+    m
+}
+
+/// Roger saw the fox's tails cut off at the edge of its window: no pet
+/// reaches the left, top or right edge of its picture, whatever it does.
+/// (Along the bottom the faint edge of the shadow may touch.)
+#[test]
+fn no_mesh_pet_is_cut_off_by_the_edge_of_its_picture() {
+    use chonkgene_core::anim::{Act, Animator, Expression};
+    for id in QUAD_SPECIES.iter().chain(&BIPED_SPECIES) {
+        let Some(mut r) = app_renderer(id) else {
+            eprintln!("skipped: no GPU");
+            return;
+        };
+        let mut a = Animator::new(1, 0.33, 0.0).with_pops(false);
+        let mut worst = [u32::MAX; 3];
+        let mut what = [""; 3];
+        let mut run = |a: &mut Animator, secs: f32, doing: &'static str, e: Expression| {
+            for _ in 0..(secs * 10.0) as usize {
+                a.step(0.1);
+                r.render(&a.params(), e);
+                r.finish();
+                let m = margins(r.pixmap());
+                for i in 0..3 {
+                    if m[i] < worst[i] {
+                        (worst[i], what[i]) = (m[i], doing);
+                    }
+                }
+            }
+        };
+        run(&mut a, 1.0, "standing", Expression::Neutral);
+        a.walking = true;
+        run(&mut a, 1.5, "walking right", Expression::Neutral);
+        a.facing = -1.0;
+        run(&mut a, 1.5, "turning and walking left", Expression::Neutral);
+        a.pace = 4.0;
+        a.facing = 1.0;
+        run(&mut a, 1.0, "zoomies", Expression::Neutral);
+        (a.walking, a.pace) = (false, 1.0);
+        run(&mut a, 3.0, "sitting down", Expression::Neutral);
+        a.cheer();
+        run(&mut a, 1.5, "hopping", Expression::Happy);
+        for g in [Act::Stretch, Act::Yawn, Act::Wave] {
+            a.gesture(g);
+            run(&mut a, 2.0, "a gesture", Expression::Neutral);
+        }
+        a.facing = -1.0;
+        run(&mut a, 2.0, "turning sitting", Expression::Neutral);
+        run(&mut a, 3.0, "lying down", Expression::Asleep);
+        for (i, side) in ["left", "top", "right"].iter().enumerate() {
+            assert!(
+                worst[i] >= 3,
+                "{id}: {} px from the {side} edge, {}",
+                worst[i],
+                what[i]
+            );
+        }
+    }
+}
+
+/// Roger saw pets stop dead mid-walk. The window now slows to a stop
+/// (chonkgene-core `Body`) as the legs do: walking on and coming to a stop,
+/// a paw on the floor stays put.
+#[test]
+fn a_paw_stays_planted_while_the_pet_slows_to_a_stop() {
+    use chonkgene_core::motion::{Area, Body, Motion};
+    use chonkgene_core::terrain::Terrain;
+    let area = Area {
+        x: 0.0,
+        y: 0.0,
+        w: 4000.0,
+        h: 1000.0,
+    };
+    let terrain = Terrain::flat(area);
+    for id in QUAD_SPECIES.iter().chain(&BIPED_SPECIES) {
+        let (model, sk) = mesh_model(id).unwrap();
+        let (leg, sole) = match sk.bone("leg_l") {
+            Some(leg) => {
+                let hip = sk.pivots[leg];
+                (leg, v3(hip.x, -1.05, hip.z + 0.1))
+            }
+            None => (sk.bone("leg_fl").unwrap(), v3(0.3, -1.05, 0.5)),
+        };
+        let mut walk = Mover::new(&sk, 1.0, &model).unwrap();
+        let mut body = Body::on_ground(&terrain, 100.0, (261.0, 192.0), 8.0);
+        let dt = 1.0 / 60.0;
+        let mut track = Vec::new();
+        for f in 0..240 {
+            // Off at once, told to stop after two seconds.
+            body.motion = if f < 120 { Motion::Walk } else { Motion::Idle };
+            body.step(dt, &terrain);
+            let joints = walk.step(dt, body.motion == Motion::Walk, 1.0);
+            // Till both the window and the legs stand still (turning to
+            // face you after, the paws pivot on the spot).
+            if f >= 60 && (body.moving_on() || walk.speed() > 0.0) {
+                let p: V3 = sk.pose(&joints)[leg].apply(sole);
+                track.push((body.pos.0 + p.x * PPU, p.y));
+            }
+        }
+        let low = track.iter().map(|t| t.1).fold(f32::MAX, f32::min);
+        let mut worst = 0.0f32;
+        let mut run: Vec<f32> = Vec::new();
+        for &(x, y) in track.iter().chain([(0.0, f32::MAX)].iter()) {
+            if y < low + 0.02 {
+                run.push(x);
+            } else {
+                if run.len() > 3 {
+                    let (a, b) = run
+                        .iter()
+                        .fold((f32::MAX, f32::MIN), |(a, b), &x| (a.min(x), b.max(x)));
+                    worst = worst.max(b - a);
+                }
+                run.clear();
+            }
+        }
+        eprintln!("{id}: a planted paw slid at most {worst:.2} px");
+        assert!(worst < 3.0, "{id}: a planted paw slid {worst:.1} px");
+    }
+}
+
+/// Roger hardly saw pets sit: every gesture stood them up. A sitting pet
+/// yawns sitting; a stretch (a play bow) still stands it up.
+#[test]
+fn a_sitting_pet_yawns_sitting_but_stands_to_stretch() {
+    use chonkgene_core::anim::{Act, Expression, PoseParams, gesture_secs};
+    let Some(mut r) = app_renderer("shiba") else {
+        eprintln!("skipped: no GPU");
+        return;
+    };
+    let tall = |pm: &Pixmap| {
+        let w = pm.width() as usize;
+        let d = pm.data();
+        let rows: Vec<usize> = (0..pm.height() as usize)
+            .filter(|y| (0..w).any(|x| d[(y * w + x) * 4 + 3] > 200))
+            .collect();
+        rows.last().unwrap() - rows[0]
+    };
+    let mut clock = 0.0;
+    let mut hold = |r: &mut chonkgene_render::MeshRenderer, act: Act, secs: f32| {
+        let mut least = usize::MAX;
+        for _ in 0..(secs * 30.0) as usize {
+            clock += 1.0 / 30.0;
+            let p = PoseParams {
+                clock,
+                act,
+                ..Default::default()
+            };
+            r.render(&p, Expression::Neutral);
+            r.finish();
+            least = least.min(tall(r.pixmap()));
+        }
+        least
+    };
+    hold(&mut r, Act::Rest, 3.0);
+    let sitting = hold(&mut r, Act::Rest, 0.5);
+    let yawning = hold(&mut r, Act::Yawn, gesture_secs(Act::Yawn).unwrap());
+    hold(&mut r, Act::Rest, 2.0);
+    let stretching = hold(&mut r, Act::Stretch, gesture_secs(Act::Stretch).unwrap());
+    assert!(
+        yawning + 1 >= sitting,
+        "yawning, {yawning} px tall against {sitting} sitting"
+    );
+    assert!(
+        stretching + 6 < sitting,
+        "stretching, still {stretching} px tall against {sitting} sitting"
+    );
+}

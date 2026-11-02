@@ -209,6 +209,8 @@ impl State {
         match msg {
             Msg::Settings(s) => {
                 let _ = store::save(&self.data.settings(), &s);
+                // The limit may have sent pets to rest or called them out.
+                let _ = store::save(&self.data.pets(), &self.pets);
             }
             Msg::Pet(p) => {
                 if let Some(old) = self.pets.pets.iter_mut().find(|o| o.id == p.id) {
@@ -531,6 +533,13 @@ fn setup(
     });
     on!(on_desktop_toggled, |ui, st, v: bool| {
         edit(&ui, st, |p| p.on_desktop = v);
+        // Called out with the desktop full: the limit makes room (the pet
+        // process raises its own the same way).
+        let out = st.pets.out() as u32;
+        if out > st.settings.on_desktop {
+            st.settings.on_desktop = out;
+            ui.set_desktop_limit(out.min(i32::MAX as u32) as i32);
+        }
     });
     on!(on_release, |ui, st| {
         let Some(id) = st.selected else { return };
@@ -570,6 +579,14 @@ fn setup(
     on!(on_desktop_limit_changed, |ui, st, v: i32| {
         st.settings.on_desktop = v.max(1) as u32;
         ui.set_desktop_limit(v.max(1));
+        // Pets go to rest or come out at once, here as on the desktop.
+        let cap = st.settings.on_desktop;
+        if st.pets.fit_to(cap) {
+            ui.set_pets(pet_rows(st));
+            if let Some(p) = st.pet() {
+                ui.set_on_desktop(p.on_desktop);
+            }
+        }
         st.send_settings();
     });
     on!(on_open_folder, |_ui, st| {

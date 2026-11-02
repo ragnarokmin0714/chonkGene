@@ -108,6 +108,19 @@ struct Bubble {
     pixmap: Pixmap,
     until: f64,
     placed: (i32, i32),
+    /// Where it hangs from on the pet's picture (the top of the head),
+    /// eased toward it: the head bobs with every step, and a bubble that
+    /// followed each bob would shake.
+    anchor: (f32, f32),
+}
+
+/// How quickly a bubble follows the head about, seconds (time constant).
+const BUBBLE_EASE: f32 = 0.3;
+
+/// A bubble's anchor `dt` seconds on, easing from `at` toward the head.
+fn ease_bubble(at: (f32, f32), head: (f32, f32), dt: f32) -> (f32, f32) {
+    let k = 1.0 - (-dt / BUBBLE_EASE).exp();
+    (at.0 + (head.0 - at.0) * k, at.1 + (head.1 - at.1) * k)
 }
 
 struct Pet {
@@ -325,6 +338,8 @@ impl App {
             })
             .unwrap_or_default();
         pets.sanitise();
+        // Saves from before the limit moved pets (more out than it allows).
+        let fitted = pets.out() > settings.on_desktop as usize && pets.fit_to(settings.on_desktop);
         for note in notes {
             eprintln!("{note}");
         }
@@ -333,7 +348,7 @@ impl App {
             data,
             settings,
             store: pets,
-            dirty: false,
+            dirty: fitted,
             kinds,
             lines: Lines::zh_tw()?,
             bubble_face: Face::bubble(),
@@ -633,6 +648,12 @@ impl App {
                 self.open_settings(None);
             }
             Msg::Settings(s) => {
+                // 「同時在桌面上的寵物」 sends pets to rest or calls them out
+                // (the settings window does the same to its list).
+                if s.on_desktop != self.settings.on_desktop {
+                    self.collect_affinity();
+                    self.dirty |= self.store.fit_to(s.on_desktop);
+                }
                 self.settings = s;
                 if let Err(e) = store::save(&self.data.settings(), &self.settings) {
                     eprintln!("{e}");
@@ -652,6 +673,15 @@ impl App {
                 save.set_affinity(&affinity);
                 let save = save.clone();
                 self.dirty = true;
+                // Called out by hand with the desktop full: the limit makes
+                // room (the settings window raises its own the same way).
+                let out = self.store.out() as u32;
+                if out > self.settings.on_desktop {
+                    self.settings.on_desktop = out;
+                    if let Err(e) = store::save(&self.data.settings(), &self.settings) {
+                        eprintln!("{e}");
+                    }
+                }
                 if let Some(i) = self.pets.iter().position(|p| p.save.id == save.id) {
                     let resized = (self.pets[i].save.size - save.size).abs() > 1e-3;
                     if resized {
@@ -1103,7 +1133,11 @@ impl Pet {
             return;
         };
         let size = (pixmap.width(), pixmap.height());
-        let pos = self.bubble_pos(ctx, size);
+        let anchor = self
+            .bubble
+            .as_ref()
+            .map_or_else(|| self.renderer.anchor(), |b| b.anchor);
+        let pos = self.bubble_pos(ctx, size, anchor);
         let until = ctx.world.now + 2.4 + 0.12 * text.chars().count() as f64;
         let reuse = self
             .bubble
@@ -1129,6 +1163,7 @@ impl Pet {
             pixmap,
             until,
             placed: pos,
+            anchor,
         };
         if let Err(e) = b.presenter.present(ctx.shared, &b.pixmap) {
             eprintln!("present failed: {e}");
@@ -1145,11 +1180,13 @@ impl Pet {
         }
     }
 
-    fn bubble_pos(&self, ctx: &Ctx, size: (u32, u32)) -> (i32, i32) {
-        let (ax, ay) = self.renderer.anchor();
+    /// Where a bubble of `size` goes, hanging from `anchor` on the pet's
+    /// picture.
+    fn bubble_pos(&self, ctx: &Ctx, size: (u32, u32), anchor: (f32, f32)) -> (i32, i32) {
+        let (ax, ay) = (anchor.0.round() as i32, anchor.1.round() as i32);
         let (x, y) = (
-            self.placed.0 + ax as i32 - size.0 as i32 / 2,
-            self.placed.1 + ay as i32 - size.1 as i32,
+            self.placed.0 + ax - size.0 as i32 / 2,
+            self.placed.1 + ay - size.1 as i32,
         );
         let a = ctx.area;
         (
@@ -1269,17 +1306,23 @@ impl Pet {
                 if let Some((ledge, x)) = above {
                     self.body.leap(x, ledge.y);
                     self.anim.land(500.0);
-                } else {
-                    self.body.motion = if self.body.motion == Motion::Idle {
-                        Motion::Walk
-                    } else {
-                        Motion::Idle
-                    };
+                } else if self.body.motion == Motion::Idle {
+                    // Off for a walk, either way. (Not on stopping: it
+                    // slows down going the way it went.)
+                    self.body.motion = Motion::Walk;
                     if self.rng.bool() {
                         self.body.facing = -self.body.facing;
                     }
+                } else {
+                    self.body.motion = Motion::Idle;
                 }
-                self.switch_at = t + 3.0 + f64::from(self.rng.f32()) * 5.0;
+                // Walks of 3–7 s; rests a little longer (4–11 s), long
+                // enough to sit down and look about.
+                self.switch_at = t + if self.body.motion == Motion::Walk {
+                    3.0 + f64::from(self.rng.f32()) * 4.0
+                } else {
+                    4.0 + f64::from(self.rng.f32()) * 7.0
+                };
             }
         }
 
@@ -1342,13 +1385,15 @@ impl Pet {
                 self.bubble = None;
             } else {
                 let size = (b.pixmap.width(), b.pixmap.height());
-                let pos = self.bubble_pos(ctx, size);
-                if let Some(b) = &mut self.bubble
-                    && pos != b.placed
-                {
-                    b.window
-                        .set_outer_position(PhysicalPosition::new(pos.0, pos.1));
-                    b.placed = pos;
+                let anchor = ease_bubble(b.anchor, self.renderer.anchor(), dt);
+                let pos = self.bubble_pos(ctx, size, anchor);
+                if let Some(b) = &mut self.bubble {
+                    b.anchor = anchor;
+                    if pos != b.placed {
+                        b.window
+                            .set_outer_position(PhysicalPosition::new(pos.0, pos.1));
+                        b.placed = pos;
+                    }
                 }
             }
         }
@@ -1736,8 +1781,13 @@ impl ApplicationHandler<UserEvent> for App {
             *frames += 1;
             // A pet blending between poses on the GPU, or with a frame on
             // its way, needs frames to show it, even when its animation is
-            // otherwise at rest.
-            let fps = p.anim.fps(p.moving()).max(p.renderer.min_fps());
+            // otherwise at rest; so does one slowing to a stop.
+            let gliding = if p.body.moving_on() { 30 } else { 0 };
+            let fps = p
+                .anim
+                .fps(p.moving())
+                .max(p.renderer.min_fps())
+                .max(gliding);
             p.next = now + Duration::from_secs_f64(1.0 / f64::from(fps));
         }
 
@@ -1787,6 +1837,30 @@ mod tests {
         );
         // Unsaved changes do make it due: save straight away.
         assert_eq!(wake_at([Some(poll_at), pending_save(true, stale)]), stale);
+    }
+
+    /// Roger saw the bubble shake along with a walking pet: it follows the
+    /// head's slow moves (sitting down) but not each step's bob.
+    #[test]
+    fn a_bubble_rides_out_the_bob_of_each_step() {
+        let dt = 1.0 / 30.0;
+        // The top of the head bobs 3 px at two steps a second, two beats
+        // a step.
+        let head = |t: f32| (130.0, 40.0 + 3.0 * (t * std::f32::consts::TAU * 4.0).sin());
+        let mut at = head(0.0);
+        let (mut low, mut high) = (f32::MAX, f32::MIN);
+        for f in 1..120 {
+            at = ease_bubble(at, head(f as f32 * dt), dt);
+            if f > 60 {
+                (low, high) = (low.min(at.1), high.max(at.1));
+            }
+        }
+        assert!(high - low < 1.5, "the bubble shook {:.1} px", high - low);
+        // Sitting down lowers the head for good: the bubble follows.
+        for _ in 0..60 {
+            at = ease_bubble(at, (130.0, 60.0), dt);
+        }
+        assert!((at.1 - 60.0).abs() < 1.0, "the bubble stayed at {}", at.1);
     }
 
     #[test]

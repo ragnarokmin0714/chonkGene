@@ -219,6 +219,40 @@ pub struct Pets {
 }
 
 impl Pets {
+    /// How many are out on the desktop (not resting in 寵物窩).
+    pub fn out(&self) -> usize {
+        self.pets.iter().filter(|p| p.on_desktop).count()
+    }
+
+    /// Make as many pets as `cap` allows be out on the desktop: over it, the
+    /// last ones out go to rest in 寵物窩; under it, resting ones come out,
+    /// first adopted first. True if any pet moved. (Both processes run it on
+    /// a change of 「同時在桌面上的寵物」, so their lists agree.)
+    pub fn fit_to(&mut self, cap: u32) -> bool {
+        let cap = cap as usize;
+        let mut out = self.out();
+        let mut moved = false;
+        for p in self.pets.iter_mut().rev() {
+            if out <= cap {
+                break;
+            }
+            if p.on_desktop {
+                p.on_desktop = false;
+                (out, moved) = (out - 1, true);
+            }
+        }
+        for p in &mut self.pets {
+            if out >= cap {
+                break;
+            }
+            if !p.on_desktop {
+                p.on_desktop = true;
+                (out, moved) = (out + 1, true);
+            }
+        }
+        moved
+    }
+
     pub fn sanitise(&mut self) {
         self.pets.retain(|p| p.species().is_some());
         for p in &mut self.pets {
@@ -277,6 +311,40 @@ mod tests {
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).unwrap();
         dir
+    }
+
+    /// Roger changed 「同時在桌面上的寵物」 and nothing happened: a pet
+    /// adopted over the limit rested in 寵物窩, and raising the limit left
+    /// it there. The limit now moves pets both ways.
+    #[test]
+    fn the_desktop_limit_sends_pets_to_rest_and_calls_them_back() {
+        let mut rng = fastrand::Rng::with_seed(1);
+        let mut pets = Pets::default();
+        for id in 1..=7 {
+            let mut p =
+                PetSave::adopt(id, chonkgene_core::species::Species::Shiba, "red", &mut rng);
+            p.on_desktop = id <= 6;
+            pets.pets.push(p);
+        }
+        let out = |p: &Pets| -> Vec<u64> {
+            p.pets
+                .iter()
+                .filter(|p| p.on_desktop)
+                .map(|p| p.id)
+                .collect()
+        };
+        assert!(pets.fit_to(7));
+        assert_eq!(out(&pets), [1, 2, 3, 4, 5, 6, 7]);
+        assert!(pets.fit_to(3));
+        assert_eq!(out(&pets), [1, 2, 3]);
+        assert!(!pets.fit_to(3));
+        // One rested by hand comes back out before the later ones.
+        pets.pets[1].on_desktop = false;
+        assert!(pets.fit_to(4));
+        assert_eq!(out(&pets), [1, 2, 3, 4]);
+        // A limit over the number of pets brings them all out.
+        assert!(pets.fit_to(10));
+        assert_eq!(pets.out(), 7);
     }
 
     #[test]

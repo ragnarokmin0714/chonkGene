@@ -12,6 +12,8 @@
     species: "fox",
     // Nine tails make a lot of surface: bake it coarser than the Shiba.
     bake_cell: 0.03,
+    // The fan of tails reaches out past the usual picture (4.5 x 3.3).
+    canvas: Some((5.8, 3.8)),
     slots: ["fur", "light", "ear", "ink", "blush", "mark", "tip", "tailmid", "tailtip", "sock", "rope", "bell", "iris"],
     coats: [
         (name: "white", colors: {

@@ -214,9 +214,13 @@ const SWING: f32 = 20.0;
 const LEG_REF: f32 = 0.59;
 const DUTY: f32 = 0.62;
 const LIFT: f32 = 0.07;
-/// How quickly the walk gets going or stops, full pace a second. The
-/// window starts and stops at once, so the legs must not lag far behind.
-pub(crate) const SPEED_UP: f32 = 6.0;
+/// How quickly the walk gets going or stops at the usual pace, full pace a
+/// second: as quickly as the window does (`chonkgene_core::motion`), so a
+/// planted paw stays put while the pet slows down.
+pub(crate) const SPEED_UP: f32 = 1.0 / chonkgene_core::motion::WALK_RAMP;
+/// Still slowing down faster than this (0 … 1), the pet keeps facing the way
+/// it goes rather than turning to you.
+pub(crate) const STILL_GOING: f32 = 0.3;
 /// How quickly the pet turns to face where it goes (spring hertz), at rest
 /// and walking: walking, the window already moves the new way, so the
 /// turn must be quick or the pet seems to slide backwards.
@@ -360,6 +364,9 @@ pub struct Walk {
     leg_len: f32,
     bones: Bones,
     n: usize,
+    /// Still on its way somewhere (walking, turning, sitting down, getting
+    /// up, a gesture): it needs smooth frames.
+    busy: bool,
 }
 
 struct Bones {
@@ -443,6 +450,7 @@ impl Walk {
                 chin: sk.bone("chin"),
             },
             n: sk.names.len(),
+            busy: false,
         })
     }
 
@@ -491,22 +499,30 @@ impl Walk {
         self.yaw.x
     }
 
+    /// Still on its way somewhere: walking, turning, sitting down or
+    /// getting up, or in a gesture.
+    pub fn busy(&self) -> bool {
+        self.busy
+    }
+
     /// Advance `dt` seconds, walking or standing, facing +1 (right) or −1
     /// (left); the joints for this frame.
     pub fn step(&mut self, dt: f32, walking: bool, facing: f32) -> Vec<Joint> {
         use std::f32::consts::{PI, TAU};
         let dt = dt.max(1e-4);
         let goal = if walking { 1.0 } else { 0.0 };
-        self.speed += (goal - self.speed).clamp(-dt * SPEED_UP, dt * SPEED_UP);
+        let ramp = dt * SPEED_UP * self.tempo.max(0.2);
+        self.speed += (goal - self.speed).clamp(-ramp, ramp);
         let s = self.speed;
         // Faster walking takes both quicker and longer steps.
         let (quicker, longer) = tempo_split(self.tempo);
         if s > 0.0 {
             self.phase = (self.phase + dt * STEP_HZ * (0.4 + 0.6 * s) * quicker).fract();
         }
+        let going = walking || s > STILL_GOING;
         let yaw = self.yaw.step(
             facing
-                * if walking {
+                * if going {
                     WALK_YAW
                 } else if self.sitting || self.lying {
                     SIT_YAW
@@ -514,7 +530,7 @@ impl Walk {
                     REST_YAW
                 },
             0.0,
-            if walking { TURN_HZ.1 } else { TURN_HZ.0 },
+            if going { TURN_HZ.1 } else { TURN_HZ.0 },
             1.0,
             dt,
         );
@@ -700,7 +716,12 @@ impl Walk {
             j[b.head].rot.x += 16.0 * lie;
             j[b.head].shift.y -= 0.06 * lie;
         }
-        if let Some(g) = self.gesture.filter(|_| s < 0.5 && sit < 0.5) {
+        // A yawn can be had sitting; the rest are done standing.
+        let sitting_ok = |g: &Gesture| g.act == chonkgene_core::anim::Act::Yawn;
+        if let Some(g) = self
+            .gesture
+            .filter(|g| s < 0.5 && (sit < 0.5 || sitting_ok(g)))
+        {
             use chonkgene_core::anim::Act;
             let e = g.e;
             match g.act {
@@ -740,6 +761,12 @@ impl Walk {
                 _ => {}
             }
         }
+        self.busy = s > 0.0
+            || self.gesture.is_some()
+            || self.yaw.v.abs() > 1.0
+            || self.look.v.abs() > 1.0
+            || self.sit.v.abs() > 0.02
+            || self.lie.v.abs() > 0.02;
         j
     }
 }

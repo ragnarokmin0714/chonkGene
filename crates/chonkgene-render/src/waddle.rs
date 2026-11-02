@@ -13,8 +13,8 @@ use chonkgene_rig::math::v3;
 use chonkgene_rig::{FLOOR, Model};
 
 use crate::skin::{
-    Gesture, Joint, MAX_SWING, REST_YAW, SIT_YAW, SPEED_UP, Skeleton, Spring, TURN_HZ, WALK_YAW,
-    Walk, bite, tempo_split,
+    Gesture, Joint, MAX_SWING, REST_YAW, SIT_YAW, SPEED_UP, STILL_GOING, Skeleton, Spring, TURN_HZ,
+    WALK_YAW, Walk, bite, tempo_split,
 };
 
 /// The pace the pet's window moves at, world units a second (60 px/s at
@@ -100,6 +100,14 @@ impl Mover {
         }
     }
 
+    /// Still on its way somewhere (see [`Walk::busy`]).
+    pub fn busy(&self) -> bool {
+        match self {
+            Self::Quad(w) => w.busy(),
+            Self::Biped(w) => w.busy(),
+        }
+    }
+
     pub fn yaw(&self) -> f32 {
         match self {
             Self::Quad(w) => w.yaw(),
@@ -151,6 +159,9 @@ pub struct Waddle {
     nod_amp: f32,
     hz: f32,
     n: usize,
+    /// Still on its way somewhere (walking, turning, sitting down, getting
+    /// up, a gesture): it needs smooth frames.
+    busy: bool,
 }
 
 impl Waddle {
@@ -198,6 +209,7 @@ impl Waddle {
             nod_amp: g.nod,
             hz,
             n: sk.names.len(),
+            busy: false,
         })
     }
 
@@ -232,20 +244,28 @@ impl Waddle {
         self.yaw.x
     }
 
+    /// Still on its way somewhere: walking, turning, sitting down or
+    /// getting up, or in a gesture.
+    pub fn busy(&self) -> bool {
+        self.busy
+    }
+
     /// Advance `dt` seconds, walking or standing, facing +1 (right) or −1
     /// (left); the joints for this frame.
     pub fn step(&mut self, dt: f32, walking: bool, facing: f32) -> Vec<Joint> {
         let dt = dt.max(1e-4);
         let goal = if walking { 1.0 } else { 0.0 };
-        self.speed += (goal - self.speed).clamp(-dt * SPEED_UP, dt * SPEED_UP);
+        let ramp = dt * SPEED_UP * self.tempo.max(0.2);
+        self.speed += (goal - self.speed).clamp(-ramp, ramp);
         let s = self.speed;
         let (quicker, longer) = tempo_split(self.tempo);
         if s > 0.0 {
             self.phase = (self.phase + dt * self.hz * (0.4 + 0.6 * s) * quicker).fract();
         }
+        let going = walking || s > STILL_GOING;
         let yaw = self.yaw.step(
             facing
-                * if walking {
+                * if going {
                     WALK_YAW
                 } else if self.sitting || self.lying {
                     SIT_YAW
@@ -253,7 +273,7 @@ impl Waddle {
                     REST_YAW
                 },
             0.0,
-            if walking { TURN_HZ.1 } else { TURN_HZ.0 },
+            if going { TURN_HZ.1 } else { TURN_HZ.0 },
             1.0,
             dt,
         );
@@ -364,7 +384,12 @@ impl Waddle {
             let y = self.chin.step(0.0, -acc - 0.02 * nod_acc, 4.0, 0.18, dt);
             j[i].shift = v3(0.0, y.clamp(-0.09, 0.09), 0.0);
         }
-        if let Some(g) = self.gesture.filter(|_| s < 0.5 && sit < 0.5) {
+        // A yawn can be had sitting; the rest are done standing.
+        let sitting_ok = |g: &Gesture| g.act == chonkgene_core::anim::Act::Yawn;
+        if let Some(g) = self
+            .gesture
+            .filter(|g| s < 0.5 && (sit < 0.5 || sitting_ok(g)))
+        {
             use chonkgene_core::anim::Act;
             let e = g.e;
             match g.act {
@@ -398,6 +423,12 @@ impl Waddle {
                 _ => {}
             }
         }
+        self.busy = s > 0.0
+            || self.gesture.is_some()
+            || self.yaw.v.abs() > 1.0
+            || self.look.v.abs() > 1.0
+            || self.sit.v.abs() > 0.02
+            || self.lie.v.abs() > 0.02;
         j
     }
 }

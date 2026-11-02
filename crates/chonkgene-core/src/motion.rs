@@ -7,6 +7,19 @@ use crate::terrain::{Ledge, Support, Terrain};
 
 const GRAVITY: f32 = 2400.0;
 const WALK_SPEED: f32 = 60.0;
+/// Seconds a walk takes to get going or to come to a stop at the usual
+/// pace (quicker at a faster one). The legs ramp the same way (chonkgene-
+/// render), so a planted paw stays put while the pet slows down.
+pub const WALK_RAMP: f32 = 0.5;
+
+/// How fast the pet goes over the ground, against full pace, a ramp `speed`
+/// (0 standing … 1 full pace) into a walk: the legs both step slower and
+/// swing shorter as they slow down, so ground speed falls faster than the
+/// ramp.
+pub fn gait(speed: f32) -> f32 {
+    let s = speed.clamp(0.0, 1.0);
+    s * (0.4 + 0.6 * s)
+}
 /// Landing slower than this stops instead of bouncing.
 const BOUNCE_MIN: f32 = 250.0;
 const BOUNCE_KEEP: f32 = 0.35;
@@ -50,6 +63,9 @@ pub struct Body {
     pub facing: f32,
     /// Walking speed multiplier (zoomies run faster).
     pub pace: f32,
+    /// How far into a walk, 0 standing … 1 full pace: walking ramps it up,
+    /// stopping ramps it down, and the pet keeps going until it is 0.
+    pub speed: f32,
     /// What the feet are on; none in the air.
     pub on: Option<Support>,
 }
@@ -71,6 +87,7 @@ impl Body {
             motion: Motion::Idle,
             facing: 1.0,
             pace: 1.0,
+            speed: 0.0,
             on: None,
         };
         if let Some(l) = terrain.floor_under(b.feet().0) {
@@ -105,11 +122,13 @@ impl Body {
         }
         self.pos = pos;
         self.motion = Motion::Held;
+        self.speed = 0.0;
         self.on = None;
     }
 
     pub fn release(&mut self) {
         self.motion = Motion::Fall;
+        self.speed = 0.0;
         self.on = None;
     }
 
@@ -124,7 +143,13 @@ impl Body {
             self.facing = self.vel.0.signum();
         }
         self.motion = Motion::Fall;
+        self.speed = 0.0;
         self.on = None;
+    }
+
+    /// Walking or slowing to a stop: the window is still going.
+    pub fn moving_on(&self) -> bool {
+        matches!(self.motion, Motion::Idle | Motion::Walk) && self.speed > 0.0
     }
 
     /// The desktop changed over `dt` seconds: a pet on a window that moved
@@ -152,9 +177,20 @@ impl Body {
         match self.motion {
             Motion::Held => None,
             Motion::Idle | Motion::Walk => {
-                if self.motion == Motion::Walk {
+                // Getting going and slowing down take a moment (quicker at
+                // a faster pace), rather than the window jumping to full
+                // speed or stopping dead.
+                let goal = if self.motion == Motion::Walk {
+                    1.0
+                } else {
+                    0.0
+                };
+                let ramp = dt * self.pace.max(0.2) / WALK_RAMP;
+                self.speed += (goal - self.speed).clamp(-ramp, ramp);
+                let vx = WALK_SPEED * self.pace * gait(self.speed) * self.facing;
+                if self.speed > 0.0 {
                     let was = self.pos.0;
-                    self.pos.0 += WALK_SPEED * self.pace * self.facing * dt;
+                    self.pos.0 += vx * dt;
                     if self.pos.0 <= left {
                         self.pos.0 = left;
                         self.facing = 1.0;
@@ -177,13 +213,9 @@ impl Body {
                     Some(l) => self.stand(&l),
                     None => {
                         // Walked off the end, or the window went away.
-                        let vx = if self.motion == Motion::Walk {
-                            WALK_SPEED * self.pace * self.facing
-                        } else {
-                            0.0
-                        };
                         self.vel = (vx, 0.0);
                         self.motion = Motion::Fall;
+                        self.speed = 0.0;
                         self.on = None;
                     }
                 }
@@ -277,12 +309,42 @@ mod tests {
         assert_eq!(b.on, Some(Support::Floor(0)));
     }
 
+    /// Roger saw pets walking along stop dead: a walk gets going and comes
+    /// to a stop over a moment, never jumping in speed.
+    #[test]
+    fn a_walk_eases_in_and_out_instead_of_stopping_dead() {
+        let t = flat();
+        let mut b = Body::on_ground(&t, 800.0, SIZE, FOOT);
+        b.motion = Motion::Walk;
+        let dt = 1.0 / 60.0;
+        let mut xs = vec![b.pos.0];
+        for f in 0..180 {
+            if f == 90 {
+                b.motion = Motion::Idle;
+            }
+            b.step(dt, &t);
+            xs.push(b.pos.0);
+        }
+        let v: Vec<f32> = xs.windows(2).map(|w| (w[1] - w[0]) / dt).collect();
+        let jump = v
+            .windows(2)
+            .map(|w| (w[1] - w[0]).abs())
+            .fold(0.0, f32::max);
+        assert!(jump < 8.0, "speed jumped {jump:.1} px/s in a frame");
+        assert!((v[80] - WALK_SPEED).abs() < 0.1, "full pace {}", v[80]);
+        // It carries on a little after being told to stop, then stands.
+        assert!(v[92] > 0.5 * WALK_SPEED, "{}", v[92]);
+        assert_eq!(v[90 + (60.0 * WALK_RAMP) as usize + 1], 0.0);
+        assert_eq!(b.speed, 0.0);
+    }
+
     #[test]
     fn walking_turns_around_at_the_edges() {
         let t = flat();
         let mut b = Body::on_ground(&t, 10.0, SIZE, FOOT);
         b.motion = Motion::Walk;
         b.facing = -1.0;
+        b.speed = 1.0;
         b.step(1.0, &t);
         assert_eq!(b.pos.0, 0.0);
         assert_eq!(b.facing, 1.0);

@@ -30,19 +30,21 @@ use crate::waddle::Mover;
 use crate::{key_for, sleep_overlay, snack_overlay};
 
 /// The canvas, world units: wider than an upright pet's, for a body lying
-/// along the floor and a fox's fan of tails.
+/// along the floor. A model may ask for more (`canvas` in its file: the
+/// fox's fan of tails).
 const UNITS: (f32, f32) = (4.5, 3.3);
 /// The longest step the walk takes at once, seconds: its springs stay
 /// steady however slowly frames come.
 const MAX_STEP: f32 = 1.0 / 60.0;
 /// Standing still doing nothing this long (seconds), a pet sits down.
-const IDLE_SIT: f32 = 1.5;
+const IDLE_SIT: f32 = 0.8;
 
-/// Pixel size of a pet on all fours at `scale` (1.0 = 100%).
-pub fn pixel_size(scale: f32) -> (u32, u32) {
+/// Pixel size of `model`'s picture at `scale` (1.0 = 100%).
+pub fn pixel_size(model: &Model, scale: f32) -> (u32, u32) {
+    let (w, h) = model.canvas.unwrap_or(UNITS);
     (
-        (UNITS.0 * PPU * scale).ceil() as u32,
-        (UNITS.1 * PPU * scale).ceil() as u32,
+        (w * PPU * scale).ceil() as u32,
+        (h * PPU * scale).ceil() as u32,
     )
 }
 
@@ -103,7 +105,7 @@ impl MeshRenderer {
     ) -> Option<Self> {
         let sk = Skeleton::new(&model);
         let walk = Mover::new(&sk, 1.0, &model).ok()?;
-        let (w, h) = pixel_size(scale);
+        let (w, h) = pixel_size(&model, scale);
         let bones = sk.pose(&[]);
         let baking = Some(spawn_bake(&model, &sk, coat, chonk));
         Some(Self {
@@ -213,9 +215,11 @@ impl MeshRenderer {
     }
 
     /// Frames a second this pet needs however still its animation is:
-    /// tails sway and bellies settle all the time, slowly at rest.
+    /// tails sway and bellies settle all the time, slowly at rest; turning,
+    /// sitting down, getting up and gestures move the whole pet and need
+    /// smooth frames.
     pub fn min_fps(&self) -> u32 {
-        if self.walk.speed() > 0.0 { 30 } else { 15 }
+        if self.walk.busy() { 30 } else { 15 }
     }
 
     /// Wait for the bake and for the frame on its way (tests, screenshots),
@@ -309,9 +313,11 @@ impl MeshRenderer {
             self.gesture = gesture_secs(params.act).map(|_| (params.act, params.clock));
         }
         // How it holds itself: asleep it lies down; resting a moment, or
-        // with a feeling on its face, it sits; a gesture is done standing.
+        // with a feeling on its face, it sits; a stretch, a wave or a snack
+        // is done standing (a glance or a yawn stays sitting).
         let asleep = expression == Expression::Asleep;
-        if walking || self.gesture.is_some() || asleep {
+        let standing = self.gesture.is_some_and(|(act, _)| act != Act::Yawn);
+        if walking || standing || asleep {
             self.rest_since = None;
         } else {
             self.rest_since.get_or_insert(params.clock);
@@ -320,12 +326,8 @@ impl MeshRenderer {
             .rest_since
             .is_some_and(|since| params.clock - since > IDLE_SIT);
         self.walk.lie(asleep && !walking);
-        self.walk.sit(
-            !walking
-                && !asleep
-                && self.gesture.is_none()
-                && (rested || expression != Expression::Neutral),
-        );
+        self.walk
+            .sit(!walking && !asleep && !standing && (rested || expression != Expression::Neutral));
         self.walk.look(match params.act {
             Act::LookLeft => 35.0,
             Act::LookRight => -35.0,
@@ -360,16 +362,18 @@ impl MeshRenderer {
         self.look = look;
         self.changed = false;
         // A walking pet's picture must keep up with its window, which moves
-        // every frame: its frames skip the budget, and if the last one is
-        // still on its way it is waited for rather than skipped (a skipped
-        // frame shows the legs standing still while the window slides on).
+        // every frame (slowing to a stop too): its frames skip the budget,
+        // and if the last one is still on its way it is waited for rather
+        // than skipped (a skipped frame shows the legs standing still while
+        // the window slides on).
+        let keep_up = walking || self.walk.speed() > 0.0;
         let mut arrived = self.collect(false);
         let pending = |r: &Self| r.live.as_ref().is_some_and(|l| l.canvas.pending());
-        if walking && pending(self) {
+        if keep_up && pending(self) {
             arrived |= self.collect(true);
         }
         if self.live.is_some() && !pending(self) {
-            self.send(walking);
+            self.send(keep_up);
         }
         arrived
     }
