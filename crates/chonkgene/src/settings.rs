@@ -318,7 +318,9 @@ fn show_pet(ui: &SettingsWindow, st: &mut State) {
         st.preview = Some(Preview {
             pet: p.id,
             renderer,
-            anim: Animator::new(p.id, p.chonk, species.waddle()).with_pops(pops),
+            anim: Animator::new(p.id, p.chonk, species.waddle())
+                .with_habits(species.habits())
+                .with_pops(pops),
         });
     }
 }

@@ -4,15 +4,18 @@
 //! `cargo run --release -p chonkgene-render --example mesh -- peek <species> <out dir>`
 //! ray-marches the model from a few angles, to check its shape.
 //!
-//! `... -- walk|sit <species> <out dir> [scale] [coat]` bakes the mesh, then
-//! writes `<mode>-<frame>.png` at 30 fps. `walk`: walking right, turning,
-//! walking left, stopping, and a poke in the belly. `sit`: standing,
-//! sitting down, sitting a while, getting up. It prints the bake time, the
-//! mesh size and what each frame cost.
+//! `... -- walk|sit|lie|look|<gesture> <species> <out dir> [scale] [coat]`
+//! bakes the mesh, then writes `<mode>-<frame>.png` at 30 fps. `walk`:
+//! walking right, turning, walking left, stopping, and a poke in the belly.
+//! `sit`: standing, sitting down, sitting a while, getting up. `lie`: lying
+//! down asleep and getting up. `look`: glances while sitting. A gesture
+//! (`eat`, `dig`, `scratch`, `groom`, `shake`, `preen`, `peck`, `flap`,
+//! `stretch`, `yawn`, `wave`) is played through once. It prints the bake
+//! time, the mesh size and what each frame cost.
 
 use std::time::Instant;
 
-use chonkgene_core::anim::Act;
+use chonkgene_core::anim::{Act, gesture_secs};
 use chonkgene_render::gpu::Gpu;
 use chonkgene_render::mesh::bake;
 use chonkgene_render::mesh_gpu::MeshCanvas;
@@ -31,54 +34,98 @@ const PPU: f32 = 58.0;
 
 /// What the pet does at time `t`: whether it walks, which way it faces;
 /// it may also poke or sit the walker.
-type Script = fn(f32, &mut Mover) -> (bool, f32);
+type Script = Box<dyn Fn(f32, &mut Mover) -> (bool, f32)>;
 
-const WALK: (f32, Script) = (7.4, |t, w| {
-    if (t - 5.6).abs() < 0.01 {
-        w.poke(2.0);
-    }
-    (t < 4.0, if t < 1.9 { 1.0 } else { -1.0 })
-});
-
-const SIT: (f32, Script) = (5.0, |t, w| {
-    w.sit((0.6..3.4).contains(&t));
-    (false, 1.0)
-});
-
-/// An idle gesture held at its middle for the whole run.
-fn held(act: Act) -> Script {
-    match act {
-        Act::Stretch => |_, w| {
-            w.gesture(Some(Gesture {
-                act: Act::Stretch,
-                e: 1.0,
-                t: 0.5,
-            }));
-            (false, 1.0)
-        },
-        Act::Yawn => |_, w| {
-            w.gesture(Some(Gesture {
-                act: Act::Yawn,
-                e: 1.0,
-                t: 0.5,
-            }));
-            (false, 1.0)
-        },
-        _ => |_, w| {
-            w.gesture(Some(Gesture {
-                act: Act::Wave,
-                e: 1.0,
-                t: 0.1,
-            }));
-            (false, 1.0)
-        },
-    }
+fn walk() -> (f32, Script) {
+    (
+        7.4,
+        Box::new(|t, w| {
+            if (t - 5.6).abs() < 0.01 {
+                w.poke(2.0);
+            }
+            (t < 4.0, if t < 1.9 { 1.0 } else { -1.0 })
+        }),
+    )
 }
+
+fn sit() -> (f32, Script) {
+    (
+        5.0,
+        Box::new(|t, w| {
+            w.sit((0.6..3.4).contains(&t));
+            (false, 1.0)
+        }),
+    )
+}
+
+fn lie() -> (f32, Script) {
+    (
+        5.0,
+        Box::new(|t, w| {
+            w.lie((0.3..4.0).contains(&t));
+            (false, 1.0)
+        }),
+    )
+}
+
+/// Glances left and right while sitting (the head turns toward you too).
+fn look() -> (f32, Script) {
+    (
+        4.0,
+        Box::new(|t, w| {
+            w.sit(true);
+            w.look(if t < 1.3 {
+                35.0
+            } else if t < 2.6 {
+                -35.0
+            } else {
+                0.0
+            });
+            (false, 1.0)
+        }),
+    )
+}
+
+/// A gesture from a second in, eased in and out over its length as the app
+/// does; sitting before it, and through it if it is done sitting.
+fn gesture(act: Act) -> (f32, Script) {
+    let secs = gesture_secs(act).expect("a gesture with a length");
+    (
+        secs + 1.8,
+        Box::new(move |t, w| {
+            let at = t - 1.0;
+            let on = (0.0..secs).contains(&at);
+            w.sit(if on { act.seated() } else { true });
+            w.gesture(on.then(|| Gesture {
+                act,
+                e: (std::f32::consts::PI * at / secs).sin().sqrt(),
+                t: at,
+            }));
+            (false, 1.0)
+        }),
+    )
+}
+
+const GESTURES: [(&str, Act); 11] = [
+    ("stretch", Act::Stretch),
+    ("yawn", Act::Yawn),
+    ("wave", Act::Wave),
+    ("eat", Act::Eat),
+    ("dig", Act::Dig),
+    ("scratch", Act::Scratch),
+    ("groom", Act::Groom),
+    ("shake", Act::Shake),
+    ("preen", Act::Preen),
+    ("peck", Act::Peck),
+    ("flap", Act::Flap),
+];
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let (Some(mode), Some(id), Some(out)) = (args.first(), args.get(1), args.get(2)) else {
-        eprintln!("usage: mesh peek|walk|sit <species> <out dir> [scale] [coat]");
+        eprintln!(
+            "usage: mesh peek|walk|sit|lie|look|<gesture> <species> <out dir> [scale] [coat]"
+        );
         std::process::exit(2);
     };
     let scale: f32 = args.get(3).and_then(|s| s.parse().ok()).unwrap_or(1.0);
@@ -88,39 +135,18 @@ fn main() {
         .map(|c| model.coat(c).unwrap_or_else(|| panic!("no coat {c:?}")))
         .unwrap_or(0);
     std::fs::create_dir_all(out).expect("out dir");
-    match mode.as_str() {
-        "peek" => peek(&model, out),
-        "walk" => run(&model, &sk, coat, out, scale, "walk", WALK),
-        "sit" => run(&model, &sk, coat, out, scale, "sit", SIT),
-        "stretch" => run(
-            &model,
-            &sk,
-            coat,
-            out,
-            scale,
-            "stretch",
-            (1.0, held(Act::Stretch)),
-        ),
-        "yawn" => run(
-            &model,
-            &sk,
-            coat,
-            out,
-            scale,
-            "yawn",
-            (1.0, held(Act::Yawn)),
-        ),
-        "wave" => run(
-            &model,
-            &sk,
-            coat,
-            out,
-            scale,
-            "wave",
-            (1.0, held(Act::Wave)),
-        ),
-        _ => panic!("no mode {mode:?}"),
-    }
+    let script = match mode.as_str() {
+        "peek" => return peek(&model, out),
+        "walk" => walk(),
+        "sit" => sit(),
+        "lie" => lie(),
+        "look" => look(),
+        g => match GESTURES.iter().find(|(name, _)| *name == g) {
+            Some(&(_, act)) => gesture(act),
+            None => panic!("no mode {mode:?}"),
+        },
+    };
+    run(&model, &sk, coat, out, scale, mode, script);
 }
 
 fn peek(model: &Model, out: &str) {
@@ -160,12 +186,18 @@ fn run(
     );
     let gpu = Gpu::new().expect("gpu");
     println!("GPU: {}", gpu.name());
+    let (cw, ch) = model.canvas.unwrap_or((4.5, 3.3));
     let (w, h) = (
-        (4.5 * PPU * scale).ceil() as u32,
-        (3.3 * PPU * scale).ceil() as u32,
+        (cw * PPU * scale).ceil() as u32,
+        (ch * PPU * scale).ceil() as u32,
     );
     let mut canvas = MeshCanvas::new(&gpu, &mesh, w, h, scale);
-    let face = Scene::posed(model, coat, 0.33, &Pose::default(), Look::Open, Layer::All);
+    let look = if name == "lie" {
+        Look::Asleep
+    } else {
+        Look::Open
+    };
+    let face = Scene::posed(model, coat, 0.33, &Pose::default(), look, Layer::All);
     let mut frame = Pixmap::new(w, h).expect("frame");
     let mut walker = Mover::new(sk, 1.0, model).expect("walk");
     let mut x = 0.0f32;
@@ -179,6 +211,13 @@ fn run(
         for _ in 0..2 {
             joints = walker.step(0.5 / FPS, walking, facing);
             x += WALK_SPEED * scale * walker.speed() * facing * 0.5 / FPS;
+        }
+        // `TURN=90` turns the whole pet further, for a look from the side.
+        if let Some(turn) = std::env::var("TURN")
+            .ok()
+            .and_then(|t| t.parse::<f32>().ok())
+        {
+            joints[0].rot.y += turn;
         }
         let bones = sk.pose(&joints);
         let start = Instant::now();

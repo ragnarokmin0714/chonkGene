@@ -274,6 +274,13 @@ pub fn key_for(expression: Expression, params: &PoseParams) -> Key {
         Act::Wave => (PoseId::Wave, Look::Happy),
         // Sprites have no eating pose: a happy sit (meshes bite and chew).
         Act::Eat => (PoseId::Sit, Look::Happy),
+        // Nor poses for the little things done at rest: the nearest one
+        // (the meshes do them properly).
+        Act::Dig | Act::Peck => (PoseId::Stretch, Look::Happy),
+        Act::Scratch | Act::Groom => (PoseId::Sit, Look::Happy),
+        Act::Shake => (PoseId::Sit, Look::Shut),
+        Act::Preen => (PoseId::LookLeft, Look::Happy),
+        Act::Flap => (PoseId::Wave, Look::Happy),
     };
     let (pose, look) = match expression {
         Expression::Neutral => gesture(eyes),
@@ -335,6 +342,42 @@ fn snack_overlay(pm: &mut Pixmap, at: (f32, f32), s: f32, eaten: f32) {
                 ..Paint::default()
             };
             pm.fill_path(&p, &clear, FillRule::Winding, Transform::identity(), None);
+        }
+    }
+}
+
+/// A hole being dug at `at` (pixels, on the floor), `t` seconds in: a
+/// little mound of earth growing beside it, and clods flicked out behind
+/// the pet (to `-side` on screen, the way it faces being `side`).
+fn dirt_overlay(pm: &mut Pixmap, at: (f32, f32), s: f32, t: f32, side: f32) {
+    let mut paint = Paint {
+        anti_alias: true,
+        ..Paint::default()
+    };
+    let grow = (t / 1.5).clamp(0.0, 1.0);
+    // The mound: a squat dome of earth, a darker hollow in front of it.
+    let (x, y) = (at.0 - side * 4.0 * s, at.1);
+    let r = (4.0 + 5.0 * grow) * s;
+    if let Some(p) = tiny_skia::Rect::from_xywh(x - r, y - 0.55 * r, 2.0 * r, 1.1 * r)
+        .and_then(tiny_skia::PathBuilder::from_oval)
+    {
+        paint.set_color_rgba8(0x9A, 0x6B, 0x45, 255);
+        pm.fill_path(&p, &paint, FillRule::Winding, Transform::identity(), None);
+    }
+    if let Some(p) = tiny_skia::Rect::from_xywh(x - 0.6 * r, y - 0.5 * r, 1.2 * r, 0.45 * r)
+        .and_then(tiny_skia::PathBuilder::from_oval)
+    {
+        paint.set_color_rgba8(0xB8, 0x86, 0x5B, 255);
+        pm.fill_path(&p, &paint, FillRule::Winding, Transform::identity(), None);
+    }
+    // Clods: each flies out in an arc, a third of a second apart.
+    for k in 0..3 {
+        let p = (t * 2.6 + k as f32 / 3.0).fract();
+        let cx = x - side * (6.0 + 26.0 * p) * s;
+        let cy = y - (22.0 * p * (1.0 - p) * 4.0 - 3.0 * p) * s;
+        if let Some(c) = tiny_skia::PathBuilder::from_circle(cx, cy, (1.8 - 0.6 * p) * s) {
+            paint.set_color_rgba8(0x8A, 0x5E, 0x3B, (255.0 * (1.0 - p * p)) as u8);
+            pm.fill_path(&c, &paint, FillRule::Winding, Transform::identity(), None);
         }
     }
 }

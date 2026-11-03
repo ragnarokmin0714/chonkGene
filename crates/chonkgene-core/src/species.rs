@@ -1,6 +1,7 @@
 //! The six species and their defaults (PLAN §1.1, §1.6, §1.12).
 
 use crate::Personality;
+use crate::anim::{Act, Habits};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Species {
@@ -64,6 +65,78 @@ impl Species {
             Species::Munchkin => 0.55,
             Species::Owl => 0.7,
             Species::Chick | Species::Duck => 1.0,
+        }
+    }
+
+    /// The little things it does at rest, with how often (see
+    /// [`Animator::with_habits`](crate::anim::Animator::with_habits)): dogs
+    /// dig and scratch, cats wash, birds preen, peck and flap; everyone
+    /// glances about, stretches, yawns, waves and shakes.
+    pub fn habits(self) -> Habits {
+        match self {
+            Species::Shiba => &[
+                (Act::LookLeft, 13),
+                (Act::LookRight, 13),
+                (Act::Stretch, 10),
+                (Act::Yawn, 8),
+                (Act::Wave, 6),
+                (Act::Dig, 18),
+                (Act::Scratch, 18),
+                (Act::Shake, 12),
+            ],
+            Species::Munchkin | Species::Fold => &[
+                (Act::LookLeft, 13),
+                (Act::LookRight, 13),
+                (Act::Stretch, 12),
+                (Act::Yawn, 10),
+                (Act::Wave, 6),
+                (Act::Scratch, 14),
+                (Act::Groom, 24),
+                (Act::Shake, 6),
+            ],
+            Species::Fox => &[
+                (Act::LookLeft, 12),
+                (Act::LookRight, 12),
+                (Act::Stretch, 10),
+                (Act::Yawn, 6),
+                (Act::Wave, 6),
+                (Act::Dig, 12),
+                (Act::Scratch, 12),
+                (Act::Groom, 18),
+                (Act::Shake, 10),
+            ],
+            Species::Chick => &[
+                (Act::LookLeft, 12),
+                (Act::LookRight, 12),
+                (Act::Stretch, 8),
+                (Act::Yawn, 6),
+                (Act::Wave, 6),
+                (Act::Peck, 26),
+                (Act::Preen, 14),
+                (Act::Flap, 10),
+                (Act::Shake, 6),
+            ],
+            Species::Duck => &[
+                (Act::LookLeft, 12),
+                (Act::LookRight, 12),
+                (Act::Stretch, 8),
+                (Act::Yawn, 6),
+                (Act::Wave, 6),
+                (Act::Preen, 22),
+                (Act::Flap, 16),
+                (Act::Peck, 10),
+                (Act::Shake, 8),
+            ],
+            Species::Owl => &[
+                (Act::LookLeft, 18),
+                (Act::LookRight, 18),
+                (Act::Stretch, 8),
+                (Act::Yawn, 12),
+                (Act::Wave, 6),
+                (Act::Preen, 18),
+                (Act::Flap, 10),
+                (Act::Shake, 10),
+            ],
         }
     }
 

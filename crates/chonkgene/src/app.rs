@@ -1089,7 +1089,9 @@ fn spawn(
     let seed = save.id.wrapping_mul(0x9E37_79B9_7F4A_7C15) ^ (t * 1000.0) as u64;
     Ok(Pet {
         mind: Mind::new(species, save.personality(), save.affinity()),
-        anim: Animator::new(seed, save.chonk, species.waddle()).with_pops(!renderer.is_gpu()),
+        anim: Animator::new(seed, save.chonk, species.waddle())
+            .with_habits(species.habits())
+            .with_pops(!renderer.is_gpu()),
         species,
         window,
         presenter,

@@ -151,6 +151,8 @@ struct GaitFile {
     twist: f32,
     nod: f32,
     diagonal: bool,
+    neck: f32,
+    tuck: f32,
 }
 
 impl Default for GaitFile {
@@ -162,6 +164,8 @@ impl Default for GaitFile {
             twist: 7.0,
             nod: 4.0,
             diagonal: true,
+            neck: 1.0,
+            tuck: 0.0,
         }
     }
 }
@@ -430,6 +434,13 @@ pub struct Gait {
     pub nod: f32,
     /// Four legs in diagonal pairs (a trot); else two legs in turn.
     pub diagonal: bool,
+    /// The share of a head turn the head takes on its own (0 … 1); the
+    /// body turns for the rest. A head melted into its body (the owl's)
+    /// slides its face across the body's outline if it turns alone.
+    pub neck: f32,
+    /// How far a sleeping bird tucks its head into its back feathers
+    /// (0 … 1): the chick and duckling do, the owl sleeps upright.
+    pub tuck: f32,
 }
 
 /// A soft spot (a belly, a bottom, a chin) that wobbles on a spring bone
@@ -876,6 +887,8 @@ fn resolve(file: ModelFile, shared: HashMap<String, PoseFile>) -> Result<Model, 
             twist: file.gait.twist,
             nod: file.gait.nod,
             diagonal: file.gait.diagonal,
+            neck: file.gait.neck.clamp(0.0, 1.0),
+            tuck: file.gait.tuck.clamp(0.0, 1.0),
         },
         parts,
         face,

@@ -9,12 +9,14 @@
 
 use std::f32::consts::{PI, TAU};
 
+use chonkgene_core::anim::Act;
+
 use chonkgene_rig::math::v3;
 use chonkgene_rig::{FLOOR, Model};
 
 use crate::skin::{
     Gesture, Joint, MAX_SWING, REST_YAW, SIT_YAW, SPEED_UP, STILL_GOING, Skeleton, Spring, TURN_HZ,
-    WALK_YAW, Walk, bite, tempo_split,
+    WALK_YAW, Walk, bite, peck, tempo_split,
 };
 
 /// The pace the pet's window moves at, world units a second (60 px/s at
@@ -26,6 +28,13 @@ const DUTY: f32 = 0.55;
 /// sinks, world units.
 const SIT_LEGS: f32 = 75.0;
 const SIT_DROP: f32 = 0.1;
+/// A bird that tucks its head in to sleep (`Gait::tuck`): the head sinks
+/// into its puffed-up feathers, turns this far toward a shoulder (degrees)
+/// and leans over onto it, chin down; the body sinks this much further,
+/// hiding the feet.
+const TUCK_TURN: f32 = 26.0;
+const TUCK_LEAN: f32 = 26.0;
+const TUCK_DROP: f32 = 0.08;
 /// Body rise over a planted leg, world units; the body's slide over it.
 const BOB: f32 = 0.03;
 const SLIDE: f32 = 0.045;
@@ -158,6 +167,9 @@ pub struct Waddle {
     roll: f32,
     nod_amp: f32,
     hz: f32,
+    /// See [`chonkgene_rig::Gait::neck`] and [`chonkgene_rig::Gait::tuck`].
+    neck: f32,
+    tuck: f32,
     n: usize,
     /// Still on its way somewhere (walking, turning, sitting down, getting
     /// up, a gesture): it needs smooth frames.
@@ -208,6 +220,8 @@ impl Waddle {
             roll: g.roll,
             nod_amp: g.nod,
             hz,
+            neck: g.neck,
+            tuck: g.tuck,
             n: sk.names.len(),
             busy: false,
         })
@@ -263,11 +277,12 @@ impl Waddle {
             self.phase = (self.phase + dt * self.hz * (0.4 + 0.6 * s) * quicker).fract();
         }
         let going = walking || s > STILL_GOING;
+        let eating = self.gesture.is_some_and(|g| g.act == Act::Eat);
         let yaw = self.yaw.step(
             facing
                 * if going {
                     WALK_YAW
-                } else if self.sitting || self.lying {
+                } else if self.sitting || self.lying || eating {
                     SIT_YAW
                 } else {
                     REST_YAW
@@ -322,23 +337,30 @@ impl Waddle {
         let bob = BOB * s * (0.5 - 0.5 * (2.0 * TAU * ph).cos());
         j[0] = Joint {
             rot: v3(0.0, yaw, 0.0),
-            shift: v3(0.0, -SIT_DROP * sit, 0.0),
+            shift: v3(0.0, -(SIT_DROP + TUCK_DROP * self.tuck * lie) * sit, 0.0),
         };
         j[self.body] = Joint {
             rot: v3(3.0 * s, 0.0, roll),
             shift: v3(SLIDE * s * side, bob, 0.0),
         };
         // The head stays steadier than the body, nodding a beat late, and
-        // turns toward you, more so at rest.
+        // turns toward you, more so at rest. A bird with no neck to speak
+        // of (the owl) turns its body for most of it.
         let nod = self.nod_amp * s * (2.0 * TAU * ph - 0.9).sin();
         let look = self.look.step(self.look_goal, 0.0, 1.6, 1.0, dt);
+        let turn = -yaw * (0.45 - 0.3 * s) + look;
+        j[self.body].rot.y += (1.0 - self.neck) * turn;
+        // Asleep, a bird that tucks in sinks its head into its feathers
+        // and lays it over on a shoulder (the one away from you); the rest
+        // just droop.
+        let tuck = self.tuck * lie;
         j[self.head] = Joint {
             rot: v3(
-                nod + 18.0 * lie,
-                -yaw * (0.45 - 0.3 * s) + look,
-                -0.7 * roll,
+                nod + 18.0 * lie + 6.0 * tuck,
+                self.neck * turn - facing * TUCK_TURN * tuck,
+                -0.7 * roll + facing * TUCK_LEAN * tuck,
             ),
-            shift: v3(0.0, -0.05 * lie, 0.0),
+            shift: v3(0.0, -0.05 * lie - 0.1 * tuck, -0.04 * tuck),
         };
 
         // Wings: out a little, more with each step, puffed up sitting.
@@ -349,6 +371,14 @@ impl Waddle {
             if let Some(w) = *wing {
                 let sign = if side == 0 { 1.0 } else { -1.0 };
                 j[w].rot = v3(0.0, 0.0, sign * flap);
+            }
+        }
+        // Tucked in, the wing the head lies on comes up over it a little.
+        if tuck > 0.0 {
+            let (k, sign) = if facing > 0.0 { (1, -1.0) } else { (0, 1.0) };
+            if let Some(w) = self.wings[k] {
+                j[w].rot.z += sign * 18.0 * tuck;
+                j[w].rot.x -= 10.0 * tuck;
             }
         }
         // The tail wags faster at pace, and bobs with the steps.
@@ -384,13 +414,12 @@ impl Waddle {
             let y = self.chin.step(0.0, -acc - 0.02 * nod_acc, 4.0, 0.18, dt);
             j[i].shift = v3(0.0, y.clamp(-0.09, 0.09), 0.0);
         }
-        // A yawn can be had sitting; the rest are done standing.
-        let sitting_ok = |g: &Gesture| g.act == chonkgene_core::anim::Act::Yawn;
+        // Some gestures are done sitting (see `Act::seated`); the rest
+        // standing.
         if let Some(g) = self
             .gesture
-            .filter(|g| s < 0.5 && (sit < 0.5 || sitting_ok(g)))
+            .filter(|g| s < 0.5 && (sit < 0.5 || g.act.seated()))
         {
-            use chonkgene_core::anim::Act;
             let e = g.e;
             match g.act {
                 // Wings spread wide and the chest out: a stretch.
@@ -407,11 +436,73 @@ impl Waddle {
                     j[self.head].rot.x -= 14.0 * e;
                     self.chin.v += 0.5 * e * dt;
                 }
-                // Pecks at the snack on the floor, chewing in between.
+                // For each bite, quick pecks at the snack on the floor,
+                // then the head comes up and back to swallow, the chin
+                // bobbing.
                 Act::Eat => {
                     let (dip, chew) = bite(g.t);
-                    j[self.body].rot.x += e * 12.0 * dip;
-                    j[self.head].rot.x += e * (35.0 * dip + 3.0 * chew);
+                    let pecks = if dip > 0.5 { peck(g.t, 4.5) } else { 0.0 };
+                    let down = dip * (0.55 + 0.45 * pecks);
+                    j[self.body].rot.x += e * 16.0 * down;
+                    j[self.head].rot.x += e * (32.0 * down - 8.0 * chew.abs());
+                    if chew.abs() > 0.9 {
+                        self.chin.v -= 0.4 * e;
+                    }
+                }
+                // Pecking about at the floor: bursts of quick pecks, a
+                // little step's sway between them.
+                Act::Peck => {
+                    let burst = ((TAU * 0.9 * g.t).sin() > -0.3) as u8 as f32;
+                    let down = burst * peck(g.t, 3.6);
+                    j[self.body].rot.x += e * 16.0 * down;
+                    j[self.head].rot.x += e * 30.0 * down;
+                    j[self.body].rot.z += e * 4.0 * (TAU * 0.9 * g.t).sin();
+                }
+                // Preening: sitting, the head turns back over a wing and
+                // nibbles at it, the wing lifting out a little.
+                Act::Preen => {
+                    let side = -facing;
+                    let nibble =
+                        (TAU * 6.0 * g.t).sin() * ((TAU * 0.8 * g.t).sin() > 0.0) as u8 as f32;
+                    let turn = side * 70.0 * e;
+                    j[self.body].rot.y += (1.0 - self.neck) * turn;
+                    j[self.head].rot.y += self.neck * turn;
+                    j[self.head].rot.x += e * (22.0 + 5.0 * nibble);
+                    j[self.head].rot.z -= side * 10.0 * e;
+                    let k = if side > 0.0 { 0 } else { 1 };
+                    if let Some(w) = self.wings[k] {
+                        j[w].rot.z += side * 22.0 * e;
+                    }
+                }
+                // Flapping: both wings beat quickly, the body rising onto
+                // its toes and the head up.
+                Act::Flap => {
+                    let beat = (TAU * 6.5 * g.t).sin();
+                    for (side, wing) in self.wings.iter().enumerate() {
+                        if let Some(w) = *wing {
+                            let sign = if side == 0 { 1.0 } else { -1.0 };
+                            j[w].rot.z += sign * e * (40.0 + 35.0 * beat);
+                        }
+                    }
+                    j[self.body].shift.y += e * 0.03 * (1.0 + beat) * 0.5;
+                    j[self.head].rot.x -= 8.0 * e;
+                    self.belly.v += e * 0.6 * beat * dt * 30.0;
+                }
+                // A ruffling shake: the body rolls quickly side to side,
+                // the head a beat ahead, the wings fluttering.
+                Act::Shake => {
+                    let fade = 1.0 - (g.t / 1.2).clamp(0.0, 1.0) * 0.6;
+                    let w = TAU * 5.5 * g.t;
+                    j[self.body].rot.z += e * fade * 12.0 * w.sin();
+                    j[self.head].rot.z += e * fade * 10.0 * (w + 0.8).sin();
+                    j[self.head].rot.y += e * fade * 10.0 * (w + 0.8).sin();
+                    for (side, wing) in self.wings.iter().enumerate() {
+                        if let Some(wg) = *wing {
+                            let sign = if side == 0 { 1.0 } else { -1.0 };
+                            j[wg].rot.z += sign * e * fade * 14.0 * (w * 1.7).sin().abs();
+                        }
+                    }
+                    self.butt_x.v += e * fade * 1.2 * (w - 0.9).cos() * dt * 30.0;
                 }
                 // One wing up, waving.
                 Act::Wave => {

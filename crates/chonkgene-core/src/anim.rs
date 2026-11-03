@@ -55,11 +55,46 @@ pub enum Act {
     Wave,
     /// Eating a snack: a few bites and some chewing.
     Eat,
+    /// Digging a hole: the front paws scoop at the floor in turn.
+    Dig,
+    /// Scratching an itch behind the ear with a hind paw, sitting.
+    Scratch,
+    /// A cat washing: licking a front paw and wiping it over the face.
+    Groom,
+    /// A shake from nose to tail, as after a bath.
+    Shake,
+    /// A bird preening: the head turns back to nibble at a wing.
+    Preen,
+    /// A bird pecking about at the floor.
+    Peck,
+    /// A bird flapping its wings.
+    Flap,
 }
 
+impl Act {
+    /// Done sitting down, so a sitting pet stays sat (the rest of the
+    /// gestures stand it up).
+    pub fn seated(self) -> bool {
+        matches!(self, Act::Yawn | Act::Scratch | Act::Groom | Act::Preen)
+    }
+}
+
+/// The idle gestures a species picks from, with their weights.
+pub type Habits = &'static [(Act, u32)];
+
+/// What a pet does when nothing says otherwise: glances, a stretch, a yawn,
+/// a wave.
+pub const PLAIN_HABITS: Habits = &[
+    (Act::LookLeft, 30),
+    (Act::LookRight, 30),
+    (Act::Stretch, 15),
+    (Act::Yawn, 15),
+    (Act::Wave, 10),
+];
+
 /// How long a snack takes, and each bite of it.
-pub const EAT_SECS: f32 = 2.4;
-pub const BITE_SECS: f32 = 0.8;
+pub const EAT_SECS: f32 = 3.6;
+pub const BITE_SECS: f32 = 1.2;
 
 /// How long a gesture that has a fixed length lasts, seconds: the idle
 /// stretch, yawn and wave. None for the rest (looks vary, steps and rest
@@ -70,6 +105,13 @@ pub fn gesture_secs(act: Act) -> Option<f32> {
         Act::Yawn => Some(1.7),
         Act::Wave => Some(1.6),
         Act::Eat => Some(EAT_SECS),
+        Act::Dig => Some(2.6),
+        Act::Scratch => Some(2.2),
+        Act::Groom => Some(3.0),
+        Act::Shake => Some(1.2),
+        Act::Preen => Some(2.6),
+        Act::Peck => Some(1.8),
+        Act::Flap => Some(1.4),
         _ => None,
     }
 }
@@ -161,6 +203,10 @@ pub struct Animator {
     /// The gesture under way, when it started and when it ends.
     gesture: Option<(Act, f32, f32)>,
     next_gesture: f32,
+    /// The gestures it picks from at rest.
+    habits: Habits,
+    /// Walking last update: stopping brings the next gesture closer.
+    was_walking: bool,
     /// The current or next burst of idle wagging.
     wag: (f32, f32),
     next_huff: f32,
@@ -179,7 +225,9 @@ impl Animator {
             next_blink: t + 1.0 + rng.f32() * 3.0,
             blink_until: 0.0,
             next_giggle: 0.0,
-            next_gesture: t + 4.0 + rng.f32() * 5.0,
+            next_gesture: t + 1.5 + rng.f32() * 2.5,
+            habits: PLAIN_HABITS,
+            was_walking: false,
             wag: (wag_at, wag_at + 1.5),
             next_huff: 0.0,
             rng,
@@ -198,6 +246,15 @@ impl Animator {
             pressed: false,
             gesture: None,
         }
+    }
+
+    /// The same animator, picking its idle gestures from `habits` (see
+    /// `Species::habits`).
+    pub fn with_habits(mut self, habits: Habits) -> Self {
+        if habits.iter().any(|&(_, w)| w > 0) {
+            self.habits = habits;
+        }
+        self
     }
 
     /// The same animator, popping into new poses or not (see `pops`).
@@ -311,13 +368,15 @@ impl Animator {
     }
 
     fn pick_gesture(&mut self) -> Act {
-        match self.rng.u32(0..100) {
-            0..30 => Act::LookLeft,
-            30..60 => Act::LookRight,
-            60..75 => Act::Stretch,
-            75..90 => Act::Yawn,
-            _ => Act::Wave,
+        let total: u32 = self.habits.iter().map(|&(_, w)| w).sum();
+        let mut roll = self.rng.u32(0..total.max(1));
+        for &(act, w) in self.habits {
+            if roll < w {
+                return act;
+            }
+            roll -= w;
         }
+        Act::LookLeft
     }
 
     /// A landing squashes the body in proportion to the impact.
@@ -341,9 +400,12 @@ impl Animator {
 
     /// Frames per second this pet needs now (PLAN §5).
     pub fn fps(&self, moving: bool) -> u32 {
-        let waving = self
-            .gesture
-            .is_some_and(|(act, ..)| matches!(act, Act::Wave | Act::Eat));
+        let waving = self.gesture.is_some_and(|(act, ..)| {
+            !matches!(
+                act,
+                Act::Stretch | Act::Yawn | Act::LookLeft | Act::LookRight
+            )
+        });
         if moving
             || self.is_wobbling()
             || self.expression == Expression::Giggle
@@ -414,12 +476,19 @@ impl Animator {
             }
         }
 
-        // Idle gestures: now and then, while nothing else is going on.
+        // Idle gestures: now and then, while nothing else is going on. A
+        // pet that has just stopped walking soon finds something to do.
+        if self.was_walking && !self.walking {
+            self.next_gesture = self.next_gesture.min(self.t + 1.2 + self.rng.f32() * 1.3);
+        }
+        self.was_walking = self.walking;
         if let Some((act, _, until)) = self.gesture {
             if !self.free() || self.t >= until {
                 self.gesture = None;
                 self.body.target = if self.pressed { PRESS_SQUASH } else { 0.0 };
-                self.next_gesture = self.t + 5.0 + self.rng.f32() * 7.0;
+                // Rests are filled with little things to do (Roger: idling
+                // went on too long), a short breath apart.
+                self.next_gesture = self.t + 1.5 + self.rng.f32() * 2.5;
                 // A yawn ends with a little shake of the head.
                 if act == Act::Yawn {
                     self.sway = 6.0;
@@ -582,7 +651,9 @@ mod tests {
     }
 
     /// Idle pets are mostly still, so frames can be cached (PLAN §5): over
-    /// ten minutes they average well under the walking rate.
+    /// ten minutes they average under the walking rate. (Since 2026-11-03
+    /// they do little things a few seconds apart, which costs a few frames
+    /// a second more than the old 18.)
     #[test]
     fn idle_pets_mostly_run_slow() {
         for seed in 0..4 {
@@ -595,7 +666,45 @@ mod tests {
                 frames += 1;
             }
             let fps = frames as f32 / 600.0;
-            assert!(fps < 18.0, "seed {seed}: {fps:.1} fps");
+            assert!(fps < 22.0, "seed {seed}: {fps:.1} fps");
+        }
+    }
+
+    /// Roger: pets idled too long. A pet that stops walking soon finds
+    /// something to do, picked from its own species' habits, and keeps
+    /// finding things a few seconds apart.
+    #[test]
+    fn a_resting_pet_soon_does_its_own_little_things() {
+        use crate::species::Species;
+        for species in Species::ALL {
+            let mut a = Animator::new(5, 0.33, species.waddle()).with_habits(species.habits());
+            a.walking = true;
+            run(&mut a, 30.0, |_| {});
+            a.walking = false;
+            let mut first = None;
+            let mut seen = Vec::new();
+            let mut t = 0.0;
+            run(&mut a, 120.0, |a| {
+                t += 1.0 / 60.0;
+                if let Some((act, ..)) = a.gesture {
+                    first.get_or_insert(t);
+                    if !seen.contains(&act) {
+                        seen.push(act);
+                    }
+                }
+            });
+            let first = first.expect("no gesture at all");
+            assert!(
+                first < 2.6,
+                "{species:?}: first gesture {first:.1} s after stopping"
+            );
+            for act in &seen {
+                assert!(
+                    species.habits().iter().any(|&(h, _)| h == *act),
+                    "{species:?} did {act:?}, not one of its habits"
+                );
+            }
+            assert!(seen.len() >= 5, "{species:?}: only {seen:?} in two minutes");
         }
     }
 

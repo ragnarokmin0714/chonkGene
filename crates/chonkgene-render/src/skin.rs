@@ -229,14 +229,35 @@ pub(crate) const TURN_HZ: (f32, f32) = (1.3, 2.8);
 pub(crate) const MAX_SWING: f32 = 45.0;
 
 /// Where a snack is at `t` seconds into eating it: how far the head is
-/// down for a bite (0 … 1), and the chewing after it (−1 … 1).
+/// down for a bite (0 … 1), and the chewing after it (−1 … 1). Each bite
+/// goes down to the snack, nibbles at it a moment (the head bobbing a
+/// little), comes up and chews.
 pub(crate) fn bite(t: f32) -> (f32, f32) {
     use chonkgene_core::anim::BITE_SECS;
+    use std::f32::consts::TAU;
     let b = (t / BITE_SECS).fract();
-    if b < 0.45 {
-        ((std::f32::consts::PI * b / 0.45).sin(), 0.0)
+    let ease = |x: f32| {
+        let x = x.clamp(0.0, 1.0);
+        x * x * (3.0 - 2.0 * x)
+    };
+    if b < 0.5 {
+        let nibble = 0.12 * (TAU * 7.0 * t).sin().abs();
+        (ease(b / 0.2) - nibble * ease((b - 0.15) / 0.1), 0.0)
     } else {
-        (0.0, (std::f32::consts::TAU * 3.0 * (b - 0.45) / 0.55).sin())
+        let chew = (TAU * 2.5 * (b - 0.5) * BITE_SECS).sin();
+        (1.0 - ease((b - 0.5) / 0.15), chew * ease((b - 0.55) / 0.1))
+    }
+}
+
+/// A bird's quick peck, `hz` a second: straight down, then back up more
+/// slowly (0 up … 1 down).
+pub(crate) fn peck(t: f32, hz: f32) -> f32 {
+    let p = (t * hz).fract();
+    if p < 0.3 {
+        (std::f32::consts::FRAC_PI_2 * p / 0.3).sin()
+    } else {
+        let x = (p - 0.3) / 0.7;
+        1.0 - x * x * (3.0 - 2.0 * x)
     }
 }
 
@@ -256,6 +277,8 @@ const LEGS: [(&str, f32, bool); 4] = [
     ("leg_br", 0.5, false),
     ("leg_fr", 0.75, true),
 ];
+/// Scoops a second, each front paw, digging.
+const DIG_HZ: f32 = 2.6;
 /// The chest's rise and fall, world units; twice a step cycle.
 const BOB: f32 = 0.02;
 const ROLL: f32 = 3.0;
@@ -286,6 +309,17 @@ const SIT_FAN_BACK: f32 = 0.35;
 /// The fan leaves a gap this wide either side of straight up, where the
 /// head and ears would hide a tail.
 const SIT_FAN_GAP: f32 = 24.0;
+/// Asleep, several tails fold forward over the pet's back like a blanket:
+/// the whole bunch tips forward this far (degrees) at the root, spreading
+/// a little side to side, and each segment past the root droops on this
+/// much, so the tips settle over the back. They move as one bunch: their
+/// roots share skin, and pulling them apart would stretch it into a sheet.
+const BLANKET_TIP: f32 = 62.0;
+const BLANKET_SPREAD: f32 = 14.0;
+const BLANKET_DROOP: f32 = 16.0;
+/// Eating, the pet crouches over the snack: it sinks this share of its
+/// legs' length.
+const EAT_CROUCH: f32 = 0.3;
 /// The bottom's waddle side to side at full pace, world units, and the
 /// bounce it gets plopping down into a sit (and a smaller one getting up),
 /// world units a second.
@@ -317,6 +351,10 @@ struct Tail {
     /// The turn (degrees, as [`M3::euler`]) that takes the root from where
     /// it rests to its place in the fan, sitting.
     sit_turn: V3,
+    /// The turns that wrap it round the pet asleep: the root's, and each
+    /// segment's after it (several tails only; see [`blanket`]).
+    lie_turn: V3,
+    lie_curl: V3,
     /// How the sideways swish is shared between turning about z (a tail
     /// held up, as the Shiba's) and about the vertical (one held out
     /// behind, as the Fold's), from which way its root points.
@@ -370,6 +408,8 @@ pub struct Walk {
 }
 
 struct Bones {
+    hind_l: Option<usize>,
+    hind_r: Option<usize>,
     body: usize,
     hips: usize,
     head: usize,
@@ -391,25 +431,27 @@ impl Walk {
         // sway as one.
         let chains = sk.tails();
         let turns = fan(sk, &chains);
+        let blankets = blanket(sk, &chains);
         let tails = chains
             .into_iter()
-            .zip(turns)
+            .zip(turns.into_iter().zip(blankets))
             .enumerate()
-            .map(|(i, (bones, sit_turn))| {
+            .map(|(i, (bones, (sit_turn, (lie_turn, lie_curl))))| {
                 let up = match bones[..] {
                     [a, b, ..] => (sk.pivots[b] - sk.pivots[a]).normalize().y.abs(),
                     _ => 1.0,
                 };
-                (i, bones, sit_turn, (up, (1.0 - up * up).max(0.0).sqrt()))
-            })
-            .map(|(i, bones, sit_turn, swish_axes)| Tail {
-                swish: vec![Spring::default(); bones.len()],
-                bounce: vec![Spring::default(); bones.len()],
-                bones,
-                fling: Spring::default(),
-                offset: i as f32 * 0.37,
-                sit_turn,
-                swish_axes,
+                Tail {
+                    swish: vec![Spring::default(); bones.len()],
+                    bounce: vec![Spring::default(); bones.len()],
+                    bones,
+                    fling: Spring::default(),
+                    offset: i as f32 * 0.37,
+                    sit_turn,
+                    lie_turn,
+                    lie_curl,
+                    swish_axes: (up, (1.0 - up * up).max(0.0).sqrt()),
+                }
             })
             .collect();
         Ok(Self {
@@ -442,6 +484,8 @@ impl Walk {
             swing,
             leg_len,
             bones: Bones {
+                hind_l: sk.bone("leg_bl"),
+                hind_r: sk.bone("leg_br"),
                 body: need("body")?,
                 hips: need("hips")?,
                 head: need("head")?,
@@ -520,11 +564,15 @@ impl Walk {
             self.phase = (self.phase + dt * STEP_HZ * (0.4 + 0.6 * s) * quicker).fract();
         }
         let going = walking || s > STILL_GOING;
+        // Eating, it turns to you, so you see it eat.
+        let eating = self
+            .gesture
+            .is_some_and(|g| g.act == chonkgene_core::anim::Act::Eat);
         let yaw = self.yaw.step(
             facing
                 * if going {
                     WALK_YAW
-                } else if self.sitting || self.lying {
+                } else if self.sitting || self.lying || eating {
                     SIT_YAW
                 } else {
                     REST_YAW
@@ -611,8 +659,13 @@ impl Walk {
         // Tails: a wave runs from root to tip, faster and wider at pace;
         // the root bounces with the steps, and turning flings it out.
         self.swish = (self.swish + dt * (SWISH_HZ.0 + (SWISH_HZ.1 - SWISH_HZ.0) * s)).fract();
-        // Asleep, the tails hardly stir.
-        let amp = (SWISH_REST + (SWISH_WALK - SWISH_REST) * s) * (1.0 - 0.75 * lie);
+        // Asleep, the tails hardly stir; a snack sets them going.
+        let treat = self
+            .gesture
+            .filter(|g| g.act == chonkgene_core::anim::Act::Eat)
+            .map_or(0.0, |g| g.e);
+        let amp =
+            (SWISH_REST + (SWISH_WALK - SWISH_REST) * s) * (1.0 - 0.75 * lie) * (1.0 + 0.8 * treat);
         for tail in &mut self.tails {
             let fling = tail.fling.step(0.0, -0.5 * yaw_acc, 1.8, 0.35, dt);
             let at = TAU * (self.swish + tail.offset);
@@ -642,7 +695,9 @@ impl Walk {
                     shift: V3::ZERO,
                 };
                 if k == 0 {
-                    j[bone].rot = j[bone].rot + tail.sit_turn * sit;
+                    j[bone].rot = j[bone].rot + tail.sit_turn * sit + tail.lie_turn * lie;
+                } else {
+                    j[bone].rot = j[bone].rot + tail.lie_curl * lie;
                 }
             }
         }
@@ -716,11 +771,11 @@ impl Walk {
             j[b.head].rot.x += 16.0 * lie;
             j[b.head].shift.y -= 0.06 * lie;
         }
-        // A yawn can be had sitting; the rest are done standing.
-        let sitting_ok = |g: &Gesture| g.act == chonkgene_core::anim::Act::Yawn;
+        // Some gestures are done sitting (see `Act::seated`); the rest
+        // standing.
         if let Some(g) = self
             .gesture
-            .filter(|g| s < 0.5 && (sit < 0.5 || sitting_ok(g)))
+            .filter(|g| s < 0.5 && (sit < 0.5 || g.act.seated()))
         {
             use chonkgene_core::anim::Act;
             let e = g.e;
@@ -742,12 +797,80 @@ impl Walk {
                     j[b.head].rot.x -= 16.0 * e;
                     self.chin.v += 0.5 * e * dt;
                 }
-                // Bites: the head dips to the snack on the floor, the body
-                // leaning after it, and comes up to chew.
+                // It crouches over the snack (legs folding, as lying down
+                // but less), then for each bite the head goes down to it,
+                // nibbles, and comes up chewing, the head rocking a little
+                // side to side with the jaw.
                 Act::Eat => {
                     let (dip, chew) = bite(g.t);
-                    j[b.head].rot.x += e * (30.0 * dip + 3.0 * chew);
-                    j[b.body].rot.x += e * 8.0 * dip;
+                    j[0].shift.y -= EAT_CROUCH * self.leg_len * e;
+                    for &(leg, _, front) in &self.legs {
+                        j[leg].rot.x += if front { -40.0 } else { 0.5 * SIT_HIND } * e;
+                    }
+                    j[b.body].rot.x += e * (4.0 + 6.0 * dip);
+                    j[b.head].rot.x += e * (10.0 + 26.0 * dip - 4.0 * chew.abs());
+                    j[b.head].rot.z += e * 4.0 * chew;
+                }
+                // Digging: nose down over the hole, bottom up, the front
+                // paws scooping at the floor in turn (each reaches forward
+                // lifted and drags back along the floor).
+                Act::Dig => {
+                    j[b.body].rot.x += 12.0 * e;
+                    j[b.head].rot.x += 14.0 * e;
+                    j[b.hips].rot.x -= 6.0 * e;
+                    let mut k = 0.0;
+                    for &(leg, _, front) in &self.legs {
+                        if front {
+                            let p = TAU * (DIG_HZ * g.t + 0.5 * k);
+                            j[leg].rot.x -= e * (14.0 + 40.0 * p.cos());
+                            j[leg].shift.y += e * 0.12 * p.sin().max(0.0);
+                            k += 1.0;
+                        }
+                    }
+                }
+                // Scratching behind the ear: sitting, a hind leg swings
+                // out to the side and up toward the head and drums away (a
+                // chubby leg cannot reach the ear, but the drumming reads);
+                // the head leans into it, the body tips toward that side.
+                Act::Scratch => {
+                    let side = facing;
+                    let drum = (TAU * 7.0 * g.t).sin();
+                    if let Some(leg) = if side > 0.0 { b.hind_r } else { b.hind_l } {
+                        j[leg].rot.x -= e * (20.0 + 8.0 * drum);
+                        j[leg].rot.z -= side * e * (62.0 + 14.0 * drum);
+                        j[leg].shift.y += e * 0.14;
+                    }
+                    j[b.body].rot.z -= side * 8.0 * e;
+                    j[b.head].rot.z -= side * 24.0 * e;
+                    j[b.head].rot.y -= side * 10.0 * e;
+                }
+                // Washing: sitting, a front paw comes up to the mouth to be
+                // licked (little nods), then wipes over the face (the head
+                // turning into it).
+                Act::Groom => {
+                    let wipe = (g.t / 1.5 - 1.0).clamp(0.0, 1.0);
+                    let lick = (TAU * 3.0 * g.t).sin();
+                    let swipe = (TAU * 1.6 * g.t).sin();
+                    if let Some(&(leg, ..)) = self.legs.iter().find(|l| l.1 == 0.25) {
+                        j[leg].rot.x -= e * (95.0 + 12.0 * wipe * swipe);
+                        j[leg].rot.z -= e * 16.0;
+                        j[leg].shift.y += e * 0.2;
+                    }
+                    j[b.head].rot.x += e * (24.0 * (1.0 - wipe) + 6.0 * lick * (1.0 - wipe));
+                    j[b.head].rot.y -= e * wipe * (10.0 + 8.0 * swipe);
+                    j[b.head].rot.z -= e * wipe * 8.0;
+                }
+                // A shake from head to tail: the body rolls quickly about
+                // its length, the head a beat ahead, dying away at the end.
+                Act::Shake => {
+                    let fade = 1.0 - (g.t / 1.2).clamp(0.0, 1.0) * 0.6;
+                    let w = TAU * 5.0 * g.t;
+                    j[b.body].rot.z += e * fade * 16.0 * w.sin();
+                    j[b.head].rot.z += e * fade * 10.0 * (w + 0.8).sin();
+                    j[b.head].rot.y += e * fade * 12.0 * (w + 0.8).sin();
+                    j[b.hips].rot.z -= e * fade * 22.0 * (w - 0.9).sin();
+                    self.butt_x.v += e * fade * 1.5 * (w - 0.9).cos() * dt * 30.0;
+                    self.chin.v += e * fade * 0.8 * w.cos() * dt * 30.0;
                 }
                 // A front paw up, waving.
                 Act::Wave => {
@@ -769,6 +892,29 @@ impl Walk {
             || self.lie.v.abs() > 0.02;
         j
     }
+}
+
+/// How each tail folds over the pet asleep (see [`BLANKET_TIP`]): its
+/// root's turn, and the droop each segment after it adds, both as
+/// [`M3::euler`] degrees. One tail stays put.
+fn blanket(sk: &Skeleton, chains: &[Vec<usize>]) -> Vec<(V3, V3)> {
+    if chains.len() < 2 {
+        return vec![(V3::ZERO, V3::ZERO); chains.len()];
+    }
+    chains
+        .iter()
+        .map(|c| {
+            // Leaning the way it already leans, a little further.
+            let lean = match c[..] {
+                [a, b, ..] => (sk.pivots[b] - sk.pivots[a]).normalize().x,
+                _ => 0.0,
+            };
+            (
+                v3(BLANKET_TIP, 0.0, -BLANKET_SPREAD * lean.clamp(-1.0, 1.0)),
+                v3(BLANKET_DROOP, 0.0, 0.0),
+            )
+        })
+        .collect()
 }
 
 /// Where each tail's root turns to when the pet sits (see [`SIT_FAN`]),
@@ -840,6 +986,10 @@ fn aim(from: V3, to: V3) -> V3 {
         };
         cross(from, other).normalize()
     };
+    rodrigues(k, sin, cos)
+}
+
+fn rodrigues(k: V3, sin: f32, cos: f32) -> V3 {
     let kk = |i: usize, j: usize| [k.x, k.y, k.z][i] * [k.x, k.y, k.z][j];
     let skew = [[0.0, -k.z, k.y], [k.z, 0.0, -k.x], [-k.y, k.x, 0.0]];
     let m = |i: usize, j: usize| {

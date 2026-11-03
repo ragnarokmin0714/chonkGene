@@ -766,13 +766,30 @@ fn idle_gestures_move_every_mesh_pet() {
     use chonkgene_render::skin::Gesture;
     for id in QUAD_SPECIES.iter().chain(&BIPED_SPECIES) {
         let (model, sk) = mesh_model(id).unwrap();
-        let mut rest = Mover::new(&sk, 1.0, &model).unwrap();
-        let mut rest_joints = Vec::new();
-        for _ in 0..60 {
-            rest_joints = rest.step(1.0 / 60.0, false, 1.0);
-        }
-        for act in [Act::Stretch, Act::Yawn, Act::Wave, Act::Eat] {
+        // At rest standing, and sitting (where the gestures done sitting
+        // are measured from).
+        let rest_joints = |sitting: bool| {
+            let mut rest = Mover::new(&sk, 1.0, &model).unwrap();
+            rest.sit(sitting);
+            let mut joints = Vec::new();
+            for _ in 0..60 {
+                joints = rest.step(1.0 / 60.0, false, 1.0);
+            }
+            joints
+        };
+        // Every gesture its species does at rest, and eating.
+        let species = chonkgene_core::species::Species::from_id(id).unwrap();
+        let acts = species
+            .habits()
+            .iter()
+            .map(|&(act, _)| act)
+            .filter(|&act| chonkgene_core::anim::gesture_secs(act).is_some())
+            .chain([Act::Eat]);
+        for act in acts {
             let mut walk = Mover::new(&sk, 1.0, &model).unwrap();
+            // Gestures done sitting are seen sitting.
+            walk.sit(act.seated());
+            let rest_joints = rest_joints(act.seated());
             let mut joints = Vec::new();
             for _ in 0..60 {
                 // 0.18 s in: a bite's head right down.
@@ -897,7 +914,7 @@ fn margins(pm: &Pixmap) -> [u32; 4] {
 /// (Along the bottom the faint edge of the shadow may touch.)
 #[test]
 fn no_mesh_pet_is_cut_off_by_the_edge_of_its_picture() {
-    use chonkgene_core::anim::{Act, Animator, Expression};
+    use chonkgene_core::anim::{Animator, Expression};
     for id in QUAD_SPECIES.iter().chain(&BIPED_SPECIES) {
         let Some(mut r) = app_renderer(id) else {
             eprintln!("skipped: no GPU");
@@ -931,10 +948,13 @@ fn no_mesh_pet_is_cut_off_by_the_edge_of_its_picture() {
         run(&mut a, 3.0, "sitting down", Expression::Neutral);
         a.cheer();
         run(&mut a, 1.5, "hopping", Expression::Happy);
-        for g in [Act::Stretch, Act::Yawn, Act::Wave] {
+        let species = chonkgene_core::species::Species::from_id(id).unwrap();
+        for &(g, _) in species.habits() {
             a.gesture(g);
-            run(&mut a, 2.0, "a gesture", Expression::Neutral);
+            run(&mut a, 3.2, "a gesture", Expression::Neutral);
         }
+        a.eat();
+        run(&mut a, 3.8, "eating", Expression::Neutral);
         a.facing = -1.0;
         run(&mut a, 2.0, "turning sitting", Expression::Neutral);
         run(&mut a, 3.0, "lying down", Expression::Asleep);
@@ -1055,4 +1075,96 @@ fn a_sitting_pet_yawns_sitting_but_stands_to_stretch() {
         stretching + 6 < sitting,
         "stretching, still {stretching} px tall against {sitting} sitting"
     );
+}
+
+fn settle(walk: &mut Mover, secs: f32) -> Vec<chonkgene_render::skin::Joint> {
+    let mut joints = Vec::new();
+    for _ in 0..(secs * 60.0) as usize {
+        joints = walk.step(1.0 / 60.0, false, 1.0);
+    }
+    joints
+}
+
+/// Roger: the fox slept like it stood. Asleep, its nine tails fold forward
+/// over its back like a blanket: their tips come forward to the hips, where
+/// standing they reach out far behind.
+#[test]
+fn a_sleeping_fox_folds_its_tails_over_itself() {
+    let (model, sk) = quad("fox").unwrap();
+    let hips = sk.bone("hips").unwrap();
+    let tips = |lying: bool| {
+        let mut walk = Mover::new(&sk, 1.0, &model).unwrap();
+        walk.lie(lying);
+        let joints = settle(&mut walk, 5.0);
+        let pose = sk.pose(&joints);
+        let unturn = M3::rot_y(-walk.yaw().to_radians());
+        let chains = sk.tails();
+        let z: f32 = chains
+            .iter()
+            .map(|c| {
+                let tip = *c.last().unwrap();
+                unturn.apply(pose[tip].apply(sk.pivots[tip])).z
+            })
+            .sum::<f32>()
+            / chains.len() as f32;
+        z - unturn.apply(pose[hips].apply(sk.pivots[hips])).z
+    };
+    let (standing, lying) = (tips(false), tips(true));
+    assert!(
+        lying - standing > 0.6,
+        "tips {standing:.2} from the hips standing, {lying:.2} asleep"
+    );
+    assert!(
+        lying > -0.3,
+        "asleep, tips still {lying:.2} behind the hips"
+    );
+}
+
+/// Roger: the chick and duckling slept like they stood. Asleep they sink
+/// their heads into their feathers and lay them over on a shoulder; the
+/// owl, which already read as asleep, stays upright.
+#[test]
+fn sleeping_chicks_and_ducklings_tuck_their_heads_in() {
+    for id in BIPED_SPECIES {
+        let (model, sk) = mesh_model(id).unwrap();
+        let head = sk.bone("head").unwrap();
+        let held = |lying: bool| {
+            let mut walk = Mover::new(&sk, 1.0, &model).unwrap();
+            if lying {
+                walk.lie(true);
+            } else {
+                walk.sit(true);
+            }
+            let joints = settle(&mut walk, 5.0);
+            let y = sk.pose(&joints)[head].apply(sk.pivots[head]).y;
+            (y, joints[head].rot.z.abs())
+        };
+        let ((sitting, _), (lying, lean)) = (held(false), held(true));
+        if model.gait.tuck > 0.0 {
+            assert!(
+                sitting - lying > 0.12,
+                "{id}: head only {:.2} lower asleep",
+                sitting - lying
+            );
+            assert!(lean > 15.0, "{id}: head leans only {lean:.0}° asleep");
+        } else {
+            assert!(lean < 5.0, "{id}: head leans {lean:.0}° asleep");
+        }
+    }
+}
+
+/// Roger: the owl's face went misshapen when it turned its head to him.
+/// Its head is melted into its body, so a head turning alone slides the
+/// face across the body's outline: the body takes most of the turn.
+#[test]
+fn the_owl_turns_its_body_with_its_head() {
+    let (model, sk) = mesh_model("owl").unwrap();
+    let (head, body) = (sk.bone("head").unwrap(), sk.bone("body").unwrap());
+    let mut walk = Mover::new(&sk, 1.0, &model).unwrap();
+    walk.sit(true);
+    walk.look(35.0);
+    let joints = settle(&mut walk, 3.0);
+    let (h, b) = (joints[head].rot.y, joints[body].rot.y);
+    assert!(h + b > 25.0, "turned only {:.0}° in all", h + b);
+    assert!(b > 1.5 * h, "head {h:.0}°, body only {b:.0}°");
 }

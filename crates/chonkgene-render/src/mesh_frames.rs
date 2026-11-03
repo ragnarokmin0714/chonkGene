@@ -27,7 +27,7 @@ use crate::mesh_gpu::MeshCanvas;
 use crate::raymarch::PPU;
 use crate::skin::{Affine, Gesture, Skeleton, bite};
 use crate::waddle::Mover;
-use crate::{key_for, sleep_overlay, snack_overlay};
+use crate::{dirt_overlay, key_for, sleep_overlay, snack_overlay};
 
 /// The canvas, world units: wider than an upright pet's, for a body lying
 /// along the floor. A model may ask for more (`canvas` in its file: the
@@ -251,7 +251,19 @@ impl MeshRenderer {
             }
         }
         let arrived = self.draw(params, expression, look);
-        if let Some(t) = eating {
+        let digging = (params.act == Act::Dig)
+            .then_some(self.gesture)
+            .flatten()
+            .map(|(_, since)| (params.clock - since).max(0.0));
+        if let Some(t) = digging {
+            // Earth piling up under the paws, clods flying.
+            self.pixmap.data_mut().copy_from_slice(self.base.data());
+            if let Some(at) = self.snack_spot() {
+                let side = if params.facing < 0.0 { -1.0 } else { 1.0 };
+                dirt_overlay(&mut self.pixmap, at, self.scale, t, side);
+            }
+            self.changed = true;
+        } else if let Some(t) = eating {
             // The snack on the floor before it, a bite smaller each bite.
             self.pixmap.data_mut().copy_from_slice(self.base.data());
             let eaten = (t / BITE_SECS).floor() / (EAT_SECS / BITE_SECS);
@@ -313,10 +325,12 @@ impl MeshRenderer {
             self.gesture = gesture_secs(params.act).map(|_| (params.act, params.clock));
         }
         // How it holds itself: asleep it lies down; resting a moment, or
-        // with a feeling on its face, it sits; a stretch, a wave or a snack
-        // is done standing (a glance or a yawn stays sitting).
+        // with a feeling on its face, it sits; some gestures are done
+        // sitting (a yawn, a scratch, washing, preening: they sit it down
+        // at once), the rest standing (a stretch, a wave, a snack, digging).
         let asleep = expression == Expression::Asleep;
-        let standing = self.gesture.is_some_and(|(act, _)| act != Act::Yawn);
+        let standing = self.gesture.is_some_and(|(act, _)| !act.seated());
+        let seated = self.gesture.is_some_and(|(act, _)| act.seated());
         if walking || standing || asleep {
             self.rest_since = None;
         } else {
@@ -326,8 +340,12 @@ impl MeshRenderer {
             .rest_since
             .is_some_and(|since| params.clock - since > IDLE_SIT);
         self.walk.lie(asleep && !walking);
-        self.walk
-            .sit(!walking && !asleep && !standing && (rested || expression != Expression::Neutral));
+        self.walk.sit(
+            !walking
+                && !asleep
+                && !standing
+                && (rested || seated || expression != Expression::Neutral),
+        );
         self.walk.look(match params.act {
             Act::LookLeft => 35.0,
             Act::LookRight => -35.0,

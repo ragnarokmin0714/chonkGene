@@ -94,7 +94,7 @@
     // Two legs in turn; the body sways rather than twists, the head bobs.
     // Two legs in turn (degrees of swing, world units of lift); the body rolls
     // onto the planted leg by `roll` degrees, the head nods `nod`.
-    gait: (swing: 22, lift: 0.06, roll: 5, twist: 0, nod: 3, diagonal: false),
+    gait: (swing: 22, lift: 0.06, roll: 5, twist: 0, nod: 3, diagonal: false, neck: 0.35),
     face: (
         on: "head",
         nose: (0.14, -0.15, 0.85),
