@@ -806,6 +806,23 @@ Roger played `feat/mesh-pets` (01dad28) and reported four things; each is change
 
 Tests: `a_resting_pet_soon_does_its_own_little_things` (first gesture within 2.6 s, only its own habits, at least five kinds in two minutes, every species), `a_sleeping_fox_folds_its_tails_over_itself`, `sleeping_chicks_and_ducklings_tuck_their_heads_in`, `the_owl_turns_its_body_with_its_head` (the last three checked to fail with the change taken out); `idle_gestures_move_every_mesh_pet` and the edge-of-picture test now run every species' own gestures and eating. `--example mesh` gained `lie`, `look`, every gesture by name, the model's own canvas and `TURN=<deg>` for side views.
 
+### Roger's sixth pass (2026-11-03)
+
+Feedback only; nothing here is built yet.
+
+1. **Cats, dogs and the fox sleep with their heads up.** Confirmed in the code: lying down (`skin.rs`, the `lie` block) only tips the head 16° and drops it 0.06, so the chin hangs in the air above the paws. The fourth pass (item 6) already planned real sleeping poses per species; the fifth pass did only the fox's tails and the birds' tucks. Plan: several sleeping poses, picked at random each time a pet falls asleep (and sometimes changed in its sleep):
+   - **chin on paws** (all four-legged pets): head down until the chin rests on the front paws or the floor;
+   - **curled up**: nose to tail, the body bent round (cats: a doughnut; the fox under its tails);
+   - **on its side**: legs out (the Shiba especially);
+   - **belly up**: legs in the air (the Munchkin; a happy Shiba now and then).
+   A comparison page of the poses comes before the code, as the fourth pass said.
+2. **Touching the pets is gone.** Confirmed: the mesh renderer (`mesh_frames.rs`) never reads `PoseParams::squash` or `sway`, so the squish under the finger, the pop when it lets go and the swinging while held, which the sprite and ray-marched pets had, were lost when pets became meshes; only a small belly jolt (`walk.poke`) is left. Strong feelings (laughing, fed up, sulking) only sit the pet down with a new face, where the sprites had belly-up, melt and turned-away poses. Plan, on the meshes:
+   - squish: the flesh under the finger sinks in (bones near the press point squashed, the rest bulging out) and springs back with a wobble on release; long-press kneading (揉肉肉) keeps squishing in time with small drags;
+   - per zone: belly rub rolls it belly-up toward you, head pat leans into the hand with eyes shut, cheek squeeze puffs the cheeks, a poke in the bottom makes it jump and look back, paws a handshake;
+   - **new zones**: chin (下巴: it lifts its head and shuts its eyes, the leg kicks on a Shiba) and tail (尾巴: a flick, a cat lashes it, the fox swats with a tail); zones are painted per part in each model file, so this means splitting the head's lower part and the tail bones into their own zones;
+   - with the fourth pass's item 3: every touch turns the pet to face you first;
+   - **狗尾草逗貓 (teasing with a grass stalk / feather wand)**: was only in §9 "Later" and never built. Moved into v1: a cursor mode from the tray / menu that draws a stalk on the cursor; cats crouch, wiggle their bottoms and pounce at it, the fox too, dogs jump at it, birds peck at it. (Roger wrote 鼠尾草; read as 狗尾草, to confirm.)
+
 ### Phase 1: Shiba prototype (feel) — `v0.1.0`
 
 - The art pipeline (§3.3) works end to end for one Shiba, with placeholder art.
@@ -870,7 +887,7 @@ Tests: `a_resting_pet_soon_does_its_own_little_things` (first gesture within 2.6
 - **Native Wayland**: `wlr-layer-shell` + foreign-toplevel for KDE and wlroots compositors to close the §4 gaps; a GNOME Shell extension for GNOME.
 - **Community skin packs**: data only, never code; validated by the model loader, with size and part-count caps.
 - **Reminders**: knowing your routine (telling you to go to bed), water, pomodoro (all optional).
-- **More interactions**: feather-wand cursor mode. (Ball / frisbee throwing moved into v1 on 2026-11-03, §8 "Roger's fourth pass", item 2.)
+- **More interactions**: none left here: ball / frisbee throwing moved into v1 on 2026-11-03 (§8 "Roger's fourth pass", item 2), the feather-wand / grass-stalk cursor too (§8 "Roger's sixth pass", item 2).
 - **Japanese**, more species.
 
 ---
