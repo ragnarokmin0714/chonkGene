@@ -904,7 +904,7 @@ Tests: `every_mesh_pet_has_a_chin_and_a_tail_to_touch`, `a_touched_pet_turns_to_
 | **Who draws the art** (Roger, a commission, or my placeholders first) | critical path; cuteness depends on it | end of Phase 1 |
 | Sound sources (self-recorded, commissioned, CC0) | licensing | end of Phase 1 |
 | Owl's favourite snack | snack content | Phase 5 |
-| What 「沒有 ui/ux icon」 means: the program icon (exe, taskbar, Alt-Tab), icons in the settings window, a nicer tray icon, or all of them | icon work in §8 "Roger's fourth pass", item 1 | before that work starts |
+| What 「沒有 ui/ux icon」 means. Roger, 2026-11-03: the 招牌 icon, read as the program's own signature icon (exe, taskbar, Alt-Tab, tray, settings window), to be confirmed when the designs are shown; whether the settings window also gets icons is still open | icon work in §8 "Roger's fourth pass", item 1: the next round | before that work starts |
 | Commands (坐下, 趴下, 過來…): available from the start, or still unlocked by affinity like §1.13's tricks | menu design, nurturing | before item 2 |
 | Typing reactions on by default? They only use input timing (§1.3), but some people may still not want pets reacting to typing | settings default | before item 4 |
 | Scene props (branch, pond): appear only while their scene plays, or stay as desktop decorations | look, screen clutter | before item 4 |
