@@ -5,7 +5,7 @@
 > Items marked **"verify in Phase 0"** are reasoned, not yet confirmed on real machines.
 > UI copy and pet lines are quoted in Traditional Chinese (zh-TW), the product's default language, with an English gloss where it helps.
 >
-> Last updated: 2026-10-22
+> Last updated: 2026-11-03
 
 ---
 
@@ -33,7 +33,7 @@
 
 ### 1.1 Pets
 
-v1 has six species. A species only sets **default personality**; each individual rolls its own personality near those defaults when adopted, editable later in settings.
+v1 has seven species (the 九尾狐 joined on 2026-10-28). A species only sets **default personality**; each individual rolls its own personality near those defaults when adopted, editable later in settings.
 
 | Species | Default name | Ticklish | Patience | Energy | Daily rhythm | Signature moves |
 |---|---|---|---|---|---|---|
@@ -43,6 +43,7 @@ v1 has six species. A species only sets **default personality**; each individual
 | Owl (貓頭鷹) | 咕咕 | medium | medium | low by day, high at night | **nocturnal** (system clock) | 270° head turn, puffing into a ball, dozing by day |
 | Chick (小雞) | 蛋黃 | medium | low | high | **early riser**: up first, asleep first | pecks at the cursor and window edges; puffs up and drops a feather when startled; tiny rapid steps |
 | Duckling (小鴨) | 湯圓 | medium | high | low | daytime | waddles; lines up behind another pet and follows it; floats on the taskbar as if on water; "呱" when poked |
+| Nine-tailed fox (九尾狐) | 小九 | medium | medium | high | **late**: asleep 1:00–9:00 | spins when grumpy; its bell rings as it moves; plays with its tails (and with others using them, §1.4) |
 
 - **How many pets are on the desktop at once** is a setting: **6 by default, no upper limit**. Above 6 the setting shows a plain hint that CPU and memory use grow with each pet (§5); nothing stops the user.
 - Adopted pets beyond that number rest in the **pet house (寵物窩)** and can be swapped onto the desktop at any time. The same species can be adopted more than once.
@@ -76,6 +77,8 @@ v1 has six species. A species only sets **default personality**; each individual
 - **Fed up must be funny, never really angry**: no permanent affinity loss; calms down after 1–3 minutes and comes back to nuzzle the cursor.
 - Spam clicks do not restart animations: a counter only picks the stage; poke sounds are rate-limited too (§1.5).
 
+**Touching turns it to you** (Roger, 2026-11-03): any poke, pat, long press or tickle first turns the pet to face you and look at the cursor, and the reaction plays facing you (rolling belly-up toward you, leaning into the hand). See §8 "Roger's fourth pass", item 3.
+
 **Other interactions**
 - **Lift**: dragging grabs the scruff; body hangs, feet dangle.
 - **Shake**: while dragging, 4+ left-right reversals within 1.2 s count as a shake. Shaken while awake → dizzy; shaken while asleep → see §1.12.
@@ -89,7 +92,9 @@ v1 has six species. A species only sets **default personality**; each individual
 - **Needs**: energy, mood, social; they steer action choice (low energy → dozing).
 - **Daily rhythm**: each species has a 24-hour activity curve tied to the system clock.
 - **Idle detection**: user idle for N minutes → pets fall asleep or come over to look at the cursor; user returns → they stretch. Uses only the system idle-time API, **never hooks keyboard or mouse** (§6).
-- **Cursor curiosity**: when the cursor comes near, sometimes turn the head or chase it a little (low-rate cursor polling, no hooks).
+- **Typing and a still mouse** (Roger, 2026-11-03): while the mouse stays still, pets settle down (lie down, scratch an itch, wag); while you type they react too (paws tapping along, a head tilt, curling up next to you). Typing is inferred without hooks: the system's last-input time keeps resetting while the polled cursor stays put. Only that timing is used; no key is ever read (§6).
+- **Species idle scenes** (Roger, 2026-11-03): with time on their hands pets do their own thing with a prop and effects: the owl flies to a branch, the duckling swims in a pond, and so on. Props are their own click-through windows (§3.2). See §8 "Roger's fourth pass", item 4.
+- **Cursor curiosity**: when the cursor comes near, sometimes turn the head or chase it a little (low-rate cursor polling, no hooks). Not built yet; Roger finds that pets hardly ever face him (§8 "Roger's fourth pass", item 6).
 - **Desktop terrain**:
   - walk along the **bottom of the work area** (top edge of the taskbar), with the taskbar on any side;
   - sit on **window tops**, and hop up onto a low one nearby; ride along when the window is dragged, get thrown off when it is yanked, fall when it is closed or minimised (Windows and native X11; Wayland sessions see §4);
@@ -105,6 +110,7 @@ v1 has six species. A species only sets **default personality**; each individual
   - one pet is poked into laughter, the other laughs at it → the first chases it in embarrassment;
   - **雞同鴨講** (chick and duck talk past each other): their bubbles go 「啾啾！」/「呱呱。」 back and forth, louder each time, until both shrug;
   - the duckling lines up behind another pet and follows it everywhere; the leader gets annoyed, then gives up and leads a parade.
+  - **play-fights** (Roger, 2026-11-03): swatting, wrestling, pouncing, each species reacting its own way; the fox's bell rings and it fights and plays with its tails (§8 "Roger's fourth pass", item 5).
 - **Always ends in making up**: grooming each other, sleeping side by side.
 - **Frequency**: settings offer 偶爾 / 常常 / 超常 (sometimes / often / constantly); each pair has a cooldown.
 - **Breaking it up**: clicking either pet during a skit stops it; both look at you, then make up.
@@ -122,7 +128,7 @@ v1 has six species. A species only sets **default personality**; each individual
 | Item | Detail |
 |---|---|
 | Name | Chinese input must work (IME, verify in Phase 0); max 12 characters |
-| What it calls you (牠怎麼叫你) | How the pet addresses you in bubbles; per pet, max 8 characters. Defaults by species: Shiba 「主人」, Munchkin 「好朋友」, Fold 「奴才」, Owl 「同學」, Chick 「老大」, Duckling 「領隊」 |
+| What it calls you (牠怎麼叫你) | How the pet addresses you in bubbles; per pet, max 8 characters. Defaults by species: Shiba 「主人」, Munchkin 「好朋友」, Fold 「奴才」, Owl 「同學」, Chick 「老大」, Duckling 「領隊」, Fox 「小主人」 |
 | Eating makes it rounder (吃多了會慢慢變圓) | Optional, **off** by default. When on, feeding slowly raises the body value above the slider setting and play brings it back; when off, body shape follows only the slider |
 | Coat colour | Preset sets per species (Shiba: red, black, sesame, white; cats: orange, grey, milk-tea, black…; Chick: yolk yellow, white, black silkie; Duckling: white, yellow, mallard), plus custom colours |
 | Pattern | tabby, calico, tuxedo, etc.; implemented with palette slots |
@@ -242,6 +248,8 @@ Every string in the UI follows this section; check the glossary below before add
 - Naps when energy runs out.
 - Right-click menu 「讓牠去睡覺」.
 
+**Sleeping posture**: each species sleeps in a pose that clearly reads as asleep, never standing: curled into a ball, flat on its side, belly-up, or (birds) sat down puffed with the head tucked; only the owl sleeps upright (§8 "Roger's fourth pass", item 6).
+
 **While asleep**: a snot bubble grows and shrinks with breathing, occasional sleep talk (「……肉乾……」), very quiet snoring. Respects sound mode and don't disturb (§1.7).
 
 **How it is woken decides the reaction**
@@ -282,7 +290,7 @@ Every string in the UI follows this section; check the glossary below before add
 - A daily portion; a full pet declines (「吃不下了……」). Pets never go hungry from not being fed.
 - Affects body shape only when 「吃多了會慢慢變圓」 is on (§1.6).
 
-**Tricks**: learned with affinity, e.g. handshake (Lv.1), sit (Lv.2), spin (Lv.3), roll over (Lv.4), act cute (Lv.6). Learned tricks are sometimes performed spontaneously and can be requested from the menu. Birds get bird versions (wing wave instead of handshake).
+**Tricks**: learned with affinity, e.g. handshake (Lv.1), sit (Lv.2), spin (Lv.3), roll over (Lv.4), act cute (Lv.6). Learned tricks are sometimes performed spontaneously and can be requested from the menu. Roger asked (2026-11-03) to command pets (sit, catch a frisbee); whether the basic commands are there from the start or still unlocked by affinity is open (§10, §8 "Roger's fourth pass", item 2). Birds get bird versions (wing wave instead of handshake).
 
 **Growth diary (成長日記)**, a settings tab
 - Affinity level and progress, learned tricks.
@@ -354,6 +362,7 @@ Every string in the UI follows this section; check the glossary below before add
   - **Windows**: `UpdateLayeredWindow` with premultiplied BGRA. Layered windows **natively let clicks through** pixels with alpha = 0.
   - **X11**: ARGB visual + `XPutImage` (or MIT-SHM); an **XShape input region** set to the pet's silhouette (updated at a low rate).
 - Lifting and throwing move the window every frame.
+- **Props and effects** (planned, §8 "Roger's fourth pass"): a branch, a pond, a frisbee, ripples or sparkles each get their own small click-through layered window like a pet's, shown only while in use, hidden with the pets in every don't-disturb state, and off under reduced motion where they are only decoration.
 
 > **Verify in Phase 0**: adding `WS_EX_LAYERED` to a winit-created HWND and using `UpdateLayeredWindow`; drawing into a winit-created X11 window from a separate x11rb connection. If either fails, the platform crate creates pet windows itself.
 
@@ -750,6 +759,40 @@ Roger played `feat/mesh-pets` again and reported five things; each is fixed here
 
 1. **The GPU check report in English.** `chonkgene --gpu-check` (`crates/chonkgene-render/src/gpu_check.rs`, also `--example gpu`) writes `report.txt` in Chinese (27 lines carry Chinese text: headings, the per-species mesh lines with the species' Chinese names, units and notes). Roger asked for it in English: write every line of the report in English (species by their English names), keep the numbers and the layout, and update anything that reads the report back (tests, the issue #1 notes) to match.
 
+### Roger's fourth pass: more to do and more to see (2026-11-03)
+
+Roger played `feat/mesh-pets` again and asked for more actions and backgrounds, to make the pets smoother and more interactive. His notes, with what the plan already had and what is new. **Nothing here is built yet**; the order at the end is a proposal for Roger.
+
+1. **沒有 ui/ux icon (no UI/UX icons).** What exists: the pet menu draws an icon per row (`menu.rs`), the tray icon is a paw drawn in code (`app.rs` `tray_icon`). What is missing: the program has no icon of its own (no `.ico` resource in the exe, no Slint window icon), so Explorer, the taskbar and Alt-Tab show the default one for chonkGene and its settings window; the settings window has no icons at all; the cute widgets of §1.9 (paw switches, fish / bone slider thumbs, squashy buttons) are Phase 4 and not built. Plan: one icon set in the §1.9 style (a chubby pet face for the program, line icons with round ends for settings tabs and buttons, the tray paw redrawn to match), embedded at build time (§6.6), the program icon at 16–256 px. Which of these Roger meant is open (§10).
+2. **Commands and play: 坐下, 丟飛盤… (sit, throw a frisbee).** The plan had tricks unlocked by affinity and asked for from the menu (§1.13, Phase 5) and ball throwing for later (§9, now moved into v1). Plan:
+   - a 「叫牠…」 entry in the pet menu: 坐下 (sit), 趴下 (lie down), 過來 (come here, to the cursor), 轉圈 (spin), 握手 (shake hands; a wing for birds); a pet in a bad mood may take its time, never refuses for good;
+   - toys: a frisbee or ball thrown from the menu (or flicked with the mouse); it flies as a prop (§3.2) with the throw physics pets already use; dogs and the fox run and leap to catch it and bring it back, cats bat it about and lose interest, birds chase it a few steps and give up; more pets means a race for it (and a squabble, §1.4);
+   - needs on the meshes: lying on command (the sleep pose without sleeping), a leap and a catch, carrying in the mouth.
+3. **Tickling: the pet should face me.** The plan had the reactions (§1.2: belly rub melts into a puddle, head pat nuzzles the cursor), but on the meshes they are still faces over the normal pose, at whatever angle the pet stood. Plan: any touch turns the pet to face you (yaw to about 0, head and eyes toward the cursor) within about 0.25 s before the reaction; laughing rolls it belly-up toward you, a pat makes it lean into the cursor, a belly rub melts it into a puddle facing you; it keeps looking at you for a moment after.
+4. **A still mouse, typing, and scenes of their own.** The plan had idle detection (§1.3: fall asleep, or come over to look at the cursor; stretch when you come back); only sleep is wired up. New:
+   - mouse still (you are reading or typing): pets lie down and scratch an itch (趴下撓癢癢), wag their tails, groom;
+   - typing (inferred from timing only, §1.3, §6.2–6.3): paws tapping along, a head tilt at fast bursts, a cat curling up close to where you type, a Shiba falling asleep to the rhythm;
+   - species scenes: the owl flies to a branch and perches (birds' flight is still owed from 2026-10-30), the duckling swims in a small pond with ripples (§1.1 already had it floating on the taskbar), the chick pecks at seeds, cats lie in a sunbeam or chase a butterfly, the Shiba chews a bone, the fox chases its own tails among fox-fire orbs;
+   - needs: a props and effects layer (§3.2: branch, pond, seeds, sunbeam; ripples, splashes, leaves, sparkles, hearts, dust on landing), all hidden in don't-disturb states and toned down under reduced motion; flight for the birds; swimming for the duckling.
+5. **Pets play together, each in its own way; the fox's bell rings and it fights with its tails.** The plan had at least seven skits (§1.4); two are built (stare-off and chase, 雞同鴨講). New:
+   - play-fights: swatting, wrestling, pouncing, a tail tug, chasing in turns, each species with its own answer (the Shiba play-bows and does zoomies, the Fold swats once and turns its back, the Munchkin rolls over and cannot roll back, the chick pecks, the duckling quacks and flees, the owl puffs up and stares);
+   - the fox: its bell swings on a spring and rings (sound mode) when it runs, lands, is poked or plays; it swats others with its tails, tickles them with a tail tip, and may tuck a small pet under its tails;
+   - needs: pets touching each other. Each pet has its own window, so for the length of a contact skit both pets are drawn into one shared window (or their windows overlap with the near one on top); this is the main technical question of this item.
+6. **Why do they sleep standing, except the owl? And they hardly ever face me.**
+   - Sleeping: lying down asleep was added on 2026-10-30 (`Walk::lie`: the body sinks 0.42 of the leg length, front legs forward, hind legs folded, head down; birds sit down and tuck in), yet Roger still sees them standing. To check first: which build he played, whether the sprite fallback (no GPU, upright `model.ron` with eyes shut) was in use, and whether the pose is simply too slight from the camera. Then give each species a pose that cannot be read as standing (§1.12): the Shiba curled nose to tail or flat on its side, the cats curled into a doughnut (the Munchkin sometimes belly-up), the fox curled under its tails like a blanket, chick and duckling sat down puffed with the head under a wing; the owl stays upright, which looks right. A comparison page of the poses comes before any code.
+   - Facing: at rest a pet turns 28° from you (`REST_YAW`), sitting 8° (`SIT_YAW`), walking 72° (`WALK_YAW`), and walks take up much of the time; cursor curiosity (§1.3) is not built. Plan: standing at rest it faces you too, it looks at the cursor when the cursor comes near (head and eyes), glances at you while walking, turns and greets you when you come back after being away, and more of the idle choices are ones done facing you.
+
+**Proposed order**, each step checked headlessly here and then on Roger's Windows machine:
+
+| Step | Items | Why in this order |
+|---|---|---|
+| A | 6 (sleep poses, facing you) | fixes what looks wrong now; small, all in `skin.rs` / `waddle.rs` and the idle choices |
+| B | 3 (touch turns it to you, the real reactions) | builds on A's facing; makes poking feel personal |
+| C | 1 (icons) | independent; quick once Roger says which icons he meant |
+| D | 2 (commands, frisbee) | needs the props layer, which D builds |
+| E | 4 (still mouse, typing, scenes, effects, flight, swimming) | the biggest; reuses D's props |
+| F | 5 (play-fights, the fox's bell and tails) | needs two pets drawn together, the hardest technical part |
+
 ### Phase 1: Shiba prototype (feel) — `v0.1.0`
 
 - The art pipeline (§3.3) works end to end for one Shiba, with placeholder art.
@@ -814,7 +857,7 @@ Roger played `feat/mesh-pets` again and reported five things; each is fixed here
 - **Native Wayland**: `wlr-layer-shell` + foreign-toplevel for KDE and wlroots compositors to close the §4 gaps; a GNOME Shell extension for GNOME.
 - **Community skin packs**: data only, never code; validated by the model loader, with size and part-count caps.
 - **Reminders**: knowing your routine (telling you to go to bed), water, pomodoro (all optional).
-- **More interactions**: feather-wand cursor mode, ball throwing.
+- **More interactions**: feather-wand cursor mode. (Ball / frisbee throwing moved into v1 on 2026-11-03, §8 "Roger's fourth pass", item 2.)
 - **Japanese**, more species.
 
 ---
@@ -826,6 +869,10 @@ Roger played `feat/mesh-pets` again and reported five things; each is fixed here
 | **Who draws the art** (Roger, a commission, or my placeholders first) | critical path; cuteness depends on it | end of Phase 1 |
 | Sound sources (self-recorded, commissioned, CC0) | licensing | end of Phase 1 |
 | Owl's favourite snack | snack content | Phase 5 |
+| What 「沒有 ui/ux icon」 means: the program icon (exe, taskbar, Alt-Tab), icons in the settings window, a nicer tray icon, or all of them | icon work in §8 "Roger's fourth pass", item 1 | before that work starts |
+| Commands (坐下, 趴下, 過來…): available from the start, or still unlocked by affinity like §1.13's tricks | menu design, nurturing | before item 2 |
+| Typing reactions on by default? They only use input timing (§1.3), but some people may still not want pets reacting to typing | settings default | before item 4 |
+| Scene props (branch, pond): appear only while their scene plays, or stay as desktop decorations | look, screen clutter | before item 4 |
 | Windows code signing (unsigned triggers SmartScreen warnings; cloud signing is about USD 10/month, to be rechecked) | first-run experience | Phase 6 |
 | Whether the GNOME Wayland degradation is acceptable | whether §9's native Wayland moves earlier | after Phase 0 |
 | Open-source licence and repo visibility | art, font and sound licences must agree | before going public |
