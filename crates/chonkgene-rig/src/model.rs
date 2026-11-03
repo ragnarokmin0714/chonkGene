@@ -10,7 +10,7 @@ use crate::sdf::Shape;
 use crate::{Error, invalid};
 
 /// Hit zones, in hit-test priority order (PLAN §1.2).
-pub const ZONES: [&str; 5] = ["belly", "cheek", "paw", "head", "bottom"];
+pub const ZONES: [&str; 7] = ["belly", "cheek", "paw", "head", "bottom", "chin", "tail"];
 
 /// Whole-body poses every species can strike.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]

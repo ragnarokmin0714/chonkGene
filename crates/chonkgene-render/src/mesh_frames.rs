@@ -16,8 +16,11 @@
 use std::sync::Arc;
 use std::sync::mpsc::{Receiver, TryRecvError, channel};
 
-use chonkgene_core::anim::{Act, BITE_SECS, EAT_SECS, Expression, PoseParams, gesture_secs};
-use chonkgene_rig::math::{V3, v3};
+use chonkgene_core::Zone;
+use chonkgene_core::anim::{
+    Act, BITE_SECS, EAT_SECS, Expression, HOLD_SECS, PoseParams, Touch, gesture_secs,
+};
+use chonkgene_rig::math::{M3, V3, v3};
 use chonkgene_rig::{FLOOR, Layer, Look, Model, Pose, Scene, ZONES};
 use tiny_skia::{Pixmap, Transform};
 
@@ -25,7 +28,7 @@ use crate::gpu::Gpu;
 use crate::mesh::{Mesh, bake};
 use crate::mesh_gpu::MeshCanvas;
 use crate::raymarch::PPU;
-use crate::skin::{Affine, Gesture, Skeleton, bite};
+use crate::skin::{Affine, Feel, Gesture, Mood, Skeleton, SleepPose, Spring, bite};
 use crate::waddle::Mover;
 use crate::{dirt_overlay, key_for, sleep_overlay, snack_overlay};
 
@@ -38,6 +41,13 @@ const UNITS: (f32, f32) = (4.5, 3.3);
 const MAX_STEP: f32 = 1.0 / 60.0;
 /// Standing still doing nothing this long (seconds), a pet sits down.
 const IDLE_SIT: f32 = 0.8;
+/// Asleep, a pet may change how it lies after this many seconds (and up
+/// to as many again).
+const SLEEP_SHIFT: f32 = 45.0;
+/// How the head follows a finger: degrees of turn per world unit the
+/// finger is beside the head, of tilt per unit below it, and the most.
+const GAZE_TURN: (f32, f32) = (28.0, 40.0);
+const GAZE_TILT: (f32, f32) = (22.0, 28.0);
 
 /// Pixel size of `model`'s picture at `scale` (1.0 = 100%).
 pub fn pixel_size(model: &Model, scale: f32) -> (u32, u32) {
@@ -89,6 +99,18 @@ pub struct MeshRenderer {
     /// Since when (the animator's clock) it has stood still, doing nothing.
     rest_since: Option<f32>,
     changed: bool,
+    /// The vertex under the finger, and the pixel it was found for.
+    pressed: Option<(usize, (f32, f32))>,
+    /// How deep the finger has pressed in (world units, springing back out
+    /// past zero when it lets go), and the dent sent with the next frame.
+    dent: Spring,
+    dent_r: f32,
+    press: Option<(V3, f32, f32)>,
+    /// Asleep: the pose, and when (the animator's clock) it may change.
+    sleep: Option<(SleepPose, f32)>,
+    /// For picking sleep poses; or the one pose to sleep in (tests, looks).
+    seed: u32,
+    sleep_in: Option<SleepPose>,
 }
 
 impl MeshRenderer {
@@ -131,6 +153,13 @@ impl MeshRenderer {
             gesture: None,
             rest_since: None,
             changed: false,
+            pressed: None,
+            dent: Spring::default(),
+            dent_r: 0.3,
+            press: None,
+            sleep: None,
+            seed: 0x9E37_79B9 ^ (coat as u32).wrapping_mul(0x85EB_CA6B),
+            sleep_in: None,
         })
     }
 
@@ -219,7 +248,11 @@ impl MeshRenderer {
     /// sitting down, getting up and gestures move the whole pet and need
     /// smooth frames.
     pub fn min_fps(&self) -> u32 {
-        if self.walk.busy() { 30 } else { 15 }
+        if self.walk.busy() || self.dent.x.abs() > 0.002 {
+            30
+        } else {
+            15
+        }
     }
 
     /// Wait for the bake and for the frame on its way (tests, screenshots),
@@ -239,6 +272,9 @@ impl MeshRenderer {
 
     pub fn render(&mut self, params: &PoseParams, expression: Expression) -> &Pixmap {
         let mut look = key_for(expression, params).look;
+        if matches!(expression, Expression::Neutral | Expression::Happy) {
+            look = touched_look(&params.touch).unwrap_or(look);
+        }
         let eating = (params.act == Act::Eat)
             .then_some(self.gesture)
             .flatten()
@@ -340,12 +376,17 @@ impl MeshRenderer {
             .rest_since
             .is_some_and(|since| params.clock - since > IDLE_SIT);
         self.walk.lie(asleep && !walking);
+        // Laughing, fed up and sulking are poses of their own (see
+        // `Feel`); pleased, it sits.
         self.walk.sit(
             !walking
                 && !asleep
                 && !standing
-                && (rested || seated || expression != Expression::Neutral),
+                && (rested || seated || expression == Expression::Happy),
         );
+        self.sleep_pose(asleep, params.clock);
+        let feel = self.feel(params, expression);
+        self.walk.feel(feel);
         self.walk.look(match params.act {
             Act::LookLeft => 35.0,
             Act::LookRight => -35.0,
@@ -377,6 +418,8 @@ impl MeshRenderer {
             root.shift.y += (-params.bob).max(0.0) / PPU;
         }
         self.bones = self.sk.pose(&joints);
+        self.settle(params);
+        self.dent(params, dt);
         self.look = look;
         self.changed = false;
         // A walking pet's picture must keep up with its window, which moves
@@ -411,6 +454,7 @@ impl MeshRenderer {
             Layer::All,
         );
         let yaw = self.walk.yaw();
+        live.canvas.press = self.press;
         let sent = if force {
             live.canvas
                 .submit(self.gpu, &scene, &self.bones, yaw)
@@ -480,6 +524,14 @@ impl MeshRenderer {
     /// couple of pixels of it, the one nearest the camera.
     pub fn hit(&self, x: f32, y: f32) -> Option<&'static str> {
         let live = self.live.as_ref()?;
+        let i = self.nearest(x, y)?;
+        ZONES.get(usize::from(live.mesh.zones[i])).copied()
+    }
+
+    /// The vertex drawn nearest the camera within a couple of pixels of
+    /// pixel `(x, y)` of the picture shown, if the pet is there.
+    fn nearest(&self, x: f32, y: f32) -> Option<usize> {
+        let live = self.live.as_ref()?;
         let (w, h) = (self.pixmap.width() as f32, self.pixmap.height() as f32);
         if !(0.0..w).contains(&x) || !(0.0..h).contains(&y) {
             return None;
@@ -493,7 +545,7 @@ impl MeshRenderer {
         }
         let reach = 2.5 * self.scale;
         let fwd = self.canvas_forward();
-        let mut best: Option<(f32, u8)> = None;
+        let mut best: Option<(f32, usize)> = None;
         for i in 0..live.mesh.vertices.len() {
             let p = self.skinned(&live.mesh, i);
             let (px, py) = live.canvas.project(p);
@@ -502,10 +554,189 @@ impl MeshRenderer {
             }
             let depth = p.dot(fwd);
             if best.is_none_or(|(d, _)| depth < d) {
-                best = Some((depth, live.mesh.zones[i]));
+                best = Some((depth, i));
             }
         }
-        best.and_then(|(_, z)| ZONES.get(usize::from(z)).copied())
+        best.map(|(_, i)| i)
+    }
+
+    /// How the pet feels and is touched, for the walk: the face's feeling
+    /// as a pose, and where the finger is (it turns to you and looks).
+    fn feel(&mut self, params: &PoseParams, expression: Expression) -> Feel {
+        let mood = match expression {
+            Expression::Giggle => Mood::Laugh,
+            Expression::FedUp => Mood::FedUp,
+            Expression::Sulk => Mood::Sulk,
+            Expression::Happy => Mood::Content,
+            Expression::Neutral | Expression::Asleep => Mood::Calm,
+        };
+        let touch = &params.touch;
+        // The vertex under the finger, found again when the finger moves.
+        match touch.at() {
+            Some(at) if self.pressed.is_none_or(|(_, was)| was != at) => {
+                if let Some(i) = self.nearest(at.0, at.1) {
+                    self.pressed = Some((i, at));
+                }
+            }
+            _ => {}
+        }
+        let bone = self.pressed.and_then(|(i, _)| {
+            let live = self.live.as_ref()?;
+            Some(live.mesh.vertices[i].bones[0] as usize)
+        });
+        // Asleep or sulking it does not turn to you.
+        let gaze = (touch.attending() && mood != Mood::Sulk && expression != Expression::Asleep)
+            .then(|| touch.at())
+            .flatten()
+            .map(|at| {
+                let head = self.project_on(self.model.part("head"), V3::ZERO);
+                let unit = PPU * self.scale;
+                let (dx, dy) = ((at.0 - head.0) / unit, (at.1 - head.1) / unit);
+                (
+                    (dx * GAZE_TURN.0).clamp(-GAZE_TURN.1, GAZE_TURN.1),
+                    (dy * GAZE_TILT.0).clamp(-GAZE_TILT.1, GAZE_TILT.1),
+                )
+            });
+        Feel {
+            mood,
+            gaze,
+            held: touch.held.map(|(z, _, secs)| (z, bone, secs)),
+            poked: touch.last.map(|(z, _, ago)| (z, bone, ago)),
+        }
+    }
+
+    /// How deep a finger has the flesh pressed in now, world units
+    /// (negative springing back out; 0 when nothing presses).
+    pub fn pressed_in(&self) -> f32 {
+        self.press.map_or(0.0, |(_, depth, _)| depth)
+    }
+
+    /// Always sleep in `pose` (tests, looking at the poses); none: pick as
+    /// the species likes.
+    pub fn sleep_in(&mut self, pose: Option<SleepPose>) {
+        self.sleep_in = pose;
+        self.sleep = None;
+    }
+
+    /// Asleep, pick how to lie (by the species' liking), and now and then
+    /// another; awake, forget it.
+    fn sleep_pose(&mut self, asleep: bool, clock: f32) {
+        if !asleep {
+            self.sleep = None;
+            return;
+        }
+        if let Some(pose) = self.sleep_in {
+            self.walk.sleep_pose(pose);
+            return;
+        }
+        let due = self.sleep.is_none_or(|(_, until)| clock >= until);
+        if !due {
+            return;
+        }
+        let weights = SleepPose::weights(&self.model.species);
+        let mut roll = |n: u32| {
+            // xorshift
+            self.seed ^= self.seed << 13;
+            self.seed ^= self.seed >> 17;
+            self.seed ^= self.seed << 5;
+            self.seed % n.max(1)
+        };
+        let total: u32 = weights.iter().sum();
+        let mut pick = roll(total);
+        let mut pose = SleepPose::Chin;
+        for (k, &w) in weights.iter().enumerate() {
+            if pick < w {
+                pose = SleepPose::ALL[k];
+                break;
+            }
+            pick -= w;
+        }
+        let wait = SLEEP_SHIFT * (1.0 + roll(1000) as f32 / 1000.0);
+        self.sleep = Some((pose, clock + wait));
+        self.walk.sleep_pose(pose);
+    }
+
+    /// The whole body's squash (a finger pressing, a landing, a giggle,
+    /// melting) and breathing, its lean (held swinging, dizzy), and, rolled
+    /// over or melted, settling it onto the floor: one move after the
+    /// skeleton's, for every bone.
+    fn settle(&mut self, params: &PoseParams) {
+        let sq =
+            (0.35 * params.squash + 0.15 * params.belly + self.walk.flatten()).clamp(-0.3, 0.3);
+        let breath = 0.012 * params.breath;
+        let wide = 1.0 + 0.5 * sq;
+        let feet = v3(0.0, FLOOR, crate::skin::ROOT_PIVOT.z);
+        let squash = Affine::about(M3::diag(v3(wide, (1.0 - sq) * (1.0 + breath), wide)), feet);
+        let lean = Affine::about(M3::rot_z(params.sway.to_radians()), feet);
+        let mut world = lean.then(&squash);
+        let g = self.walk.ground();
+        if g > 0.0
+            && let Some(live) = &self.live
+        {
+            // The lowest of the skin (a sample of it) comes to the floor,
+            // and the pet to the middle of its picture (rolling over about
+            // its length carries it off to one side).
+            let (mut low, mut left, mut right) = (f32::MAX, f32::MAX, f32::MIN);
+            for v in live.mesh.vertices.iter().step_by(5) {
+                let rest = v3(v.pos[0], v.pos[1], v.pos[2]);
+                let mut p = V3::ZERO;
+                for (b, w) in v.bones.iter().zip(v.weights) {
+                    if w > 0.0 {
+                        p = p + self.bones[*b as usize].apply(rest) * w;
+                    }
+                }
+                let p = world.apply(p);
+                low = low.min(p.y);
+                (left, right) = (left.min(p.x), right.max(p.x));
+            }
+            if low < f32::MAX {
+                world.t.y += (FLOOR - low) * g;
+                world.t.x -= 0.5 * (left + right) * g;
+            }
+        }
+        for b in &mut self.bones {
+            *b = world.then(b);
+        }
+    }
+
+    /// A finger pressing in: the dent deepens while it is down (chubbier
+    /// pets give more) and springs back past flat when it lets go, so the
+    /// flesh wobbles out and settles.
+    fn dent(&mut self, params: &PoseParams, dt: f32) {
+        let (goal, radius) = match params.touch.held {
+            Some((zone, ..)) => {
+                let (d, r) = dent_for(zone);
+                (d * (0.8 + 0.4 * self.chonk), r)
+            }
+            None => (0.0, self.dent_r),
+        };
+        self.dent_r = radius;
+        let mut x = 0.0;
+        let steps = (dt / MAX_STEP).ceil().max(1.0);
+        for _ in 0..steps as usize {
+            x = self.dent.step(goal, 0.0, 5.5, 0.3, dt / steps);
+        }
+        let resting = x.abs() < 0.002 && self.dent.v.abs() < 0.02;
+        if resting && params.touch.held.is_none() {
+            self.dent = Spring::default();
+            self.press = None;
+            if params.touch.last.is_none() {
+                self.pressed = None;
+            }
+            return;
+        }
+        self.press = self.pressed.and_then(|(i, _)| {
+            let live = self.live.as_ref()?;
+            let v = &live.mesh.vertices[i];
+            let rest = v3(v.pos[0], v.pos[1], v.pos[2]);
+            let mut p = V3::ZERO;
+            for (b, w) in v.bones.iter().zip(v.weights) {
+                if w > 0.0 {
+                    p = p + self.bones[*b as usize].apply(rest) * w;
+                }
+            }
+            Some((p, x, radius))
+        });
     }
 
     /// Into the screen, the way the camera looks.
@@ -521,6 +752,37 @@ impl MeshRenderer {
             Some(l) => l.canvas.project(self.skinned(&l.mesh, l.mesh.crown)),
             None => (self.pixmap.width() as f32 / 2.0, 0.0),
         }
+    }
+}
+
+/// How deep a finger presses in on each zone (world units) and how wide
+/// the dent is: the belly and bottom are the softest.
+fn dent_for(zone: Zone) -> (f32, f32) {
+    match zone {
+        Zone::Belly => (0.13, 0.32),
+        Zone::Bottom => (0.11, 0.3),
+        Zone::Cheek => (0.09, 0.2),
+        Zone::Chin => (0.07, 0.2),
+        Zone::Head => (0.06, 0.24),
+        Zone::Paw => (0.05, 0.16),
+        Zone::Tail => (0.06, 0.14),
+    }
+}
+
+/// The face a touch puts on: content ^ ^ for a hand held on its head, chin
+/// or cheek (or a long belly rub), a squint for a poke on the head.
+fn touched_look(touch: &Touch) -> Option<Look> {
+    if let Some((zone, _, secs)) = touch.held {
+        let nice = match zone {
+            Zone::Head | Zone::Chin | Zone::Cheek => secs > 0.25,
+            Zone::Belly => secs > HOLD_SECS,
+            _ => false,
+        };
+        return nice.then_some(Look::Happy);
+    }
+    match touch.last {
+        Some((Zone::Head, _, ago)) if ago < 0.35 => Some(Look::Shut),
+        _ => None,
     }
 }
 

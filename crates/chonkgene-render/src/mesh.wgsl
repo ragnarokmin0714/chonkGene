@@ -25,6 +25,10 @@ struct Uniforms {
     mouth_r: vec4<f32>,
     // The shadow: centre x and z on the floor, radii across and along the pet.
     shadow: vec4<f32>,
+    // A finger pressing in: xyz where (posed, world), w how deep (into the
+    // screen; negative springing back out); press_r.x: the dent's radius.
+    press: vec4<f32>,
+    press_r: vec4<f32>,
     // Three rows of [m | t] per bone.
     bones: array<vec4<f32>, 192>,
 }
@@ -95,6 +99,20 @@ fn vs_pet(v: In) -> Out {
         if w > 0.0 {
             p += bone_point(v.bones[k], v.pos.xyz) * w;
             n += bone_dir(v.bones[k], v.normal.xyz) * w;
+        }
+    }
+    // The skin under the finger sinks away from you, most in the middle;
+    // the dent's walls tilt their normals in so it shades as a dent.
+    let depth = u.press.w;
+    if depth != 0.0 {
+        let r = u.press_r.x;
+        let rel = p - u.press.xyz;
+        let q = dot(rel, rel) / (r * r);
+        if q < 1.0 {
+            let f = (1.0 - q) * (1.0 - q);
+            p += u.fwd.xyz * depth * f;
+            let across = rel - u.fwd.xyz * dot(rel, u.fwd.xyz);
+            n += across * (-4.0 * depth * (1.0 - q) / (r * r)) * length(n);
         }
     }
     var o: Out;

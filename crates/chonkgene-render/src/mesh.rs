@@ -5,7 +5,7 @@
 
 use chonkgene_rig::math::{V3, smoothstep, v3};
 use chonkgene_rig::sdf::Shape;
-use chonkgene_rig::{FLOOR, Layer, Look, Model, Pose, Scene};
+use chonkgene_rig::{FLOOR, Layer, Look, Model, Pose, Scene, ZONES};
 
 use crate::raymarch::occlusion;
 use crate::skin::{ROOT_PIVOT, Skeleton};
@@ -161,6 +161,11 @@ pub fn bake(
         [q.x, q.y, q.z, if on { 1.0 } else { 0.0 }]
     };
     let mut zones = Vec::with_capacity(points.len());
+    // Under the chin is below the nose (or beak, or bill).
+    let nose_y = parts
+        .iter()
+        .find(|pv| ["nose", "beak", "bill"].contains(&pv.part.name.as_str()))
+        .map(|pv| pv.center.y);
     let vertices: Vec<Vertex> = points
         .iter()
         .map(|&p0| {
@@ -170,8 +175,8 @@ pub fn bake(
             }
             let nrm = scene.normal(p);
             let s = scene.coat_at(p);
-            zones.push(s.zone);
             let (bones, weights) = weigh(&parts, skeleton, p);
+            zones.push(refine_zone(skeleton, s.zone, p, &bones, &weights, nose_y));
             Vertex {
                 pos: [p.x, p.y, p.z, occlusion(&scene, p, nrm)],
                 normal: [nrm.x, nrm.y, nrm.z, s.gloss],
@@ -234,6 +239,41 @@ fn sample(scene: &Scene, n: usize, at: &(dyn Fn(usize, usize, usize) -> V3 + Syn
 /// pulls toward its bone by how near it is, fading out across the seam's
 /// blend, so a seam bends smoothly and nothing past it follows; tips and
 /// jiggles then take their share.
+/// The hit zones the model's parts cannot give: the tail (skin that moves
+/// mostly with a `tail…` bone) and under the chin (head skin that wobbles
+/// with the `chin` soft spot, below the nose). The rest keep their part's.
+fn refine_zone(
+    sk: &Skeleton,
+    zone: u8,
+    p: V3,
+    bones: &[u32; 4],
+    weights: &[f32; 4],
+    nose_y: Option<f32>,
+) -> u8 {
+    let index = |name: &str| ZONES.iter().position(|z| *z == name).map(|i| i as u8);
+    let name = |b: u32| sk.names[b as usize].as_str();
+    let share = |on: &dyn Fn(&str) -> bool| -> f32 {
+        bones
+            .iter()
+            .zip(weights)
+            .filter(|(b, _)| on(name(**b)))
+            .map(|(_, w)| *w)
+            .sum()
+    };
+    // A long tail spreads its skin over several segments' bones; a bird's
+    // short one blends into its bottom.
+    let tail = |n: &str| n.starts_with("tail");
+    if share(&tail) > 0.5 || (tail(name(bones[0])) && weights[0] > 0.35) {
+        return index("tail").unwrap_or(zone);
+    }
+    let chin = share(&|n| n == "chin");
+    let on_head = [index("head"), index("cheek")].contains(&Some(zone));
+    if on_head && chin > 0.25 && nose_y.is_some_and(|y| p.y < y - 0.02) {
+        return index("chin").unwrap_or(zone);
+    }
+    zone
+}
+
 fn weigh(parts: &[chonkgene_rig::PartView], sk: &Skeleton, p: V3) -> ([u32; 4], [f32; 4]) {
     let mut w = vec![0.0f32; sk.names.len()];
     let d: Vec<f32> = parts

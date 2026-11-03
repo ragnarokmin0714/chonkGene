@@ -914,7 +914,9 @@ fn margins(pm: &Pixmap) -> [u32; 4] {
 /// (Along the bottom the faint edge of the shadow may touch.)
 #[test]
 fn no_mesh_pet_is_cut_off_by_the_edge_of_its_picture() {
+    use chonkgene_core::Zone;
     use chonkgene_core::anim::{Animator, Expression};
+    use chonkgene_render::skin::SleepPose;
     for id in QUAD_SPECIES.iter().chain(&BIPED_SPECIES) {
         let Some(mut r) = app_renderer(id) else {
             eprintln!("skipped: no GPU");
@@ -923,7 +925,11 @@ fn no_mesh_pet_is_cut_off_by_the_edge_of_its_picture() {
         let mut a = Animator::new(1, 0.33, 0.0).with_pops(false);
         let mut worst = [u32::MAX; 3];
         let mut what = [""; 3];
-        let mut run = |a: &mut Animator, secs: f32, doing: &'static str, e: Expression| {
+        let mut run = |r: &mut chonkgene_render::MeshRenderer,
+                       a: &mut Animator,
+                       secs: f32,
+                       doing: &'static str,
+                       e: Expression| {
             for _ in 0..(secs * 10.0) as usize {
                 a.step(0.1);
                 r.render(&a.params(), e);
@@ -936,28 +942,52 @@ fn no_mesh_pet_is_cut_off_by_the_edge_of_its_picture() {
                 }
             }
         };
-        run(&mut a, 1.0, "standing", Expression::Neutral);
+        run(&mut r, &mut a, 1.0, "standing", Expression::Neutral);
         a.walking = true;
-        run(&mut a, 1.5, "walking right", Expression::Neutral);
+        run(&mut r, &mut a, 1.5, "walking right", Expression::Neutral);
         a.facing = -1.0;
-        run(&mut a, 1.5, "turning and walking left", Expression::Neutral);
+        run(
+            &mut r,
+            &mut a,
+            1.5,
+            "turning and walking left",
+            Expression::Neutral,
+        );
         a.pace = 4.0;
         a.facing = 1.0;
-        run(&mut a, 1.0, "zoomies", Expression::Neutral);
+        run(&mut r, &mut a, 1.0, "zoomies", Expression::Neutral);
         (a.walking, a.pace) = (false, 1.0);
-        run(&mut a, 3.0, "sitting down", Expression::Neutral);
+        run(&mut r, &mut a, 3.0, "sitting down", Expression::Neutral);
         a.cheer();
-        run(&mut a, 1.5, "hopping", Expression::Happy);
+        run(&mut r, &mut a, 1.5, "hopping", Expression::Happy);
         let species = chonkgene_core::species::Species::from_id(id).unwrap();
         for &(g, _) in species.habits() {
             a.gesture(g);
-            run(&mut a, 3.2, "a gesture", Expression::Neutral);
+            run(&mut r, &mut a, 3.2, "a gesture", Expression::Neutral);
         }
         a.eat();
-        run(&mut a, 3.8, "eating", Expression::Neutral);
+        run(&mut r, &mut a, 3.8, "eating", Expression::Neutral);
         a.facing = -1.0;
-        run(&mut a, 2.0, "turning sitting", Expression::Neutral);
-        run(&mut a, 3.0, "lying down", Expression::Asleep);
+        run(&mut r, &mut a, 2.0, "turning sitting", Expression::Neutral);
+        run(&mut r, &mut a, 3.0, "lying down", Expression::Asleep);
+        // Feelings shown with the whole body, touches, every way of
+        // sleeping (Roger, 2026-11-03).
+        a.facing = 1.0;
+        run(&mut r, &mut a, 3.0, "laughing", Expression::Giggle);
+        run(&mut r, &mut a, 3.0, "fed up", Expression::FedUp);
+        run(&mut r, &mut a, 4.0, "sulking", Expression::Sulk);
+        let (w, h) = (r.pixmap().width() as f32, r.pixmap().height() as f32);
+        for zone in [Zone::Belly, Zone::Chin, Zone::Tail, Zone::Paw] {
+            a.press(zone, (0.5 * w, 0.6 * h));
+            run(&mut r, &mut a, 2.5, "held", Expression::Neutral);
+            a.poke(zone);
+            run(&mut r, &mut a, 1.0, "let go", Expression::Neutral);
+        }
+        for pose in SleepPose::ALL {
+            r.sleep_in(Some(pose));
+            run(&mut r, &mut a, 4.0, "asleep", Expression::Asleep);
+            run(&mut r, &mut a, 2.0, "waking", Expression::Neutral);
+        }
         for (i, side) in ["left", "top", "right"].iter().enumerate() {
             assert!(
                 worst[i] >= 3,
@@ -1167,4 +1197,258 @@ fn the_owl_turns_its_body_with_its_head() {
     let (h, b) = (joints[head].rot.y, joints[body].rot.y);
     assert!(h + b > 25.0, "turned only {:.0}° in all", h + b);
     assert!(b > 1.5 * h, "head {h:.0}°, body only {b:.0}°");
+}
+
+/// Roger, 2026-11-03: chin scratches and tail pulls. Every mesh pet has
+/// skin that answers to its chin and to its tail.
+#[test]
+fn every_mesh_pet_has_a_chin_and_a_tail_to_touch() {
+    let zone = |name: &str| {
+        chonkgene_rig::ZONES
+            .iter()
+            .position(|z| *z == name)
+            .unwrap() as u8
+    };
+    for id in QUAD_SPECIES.iter().chain(&BIPED_SPECIES) {
+        let (model, sk) = mesh_model(id).unwrap();
+        let mesh = bake(&model, &sk, 0, 0.33, model.bake_cell).unwrap();
+        let count = |z: u8| mesh.zones.iter().filter(|&&v| v == z).count();
+        let (chin, tail) = (count(zone("chin")), count(zone("tail")));
+        // The owl's flat face has hardly any chin to speak of.
+        let least = if *id == "owl" { 1 } else { 100 };
+        assert!(chin >= least, "{id}: {chin} chin vertices");
+        assert!(tail >= 100, "{id}: {tail} tail vertices");
+    }
+}
+
+fn feel(mood: chonkgene_render::skin::Mood) -> chonkgene_render::skin::Feel {
+    chonkgene_render::skin::Feel {
+        mood,
+        ..Default::default()
+    }
+}
+
+/// PLAN §1.2: a touch turns the pet to face you and look at the finger.
+#[test]
+fn a_touched_pet_turns_to_you_and_looks_at_the_finger() {
+    use chonkgene_core::Zone;
+    for id in QUAD_SPECIES.iter().chain(&BIPED_SPECIES) {
+        let (model, sk) = mesh_model(id).unwrap();
+        let mut walk = Mover::new(&sk, 1.0, &model).unwrap();
+        settle(&mut walk, 3.0);
+        let before = walk.yaw();
+        walk.feel(chonkgene_render::skin::Feel {
+            gaze: Some((25.0, 0.0)),
+            held: Some((Zone::Head, None, 0.1)),
+            ..Default::default()
+        });
+        let joints = settle(&mut walk, 0.4);
+        assert!(
+            walk.yaw().abs() < 12.0,
+            "{id}: still turned {:.0}° (was {before:.0}°) after 0.4 s",
+            walk.yaw()
+        );
+        let head = sk.bone("head").unwrap();
+        let body = sk.bone("body").unwrap();
+        let turn = joints[head].rot.y + joints[body].rot.y;
+        assert!(
+            turn > 12.0,
+            "{id}: head turned only {turn:.0}° to the finger"
+        );
+    }
+}
+
+/// Roger: cats, dogs and the fox slept with their heads up. Lying chin
+/// down or curled up, the nose comes down below 60% of its height standing
+/// (lying down before, it stayed at two thirds); on its side or back, the
+/// body is rolled over by most of a quarter turn or more.
+#[test]
+fn four_legged_pets_sleep_with_their_heads_down() {
+    use chonkgene_render::skin::SleepPose;
+    for id in QUAD_SPECIES {
+        let (model, sk) = mesh_model(id).unwrap();
+        let nose = &model.parts[model.part("nose").unwrap()];
+        let body = sk.bone("body").unwrap();
+        let floor = chonkgene_rig::FLOOR;
+        let nose_up = |joints: &[chonkgene_render::skin::Joint]| {
+            sk.pose(joints)[nose.bone].apply(nose.at).y - floor
+        };
+        let mut walk = Mover::new(&sk, 1.0, &model).unwrap();
+        let standing = nose_up(&settle(&mut walk, 2.0));
+        let weights = chonkgene_render::skin::SleepPose::weights(id);
+        for (k, pose) in SleepPose::ALL.into_iter().enumerate() {
+            if weights[k] == 0 {
+                continue;
+            }
+            let mut walk = Mover::new(&sk, 1.0, &model).unwrap();
+            walk.sleep_pose(pose);
+            walk.lie(true);
+            let joints = settle(&mut walk, 6.0);
+            match pose {
+                SleepPose::Chin | SleepPose::Curl => {
+                    let up = nose_up(&joints);
+                    assert!(
+                        up < 0.6 * standing,
+                        "{id} {pose:?}: nose {up:.2} up, {standing:.2} standing"
+                    );
+                }
+                SleepPose::Side | SleepPose::BellyUp => {
+                    let back = sk.pose(&joints)[body].m.apply(v3(0.0, 1.0, 0.0));
+                    let tipped = back.y.clamp(-1.0, 1.0).acos().to_degrees();
+                    let least = if pose == SleepPose::Side { 70.0 } else { 140.0 };
+                    assert!(tipped > least, "{id} {pose:?}: rolled only {tipped:.0}°");
+                }
+            }
+        }
+    }
+}
+
+/// Laughing, a four-legged pet rolls onto its back, paws in the air; the
+/// fox, whose tails would prop it up, laughs sitting.
+#[test]
+fn laughing_rolls_a_pet_onto_its_back() {
+    use chonkgene_render::skin::Mood;
+    for id in QUAD_SPECIES {
+        let (model, sk) = mesh_model(id).unwrap();
+        let mut walk = Mover::new(&sk, 1.0, &model).unwrap();
+        walk.feel(feel(Mood::Laugh));
+        let joints = settle(&mut walk, 3.0);
+        let pose = sk.pose(&joints);
+        let at = |name: &str| {
+            let b = sk.bone(name).unwrap();
+            pose[b].apply(sk.pivots[b] + v3(0.0, -0.4, 0.0)).y
+        };
+        let body = sk.bone("body").unwrap();
+        let middle = pose[body].apply(sk.pivots[body]).y;
+        let paws = (at("leg_fl") + at("leg_fr") + at("leg_bl") + at("leg_br")) / 4.0;
+        if id == "fox" {
+            assert!(
+                paws < middle,
+                "fox: paws {paws:.2} over the body {middle:.2}"
+            );
+        } else {
+            assert!(
+                paws > middle + 0.2,
+                "{id}: paws {paws:.2}, the body {middle:.2}"
+            );
+        }
+    }
+}
+
+/// A finger pressing in dents the flesh under it (mesh.wgsl), and only
+/// there.
+#[test]
+fn a_finger_dents_the_flesh_under_it() {
+    let gpu = match Gpu::new() {
+        Ok(g) => g,
+        Err(e) => {
+            eprintln!("skipped: {e}");
+            return;
+        }
+    };
+    let (model, sk) = shiba();
+    let mesh = bake(&model, &sk, 0, 0.33, 0.025).unwrap();
+    let scene = Scene::posed(&model, 0, 0.33, &Pose::default(), Look::Open, Layer::All);
+    let (w, h) = chonkgene_render::mesh_pixel_size(&model, 1.0);
+    let mut canvas = MeshCanvas::new(&gpu, &mesh, w, h, 1.0);
+    let bones = sk.pose(&[]);
+    let draw = |canvas: &mut MeshCanvas| {
+        let mut pm = Pixmap::new(w, h).unwrap();
+        canvas.draw(&gpu, &scene, &bones, 0.0, &mut pm).unwrap();
+        pm
+    };
+    let flat = draw(&mut canvas);
+    // The front of the belly.
+    let belly = chonkgene_rig::ZONES
+        .iter()
+        .position(|z| *z == "belly")
+        .unwrap() as u8;
+    let front = (0..mesh.vertices.len())
+        .filter(|&i| mesh.zones[i] == belly)
+        .max_by(|&a, &b| mesh.vertices[a].pos[2].total_cmp(&mesh.vertices[b].pos[2]))
+        .unwrap();
+    let p = mesh.vertices[front].pos;
+    let at = v3(p[0], p[1], p[2]);
+    canvas.press = Some((at, 0.13, 0.32));
+    let dented = draw(&mut canvas);
+    let (px, py) = canvas.project(at);
+    let changed = |near: bool| {
+        let mut n = 0;
+        for y in 0..h {
+            for x in 0..w {
+                let d = (x as f32 - px).hypot(y as f32 - py);
+                if (d < 15.0) != near {
+                    continue;
+                }
+                let i = ((y * w + x) * 4) as usize;
+                if (0..3).any(|k| flat.data()[i + k].abs_diff(dented.data()[i + k]) > 10) {
+                    n += 1;
+                }
+            }
+        }
+        n
+    };
+    let (near, far) = (changed(true), changed(false));
+    assert!(near > 60, "the dent changed {near} pixels round the finger");
+    // A 0.32-unit dent is under 19 px across at 100%: nothing beyond 30 px.
+    let far_off = {
+        let mut n = 0;
+        for y in 0..h {
+            for x in 0..w {
+                if (x as f32 - px).hypot(y as f32 - py) < 30.0 {
+                    continue;
+                }
+                let i = ((y * w + x) * 4) as usize;
+                if (0..4).any(|k| flat.data()[i + k] != dented.data()[i + k]) {
+                    n += 1;
+                }
+            }
+        }
+        n
+    };
+    assert_eq!(
+        far_off, 0,
+        "{far} pixels changed, {far_off} far from the finger"
+    );
+}
+
+/// Held, the flesh stays pressed in; let go, it springs back out past
+/// flat, wobbles and settles flat again.
+#[test]
+fn pressed_flesh_springs_back_when_let_go() {
+    use chonkgene_core::Zone;
+    use chonkgene_core::anim::{Animator, Expression};
+    let Some(mut r) = app_renderer("shiba") else {
+        eprintln!("skipped: no GPU");
+        return;
+    };
+    let mut a = Animator::new(1, 0.33, 0.35).with_pops(false);
+    let frames = |r: &mut chonkgene_render::MeshRenderer, a: &mut Animator, secs: f32| {
+        let mut depths = Vec::new();
+        for _ in 0..(secs * 30.0) as usize {
+            a.step(1.0 / 30.0);
+            r.render(&a.params(), Expression::Neutral);
+            r.finish();
+            depths.push(r.pressed_in());
+        }
+        depths
+    };
+    frames(&mut r, &mut a, 1.0);
+    let (x, y) = r.anchor();
+    let at = (0..80)
+        .map(|d| (x, y + d as f32))
+        .find(|&(x, y)| r.hit(x, y).is_some())
+        .expect("the pet under its crown");
+    a.press(Zone::Head, at);
+    let held = frames(&mut r, &mut a, 0.5);
+    assert!(
+        held.last().is_some_and(|&d| d > 0.04),
+        "held, pressed in {:?}",
+        held.last()
+    );
+    a.poke(Zone::Head);
+    let after = frames(&mut r, &mut a, 2.5);
+    let out = after.iter().copied().fold(0.0f32, f32::min);
+    assert!(out < -0.01, "let go, it sprang out only {out:.3}");
+    assert_eq!(after.last(), Some(&0.0), "still pressed in at the end");
 }

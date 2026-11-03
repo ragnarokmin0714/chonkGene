@@ -8,18 +8,19 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use chonkgene_core::Zone;
-use chonkgene_core::anim::{Act, Animator, Expression};
+use chonkgene_core::anim::{Act, Animator, Expression, HOLD_SECS};
 use chonkgene_core::mind::{Line, Mind, Out, World, XP_PER_LEVEL};
 use chonkgene_core::motion::{Area, Body, Motion};
 use chonkgene_core::shake::ShakeDetector;
 use chonkgene_core::skit::{Actor, Cmd, Director};
 use chonkgene_core::sound::Sound;
-use chonkgene_core::species::{Grumpiness, Species};
+use chonkgene_core::species::{Grumpiness, Play, Species};
 use chonkgene_core::terrain::{Terrain, Win};
 use chonkgene_platform::tray::{Tray, TrayCommand};
 use chonkgene_platform::{Presenter, Shared, autostart, hotkey};
 use chonkgene_render::menu::{self, Icon, Item};
 use chonkgene_render::text::Face;
+use chonkgene_render::toy::{self as grass, Stalk};
 use chonkgene_render::{Renderer, bubble};
 use chonkgene_rig::{Model, builtin};
 use cpu_time::ProcessTime;
@@ -123,6 +124,36 @@ fn ease_bubble(at: (f32, f32), head: (f32, f32), dt: f32) -> (f32, f32) {
     (at.0 + (head.0 - at.0) * k, at.1 + (head.1 - at.1) * k)
 }
 
+/// The foxtail grass (狗尾草) on the cursor (PLAN §8, Roger's sixth
+/// pass): a window that follows the cursor, lets every click through and
+/// swings; the pets go for its seed head.
+struct Toy {
+    window: Window,
+    presenter: Presenter,
+    pixmap: Pixmap,
+    stalk: Stalk,
+    placed: (i32, i32),
+    cursor: (i32, i32),
+    /// When the cursor last moved: left still long enough, the stalk is
+    /// put away by itself.
+    moved: Instant,
+    last: Instant,
+}
+
+/// Left still this long, the grass stalk is put away.
+const TOY_IDLE: Duration = Duration::from_secs(120);
+/// A pet goes for the stalk within this far either side, pixels.
+const TOY_RANGE: f32 = 900.0;
+
+/// Where the grass stalk's window goes for the cursor at `cursor`: its
+/// grip under the cursor's tip.
+fn toy_pos(cursor: (i32, i32), scale: f32) -> (i32, i32) {
+    (
+        cursor.0 - (grass::GRIP.0 * scale).round() as i32,
+        cursor.1 - (grass::GRIP.1 * scale).round() as i32,
+    )
+}
+
 struct Pet {
     save: PetSave,
     species: Species,
@@ -150,6 +181,11 @@ struct Pet {
     bubble: Option<Bubble>,
     /// Walking is up to the skit director while this is set.
     in_skit: bool,
+    /// Going for the grass stalk; when it next tries something, and when a
+    /// crouch turns into a pounce.
+    playing: bool,
+    play_at: f64,
+    pounce_at: Option<f64>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -164,6 +200,8 @@ enum Action {
     Quit,
     /// Say goodbye to this pet for good (asks once more first).
     Bye,
+    /// Take out the grass stalk, or put it away.
+    Toy,
 }
 
 struct Menu {
@@ -283,6 +321,7 @@ struct App {
     ui_scale: f32,
     pets: Vec<Pet>,
     menu: Option<Menu>,
+    toy: Option<Toy>,
     hidden: bool,
     fullscreen: bool,
     user_idle: f64,
@@ -366,6 +405,7 @@ impl App {
             ui_scale: 1.0,
             pets: Vec::new(),
             menu: None,
+            toy: None,
             hidden: false,
             fullscreen: false,
             user_idle: 0.0,
@@ -616,12 +656,102 @@ impl App {
                 self.hidden = !self.hidden;
                 self.set_visible();
             }
+            TrayCommand::Toy => self.toggle_toy(el),
             TrayCommand::Settings => self.open_settings(None),
             TrayCommand::Quit => {
                 self.save_now();
                 el.exit();
             }
         }
+    }
+
+    /// Take out the grass stalk (a window on the cursor that lets clicks
+    /// through), or put it away.
+    fn toggle_toy(&mut self, el: &ActiveEventLoop) {
+        if self.toy.take().is_some() {
+            for p in &mut self.pets {
+                p.anim.watch(None);
+            }
+            return;
+        }
+        let Some(shared) = &self.shared else {
+            return;
+        };
+        let s = self.ui_scale;
+        let size = (
+            (grass::SIZE.0 * s).ceil() as u32,
+            (grass::SIZE.1 * s).ceil() as u32,
+        );
+        let cursor = shared.cursor().unwrap_or((0, 0));
+        let pos = toy_pos(cursor, s);
+        let Ok(window) = el.create_window(chonkgene_platform::pet_window(size, pos, "肉肉賴桌"))
+        else {
+            return;
+        };
+        let Ok(mut presenter) = Presenter::new(shared, &window) else {
+            return;
+        };
+        if let Err(e) = presenter.set_ghost(shared) {
+            eprintln!("grass stalk: {e}");
+        }
+        // Clicks pass through to the pets and the desktop under it.
+        let _ = window.set_cursor_hittest(false);
+        let Some(mut pixmap) = Pixmap::new(size.0, size.1) else {
+            return;
+        };
+        let stalk = Stalk::default();
+        stalk.draw(&mut pixmap, s);
+        if let Err(e) = presenter.present(shared, &pixmap) {
+            eprintln!("present failed: {e}");
+        }
+        let now = Instant::now();
+        self.toy = Some(Toy {
+            window,
+            presenter,
+            pixmap,
+            stalk,
+            placed: pos,
+            cursor,
+            moved: now,
+            last: now,
+        });
+    }
+
+    /// Move the grass stalk with the cursor and swing it; where its seed
+    /// head is now (screen pixels), if it is out. Left still a long while,
+    /// it is put away.
+    fn step_toy(&mut self, now: Instant) -> Option<(f32, f32)> {
+        let (toy, shared) = (self.toy.as_mut()?, self.shared.as_ref()?);
+        let cursor = shared.cursor().unwrap_or(toy.cursor);
+        let dt = (now - toy.last).as_secs_f32();
+        toy.last = now;
+        let moved = cursor != toy.cursor;
+        if moved {
+            toy.cursor = cursor;
+            toy.moved = now;
+        } else if now - toy.moved > TOY_IDLE {
+            self.toy = None;
+            for p in &mut self.pets {
+                p.anim.watch(None);
+            }
+            return None;
+        }
+        let s = self.ui_scale;
+        let swinging = toy.stalk.step((cursor.0 as f32, cursor.1 as f32), dt, s);
+        let pos = toy_pos(cursor, s);
+        if pos != toy.placed {
+            toy.window
+                .set_outer_position(PhysicalPosition::new(pos.0, pos.1));
+            toy.placed = pos;
+        }
+        if swinging || moved {
+            toy.stalk.draw(&mut toy.pixmap, s);
+            if let Err(e) = toy.presenter.present(shared, &toy.pixmap) {
+                eprintln!("present failed: {e}");
+            }
+        }
+        let head = toy.stalk.head(s);
+        Some((cursor.0 as f32 + head.0, cursor.1 as f32 + head.1))
     }
 
     fn set_visible(&mut self) {
@@ -637,6 +767,10 @@ impl App {
         }
         if !visible {
             self.menu = None;
+        }
+        if let Some(toy) = &mut self.toy {
+            toy.window.set_visible(visible);
+            toy.presenter.restyle();
         }
     }
 
@@ -770,6 +904,17 @@ impl App {
             items.push(item("讓牠去睡覺", None, Icon::Moon, false));
             actions.push(Action::Sleep);
         }
+        items.push(item(
+            if self.toy.is_some() {
+                "把狗尾草收起來"
+            } else {
+                "拿狗尾草逗牠們"
+            },
+            None,
+            Icon::Grass,
+            false,
+        ));
+        actions.push(Action::Toy);
         items.push(item("說再見…", None, Icon::Bye, false));
         actions.push(Action::Bye);
         items.push(item(
@@ -864,6 +1009,7 @@ impl App {
             }
             Action::Settings => return self.open_settings(None),
             Action::Edit => return self.open_settings(Some(pet)),
+            Action::Toy => return self.toggle_toy(el),
             Action::Bye => {
                 self.store.pets.retain(|p| p.id != pet);
                 self.dirty = true;
@@ -1112,6 +1258,9 @@ fn spawn(
         act: None,
         bubble: None,
         in_skit: false,
+        playing: false,
+        play_at: 0.0,
+        pounce_at: None,
         save,
     })
 }
@@ -1119,6 +1268,76 @@ fn spawn(
 impl Pet {
     fn center_x(&self) -> f32 {
         self.placed.0 as f32 + self.renderer.pixmap().width() as f32 / 2.0
+    }
+
+    /// Go for the grass stalk's seed head at `tip` (screen pixels), as the
+    /// species likes (PLAN §8, Roger's sixth pass): watch it, walk up to
+    /// it, then crouch and pounce (cats), pounce and swat (dogs, the fox),
+    /// or peck and flap at it (birds); the owl only watches. False if it
+    /// is out of reach (too far, or below the floor the pet is on).
+    fn play(&mut self, tip: (f32, f32), t: f64) -> bool {
+        let (w, h) = self.body.size;
+        let (fx, fy) = self.body.feet();
+        let dx = tip.0 - fx;
+        if dx.abs() > TOY_RANGE || tip.1 > fy + 0.3 * h || tip.1 < fy - 5.0 * h {
+            return false;
+        }
+        self.anim
+            .watch(Some((tip.0 - self.body.pos.0, tip.1 - self.body.pos.1)));
+        // Not off on a walk of its own while it plays.
+        self.switch_at = t + 1.0;
+        let keen = self.species.toy_keen();
+        if keen <= 0.0 {
+            if self.body.motion == Motion::Walk {
+                self.body.motion = Motion::Idle;
+            }
+            return true;
+        }
+        self.body.facing = if dx < 0.0 { -1.0 } else { 1.0 };
+        if dx.abs() > 0.3 * w {
+            self.body.motion = Motion::Walk;
+            self.body.pace = 1.0 + 0.8 * keen;
+            self.pounce_at = None;
+            return true;
+        }
+        if self.body.motion == Motion::Walk {
+            self.body.motion = Motion::Idle;
+        }
+        if let Some(at) = self.pounce_at
+            && t >= at
+        {
+            self.pounce_at = None;
+            self.anim.pounce();
+        }
+        if t < self.play_at {
+            return true;
+        }
+        self.play_at = t + 0.9 + f64::from(self.rng.f32()) * 1.4 / f64::from(keen);
+        // Low: down near the floor it stands on.
+        let low = tip.1 > fy - 0.45 * h;
+        match self.species.plays_like() {
+            // Down on the front, bottom up and wiggling, then the pounce.
+            Play::Stalk => {
+                self.anim.gesture(Act::Stretch);
+                self.pounce_at = Some(t + 0.9);
+            }
+            Play::Pounce => {
+                if self.rng.bool() {
+                    self.anim.pounce();
+                } else {
+                    self.anim.gesture(Act::Wave);
+                }
+            }
+            Play::Peck => {
+                if low {
+                    self.anim.gesture(Act::Peck);
+                } else {
+                    self.anim.gesture(Act::Flap);
+                    self.pounce_at = Some(t + 0.4);
+                }
+            }
+        }
+        true
     }
 
     fn say(&mut self, ctx: &mut Ctx, line: Line) {
@@ -1239,7 +1458,15 @@ impl Pet {
         }
     }
 
-    fn step(&mut self, ctx: &mut Ctx, i: usize, dt: f32, now: Instant, cursor: Option<(i32, i32)>) {
+    fn step(
+        &mut self,
+        ctx: &mut Ctx,
+        i: usize,
+        dt: f32,
+        now: Instant,
+        cursor: Option<(i32, i32)>,
+        toy: Option<(f32, f32)>,
+    ) {
         let t = ctx.world.now;
         if let Some(at) = self.hello_at
             && t >= at
@@ -1295,7 +1522,18 @@ impl Pet {
             if self.mind.asleep() && self.body.motion == Motion::Walk {
                 self.body.motion = Motion::Idle;
             }
+            let playing = free
+                && matches!(self.body.motion, Motion::Idle | Motion::Walk)
+                && toy.is_some_and(|tip| self.play(tip, t));
+            if self.playing && !playing {
+                self.anim.watch(None);
+                if self.body.motion == Motion::Walk {
+                    self.body.motion = Motion::Idle;
+                }
+            }
+            self.playing = playing;
             if free
+                && !playing
                 && matches!(self.body.motion, Motion::Idle | Motion::Walk)
                 && t >= self.switch_at
             {
@@ -1547,7 +1785,12 @@ impl ApplicationHandler<UserEvent> for App {
         };
         match event {
             WindowEvent::CursorMoved { position, .. } => {
-                self.pets[i].cursor = (position.x as f32, position.y as f32);
+                let p = &mut self.pets[i];
+                p.cursor = (position.x as f32, position.y as f32);
+                // Rubbing about under a held finger (not yet a lift).
+                if p.press.as_ref().is_some_and(|p| !p.moved) {
+                    p.anim.knead(p.cursor);
+                }
             }
             WindowEvent::MouseInput { state, button, .. } => {
                 let now = Instant::now();
@@ -1562,8 +1805,14 @@ impl ApplicationHandler<UserEvent> for App {
                             last: now,
                         });
                         p.shake = ShakeDetector::default();
-                        // It squishes in under the finger at once.
-                        p.anim.press();
+                        // It squishes in under the finger at once, where
+                        // the finger is.
+                        let zone = p
+                            .renderer
+                            .hit(p.cursor.0, p.cursor.1)
+                            .and_then(Zone::from_name)
+                            .unwrap_or(Zone::Belly);
+                        p.anim.press(zone, p.cursor);
                         p.next = now;
                     }
                     (MouseButton::Left, ElementState::Released) => {
@@ -1617,14 +1866,28 @@ impl ApplicationHandler<UserEvent> for App {
                             p.body.release();
                         } else {
                             let zone = p
-                                .renderer
-                                .hit(p.cursor.0, p.cursor.1)
-                                .and_then(Zone::from_name)
-                                .unwrap_or(Zone::Belly);
+                                .anim
+                                .params()
+                                .touch
+                                .held
+                                .map_or(Zone::Belly, |(zone, ..)| zone);
+                            // Held a while on a nice spot, it was a rub or a
+                            // scratch (a pat), not a poke; a tail or a bottom
+                            // held is still a poke.
+                            let rub = p.anim.held_secs() >= HOLD_SECS
+                                && matches!(
+                                    zone,
+                                    Zone::Head | Zone::Chin | Zone::Belly | Zone::Cheek
+                                );
                             p.anim.poke(zone);
-                            let mut rng = p.rng.clone();
-                            let out = p.mind.poke(&world, zone, &mut rng);
-                            p.rng = rng;
+                            let out = if rub {
+                                p.mind.pat(&world)
+                            } else {
+                                let mut rng = p.rng.clone();
+                                let out = p.mind.poke(&world, zone, &mut rng);
+                                p.rng = rng;
+                                out
+                            };
                             let mut ctx = Ctx {
                                 el,
                                 shared,
@@ -1719,6 +1982,7 @@ impl ApplicationHandler<UserEvent> for App {
         }
 
         let visible = !self.hidden && !self.fullscreen;
+        let toy = if visible { self.step_toy(now) } else { None };
         let world = self.world(now);
         let App {
             pets,
@@ -1776,7 +2040,7 @@ impl ApplicationHandler<UserEvent> for App {
             }
             let dt = (now - p.last).as_secs_f32().min(0.1);
             p.last = now;
-            p.step(&mut ctx, i, dt, now, cursor);
+            p.step(&mut ctx, i, dt, now, cursor, toy);
             let started = Instant::now();
             *presenting += p.draw(ctx.shared, world.now);
             *drawing += started.elapsed();
@@ -1810,6 +2074,8 @@ impl ApplicationHandler<UserEvent> for App {
                 None
             },
             self.menu.is_some().then(|| now + Duration::from_millis(33)),
+            // The grass stalk follows the cursor smoothly.
+            (visible && self.toy.is_some()).then(|| now + Duration::from_millis(16)),
             self.stats.then_some(self.stats_at),
             // Always ahead of now: it is moved on whenever it is reached.
             visible.then_some(self.terrain_at),

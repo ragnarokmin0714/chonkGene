@@ -20,6 +20,7 @@ pub mod skin;
 mod sprite_frames;
 pub mod sprites;
 pub mod text;
+pub mod toy;
 pub mod waddle;
 
 use std::sync::{Arc, OnceLock};
@@ -30,7 +31,7 @@ use tiny_skia::{FillRule, LineCap, LineJoin, Paint, Pixmap, Stroke, Transform};
 
 use crate::gpu::Gpu;
 pub use crate::gpu_frames::GpuRenderer;
-pub use crate::mesh_frames::MeshRenderer;
+pub use crate::mesh_frames::{MeshRenderer, pixel_size as mesh_pixel_size};
 pub use crate::sprite_frames::{SpriteRenderer, frame_transform};
 pub use crate::sprites::{KEYS, Key, Variant};
 

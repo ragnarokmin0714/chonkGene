@@ -67,6 +67,9 @@ fn zone_weight(zone: Zone) -> f32 {
         Zone::Cheek => 0.7,
         Zone::Paw => 0.5,
         Zone::Head => 0.4,
+        // A chin scratch is mostly nice; a tail grabbed is mostly not.
+        Zone::Chin => 0.3,
+        Zone::Tail => 0.9,
     }
 }
 

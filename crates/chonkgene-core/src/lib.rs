@@ -22,6 +22,9 @@ pub enum Zone {
     Paw,
     Bottom,
     Head,
+    /// Under the chin (Roger, 2026-11-03: chin scratches).
+    Chin,
+    Tail,
 }
 
 impl Zone {
@@ -32,6 +35,8 @@ impl Zone {
             "paw" => Self::Paw,
             "bottom" => Self::Bottom,
             "head" => Self::Head,
+            "chin" => Self::Chin,
+            "tail" => Self::Tail,
             _ => return None,
         })
     }

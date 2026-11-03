@@ -29,7 +29,7 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{
     GetCursorPos, GetWindowLongPtrW, GetWindowRect, GetWindowTextLengthW, GetWindowThreadProcessId,
     IsIconic, IsWindowVisible, SPI_GETWORKAREA, SW_RESTORE, SetForegroundWindow, SetWindowLongPtrW,
     ShowWindow, SystemParametersInfoW, ULW_ALPHA, UpdateLayeredWindow, WS_EX_LAYERED,
-    WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW,
+    WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TRANSPARENT,
 };
 use winit::raw_window_handle::{HasWindowHandle, RawWindowHandle};
 use winit::window::Window;
@@ -228,6 +228,8 @@ pub struct Presenter {
     bits: *mut u8,
     width: i32,
     height: i32,
+    /// Clicks always go through (see [`Presenter::set_ghost`]).
+    ghost: bool,
 }
 
 /// See [`crate::bring_to_front`].
@@ -268,14 +270,19 @@ const PET_EX_STYLE: isize = (WS_EX_LAYERED | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE
 ///
 /// # Safety
 /// `hwnd` must be a live window handle.
-unsafe fn restyle(hwnd: HWND) -> bool {
+unsafe fn restyle(hwnd: HWND, ghost: bool) -> bool {
+    let want = if ghost {
+        PET_EX_STYLE | WS_EX_TRANSPARENT as isize
+    } else {
+        PET_EX_STYLE
+    };
     // SAFETY: reading and writing a live window's extended style.
     unsafe {
         let ex = GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
-        if ex & PET_EX_STYLE == PET_EX_STYLE {
+        if ex & want == want {
             return false;
         }
-        SetWindowLongPtrW(hwnd, GWL_EXSTYLE, ex | PET_EX_STYLE);
+        SetWindowLongPtrW(hwnd, GWL_EXSTYLE, ex | want);
         true
     }
 }
@@ -286,7 +293,15 @@ impl Presenter {
     /// picture must be presented again.
     pub fn restyle(&self) -> bool {
         // SAFETY: `hwnd` lives as long as the presenter.
-        unsafe { restyle(self.hwnd) }
+        unsafe { restyle(self.hwnd, self.ghost) }
+    }
+
+    /// Let every click through, wherever it lands (a toy that follows the
+    /// cursor): a transparent window, kept so by [`Presenter::restyle`].
+    pub fn set_ghost(&mut self, _shared: &Shared) -> Result<(), String> {
+        self.ghost = true;
+        self.restyle();
+        Ok(())
     }
 
     pub fn new(_shared: &Shared, window: &Window) -> Result<Self, String> {
@@ -299,7 +314,7 @@ impl Presenter {
         // SAFETY: plain Win32 calls on a window and DCs we own; every handle is
         // checked before use and released in Drop.
         unsafe {
-            restyle(hwnd);
+            restyle(hwnd, false);
 
             let screen_dc = GetDC(null_mut());
             let mem_dc = CreateCompatibleDC(screen_dc);
@@ -333,6 +348,7 @@ impl Presenter {
                 bits: bits.cast(),
                 width,
                 height,
+                ghost: false,
             })
         }
     }

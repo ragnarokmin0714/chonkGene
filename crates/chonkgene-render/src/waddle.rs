@@ -14,9 +14,12 @@ use chonkgene_core::anim::Act;
 use chonkgene_rig::math::v3;
 use chonkgene_rig::{FLOOR, Model};
 
+use chonkgene_core::Zone;
+
 use crate::skin::{
-    Gesture, Joint, MAX_SWING, REST_YAW, SIT_YAW, SPEED_UP, STILL_GOING, Skeleton, Spring, TURN_HZ,
-    WALK_YAW, Walk, bite, peck, tempo_split,
+    ATTEND_HZ, ATTEND_YAW, Feel, Gesture, Joint, Levels, MAX_SWING, Mood, Moods, REST_YAW, SIT_YAW,
+    SPEED_UP, STILL_GOING, SULK_BACK, SULK_YAW, Skeleton, SleepPose, Spring, TURN_HZ, WALK_YAW,
+    Walk, bite, peck, tempo_split,
 };
 
 /// The pace the pet's window moves at, world units a second (60 px/s at
@@ -52,7 +55,9 @@ impl Mover {
         if sk.bone("leg_l").is_some() {
             Waddle::new(sk, facing, model).map(|w| Self::Biped(Box::new(w)))
         } else {
-            Walk::new(sk, facing).map(|w| Self::Quad(Box::new(w)))
+            let mut w = Walk::new(sk, facing)?;
+            w.set_species(&model.species);
+            Ok(Self::Quad(Box::new(w)))
         }
     }
 
@@ -60,6 +65,37 @@ impl Mover {
         match self {
             Self::Quad(w) => w.poke(kick),
             Self::Biped(w) => w.poke(kick),
+        }
+    }
+
+    /// How it feels and where it is touched (set every frame).
+    pub fn feel(&mut self, feel: Feel) {
+        match self {
+            Self::Quad(w) => w.feel(feel),
+            Self::Biped(w) => w.feel(feel),
+        }
+    }
+
+    /// The pose to sleep in (birds always tuck in, or stand: the owl).
+    pub fn sleep_pose(&mut self, pose: SleepPose) {
+        if let Self::Quad(w) = self {
+            w.sleep_pose(pose);
+        }
+    }
+
+    /// How far to settle the pet onto the floor, and flatten it, this
+    /// frame (see [`Walk::ground`]).
+    pub fn ground(&self) -> f32 {
+        match self {
+            Self::Quad(w) => w.ground(),
+            Self::Biped(w) => w.ground,
+        }
+    }
+
+    pub fn flatten(&self) -> f32 {
+        match self {
+            Self::Quad(w) => w.flatten(),
+            Self::Biped(w) => w.flatten,
         }
     }
 
@@ -174,6 +210,13 @@ pub struct Waddle {
     /// Still on its way somewhere (walking, turning, sitting down, getting
     /// up, a gesture): it needs smooth frames.
     busy: bool,
+    feel: Feel,
+    moods: Moods,
+    /// A flick of the tail (degrees about z).
+    flick: Spring,
+    /// Out: see [`Walk::ground`].
+    ground: f32,
+    flatten: f32,
 }
 
 impl Waddle {
@@ -224,7 +267,16 @@ impl Waddle {
             tuck: g.tuck,
             n: sk.names.len(),
             busy: false,
+            feel: Feel::default(),
+            moods: Moods::default(),
+            flick: Spring::default(),
+            ground: 0.0,
+            flatten: 0.0,
         })
+    }
+
+    pub fn feel(&mut self, feel: Feel) {
+        self.feel = feel;
     }
 
     /// Jolt the soft parts (a poke in the belly), world units a second.
@@ -278,24 +330,40 @@ impl Waddle {
         }
         let going = walking || s > STILL_GOING;
         let eating = self.gesture.is_some_and(|g| g.act == Act::Eat);
+        let lv = self.moods.step(&self.feel, dt);
+        // Touched, it turns to face you; a tail or a bottom touched, it only
+        // looks back over its shoulder (turning round would hide them).
+        let touched = self.feel.gaze.is_some() && !self.feel.behind();
         let yaw = self.yaw.step(
             facing
                 * if going {
                     WALK_YAW
+                } else if self.feel.mood == Mood::Sulk {
+                    SULK_YAW
+                } else if touched {
+                    ATTEND_YAW
                 } else if self.sitting || self.lying || eating {
                     SIT_YAW
                 } else {
                     REST_YAW
                 },
             0.0,
-            if going { TURN_HZ.1 } else { TURN_HZ.0 },
+            if going {
+                TURN_HZ.1
+            } else if touched {
+                ATTEND_HZ
+            } else {
+                TURN_HZ.0
+            },
             1.0,
             dt,
         );
         let ph = self.phase;
         // Asleep, a bird settles down just as it sits, and tucks its head.
         let up_hz = if walking { 2.5 } else { 1.2 };
-        let sit_goal = if (self.sitting || self.lying) && !walking {
+        // Laughing, melted or sulking, a bird sits down for it.
+        let moody = matches!(self.feel.mood, Mood::Laugh | Mood::FedUp | Mood::Sulk);
+        let sit_goal = if (self.sitting || self.lying || moody) && !walking {
             1.0
         } else {
             0.0
@@ -514,12 +582,117 @@ impl Waddle {
                 _ => {}
             }
         }
+        self.react(&mut j, &lv, dt, facing);
         self.busy = s > 0.0
             || self.gesture.is_some()
             || self.yaw.v.abs() > 1.0
             || self.look.v.abs() > 1.0
             || self.sit.v.abs() > 0.02
-            || self.lie.v.abs() > 0.02;
+            || self.lie.v.abs() > 0.02
+            || lv.attend > 0.01;
         j
+    }
+
+    /// A bird's answer to a feeling or a touch (see [`Walk`]'s): rocking
+    /// back on its bottom kicking its feet laughing, sunk flat with wings
+    /// drooping fed up, its back turned sulking, a wing for a high five,
+    /// the head leaning into a hand, looking back at its tail.
+    fn react(&mut self, j: &mut [Joint], lv: &Levels, dt: f32, facing: f32) {
+        let t = lv.t;
+        self.ground = 0.0;
+        self.flatten = 0.0;
+        let turn_head = |j: &mut [Joint], deg: f32, neck: f32, head: usize, body: usize| {
+            j[head].rot.y += neck * deg;
+            j[body].rot.y += (1.0 - neck) * deg;
+        };
+        // Looking at the finger.
+        turn_head(j, lv.gaze.0, self.neck, self.head, self.body);
+        j[self.head].rot.x += lv.gaze.1;
+        // Laughing: back on its bottom, feet kicking, wings flapping.
+        let l = lv.laugh.min(1.0);
+        if l > 0.0 {
+            j[self.body].rot.x -= l * (22.0 + 8.0 * (TAU * 2.2 * t).sin());
+            for (k, &leg) in self.legs.iter().enumerate() {
+                j[leg].rot.x -= l * (45.0 + 20.0 * (TAU * 3.0 * t + PI * k as f32).sin());
+            }
+            for (side, wing) in self.wings.iter().enumerate() {
+                if let Some(w) = *wing {
+                    let sign = if side == 0 { 1.0 } else { -1.0 };
+                    j[w].rot.z += sign * l * (30.0 + 25.0 * (TAU * 6.0 * t).sin());
+                }
+            }
+            // The tail would swing down under it and prop it up: it
+            // lifts it out of the way.
+            if let Some(tail) = self.tail {
+                j[tail].rot.x += 30.0 * l;
+            }
+            self.ground = 0.5 * l;
+        }
+        // Fed up: sunk low and flattened, head down, wings drooping out.
+        let m = lv.melt;
+        if m > 0.0 {
+            j[0].shift.y -= 0.07 * m;
+            j[self.head].rot.x += 22.0 * m;
+            for (side, wing) in self.wings.iter().enumerate() {
+                if let Some(w) = *wing {
+                    j[w].rot.z += if side == 0 { 25.0 } else { -25.0 } * m;
+                }
+            }
+            self.flatten = 0.1 * m;
+        }
+        // Back turned, glancing round now and then.
+        if lv.sulk > 0.0 {
+            let glance = (TAU * t / 3.5).sin().max(0.0).powi(4);
+            j[0].shift.z -= SULK_BACK * lv.sulk;
+            j[self.head].rot.x += 12.0 * lv.sulk * (1.0 - glance);
+            turn_head(
+                j,
+                -facing * 60.0 * lv.sulk * glance,
+                self.neck,
+                self.head,
+                self.body,
+            );
+        }
+        j[self.head].rot.z += 8.0 * lv.content * (TAU * 0.4 * t).sin();
+        // A hand on the head, a chin scratch, a cheek: as the others.
+        j[self.head].rot.x += 10.0 * lv.head - 24.0 * lv.chin + 14.0 * lv.flinch;
+        j[self.head].rot.z += 9.0 * lv.head * (TAU * 1.1 * t).sin()
+            + 5.0 * lv.chin * (TAU * 0.8 * t).sin()
+            + 12.0 * lv.cheek;
+        // A belly rub: leaning back, wings fluttering.
+        let r = lv.rub.min(1.0);
+        if r > 0.0 {
+            j[self.body].rot.x -= 10.0 * r;
+            for (side, wing) in self.wings.iter().enumerate() {
+                if let Some(w) = *wing {
+                    let sign = if side == 0 { 1.0 } else { -1.0 };
+                    j[w].rot.z += sign * r * (14.0 + 10.0 * (TAU * 5.0 * t).sin());
+                }
+            }
+        }
+        // Its tail pulled or poked: a flick, and a look back.
+        if lv.flick {
+            self.flick.v += 300.0;
+        }
+        let flick = self.flick.step(0.0, 0.0, 3.5, 0.3, dt);
+        if let Some(tail) = self.tail {
+            j[tail].rot.z += flick;
+            if matches!(self.feel.held, Some((Zone::Tail, ..))) {
+                j[tail].rot.x -= 15.0;
+            }
+        }
+        turn_head(j, -facing * 70.0 * lv.back, self.neck, self.head, self.body);
+        // A wing (or a foot) touched: up it comes, for a high five.
+        if let Some((bone, up)) = lv.paw {
+            if let Some(k) = self.wings.iter().position(|w| *w == Some(bone)) {
+                let sign = if k == 0 { 1.0 } else { -1.0 };
+                j[bone].rot.z += sign * up * (70.0 + 8.0 * (TAU * 2.0 * t).sin());
+            } else if self.legs.contains(&bone) {
+                j[bone].rot.x -= 40.0 * up;
+                j[bone].shift.y += 0.05 * up;
+            } else if let Some(w) = self.wings[0] {
+                j[w].rot.z += up * 70.0;
+            }
+        }
     }
 }

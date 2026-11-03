@@ -56,6 +56,9 @@ pub struct MeshCanvas {
     /// GPU seconds measured so far, and frames drawn.
     pub measured: f64,
     pub frames: u32,
+    /// A finger pressing in: where (posed, world), how deep, how wide
+    /// (see mesh.wgsl); none when nothing presses.
+    pub press: Option<(V3, f32, f32)>,
 }
 
 impl MeshCanvas {
@@ -253,6 +256,7 @@ impl MeshCanvas {
             last_secs: None,
             measured: 0.0,
             frames: 0,
+            press: None,
         }
     }
 
@@ -331,6 +335,9 @@ impl MeshCanvas {
         u.push(v4(self.eye_r, yaw.to_radians()));
         u.push(v4(self.mouth_r, 0.0));
         u.push([ROOT_PIVOT.x, ROOT_PIVOT.z, self.shadow_r.0, self.shadow_r.1]);
+        let (at, depth, radius) = self.press.unwrap_or((V3::ZERO, 0.0, 1.0));
+        u.push(v4(at, depth));
+        u.push([radius, 0.0, 0.0, 0.0]);
         for i in 0..MAX_BONES {
             let rows = bones.get(i).unwrap_or(&Affine::IDENTITY).rows();
             u.extend(rows);
@@ -488,6 +495,6 @@ impl MeshCanvas {
     }
 }
 
-/// pet.wgsl's 13 + palette, then eye and mouth radii, the shadow, and three
-/// rows a bone.
-const UNIFORM_VECS: usize = 13 + 16 + 3 + 3 * MAX_BONES;
+/// pet.wgsl's 13 + palette, then eye and mouth radii, the shadow, the
+/// press and three rows a bone.
+const UNIFORM_VECS: usize = 13 + 16 + 5 + 3 * MAX_BONES;

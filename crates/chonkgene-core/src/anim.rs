@@ -116,6 +116,42 @@ pub fn gesture_secs(act: Act) -> Option<f32> {
     }
 }
 
+/// Where the pet is being touched, for renderers that show it (the
+/// meshes press in under the finger and react per zone; sprites only
+/// squash).
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct Touch {
+    /// A finger is down on this zone, at this pixel of the picture, and has
+    /// been this many seconds.
+    pub held: Option<(Zone, (f32, f32), f32)>,
+    /// The last touch let go: its zone, where, and how many seconds ago.
+    pub last: Option<(Zone, (f32, f32), f32)>,
+    /// Something it is watching (a toy on the cursor), picture pixels.
+    pub watch: Option<(f32, f32)>,
+}
+
+impl Touch {
+    /// Touched just now or still held: the pet turns to you (PLAN §1.2).
+    pub fn attending(&self) -> bool {
+        self.held.is_some()
+            || self.last.is_some_and(|(.., ago)| ago < ATTEND_SECS)
+            || self.watch.is_some()
+    }
+
+    /// Where the finger is or last was, or what it watches, picture pixels.
+    pub fn at(&self) -> Option<(f32, f32)> {
+        self.held.or(self.last).map(|(_, at, _)| at).or(self.watch)
+    }
+}
+
+/// After a touch, the pet keeps looking at you this long, seconds.
+pub const ATTEND_SECS: f32 = 2.5;
+/// Held this long without moving away, a press is a rub or a scratch
+/// rather than a poke.
+pub const HOLD_SECS: f32 = 0.6;
+/// How long anything shows a touch let go (the look back, a paw lifted).
+pub const TOUCH_SHOWS_SECS: f32 = 4.0;
+
 /// Inputs a renderer maps onto bones by convention (see chonkgene-render).
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct PoseParams {
@@ -149,6 +185,7 @@ pub struct PoseParams {
     /// Walking speed against the usual (zoomies run faster, a skit may
     /// slow it): legs drawn every frame step to match.
     pub pace: f32,
+    pub touch: Touch,
 }
 
 impl Default for PoseParams {
@@ -167,6 +204,7 @@ impl Default for PoseParams {
             stride: 0.0,
             clock: 0.0,
             pace: 1.0,
+            touch: Touch::default(),
         }
     }
 }
@@ -200,6 +238,11 @@ pub struct Animator {
     hop_vel: f32,
     hops_left: u8,
     pressed: bool,
+    /// The finger down: zone, pixel and when it went down; the last touch
+    /// let go: zone, pixel and when.
+    held: Option<(Zone, (f32, f32), f32)>,
+    last_touch: Option<(Zone, (f32, f32), f32)>,
+    watch: Option<(f32, f32)>,
     /// The gesture under way, when it started and when it ends.
     gesture: Option<(Act, f32, f32)>,
     next_gesture: f32,
@@ -244,6 +287,9 @@ impl Animator {
             hop_vel: 0.0,
             hops_left: 0,
             pressed: false,
+            held: None,
+            last_touch: None,
+            watch: None,
             gesture: None,
         }
     }
@@ -271,16 +317,31 @@ impl Animator {
         self.body.target = target;
     }
 
-    /// A finger is down on the pet: it squishes in under it, ready to pop
-    /// back when the finger lets go ([`Animator::poke`]).
-    pub fn press(&mut self) {
+    /// A finger is down on the pet, on `zone` at pixel `at` of its picture:
+    /// it squishes in under it, ready to pop back when the finger lets go
+    /// ([`Animator::poke`]).
+    pub fn press(&mut self, zone: Zone, at: (f32, f32)) {
         self.pressed = true;
+        self.held = Some((zone, at, self.t));
         self.body.target = PRESS_SQUASH;
+    }
+
+    /// The finger moved while held (kneading, a scratch): where it is now.
+    pub fn knead(&mut self, at: (f32, f32)) {
+        if let Some(h) = &mut self.held {
+            h.1 = at;
+        }
+    }
+
+    /// How long the finger has been down, seconds (0 if it is not).
+    pub fn held_secs(&self) -> f32 {
+        self.held.map_or(0.0, |(.., since)| self.t - since)
     }
 
     /// The press turned into a lift: let go of the squish and stretch.
     pub fn lift(&mut self) {
         self.pressed = false;
+        self.held = None;
         self.body.target = 0.0;
         self.body.kick(-3.0);
     }
@@ -289,13 +350,15 @@ impl Animator {
     /// quick tap that had no time to squash it kicks it instead.
     pub fn poke(&mut self, zone: Zone) {
         let held = (self.body.pos / PRESS_SQUASH).clamp(0.0, 1.0);
+        let at = self.held.take().map_or((0.0, 0.0), |(_, at, _)| at);
+        self.last_touch = Some((zone, at, self.t));
         self.pressed = false;
         self.body.target = 0.0;
         let (body, belly) = match zone {
             Zone::Belly => (6.0, 10.0),
             Zone::Bottom => (5.0, 3.0),
-            Zone::Cheek | Zone::Head => (2.5, 0.0),
-            Zone::Paw => (1.5, 0.0),
+            Zone::Cheek | Zone::Head | Zone::Chin => (2.5, 0.0),
+            Zone::Paw | Zone::Tail => (1.5, 0.0),
         };
         self.body.kick(body * (1.0 - held));
         self.belly.kick(belly);
@@ -308,6 +371,16 @@ impl Animator {
     /// A happy double hop (a pat, a snack).
     pub fn cheer(&mut self) {
         self.jump(250.0, 1);
+    }
+
+    /// A pounce at a toy: one big hop.
+    pub fn pounce(&mut self) {
+        self.jump(300.0, 0);
+    }
+
+    /// Keep an eye on this spot of the picture (a toy), or nothing.
+    pub fn watch(&mut self, at: Option<(f32, f32)>) {
+        self.watch = at;
     }
 
     fn jump(&mut self, speed: f32, again: u8) {
@@ -622,6 +695,16 @@ impl Animator {
             stride,
             clock: self.t,
             pace: self.pace,
+            touch: Touch {
+                held: self.held.map(|(z, at, since)| (z, at, self.t - since)),
+                // Forgotten once nothing shows it any more, so resting
+                // frames repeat again.
+                last: self
+                    .last_touch
+                    .map(|(z, at, at_t)| (z, at, self.t - at_t))
+                    .filter(|&(.., ago)| ago < TOUCH_SHOWS_SECS),
+                watch: self.watch,
+            },
         }
     }
 }
@@ -816,7 +899,7 @@ mod tests {
     #[test]
     fn a_held_finger_squashes_and_letting_go_pops_back() {
         let mut a = Animator::new(8, 0.33, 0.35);
-        a.press();
+        a.press(Zone::Belly, (0.0, 0.0));
         run(&mut a, 0.5, |_| {});
         let held = a.params().squash;
         assert!(held > 0.2, "held {held}");
@@ -834,7 +917,7 @@ mod tests {
     #[test]
     fn a_quick_tap_still_squashes() {
         let mut a = Animator::new(8, 0.33, 0.35);
-        a.press();
+        a.press(Zone::Belly, (0.0, 0.0));
         a.poke(Zone::Belly);
         let mut most = 0.0f32;
         run(&mut a, 0.3, |a| most = most.max(a.params().squash));

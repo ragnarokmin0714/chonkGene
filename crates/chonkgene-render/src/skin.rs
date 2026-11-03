@@ -5,6 +5,7 @@
 //! tails sway like seaweed as a wave runs down their segments, and the
 //! belly, bottom and chin wobble on springs of their own.
 
+use chonkgene_core::Zone;
 use chonkgene_rig::math::{M3, V3, v3};
 use chonkgene_rig::{FLOOR, Model, builtin};
 
@@ -29,8 +30,16 @@ impl Affine {
         t: V3::ZERO,
     };
 
+    /// `m` about the point `p`.
+    pub fn about(m: M3, p: V3) -> Affine {
+        Affine {
+            m,
+            t: p - m.apply(p),
+        }
+    }
+
     /// `self` after `o`.
-    fn then(&self, o: &Affine) -> Affine {
+    pub fn then(&self, o: &Affine) -> Affine {
         Affine {
             m: self.m.mul(o.m),
             t: self.m.apply(o.t) + self.t,
@@ -185,6 +194,227 @@ pub struct Gesture {
     pub t: f32,
 }
 
+/// A feeling the whole body shows (the face shows it too).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Mood {
+    #[default]
+    Calm,
+    /// Laughing: rolls over belly-up toward you, paws pedalling.
+    Laugh,
+    /// 厭世: melts flat on the floor, legs splayed, chin down.
+    FedUp,
+    /// The overdone finale: turns its back on you, glancing back now and then.
+    Sulk,
+    /// Pleased (a pat, made up): sits, head tilting.
+    Content,
+}
+
+/// How a four-legged pet sleeps (Roger, 2026-11-03: heads stayed up). One
+/// is picked each time it falls asleep, and now and then in its sleep.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum SleepPose {
+    /// Lying down, chin on its front paws.
+    #[default]
+    Chin,
+    /// Curled round, nose toward its tail.
+    Curl,
+    /// Flopped over on its side, legs out.
+    Side,
+    /// On its back, paws in the air.
+    BellyUp,
+}
+
+impl SleepPose {
+    pub const ALL: [SleepPose; 4] = [Self::Chin, Self::Curl, Self::Side, Self::BellyUp];
+
+    /// The poses a species sleeps in, with weights: dogs flop over, cats
+    /// curl up, the fox curls under its tails (on its side or back they
+    /// would fan out flat), the Munchkin sleeps belly-up.
+    pub fn weights(species: &str) -> [u32; 4] {
+        match species {
+            "shiba" => [3, 2, 3, 2],
+            "fox" => [2, 5, 0, 0],
+            "munchkin" => [2, 3, 1, 3],
+            "fold" => [2, 4, 1, 1],
+            _ => [1, 0, 0, 0],
+        }
+    }
+}
+
+/// How the pet feels and where it is touched, as the walks show it (set
+/// every frame).
+#[derive(Clone, Copy, Debug, Default)]
+pub struct Feel {
+    pub mood: Mood,
+    /// Look at the finger: turn and tilt, degrees (+ to the pet's left,
+    /// + down); none when nobody is touching it.
+    pub gaze: Option<(f32, f32)>,
+    /// A finger is down on this zone, nearest this bone, this many seconds.
+    pub held: Option<(Zone, Option<usize>, f32)>,
+    /// The last touch let go: zone, bone, seconds ago.
+    pub poked: Option<(Zone, Option<usize>, f32)>,
+}
+
+impl Feel {
+    /// The touch is on its tail or bottom.
+    pub fn behind(&self) -> bool {
+        let zone = self.held.map(|h| h.0).or(self.poked.map(|p| p.0));
+        matches!(zone, Some(Zone::Tail | Zone::Bottom))
+    }
+}
+
+/// Facing you while touched, degrees off straight on: a little turned, so
+/// it still looks round.
+pub(crate) const ATTEND_YAW: f32 = 6.0;
+/// Laughing (and rolled over for a belly rub, or asleep on its back) it
+/// lies side-on to you, so you see it roll; sulking it turns its back.
+pub(crate) const UP_YAW: f32 = 55.0;
+pub(crate) const SULK_YAW: f32 = 150.0;
+/// Sulking, how far back it moves (world units), so its bottom stays in
+/// the picture.
+pub(crate) const SULK_BACK: f32 = 1.2;
+/// Turning to you when touched (spring hertz): about a quarter second.
+pub(crate) const ATTEND_HZ: f32 = 3.2;
+
+/// What the feelings and touches come to this frame, worked out the same
+/// for both walks.
+#[derive(Clone, Copy, Debug, Default)]
+pub(crate) struct Levels {
+    /// 0 … 1 each, eased.
+    pub attend: f32,
+    pub laugh: f32,
+    pub melt: f32,
+    pub sulk: f32,
+    pub content: f32,
+    /// Rolled over for a belly rub (0 … 1).
+    pub rub: f32,
+    /// Looking back at a touched tail or bottom.
+    pub back: f32,
+    /// Where it looks (degrees, turn and tilt), times `attend`.
+    pub gaze: (f32, f32),
+    /// Leaning into a hand on its head, chin up for a scratch, tilting into
+    /// a hand on its cheek (signed: + to its left), each 0 … 1 and fading
+    /// back after a poke.
+    pub head: f32,
+    pub chin: f32,
+    pub cheek: f32,
+    /// A head flinch from a poke, 0 … 1.
+    pub flinch: f32,
+    /// A paw held or poked: its bone and how far up (0 … 1).
+    pub paw: Option<(usize, f32)>,
+    /// A tail or bottom poked this very frame (for a flick).
+    pub flick: bool,
+    /// A dog's hind leg kicking with a good scratch, 0 … 1.
+    pub kick: f32,
+    /// Seconds on the walk's own clock.
+    pub t: f32,
+}
+
+/// The springs behind [`Levels`].
+#[derive(Clone, Debug, Default)]
+pub(crate) struct Moods {
+    attend: Spring,
+    gaze: (Spring, Spring),
+    laugh: Spring,
+    melt: Spring,
+    sulk: Spring,
+    content: Spring,
+    rub: Spring,
+    back: Spring,
+    head: Spring,
+    chin: Spring,
+    cheek: Spring,
+    /// The last poke seen, seconds ago (to tell a new one).
+    seen: f32,
+    t: f32,
+}
+
+impl Moods {
+    pub fn step(&mut self, feel: &Feel, dt: f32) -> Levels {
+        use std::f32::consts::TAU;
+        self.t += dt;
+        let ramp = |held: f32| chonkgene_rig::math::smoothstep(0.12, 0.55, held);
+        let held = |z: Zone| match feel.held {
+            Some((zone, _, secs)) if zone == z => ramp(secs),
+            _ => 0.0,
+        };
+        // A poke shows for a moment, fading (`short`) or a little longer
+        // (`long`: looking back).
+        let faded = |z: Zone, secs: f32| match feel.poked {
+            Some((zone, _, ago)) if zone == z => (-ago / secs).exp(),
+            _ => 0.0,
+        };
+        let short = |z: Zone| faded(z, 0.4);
+        let long = |z: Zone| faded(z, 1.3);
+        let new_poke = feel.poked.is_some_and(|(.., ago)| ago < self.seen);
+        self.seen = feel.poked.map_or(f32::MAX, |(.., ago)| ago);
+        let flick = new_poke
+            && feel
+                .poked
+                .is_some_and(|(z, ..)| matches!(z, Zone::Tail | Zone::Bottom));
+        let mood = |m: Mood| if feel.mood == m { 1.0 } else { 0.0 };
+        let attend = self
+            .attend
+            .step(feel.gaze.map_or(0.0, |_| 1.0), 0.0, 2.5, 1.0, dt)
+            .clamp(0.0, 1.0);
+        let (gy, gx) = feel.gaze.unwrap_or((0.0, 0.0));
+        let gaze = (
+            self.gaze.0.step(gy, 0.0, 2.6, 0.9, dt),
+            self.gaze.1.step(gx, 0.0, 2.6, 0.9, dt),
+        );
+        let laugh = self.laugh.step(mood(Mood::Laugh), 0.0, 1.5, 0.75, dt);
+        let melt = self.melt.step(mood(Mood::FedUp), 0.0, 1.1, 0.9, dt);
+        let sulk = self.sulk.step(mood(Mood::Sulk), 0.0, 1.0, 1.0, dt);
+        let content = self.content.step(mood(Mood::Content), 0.0, 1.2, 1.0, dt);
+        let rub = self
+            .rub
+            .step(held(Zone::Belly), 0.0, 1.3, 0.8, dt)
+            .clamp(0.0, 1.2);
+        let back_goal = held(Zone::Tail)
+            .max(held(Zone::Bottom))
+            .max(long(Zone::Tail))
+            .max(long(Zone::Bottom));
+        let back = self.back.step(back_goal, 0.0, 2.2, 0.9, dt);
+        let head = self.head.step(held(Zone::Head), 0.0, 2.0, 0.8, dt);
+        let chin = self.chin.step(held(Zone::Chin), 0.0, 2.0, 0.8, dt);
+        let side = if gy < 0.0 { -1.0 } else { 1.0 };
+        let cheek = self.cheek.step(
+            side * held(Zone::Cheek).max(short(Zone::Cheek)),
+            0.0,
+            2.2,
+            0.8,
+            dt,
+        );
+        let flinch = short(Zone::Head);
+        let paw = match (feel.held, feel.poked) {
+            (Some((Zone::Paw, bone, secs)), _) => bone.map(|b| (b, ramp(secs))),
+            (None, Some((Zone::Paw, bone, _))) => bone.map(|b| (b, short(Zone::Paw))),
+            _ => None,
+        };
+        // A good scratch under the chin or on the belly sets a hind leg going.
+        let kick = held(Zone::Chin).max(held(Zone::Belly))
+            * (0.5 + 0.5 * (TAU * 0.5 * self.t).sin().abs());
+        Levels {
+            attend,
+            laugh: laugh.clamp(0.0, 1.2),
+            melt: melt.clamp(0.0, 1.0),
+            sulk: sulk.clamp(0.0, 1.0),
+            content: content.clamp(0.0, 1.0),
+            rub,
+            back: back.clamp(0.0, 1.0),
+            gaze: (gaze.0 * attend, gaze.1 * attend),
+            head: head.clamp(0.0, 1.0),
+            chin: chin.clamp(0.0, 1.0) + 0.5 * short(Zone::Chin),
+            cheek: cheek.clamp(-1.0, 1.0),
+            flinch,
+            paw,
+            flick,
+            kick,
+            t: self.t,
+        }
+    }
+}
+
 /// A damped spring: `x` chases `target`, shaken by `push` (an acceleration).
 #[derive(Clone, Copy, Debug, Default)]
 pub(crate) struct Spring {
@@ -317,6 +547,18 @@ const SIT_FAN_GAP: f32 = 24.0;
 const BLANKET_TIP: f32 = 62.0;
 const BLANKET_SPREAD: f32 = 14.0;
 const BLANKET_DROOP: f32 = 16.0;
+/// Curled up asleep, the chest turns this far (degrees) one way and the
+/// hips twice as far back the other, the head further round; seen from
+/// a little to the side.
+const CURL: f32 = 34.0;
+pub(crate) const CURL_YAW: f32 = 50.0;
+/// Lying chin on paws, turned this far, so its length shows behind the head.
+pub(crate) const CHIN_YAW: f32 = 30.0;
+/// Rolled over (degrees about its length): on its back laughing or asleep,
+/// for a belly rub nearly so, asleep on its side a quarter turn less.
+const UP_ROLL: f32 = 160.0;
+const RUB_ROLL: f32 = 145.0;
+const SIDE_ROLL: f32 = 85.0;
 /// Eating, the pet crouches over the snack: it sinks this share of its
 /// legs' length.
 const EAT_CROUCH: f32 = 0.3;
@@ -405,6 +647,22 @@ pub struct Walk {
     /// Still on its way somewhere (walking, turning, sitting down, getting
     /// up, a gesture): it needs smooth frames.
     busy: bool,
+    feel: Feel,
+    moods: Moods,
+    /// How it sleeps, and each pose's share (eased, so it can change pose
+    /// in its sleep).
+    sleep_pose: SleepPose,
+    sleep_w: [Spring; 4],
+    /// Rolled over about its length, degrees (on its back 180).
+    roll: Spring,
+    /// A dog: a good scratch sets a hind leg kicking.
+    kicks: bool,
+    /// Floor to the middle of the body, world units: what it rolls about.
+    body_h: f32,
+    /// Out: how far the renderer should settle the pet onto the floor
+    /// (rolled over, melted), and flatten it (melted), this frame.
+    ground: f32,
+    flatten: f32,
 }
 
 struct Bones {
@@ -495,7 +753,46 @@ impl Walk {
             },
             n: sk.names.len(),
             busy: false,
+            feel: Feel::default(),
+            moods: Moods::default(),
+            sleep_pose: SleepPose::Chin,
+            sleep_w: [
+                Spring { x: 1.0, v: 0.0 },
+                Spring::default(),
+                Spring::default(),
+                Spring::default(),
+            ],
+            roll: Spring::default(),
+            kicks: false,
+            body_h: sk.bone("body").map_or(0.8, |b| sk.pivots[b].y - FLOOR),
+            ground: 0.0,
+            flatten: 0.0,
         })
+    }
+
+    /// The species it is: dogs kick a hind leg when scratched.
+    pub fn set_species(&mut self, id: &str) {
+        self.kicks = matches!(id, "shiba" | "fox");
+    }
+
+    /// How it feels and where it is touched (set every frame).
+    pub fn feel(&mut self, feel: Feel) {
+        self.feel = feel;
+    }
+
+    /// The pose to sleep in (eased into, even mid-sleep).
+    pub fn sleep_pose(&mut self, pose: SleepPose) {
+        self.sleep_pose = pose;
+    }
+
+    /// How far to settle the pet onto the floor this frame (0 … 1), and
+    /// how much to flatten it (see the fields).
+    pub fn ground(&self) -> f32 {
+        self.ground
+    }
+
+    pub fn flatten(&self) -> f32 {
+        self.flatten
     }
 
     /// Jolt the soft parts (a poke in the belly), in world units a second:
@@ -564,21 +861,59 @@ impl Walk {
             self.phase = (self.phase + dt * STEP_HZ * (0.4 + 0.6 * s) * quicker).fract();
         }
         let going = walking || s > STILL_GOING;
+        let lv = self.moods.step(&self.feel, dt);
         // Eating, it turns to you, so you see it eat.
         let eating = self
             .gesture
             .is_some_and(|g| g.act == chonkgene_core::anim::Act::Eat);
+        // How it sleeps, eased from one pose to the next.
+        let mut sw = [0.0; 4];
+        for (k, w) in self.sleep_w.iter_mut().enumerate() {
+            let goal = if SleepPose::ALL[k] == self.sleep_pose {
+                1.0
+            } else {
+                0.0
+            };
+            sw[k] = w.step(goal, 0.0, 0.5, 1.0, dt).clamp(0.0, 1.0);
+        }
+        // Touched, it turns to face you; a tail or a bottom touched, it only
+        // looks back over its shoulder (turning round would hide them).
+        let touched = self.feel.gaze.is_some() && !self.feel.behind();
+        // Several tails (the fox) would prop it up off its back like legs:
+        // it laughs and takes a rub sitting up instead.
+        let many_tails = self.tails.len() > 1;
+        let rolled_over = !many_tails && (self.feel.mood == Mood::Laugh || lv.rub > 0.3);
+        let sits_up = many_tails && (self.feel.mood == Mood::Laugh || lv.rub > 0.3);
         let yaw = self.yaw.step(
             facing
                 * if going {
                     WALK_YAW
+                } else if self.feel.mood == Mood::Sulk {
+                    SULK_YAW
+                } else if rolled_over
+                    || (self.lying
+                        && matches!(self.sleep_pose, SleepPose::Side | SleepPose::BellyUp))
+                {
+                    UP_YAW
+                } else if touched {
+                    ATTEND_YAW
+                } else if self.lying && self.sleep_pose == SleepPose::Curl {
+                    CURL_YAW
+                } else if self.lying && self.sleep_pose == SleepPose::Chin {
+                    CHIN_YAW
                 } else if self.sitting || self.lying || eating {
                     SIT_YAW
                 } else {
                     REST_YAW
                 },
             0.0,
-            if going { TURN_HZ.1 } else { TURN_HZ.0 },
+            if going {
+                TURN_HZ.1
+            } else if touched {
+                ATTEND_HZ
+            } else {
+                TURN_HZ.0
+            },
             1.0,
             dt,
         );
@@ -588,7 +923,14 @@ impl Walk {
         let was_sat = self.sit.x;
         // Walking, it gets up quickly: the window is already moving.
         let up_hz = if walking { 2.5 } else { 1.2 };
-        let goal = if self.sitting && !self.lying && !walking {
+        // Sulking it sits with its back to you; laughing, melted or rolled
+        // over it does not sit.
+        let lying_about = self.feel.mood == Mood::FedUp || rolled_over;
+        let goal = if (self.sitting || self.feel.mood == Mood::Sulk || sits_up)
+            && !self.lying
+            && !lying_about
+            && !walking
+        {
             1.0
         } else {
             0.0
@@ -641,7 +983,11 @@ impl Walk {
         let nod = 3.0 * s * (2.0 * TAU * ph - 0.9).sin();
         let look = self.look.step(self.look_goal, 0.0, 1.6, 1.0, dt);
         j[b.head] = Joint {
-            rot: v3(nod, -yaw * (0.45 - 0.3 * s) + look, -0.6 * roll),
+            rot: v3(
+                nod + lv.gaze.1,
+                -yaw * (0.45 - 0.3 * s) * (1.0 - lv.attend) + look + lv.gaze.0,
+                -0.6 * roll,
+            ),
             shift: V3::ZERO,
         };
 
@@ -664,9 +1010,20 @@ impl Walk {
             .gesture
             .filter(|g| g.act == chonkgene_core::anim::Act::Eat)
             .map_or(0.0, |g| g.e);
-        let amp =
-            (SWISH_REST + (SWISH_WALK - SWISH_REST) * s) * (1.0 - 0.75 * lie) * (1.0 + 0.8 * treat);
+        // Laughing it thrashes its tail; melted it lies limp; held, it goes
+        // stiff in your hand.
+        let held_tail = matches!(self.feel.held, Some((Zone::Tail, ..)));
+        let amp = (SWISH_REST + (SWISH_WALK - SWISH_REST) * s)
+            * (1.0 - 0.75 * lie)
+            * (1.0 + 0.8 * treat + 0.9 * lv.laugh)
+            * (1.0 - 0.8 * lv.melt)
+            * if held_tail { 0.25 } else { 1.0 };
         for tail in &mut self.tails {
+            // A poke on the tail or the bottom: a flick.
+            if lv.flick {
+                tail.swish[0].v += 260.0;
+                tail.bounce[0].v -= 160.0;
+            }
             let fling = tail.fling.step(0.0, -0.5 * yaw_acc, 1.8, 0.35, dt);
             let at = TAU * (self.swish + tail.offset);
             // The bend is shared out over the segments, so a long tail (a
@@ -695,7 +1052,10 @@ impl Walk {
                     shift: V3::ZERO,
                 };
                 if k == 0 {
-                    j[bone].rot = j[bone].rot + tail.sit_turn * sit + tail.lie_turn * lie;
+                    // Sulking, back to you, the tails stay together: a fan
+                    // seen from behind stretches the skin between them.
+                    let fan = sit * (1.0 - lv.sulk);
+                    j[bone].rot = j[bone].rot + tail.sit_turn * fan + tail.lie_turn * lie;
                 } else {
                     j[bone].rot = j[bone].rot + tail.lie_curl * lie;
                 }
@@ -708,6 +1068,9 @@ impl Walk {
         if let Some(i) = b.butt {
             // Plopping down into a sit squashes the bottom, and it bounces;
             // getting up gives it a smaller one.
+            if lv.flick {
+                self.butt.v -= 0.8 * BUTT_PLOP;
+            }
             if was_sat < 0.85 && sit >= 0.85 {
                 self.butt.v -= BUTT_PLOP;
             } else if was_sat > 0.5 && sit <= 0.5 {
@@ -770,7 +1133,38 @@ impl Walk {
             }
             j[b.head].rot.x += 16.0 * lie;
             j[b.head].shift.y -= 0.06 * lie;
+            let [chin, curl, side, up] = sw.map(|w| w * lie);
+            // Chin down on its paws: the head sinks more than it tips, so
+            // the face still shows.
+            j[b.head].rot.x += 12.0 * chin;
+            j[b.head].shift.y -= 0.17 * chin;
+            // Curled round toward you: the chest turns one way, the hips
+            // the other, the head round toward the tail and down on the
+            // floor.
+            let c = -facing;
+            j[b.body].rot.y += c * CURL * curl;
+            j[b.hips].rot.y -= c * 2.0 * CURL * curl;
+            // The head turns your way and lies on its cheek, so the
+            // sleeping face shows.
+            j[b.head].rot.y += c * 2.0 * CURL * curl;
+            j[b.head].rot.x += 6.0 * curl;
+            j[b.head].rot.z += c * 26.0 * curl;
+            j[b.head].shift.y -= 0.14 * curl;
+            for tail in &self.tails {
+                if let Some(&root) = tail.bones.first() {
+                    j[root].rot.y += c * 40.0 * curl;
+                }
+            }
+            // On its side, legs out; on its back, paws folded in the air
+            // and the head tipped back: the roll comes below.
+            for &(leg, _, front) in &self.legs {
+                j[leg].rot.x += if front { 62.0 } else { 48.0 } * side;
+                j[leg].rot.x += if front { 22.0 } else { 36.0 } * up;
+            }
+            j[b.head].rot.x -= 14.0 * side + 40.0 * up;
+            j[b.head].rot.z += facing * (16.0 * side + 50.0 * up);
         }
+
         // Some gestures are done sitting (see `Act::seated`); the rest
         // standing.
         if let Some(g) = self
@@ -884,13 +1278,146 @@ impl Walk {
                 _ => {}
             }
         }
+        // Feelings and touches (PLAN §1.2), all facing you.
+        self.react(&mut j, &lv, dt, facing, yaw, lie, &sw);
         self.busy = s > 0.0
             || self.gesture.is_some()
             || self.yaw.v.abs() > 1.0
             || self.look.v.abs() > 1.0
             || self.sit.v.abs() > 0.02
-            || self.lie.v.abs() > 0.02;
+            || self.lie.v.abs() > 0.02
+            || self.roll.v.abs() > 2.0
+            || lv.attend > 0.01;
         j
+    }
+
+    /// The whole body's answer to a feeling or a touch: rolled over
+    /// laughing (or for a belly rub, or asleep on its back), melted flat,
+    /// its back turned, a paw given, the head leaning into a hand, looking
+    /// back at a tail pulled.
+    #[allow(clippy::too_many_arguments)]
+    fn react(
+        &mut self,
+        j: &mut [Joint],
+        lv: &Levels,
+        dt: f32,
+        facing: f32,
+        yaw: f32,
+        lie: f32,
+        sw: &[f32; 4],
+    ) {
+        use std::f32::consts::TAU;
+        self.ground = 0.0;
+        self.flatten = 0.0;
+        let t = lv.t;
+        // Rolling over about its length, belly toward you; on its side to
+        // sleep, a quarter of the way.
+        let many_tails = self.tails.len() > 1;
+        let awake_roll = if many_tails {
+            0.0
+        } else {
+            (UP_ROLL * lv.laugh).max(RUB_ROLL * lv.rub.min(1.0))
+        };
+        let goal = awake_roll.max(lie * (SIDE_ROLL * sw[2] + UP_ROLL * sw[3]));
+        let roll = self.roll.step(goal, 0.0, 1.2, 0.85, dt).max(0.0);
+        let b = &self.bones;
+        if roll > 0.5 {
+            let up = chonkgene_rig::math::smoothstep(90.0, 150.0, roll);
+            let giggle = 9.0 * lv.laugh * (TAU * 2.2 * t).sin();
+            let phi = -facing * roll + giggle;
+            j[0].rot.z += phi;
+            // About the middle of the body, not the floor under it.
+            let d = v3(0.0, self.body_h, 0.0);
+            let turned = d - M3::rot_z(phi.to_radians()).apply(d);
+            j[0].shift = j[0].shift + M3::rot_y(yaw.to_radians()).apply(turned);
+            // Awake on its back: paws folded up, pedalling with laughter
+            // or flopping about for a rub; the head tipped back to look at
+            // you upside down.
+            let awake = up * (1.0 - lie);
+            for (k, &(leg, _, front)) in self.legs.iter().enumerate() {
+                let pedal =
+                    (18.0 * lv.laugh + 6.0 * lv.rub) * (TAU * 2.4 * t + k as f32 * 1.57).sin();
+                j[leg].rot.x += awake * (if front { -55.0 } else { -35.0 } + pedal);
+            }
+            // Rolled over side-on, you are off to its side: the head turns
+            // to you (undoing the turn it keeps at rest).
+            let over = awake.max(up * lie);
+            j[b.head].rot.y += (facing * 65.0 + 0.45 * yaw) * over;
+            j[b.head].rot.x -= 18.0 * awake;
+            j[b.head].rot.z += facing * 45.0 * awake;
+            self.ground = (roll / 80.0).min(1.0);
+        }
+        // Sitting up laughing (several tails): rocking side to side, head
+        // thrown back, front paws pedalling; a rub: leaning back into it.
+        if many_tails {
+            let l = lv.laugh.min(1.0);
+            j[0].rot.z += 7.0 * l * (TAU * 2.2 * t).sin();
+            j[b.head].rot.x -= 14.0 * l;
+            for (k, &(leg, _, front)) in self.legs.iter().enumerate() {
+                if front {
+                    j[leg].rot.x -= l * (30.0 + 15.0 * (TAU * 2.4 * t + k as f32 * 1.57).sin());
+                }
+            }
+            j[b.body].rot.x -= 10.0 * lv.rub.min(1.0);
+        }
+        // Melted flat (厭世): the belly on the floor, legs splayed out
+        // front and back, chin down, flattened.
+        let m = lv.melt;
+        if m > 0.0 {
+            j[0].shift.y -= 1.05 * LIE_DROP * self.leg_len * m;
+            for &(leg, offset, front) in &self.legs {
+                j[leg].rot.x += if front { -75.0 } else { 55.0 } * m;
+                // The left legs (+x) come first in the step cycle.
+                let out = if offset < 0.5 { 1.0 } else { -1.0 };
+                j[leg].rot.z += out * 25.0 * m;
+            }
+            j[b.head].rot.x += 26.0 * m;
+            j[b.head].shift.y -= 0.08 * m;
+            self.ground = self.ground.max(m);
+            self.flatten = 0.1 * m;
+        }
+        // Back turned (sulking), head down, glancing back now and then.
+        if lv.sulk > 0.0 {
+            let glance = (TAU * t / 3.5).sin().max(0.0).powi(4);
+            // Back to you, its bottom comes nearest, which the camera
+            // looking down a little draws lower: move it back a step.
+            j[0].shift.z -= SULK_BACK * lv.sulk;
+            j[b.head].rot.x += 14.0 * lv.sulk * (1.0 - glance);
+            j[b.head].rot.y -= facing * 55.0 * lv.sulk * glance;
+        }
+        // Pleased: a slow tilt of the head.
+        j[b.head].rot.z += 8.0 * lv.content * (TAU * 0.4 * t).sin();
+        // A hand on its head: it pushes up into it, nuzzling side to side;
+        // a scratch under the chin: chin up; on a cheek: leaning into it.
+        j[b.head].rot.x += 10.0 * lv.head - 26.0 * lv.chin + 14.0 * lv.flinch;
+        j[b.head].rot.z += 9.0 * lv.head * (TAU * 1.1 * t).sin()
+            + 5.0 * lv.chin * (TAU * 0.8 * t).sin()
+            + 12.0 * lv.cheek;
+        // Looking back at a tail pulled or a bottom poked, over the
+        // shoulder on your side, the body bending a little with it.
+        j[b.head].rot.y -= facing * 65.0 * lv.back;
+        j[b.body].rot.y -= facing * 12.0 * lv.back;
+        // A paw held: given, shaking along with the hand; poked: lifted.
+        if let Some((bone, up)) = lv.paw {
+            let leg = self
+                .legs
+                .iter()
+                .find(|l| l.0 == bone)
+                .or_else(|| self.legs.iter().find(|l| l.1 == 0.25))
+                .map(|l| l.0);
+            if let Some(leg) = leg {
+                j[leg].rot.x -= up * (55.0 + 8.0 * (TAU * 2.0 * t).sin());
+                j[leg].shift.y += 0.06 * up;
+            }
+        }
+        // A dog scratched just right: a hind leg kicks away.
+        if self.kicks && lv.kick > 0.0 {
+            let leg = if facing > 0.0 { b.hind_r } else { b.hind_l };
+            if let Some(leg) = leg {
+                j[leg].rot.x -= lv.kick * (20.0 + 22.0 * (TAU * 6.0 * t).sin());
+                j[leg].shift.y += 0.05 * lv.kick;
+            }
+        }
     }
 }
 

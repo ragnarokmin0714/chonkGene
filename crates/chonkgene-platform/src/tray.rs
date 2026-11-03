@@ -6,13 +6,16 @@
 pub enum TrayCommand {
     /// Hide all pets, or bring them back.
     Toggle,
+    /// Take out the grass stalk to tease the pets with, or put it away.
+    Toy,
     Settings,
     Quit,
 }
 
 const TOOLTIP: &str = "肉肉賴桌";
-const LABELS: [(&str, TrayCommand); 3] = [
+const LABELS: [(&str, TrayCommand); 4] = [
     ("收起來 / 叫回來", TrayCommand::Toggle),
+    ("拿狗尾草逗牠們 / 收起來", TrayCommand::Toy),
     ("設定…", TrayCommand::Settings),
     ("結束肉肉賴桌", TrayCommand::Quit),
 ];

@@ -343,6 +343,8 @@ pub struct Presenter {
     depth: u8,
     buf: Vec<u8>,
     frame: u32,
+    /// Clicks always go through (see [`Presenter::set_ghost`]).
+    ghost: bool,
 }
 
 impl Presenter {
@@ -369,7 +371,30 @@ impl Presenter {
             depth,
             buf: vec![0; (size.width * size.height * 4) as usize],
             frame: 0,
+            ghost: false,
         })
+    }
+
+    /// Let every click through, wherever it lands (a toy that follows the
+    /// cursor): an empty input region, never cut again.
+    pub fn set_ghost(&mut self, shared: &Shared) -> Result<(), String> {
+        self.ghost = true;
+        if shared.shape {
+            shared
+                .conn
+                .shape_rectangles(
+                    SO::SET,
+                    SK::INPUT,
+                    ClipOrdering::UNSORTED,
+                    self.win,
+                    0,
+                    0,
+                    &[],
+                )
+                .map_err(err)?;
+            shared.conn.flush().map_err(err)?;
+        }
+        Ok(())
     }
 
     /// The X11 window id, for telling our windows apart from others.
@@ -404,7 +429,7 @@ impl Presenter {
         )
         .map_err(err)?;
         image.put(conn, self.win, self.gc, 0, 0).map_err(err)?;
-        if shared.shape && self.frame.is_multiple_of(SHAPE_EVERY) {
+        if shared.shape && !self.ghost && self.frame.is_multiple_of(SHAPE_EVERY) {
             conn.shape_rectangles(
                 SO::SET,
                 SK::INPUT,

@@ -42,7 +42,7 @@ fn main() {
         }),
         ("poke", 1.6, |a, t, _| {
             if t == 0.0 {
-                a.press();
+                a.press(Zone::Belly, (0.0, 0.0));
             }
             if (t - 0.4).abs() < 0.01 {
                 a.poke(Zone::Belly);

@@ -20,6 +20,8 @@ pub enum Icon {
     Exit,
     /// A hand waving goodbye.
     Bye,
+    /// A stalk of foxtail grass (狗尾草), for teasing.
+    Grass,
 }
 
 #[derive(Clone, Debug)]
@@ -440,6 +442,31 @@ fn icon(pm: &mut Pixmap, icon: Icon, ts: Transform, bg: [u8; 4]) {
                     ('C', &[2.5, 16.5, 2.8, 18.5, 4.0, 19.5]),
                 ],
             );
+        }
+        Icon::Grass => {
+            // A stem bowing over to a fuzzy seed head, bristles either side.
+            stroke(
+                pm,
+                &[
+                    ('M', &[5.0, 21.0]),
+                    ('C', &[6.0, 13.0, 10.0, 8.0, 15.0, 6.5]),
+                ],
+            );
+            stroke(
+                pm,
+                &[
+                    ('M', &[14.0, 7.0]),
+                    ('C', &[16.5, 5.0, 19.0, 4.0, 21.0, 3.5]),
+                ],
+            );
+            for (x0, y0, x1, y1) in [
+                (15.0, 6.5, 15.5, 3.5),
+                (17.5, 5.2, 18.5, 2.3),
+                (15.5, 6.8, 18.0, 8.5),
+                (18.0, 5.2, 20.8, 6.6),
+            ] {
+                stroke(pm, &[('M', &[x0, y0]), ('L', &[x1, y1])]);
+            }
         }
     }
 }

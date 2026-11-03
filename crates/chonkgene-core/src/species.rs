@@ -14,6 +14,17 @@ pub enum Species {
     Fox,
 }
 
+/// How a species goes after a toy (see [`Species::plays_like`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Play {
+    /// Crouch, wiggle, pounce.
+    Stalk,
+    /// Pounce and swat.
+    Pounce,
+    /// Peck at it low, flap and hop at it high.
+    Peck,
+}
+
 /// What a species does when shaken awake (PLAN §1.12).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Grumpiness {
@@ -65,6 +76,30 @@ impl Species {
             Species::Munchkin => 0.55,
             Species::Owl => 0.7,
             Species::Chick | Species::Duck => 1.0,
+        }
+    }
+
+    /// How keen it is on the grass stalk (狗尾草) on the cursor, 0.0–1.0:
+    /// cats can't resist it, the fox and the Shiba chase it, the chick and
+    /// duckling go after it a bit, the owl only watches it go by.
+    pub fn toy_keen(self) -> f32 {
+        match self {
+            Species::Munchkin | Species::Fold => 1.0,
+            Species::Fox => 0.9,
+            Species::Shiba => 0.8,
+            Species::Chick | Species::Duck => 0.5,
+            Species::Owl => 0.0,
+        }
+    }
+
+    /// What it does about a toy in reach: cats crouch with their bottoms
+    /// up and pounce, dogs and the fox pounce and swat, birds peck at it
+    /// low and flap and hop at it high.
+    pub fn plays_like(self) -> Play {
+        match self {
+            Species::Munchkin | Species::Fold => Play::Stalk,
+            Species::Shiba | Species::Fox => Play::Pounce,
+            Species::Chick | Species::Duck | Species::Owl => Play::Peck,
         }
     }
 
