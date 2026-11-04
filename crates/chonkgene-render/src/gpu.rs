@@ -12,7 +12,7 @@
 
 use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use chonkgene_rig::math::V3;
 use chonkgene_rig::sdf::Shape;
@@ -659,15 +659,8 @@ impl Gpu {
             wgpu::PollType::Poll
         };
         self.device.poll(poll).map_err(|e| format!("GPU: {e}"))?;
-        // Waiting, the map can still land a moment after the poll returns
-        // when another thread polls the same device: poll again a little.
-        let mut tries = 0;
-        while wait && arrived.load(Ordering::Acquire) == MAPPING && tries < 200 {
-            std::thread::yield_now();
-            self.device
-                .poll(wgpu::PollType::Poll)
-                .map_err(|e| format!("GPU: {e}"))?;
-            tries += 1;
+        if wait {
+            settle_map(&self.device, &arrived, MAPPING)?;
         }
         match arrived.load(Ordering::Acquire) {
             MAPPED => {}
@@ -730,6 +723,30 @@ impl Canvas {
 const PART_VECS: usize = 7;
 const MARK_VECS: usize = 3;
 const UNIFORM_VECS: usize = 13 + PALETTE;
+
+/// Waiting for a frame, how long its map may still take to land after the
+/// wait returns.
+const MAP_LANDS: Duration = Duration::from_secs(2);
+
+/// After waiting on the device, the map's callback can still land a little
+/// later when another thread polls the same device (it runs on whichever
+/// thread polls): poll again until it has, sleeping a moment between, for
+/// at most [`MAP_LANDS`]. A busy machine (CI, tests in parallel) can take
+/// far longer than a few spins.
+pub(crate) fn settle_map(
+    device: &wgpu::Device,
+    arrived: &AtomicU8,
+    mapping: u8,
+) -> Result<(), String> {
+    let until = Instant::now() + MAP_LANDS;
+    while arrived.load(Ordering::Acquire) == mapping && Instant::now() < until {
+        std::thread::sleep(Duration::from_micros(200));
+        device
+            .poll(wgpu::PollType::Poll)
+            .map_err(|e| format!("GPU: {e}"))?;
+    }
+    Ok(())
+}
 
 fn look_index(look: Look) -> f32 {
     match look {

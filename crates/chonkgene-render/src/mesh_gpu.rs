@@ -436,15 +436,8 @@ impl MeshCanvas {
             wgpu::PollType::Poll
         };
         gpu.device().poll(poll).map_err(|e| format!("GPU: {e}"))?;
-        // Waiting, the map can still land a moment after the poll returns
-        // when another thread polls the same device: poll again a little.
-        let mut tries = 0;
-        while wait && arrived.load(Ordering::Acquire) == MAPPING && tries < 200 {
-            std::thread::yield_now();
-            gpu.device()
-                .poll(wgpu::PollType::Poll)
-                .map_err(|e| format!("GPU: {e}"))?;
-            tries += 1;
+        if wait {
+            crate::gpu::settle_map(gpu.device(), &arrived, MAPPING)?;
         }
         match arrived.load(Ordering::Acquire) {
             MAPPED => {}
