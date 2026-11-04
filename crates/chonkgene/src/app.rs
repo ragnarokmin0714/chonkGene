@@ -29,6 +29,7 @@ use winit::event::{ElementState, MouseButton, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop, EventLoopProxy};
 use winit::window::{Window, WindowId};
 
+use crate::brand;
 use crate::ipc::{self, Claim, Msg};
 use crate::lines::Lines;
 use crate::store::{self, DataDir, PetSave, Pets, Settings};
@@ -944,38 +945,6 @@ fn direct(pets: &mut [Pet], ctx: &mut Ctx, cmds: Vec<Cmd>) {
     }
 }
 
-/// A paw print for the tray, straight-alpha RGBA.
-fn tray_icon(scale: f32) -> (Vec<u8>, u32) {
-    let size = (32.0 * scale.max(1.0)).round() as u32;
-    let Some(mut pm) = tiny_skia::Pixmap::new(size, size) else {
-        return (vec![0; 4], 1);
-    };
-    let s = size as f32 / 24.0;
-    let mut paint = tiny_skia::Paint::default();
-    paint.set_color_rgba8(0xE8, 0x89, 0x4A, 255);
-    paint.anti_alias = true;
-    let ts = tiny_skia::Transform::from_scale(s, s);
-    if let Some(r) = tiny_skia::Rect::from_xywh(6.8, 11.2, 10.4, 8.6)
-        && let Some(pad) = tiny_skia::PathBuilder::from_oval(r)
-    {
-        pm.fill_path(&pad, &paint, tiny_skia::FillRule::Winding, ts, None);
-    }
-    for (x, y) in [(5.8, 10.0), (9.6, 6.4), (14.4, 6.4), (18.2, 10.0)] {
-        if let Some(toe) = tiny_skia::PathBuilder::from_circle(x, y, 2.3) {
-            pm.fill_path(&toe, &paint, tiny_skia::FillRule::Winding, ts, None);
-        }
-    }
-    let rgba = pm
-        .pixels()
-        .iter()
-        .flat_map(|p| {
-            let c = p.demultiply();
-            [c.red(), c.green(), c.blue(), c.alpha()]
-        })
-        .collect();
-    (rgba, size)
-}
-
 #[allow(clippy::too_many_arguments)]
 fn spawn(
     el: &ActiveEventLoop,
@@ -1371,8 +1340,7 @@ impl ApplicationHandler<UserEvent> for App {
                 let _ = p.send_event(UserEvent::Tray(c));
             }
         };
-        let (icon, size) = tray_icon(self.ui_scale);
-        match chonkgene_platform::tray::create(icon, size, send.clone()) {
+        match chonkgene_platform::tray::create(brand::tray(self.ui_scale), send.clone()) {
             Ok(t) => self.tray = Some(t),
             Err(e) => eprintln!("no tray icon: {e}"),
         }

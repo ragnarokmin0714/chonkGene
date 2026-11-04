@@ -288,6 +288,9 @@ component SectionTitle inherits Text {
 
 export component SettingsWindow inherits Window {
     title: "肉肉賴桌・設定";
+    // Set from Rust on Linux; Windows takes the exe's own icon instead.
+    in property <image> window-icon;
+    icon: window-icon;
     preferred-width: 880px;
     preferred-height: 620px;
     min-width: 760px;
