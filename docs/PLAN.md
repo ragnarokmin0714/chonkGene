@@ -792,6 +792,7 @@ Roger played `feat/mesh-pets` again and asked for more actions and backgrounds, 
 | D | 2 (commands, frisbee) | needs the props layer, which D builds |
 | E | 4 (still mouse, typing, scenes, effects, flight, swimming) | the biggest; reuses D's props |
 | F | 5 (play-fights, the fox's bell and tails) | needs two pets drawn together, the hardest technical part |
+| G | catnip (below, after the sixth pass) | a prop on the floor, so it needs D's props layer; small after that |
 
 ### Roger's fifth pass (2026-11-03)
 
@@ -824,9 +825,21 @@ Roger asked why cats, dogs and the fox slept with their heads up, and why touchi
    - **new zones**: `chin` and `tail`, found at bake time from the skin's bones (`mesh.rs` `refine_zone`: skin moving mostly with `tail…` bones, and head skin below the nose that wobbles with the `chin` soft spot), so no model file changed;
    - **feelings with the whole body** (they were faces over a sitting pet): laughing rolls a four-legged pet onto its back, paws pedalling and the head upside down toward you. The fox laughs sitting up and rocking instead, since its tails would prop it off its back. Fed up (厭世), the pet melts flat with legs splayed and chin down. Sulking, it turns its back, glancing round every few seconds. The birds rock back kicking their feet, sink with wings drooping, or turn their backs;
    - rolled over or melted, the renderer settles the skin onto the floor and centres it in the picture.
-3. **狗尾草逗貓 (teasing with a grass stalk).** This was in §9 and never built; it is now in v1. 「拿狗尾草逗牠們」 in the pet menu and the tray takes out a stalk of foxtail grass that follows the cursor (`chonkgene-render` `toy.rs`; app `Toy`). It is a window that lets every click through (`Presenter::set_ghost`: an empty X11 input shape, `WS_EX_TRANSPARENT` on Windows). Its seed head lags behind the hand and swings back to rest, and it is put away by itself after two minutes without the cursor moving. Pets in reach (900 px either side, not below the floor they are on) watch the head and walk to it (`Species::toy_keen`), then play as their species does (`Species::plays_like`): cats crouch bottom-up and pounce, the Shiba and the fox pounce and swat, the chick and duckling peck at it low and flap and hop at it high, and the owl only watches. Under Xvfb both pets walked straight to the stalk, and its window had no input region. Roger wrote 鼠尾草; I read it as 狗尾草, still to confirm.
+3. **狗尾草逗貓 (teasing with a grass stalk).** This was in §9 and never built; it is now in v1. 「拿狗尾草逗牠們」 in the pet menu and the tray takes out a stalk of foxtail grass that follows the cursor (`chonkgene-render` `toy.rs`; app `Toy`). It is a window that lets every click through (`Presenter::set_ghost`: an empty X11 input shape, `WS_EX_TRANSPARENT` on Windows). Its seed head lags behind the hand and swings back to rest, and it is put away by itself after two minutes without the cursor moving. Pets in reach (900 px either side, not below the floor they are on) watch the head and walk to it (`Species::toy_keen`), then play as their species does (`Species::plays_like`): cats crouch bottom-up and pounce, the Shiba and the fox pounce and swat, the chick and duckling peck at it low and flap and hop at it high, and the owl only watches. Under Xvfb both pets walked straight to the stalk, and its window had no input region. Roger wrote 鼠尾草 and confirmed on 2026-11-04 that he meant 狗尾草; the catnip he also liked is below ("Catnip").
 
 Tests: `every_mesh_pet_has_a_chin_and_a_tail_to_touch`, `a_touched_pet_turns_to_you_and_looks_at_the_finger`, `four_legged_pets_sleep_with_their_heads_down`, `laughing_rolls_a_pet_onto_its_back`, `a_finger_dents_the_flesh_under_it`, `pressed_flesh_springs_back_when_let_go` (the last four checked to fail with the change taken out); the edge-of-picture test now also runs every feeling, touches on four zones and every sleep pose; `toy.rs` tests the swing and that the stalk stays in its picture. Not covered: pets without a GPU (sprites) still only squash, and pets do not yet play with each other over the stalk (fourth pass, item 5).
+
+### Catnip (2026-11-04)
+
+Roger liked the idea while confirming 狗尾草: 貓薄荷 (catnip) is a different kind of play from the stalk. The stalk is waved in your hand; catnip is put down and the pets come to it.
+
+- 「放一把貓薄荷」 in the pet menu and the tray drops a small sprig on the floor (taskbar or a window top) under the cursor, as a prop (§3.2); it stays about a minute, its smell drawn as a faint wavy line, then is used up. One at a time.
+- Cats in reach walk over, sniff, rub their cheeks on it, flop onto their side and roll belly-up, kick at the air and go glassy-eyed for a while (a happy, silly state, not drunk); some cats do not care, as in life (a per-pet roll at adoption, about one in three indifferent).
+- Everyone else stays in character: the Shiba sniffs, sneezes and loses interest; the fox sniffs curiously and paws it once; the chick and duckling peck at the leaves; the owl watches.
+- Two cats near one sprig: both roll beside it, or a short squabble over it (§1.4) that ends with both rolling.
+- Never a snack: it does not count towards the three snacks a day (§1.13), and affinity rises only by the usual touch rules. Hidden in don't-disturb states; the rolling is toned down under reduced motion.
+- Needs on the meshes: rubbing a cheek on the floor, the roll onto the back (the laugh's belly-up roll reused), the kicks; the props layer from step D.
+- Alternative if catnip reads as too adult: 木天蓼 (silver vine), the same play with a twig. Decided when it is built.
 
 ### Phase 1: Shiba prototype (feel) — `v0.1.0`
 
