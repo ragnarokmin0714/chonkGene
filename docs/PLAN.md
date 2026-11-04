@@ -94,6 +94,7 @@ v1 has seven species (the 九尾狐 joined on 2026-10-28). A species only sets *
 - **Idle detection**: user idle for N minutes → pets fall asleep or come over to look at the cursor; user returns → they stretch. Uses only the system idle-time API, **never hooks keyboard or mouse** (§6).
 - **Typing and a still mouse** (Roger, 2026-11-03): while the mouse stays still, pets settle down (lie down, scratch an itch, wag); while you type they react too (paws tapping along, a head tilt, curling up next to you). Typing is inferred without hooks: the system's last-input time keeps resetting while the polled cursor stays put. Only that timing is used; no key is ever read (§6).
 - **Species idle scenes** (Roger, 2026-11-03): with time on their hands pets do their own thing with a prop and effects: the owl flies to a branch, the duckling swims in a pond, and so on. Props are their own click-through windows (§3.2). See §8 "Roger's fourth pass", item 4.
+- **Never frozen** (Roger, 2026-11-04): in any held pose something keeps moving (ears, tail, blinks, the tongue, wings, the belly, the fox's bell, a paw scratching), each species its own way. See §8 "Roger's seventh pass", item 1.
 - **Cursor curiosity**: when the cursor comes near, sometimes turn the head or chase it a little (low-rate cursor polling, no hooks). Not built yet; Roger finds that pets hardly ever face him (§8 "Roger's fourth pass", item 6).
 - **Desktop terrain**:
   - walk along the **bottom of the work area** (top edge of the taskbar), with the taskbar on any side;
@@ -122,6 +123,7 @@ v1 has seven species (the 九尾狐 joined on 2026-10-28). A species only sets *
 - **Master volume slider**, plus per-pet mute.
 - **Rate limit**: a cap on sounds per pet per minute; a poke burst plays one sound.
 - Muted automatically in any "don't disturb" state.
+- Loud enough and animal-like (Roger, 2026-11-04: the placeholder voices are too weak); several sounds can play at once. See §8 "Roger's seventh pass", item 2.
 
 ### 1.6 Appearance
 
@@ -841,6 +843,58 @@ Roger liked the idea while confirming 狗尾草: 貓薄荷 (catnip) is a differe
 - Needs on the meshes: rubbing a cheek on the floor, the roll onto the back (the laugh's belly-up roll reused), the kicks; the props layer from step D.
 - Alternative if catnip reads as too adult: 木天蓼 (silver vine), the same play with a twig. Decided when it is built.
 
+### Roger's seventh pass: never frozen, louder voices (2026-11-04)
+
+Roger's notes after the green CI builds of `feat/mesh-pets` 799cd2f and `feat/app-icon` cb07b42, for **the next version** (steps H and I below). **Nothing here is built yet.**
+
+1. **Pets must never stop dead: whatever they are doing (sitting, idling, smiling, looking back at you…), something keeps moving: ears, tails, the tongue, blinks, a wing shifting, the belly wobbling, the bell, a paw scratching the body, each species its own way.**
+
+   What moves today in a held pose: breathing (`mesh_frames.rs`: the body grows 1.2 % at most, hardly visible), the tails' slow sway, and the belly, bottom and chin settling on their springs after a jolt; gestures (fifth pass) come every 1.5–4 s with stillness in between. Blinking is in the animator (`anim.rs`, every 3.5–5.5 s) but only for the neutral and fed-up faces, so a smiling pet never blinks. Ears, wings, the tongue and the fox's bell (`fox/quad.ron` `bell`, `bell_cap`) never move by themselves.
+
+   Plan: a **fidget layer** under every held pose, separate from gestures:
+   - **Channels**, each with its own timer so they never move in step: ears (a flick of one ear, both swivelling toward the cursor or a sound, folding back when fed up), tails (the sway's speed and size follow the mood; wag bursts; a cat's tip curling and flicking; the fox's nine tails rippling one after another), blinks (in every face, smiling ones too: ^ ^ closing; now and then a double blink; cats a slow blink when you are near; the owl one eye at a time), the tongue (out and panting, or a quick lick of the nose), wings (shifting, half-lifting and settling, feathers puffing up and sleeking), the belly (breathing that can be seen, more on a chubbier pet, a wobble when shifting weight), the fox's bell (swings on a spring with every head movement, a soft ring now and then in sound mode), weight shifts and paw shuffles, sniffing (the nose twitching), and **a paw scratching the body** (a front paw at the cheek or chest; birds scratch the head with a foot). The hind-leg scratch stays a gesture.
+   - **Rule**: in a held pose at least one channel is always moving, and none is still longer than about 1.5 s; breathing and the tail never stop. It runs while sitting, idling, smiling or in another feeling, looking at you or back over the shoulder, between bites, held in a touch reaction, and in a skit; while a gesture moves the whole body it waits. Asleep it keeps to the quiet channels (breathing, an ear twitch, the tail tip, a dreaming paw twitch).
+   - **Per species** (the starting lists; tuned on renders):
+
+     | Pet | Its own fidgets |
+     |---|---|
+     | Shiba | ears flick and swivel, curled tail wags in bursts, tongue out panting when happy or after running, nose sniffs, front paws shuffle |
+     | Scottish Fold | the folded ears twitch a little, tail tip curls and flicks, slow blinks, licks its nose, a front paw scratches the cheek, kneads with its front paws |
+     | Munchkin | ears swivel and flick, tail swishes, slow blinks, a tongue left out (blep), short legs paddle, the belly wobbles |
+     | Fox | the big ears swivel on their own, the nine tails ripple out of step, the bell swings and rings softly, nose sniffs, licks its muzzle |
+     | Owl | slow blinks one eye at a time, the head bobs (judging distance), feathers puff up and sleek, wings shift, toes re-grip |
+     | Chick | quick head tilts, little wing flutters, a foot scratches the head, the fluff breathes, the beak opens for a cheep |
+     | Duckling | tail waggles, the bill clacks, half a wing stretch, a foot paddles a step, shakes its head |
+
+   - **Mood and personality**: a happy pet wags and pants more; fed up, ears go back and the tail only thumps; sleepy, everything slows; lively personalities fidget more often than lazy ones. Reduced motion makes the fidgets smaller, never none (breathing and blinks stay).
+   - **Needs on the meshes**: ear bones exist on the Shiba, the cats and the fox, tail bones on all, wing bones on the birds; new are a tongue (a small pink part on a `tongue` bone, hidden in the mouth until it comes out), the bell on a spring bone, a front paw reaching the cheek or chest, a bird's foot reaching the head. Sprites (no GPU) get blinks in every face, visible breathing and the tail sway.
+   - **Cost**: idle mesh pets draw at 15 fps (`min_fps`); a fidget lasts well under a second and draws at 30 fps only while it moves. The idle average must stay within §5's budget (`idle_pets_mostly_run_slow` keeps its limit).
+   - **Tests**: in every held pose and feeling, for every species, no bone group stays still longer than 1.5 s over a minute; each species uses its own channels; blinks happen in every face; reduced motion still moves. Renders of each species' fidgets through `--example mesh` before the look on Windows.
+
+2. **The animal voices are a bit weak.**
+
+   Why, from the code: every sound is still a **synthesised placeholder** (`chonkgene-core` `sound.rs`, from the first beta), built from a few pure sine harmonics with no breath or noise, so it sounds like a beep more than an animal. Each is normalised to a low peak: voices 0.55, sighs and eating 0.35, snoring 0.25 of full scale; the volume slider (default 70) then scales that again, so at the default a voice peaks around −8 dBFS and snoring around −15 dBFS. On Windows `PlaySound` plays one sound at a time, so a new one cuts off the last. Only some lines have a sound, and at most six a minute per pet.
+
+   Plan:
+   - **Louder**: normalise by loudness (short-term RMS per sound class), not by a low peak: voices and laughs loud, pokes and landings medium, snoring and eating quiet but clearly heard; peaks up to about −1 dBFS through a soft limiter. The slider gets a perceptual curve, so 100 % is properly loud and the default stays comfortable.
+   - **More like animals**: source-filter synthesis per species: a pulse train plus breath noise through formant filters, with each call's own shape: the Shiba's 汪 a noisy burst at the onset; 喵 gliding through its vowels (m, i, a, u); the owl's 咕咕 low and breathy, in a pair; the chick's 啾 a fast sweep up; the duck's 呱 a nasal buzz. Several takes per sound and a little pitch jitter, so repeats are never identical; pitch follows size and body (a chubbier, bigger pet sounds lower).
+   - **New sounds** where an animal would make one: a cat's purr while patted, the Shiba panting (with the tongue, item 1), the fox's bell, wing flutters, soft paw pats on landing, a greeting when you come back, the chick's morning call (§1.1).
+   - **Several at once**: a small mixer instead of one sound at a time: on Windows a `waveOut` stream (nothing to install, like `PlaySound`), on Linux the ALSA worker mixes; about four voices, summed through the limiter. The rate limit becomes per sound class, so a purr or the bell does not use up the voices.
+   - **Recorded sounds** stay the open question of §10. Recommended: the better synthesis first (embedded, no licence to check, any variation for free); CC0 or commissioned recordings can replace single sounds later.
+   - **Listening before Windows**: a page with old and new for every species and sound (rendered WAVs), so Roger can pick by ear before it goes into a build.
+   - **Tests**: loudness of each class within its target window, no clipping, takes differ, the mixer never clips with four voices.
+
+3. **Remove the `v0.5.0-beta.*` releases.** Removed on 2026-11-04: the local tags `v0.5.0-beta.1`–`.4` here; the GitHub releases and tags (beta.1, .2 and .4; beta.3 was never pushed) are removed by Roger, as pushing needs his credentials. The sections of this plan named after them stay as the record of what was built. The next release's number is open (§10).
+
+**Order for the next version**:
+
+| Step | Items | Why in this order |
+|---|---|---|
+| H | 1 (fidget layer) | what looks wrong now; reuses the springs and channels already in `skin.rs` / `waddle.rs` |
+| I | 2 (voices, mixer) | independent of H; the listening page comes before any change to the app; the bell and panting sounds wait for H |
+
+Steps D–G of the fourth pass follow.
+
 ### Phase 1: Shiba prototype (feel) — `v0.1.0`
 
 - The art pipeline (§3.3) works end to end for one Shiba, with placeholder art.
@@ -915,7 +969,8 @@ Roger liked the idea while confirming 狗尾草: 貓薄荷 (catnip) is a differe
 | Question | Affects | Decide by |
 |---|---|---|
 | **Who draws the art** (Roger, a commission, or my placeholders first) | critical path; cuteness depends on it | end of Phase 1 |
-| Sound sources (self-recorded, commissioned, CC0) | licensing | end of Phase 1 |
+| Sound sources (self-recorded, commissioned, CC0). Recommended 2026-11-04: better synthesis first, recordings later per sound (§8 "Roger's seventh pass", item 2) | licensing | before step I |
+| The next release's number, now that the `v0.5.0-beta.*` releases are removed | tags, README | before the next release |
 | Owl's favourite snack | snack content | Phase 5 |
 | What 「沒有 ui/ux icon」 means. Roger, 2026-11-03: the 招牌 icon, read as the program's own signature icon (exe, taskbar, Alt-Tab, tray, settings window), to be confirmed when the designs are shown; whether the settings window also gets icons is still open | icon work in §8 "Roger's fourth pass", item 1: the next round | before that work starts |
 | Commands (坐下, 趴下, 過來…): available from the start, or still unlocked by affinity like §1.13's tricks | menu design, nurturing | before item 2 |
