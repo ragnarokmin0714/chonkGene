@@ -845,7 +845,7 @@ Roger liked the idea while confirming 狗尾草: 貓薄荷 (catnip) is a differe
 
 ### Roger's seventh pass: never frozen, louder voices (2026-11-04)
 
-Roger's notes after the green CI builds of `feat/mesh-pets` 799cd2f and `feat/app-icon` cb07b42, for **the next version** (steps H and I below). **Nothing here is built yet.**
+Roger's notes after the green CI builds of `feat/mesh-pets` 799cd2f and `feat/app-icon` cb07b42, for **the next version** (steps H and I below). Both are built on `feat/mesh-pets` (see "Built" after the order table); what follows is the plan as written before.
 
 1. **Pets must never stop dead: whatever they are doing (sitting, idling, smiling, looking back at you…), something keeps moving: ears, tails, the tongue, blinks, a wing shifting, the belly wobbling, the bell, a paw scratching the body, each species its own way.**
 
@@ -869,7 +869,7 @@ Roger's notes after the green CI builds of `feat/mesh-pets` 799cd2f and `feat/ap
    - **Mood and personality**: a happy pet wags and pants more; fed up, ears go back and the tail only thumps; sleepy, everything slows; lively personalities fidget more often than lazy ones. Reduced motion makes the fidgets smaller, never none (breathing and blinks stay).
    - **Needs on the meshes**: ear bones exist on the Shiba, the cats and the fox, tail bones on all, wing bones on the birds; new are a tongue (a small pink part on a `tongue` bone, hidden in the mouth until it comes out), the bell on a spring bone, a front paw reaching the cheek or chest, a bird's foot reaching the head. Sprites (no GPU) get blinks in every face, visible breathing and the tail sway.
    - **Cost**: idle mesh pets draw at 15 fps (`min_fps`); a fidget lasts well under a second and draws at 30 fps only while it moves. The idle average must stay within §5's budget (`idle_pets_mostly_run_slow` keeps its limit).
-   - **Tests**: in every held pose and feeling, for every species, no bone group stays still longer than 1.5 s over a minute; each species uses its own channels; blinks happen in every face; reduced motion still moves. Renders of each species' fidgets through `--example mesh` before the look on Windows.
+   - **Tests**: in every held pose and feeling, for every species, something besides the tail moves within every 1.5 s over a minute (and without fidgets it would not); each species uses its own channels; blinks happen in every face; reduced motion still moves. Renders of each species' fidgets through `--example mesh` before the look on Windows.
 
 2. **The animal voices are a bit weak.**
 
@@ -884,7 +884,7 @@ Roger's notes after the green CI builds of `feat/mesh-pets` 799cd2f and `feat/ap
    - **Listening before Windows**: a page with old and new for every species and sound (rendered WAVs), so Roger can pick by ear before it goes into a build.
    - **Tests**: loudness of each class within its target window, no clipping, takes differ, the mixer never clips with four voices.
 
-3. **Remove the `v0.5.0-beta.*` releases.** Removed on 2026-11-04: the local tags `v0.5.0-beta.1`–`.4` here; the GitHub releases and tags (beta.1, .2 and .4; beta.3 was never pushed) are removed by Roger, as pushing needs his credentials. The sections of this plan named after them stay as the record of what was built. The next release's number is open (§10).
+3. **Remove the `v0.5.0-beta.*` releases.** Removed on 2026-11-04: the local tags `v0.5.0-beta.1`–`.4` here; the GitHub releases and tags (beta.1, .2 and .4; beta.3 was never pushed) are removed by Roger, as pushing needs his credentials. The sections of this plan named after them stay as the record of what was built. The next release is `v0.6.0-beta.1` (§10).
 
 **Order for the next version**:
 
@@ -894,6 +894,19 @@ Roger's notes after the green CI builds of `feat/mesh-pets` 799cd2f and `feat/ap
 | I | 2 (voices, mixer) | independent of H; the listening page comes before any change to the app; the bell and panting sounds wait for H |
 
 Steps D–G of the fourth pass follow.
+
+**Built (2026-11-04, `feat/mesh-pets`)**, checked here with tests and llvmpipe renders; the look and the sound on Windows are still owed.
+
+- **H, fidgets** (`chonkgene-render` `fidget.rs`; `skin.rs` and `waddle.rs` `fidgets`): one fidget follows another with gaps of 0.15–1.0 s (a lively pet waits less: `Personality::energy`, passed through `Renderer::set_fidgets` with a seed per pet), each species from its own weighted list as in the table above; asleep only the quiet ones (a dreaming paw, the tail tip, a ruffle) every 1.5–4 s. Each ear twitches on its own clock (every 1.6–4.5 s, asleep 5–11 s), both ears turn to listen every 2–5 s, lie back fed up or sulking and perk up pleased (a Fold's folded ears less). Ears got bones of their own: the mirrored `ear` part of each four-legged model is now `ear_l` and `ear_r` (checked to give the same shape and colours to the bit). The fox's bell is on a `bell` bone, a spring pendulum that keeps hanging down as the body tips, trails back walking and is knocked into a swing by a shake of the head. The tongue is two new faces, `Look::Blep` (open eyes, the tip out) and `Look::Pant` (^ ^, mouth open, tongue out), on CPU (`face.rs`) and GPU (`paint.wgsl`). Every face blinks, smiling ones in a gesture too (`PoseParams::blink`); cats and the owl blink slowly now and then (`Species::slow_blinks`), the others sometimes twice. Breathing shows: the belly rises and falls (`Mover::breathe`) and the body's breath is 2% instead of 1.2%. Lying about (melted, rolled over) the legs only twitch and the head lolls. Quick fidgets (an ear flick, a sniff, panting) draw at 30 fps, the rest at the idle 15 fps. Not done: the owl's one-eye-at-a-time blink (a face has one look for both eyes), the chick's beak opening (the beak is a part, not painted), reduced motion (there is no such setting yet; when it comes, fidgets get smaller, never none). Tests: `no_mesh_pet_ever_stops_dead`, `every_species_fidgets_its_own_way`, and `fidget.rs`'s own (gaps, quiet asleep, ears out of step). `--example mesh -- fidget <species> <dir>` renders 12 s of it, printing each frame's fidget.
+- **I, voices** (`chonkgene-core` `sound.rs`, `chonkgene-platform` `audio.rs`, app `Sounds`):
+  - Measured first: by a presence-weighted RMS (`sound::loudness`), the old beeps were not quiet (voices −8.9 dB, laughs −11.9, pokes −16, snoring −23); being nearly pure tones and short, they sounded thin. So the fix is mostly the sound itself, with louder targets as well.
+  - Synthesis: a band-limited pulse with breath noise through three moving formants, each call with its own pitch and vowel contours: 汪 a noisy burst gliding "w"→"a", the fox's yips shorter and sharper, 喵 through "m", "i", "a", "u", 咕咕 low and breathy in a pair, 啾 a quick sweep 2.6→4.2→3.1 kHz, 呱 a rough nasal buzz. Three takes of every sound, played in turn; the pitch follows the pet's size and body (`voice_pitch`: bigger or chubbier is lower).
+  - Loudness by class, after a soft limiter (peaks at most −1 dBFS): calls −8 dB, knocks (poke, landing, bell, wings) −12 dB, soft sounds (sigh, snore, eating, purr, panting) −17 dB, so each is 1–6 dB above the old.
+  - New sounds: a purr when a cat is patted, greetings (hello, welcome back, made up, a level up), the Shiba panting with its tongue out, the fox's bell (a shake of the head, landing), wings (a bird's flutter or ruffle).
+  - A mixer: up to four sounds at once (a fifth fades out the oldest over 10 ms), summed through the same limiter, written in 20 ms chunks: `waveOut` on Windows (four chunks queued, 80 ms), ALSA on Linux (60 ms). The rate limit is per class and pet (calls 6 a minute, knocks 10, soft 8).
+  - Decided: the volume slider stays linear. A perceptual curve would have turned Roger's saved 70% down by about 3 dB, the opposite of what he asked.
+  - The listening page (old and new for every pet): https://claude.ai/artifact/CYcH15WkAMzbRqdSfi1S51. It came after the change to the app, not before as planned; any sound Roger dislikes is a small change in `sound.rs`. `--example voices -- <dir>` writes every sound as WAV; `-- measure <file.wav>...` measures any WAV the same way.
+  - Not done: Windows output is checked by clippy for the Windows target only. Whether `waveOut` plays, and how it sounds, is the first thing to try there.
 
 ### Phase 1: Shiba prototype (feel) — `v0.1.0`
 
@@ -969,8 +982,8 @@ Steps D–G of the fourth pass follow.
 | Question | Affects | Decide by |
 |---|---|---|
 | **Who draws the art** (Roger, a commission, or my placeholders first) | critical path; cuteness depends on it | end of Phase 1 |
-| Sound sources (self-recorded, commissioned, CC0). Recommended 2026-11-04: better synthesis first, recordings later per sound (§8 "Roger's seventh pass", item 2) | licensing | before step I |
-| The next release's number, now that the `v0.5.0-beta.*` releases are removed | tags, README | before the next release |
+| Sound sources (self-recorded, commissioned, CC0). Decided 2026-11-04: synthesis (built in step I); a recording can replace a single sound later, once its licence is checked | licensing | done |
+| The next release's number, now that the `v0.5.0-beta.*` releases are removed. Decided 2026-11-04: `v0.6.0-beta.1`, since the mesh pets, terrain, touch and fidgets replace most of what the 0.5 betas had | tags, README | done |
 | Owl's favourite snack | snack content | Phase 5 |
 | What 「沒有 ui/ux icon」 means. Roger, 2026-11-03: the 招牌 icon, read as the program's own signature icon (exe, taskbar, Alt-Tab, tray, settings window), to be confirmed when the designs are shown; whether the settings window also gets icons is still open | icon work in §8 "Roger's fourth pass", item 1: the next round | before that work starts |
 | Commands (坐下, 趴下, 過來…): available from the start, or still unlocked by affinity like §1.13's tricks | menu design, nurturing | before item 2 |

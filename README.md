@@ -16,11 +16,11 @@ The UI is in Traditional Chinese first, with English to follow.
 
 ## Status
 
-Beta `0.5.0-beta.4`: all six pets as round 3D models that walk, glance about, stretch, yawn, wave and wag their tails, with placeholder sounds. See [docs/PLAN.md §8](docs/PLAN.md#lively-motion--v050-beta4) for what is in it and what is left.
+Working toward beta `0.6.0-beta.1` (the `0.5.0` betas are withdrawn): seven pets as skinned 3D meshes that walk across the desktop and its windows, sit, sleep, eat, play with a grass stalk, answer touch and never stop fidgeting, with synthesised voices. See [docs/PLAN.md §8](docs/PLAN.md#8-phases) for what is in it and what is left.
 
 ## Trying it
 
-Download the archive for your system from [Releases](https://github.com/ragnarokmin0714/chonkGene/releases), unpack it and run `chonkGene.exe` (Windows) or `chonkgene` (Linux). Settings and pets are kept in the `chonkGene-data` folder next to it.
+Download the archive for your system from [Releases](https://github.com/ragnarokmin0714/chonkGene/releases) (until `0.6.0-beta.1` is out, take the build of the latest push from [Actions](https://github.com/ragnarokmin0714/chonkGene/actions), kept 14 days), unpack it and run `chonkGene.exe` (Windows) or `chonkgene` (Linux). Settings and pets are kept in the `chonkGene-data` folder next to it.
 
 - Click a pet to poke it; keep poking and it laughs belly-up or looks thoroughly fed up.
 - Drag to lift it, shake it, let go to throw it.
