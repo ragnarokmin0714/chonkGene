@@ -914,6 +914,18 @@ Steps D–G of the fourth pass follow.
   - The listening page (old and new for every pet): https://claude.ai/artifact/CYcH15WkAMzbRqdSfi1S51. It came after the change to the app, not before as planned; any sound Roger dislikes is a small change in `sound.rs`. `--example voices -- <dir>` writes every sound as WAV; `-- measure <file.wav>...` measures any WAV the same way.
   - Not done: Windows output is checked by clippy for the Windows target only. Whether `waveOut` plays, and how it sounds, is the first thing to try there.
 
+### Roger's eighth pass (2026-11-04)
+
+Roger ran the CI build of `feat/mesh-pets` 63ff852 on Windows.
+
+1. **The taskbar icon had not changed.** The icon work was on `feat/app-icon`, which was not in that build; the taskbar entry is the settings window's (pet windows skip the taskbar). Both branches are now merged into `main` (770f352), so builds from here on carry the icon.
+2. **Pets still looked frozen.** In renders driven by the app's own animator (`--example mesh -- life`), sitting toward you hides the tail behind the body. The tail had been the one thing always moving, and the fidgets were too small to read at desktop size. Fixed on `fix/fidgets-show` (aa989eb):
+   - a slow drift under every held pose: the head tips, turns and nods, the body sways, each on its own beat, and the birds' wings breathe;
+   - bigger ear flicks and swivels, head tilts, sniffs, paw shuffles and weight shifts, and breathing at 3%;
+   - the tail's fidgets go on through gestures, and a fidget cut short fades out over 0.3 s instead of snapping back.
+
+   In the renders, the stillest 1.5 s of a pet left alone now moves about 2,500 pixels (Shiba 232 → 2,496, Fold 297 → 2,392, owl 1,433 → 2,593). Side by side: https://claude.ai/artifact/8kx9Fgw9vm5Nn7JYojjoyQ. If Roger's screen still looks stiller than the "before" there, the cause is in drawing on his machine (frames dropped by the GPU budget, or the sprite fallback), not in the motion. Windows release builds have no console, so `--stats` cannot show which yet.
+
 ### Phase 1: Shiba prototype (feel) — `v0.1.0`
 
 - The art pipeline (§3.3) works end to end for one Shiba, with placeholder art.
