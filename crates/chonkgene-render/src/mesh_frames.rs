@@ -24,6 +24,7 @@ use chonkgene_rig::math::{M3, V3, v3};
 use chonkgene_rig::{FLOOR, Layer, Look, Model, Pose, Scene, ZONES};
 use tiny_skia::{Pixmap, Transform};
 
+use crate::fidget::Tongue;
 use crate::gpu::Gpu;
 use crate::mesh::{Mesh, bake};
 use crate::mesh_gpu::MeshCanvas;
@@ -126,7 +127,9 @@ impl MeshRenderer {
         coat: usize,
     ) -> Option<Self> {
         let sk = Skeleton::new(&model);
-        let walk = Mover::new(&sk, 1.0, &model).ok()?;
+        let mut walk = Mover::new(&sk, 1.0, &model).ok()?;
+        let seed = 0x9E37_79B9 ^ (coat as u32).wrapping_mul(0x85EB_CA6B);
+        walk.set_fidgets(&model.species, 0.5, seed);
         let (w, h) = pixel_size(&model, scale);
         let bones = sk.pose(&[]);
         let baking = Some(spawn_bake(&model, &sk, coat, chonk));
@@ -158,7 +161,7 @@ impl MeshRenderer {
             dent_r: 0.3,
             press: None,
             sleep: None,
-            seed: 0x9E37_79B9 ^ (coat as u32).wrapping_mul(0x85EB_CA6B),
+            seed,
             sleep_in: None,
         })
     }
@@ -244,11 +247,11 @@ impl MeshRenderer {
     }
 
     /// Frames a second this pet needs however still its animation is:
-    /// tails sway and bellies settle all the time, slowly at rest; turning,
-    /// sitting down, getting up and gestures move the whole pet and need
-    /// smooth frames.
+    /// tails sway, bellies settle and fidgets go on all the time, slowly at
+    /// rest; turning, sitting down, getting up, gestures and the quick
+    /// fidgets (an ear flick, a sniff) move fast and need smooth frames.
     pub fn min_fps(&self) -> u32 {
-        if self.walk.busy() || self.dent.x.abs() > 0.002 {
+        if self.walk.busy() || self.dent.x.abs() > 0.002 || self.walk.fidget().quick() {
             30
         } else {
             15
@@ -270,10 +273,22 @@ impl MeshRenderer {
         self.pixmap.data_mut().copy_from_slice(self.base.data());
     }
 
+    /// How lively the pet is (0 … 1) and a seed of its own, for its
+    /// fidgets.
+    pub fn set_fidgets(&mut self, energy: f32, seed: u32) {
+        self.walk.set_fidgets(&self.model.species, energy, seed);
+    }
+
     pub fn render(&mut self, params: &PoseParams, expression: Expression) -> &Pixmap {
         let mut look = key_for(expression, params).look;
         if matches!(expression, Expression::Neutral | Expression::Happy) {
             look = touched_look(&params.touch).unwrap_or(look);
+            // The tongue out (a blep, a lick, panting), unless it blinks.
+            look = match (self.walk.fidget().tongue(), look) {
+                (Some(Tongue::Blep), Look::Open) => Look::Blep,
+                (Some(Tongue::Pant), Look::Open | Look::Happy) => Look::Pant,
+                _ => look,
+            };
         }
         let eating = (params.act == Act::Eat)
             .then_some(self.gesture)
@@ -399,6 +414,7 @@ impl MeshRenderer {
             Some(Gesture { act, e, t })
         }));
         self.walk.set_pace(params.pace);
+        self.walk.breathe(params.breath);
         // A poke jiggles the animator's belly: jolt the mesh's.
         if params.belly > 0.15 && self.belly <= 0.15 {
             self.walk.poke(2.0);
@@ -663,7 +679,7 @@ impl MeshRenderer {
     fn settle(&mut self, params: &PoseParams) {
         let sq =
             (0.35 * params.squash + 0.15 * params.belly + self.walk.flatten()).clamp(-0.3, 0.3);
-        let breath = 0.012 * params.breath;
+        let breath = 0.02 * params.breath;
         let wide = 1.0 + 0.5 * sq;
         let feet = v3(0.0, FLOOR, crate::skin::ROOT_PIVOT.z);
         let squash = Affine::about(M3::diag(v3(wide, (1.0 - sq) * (1.0 + breath), wide)), feet);

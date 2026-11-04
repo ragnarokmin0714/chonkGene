@@ -43,6 +43,8 @@ const FED_UP: i32 = 5;
 const POUT: i32 = 6;
 const ASLEEP: i32 = 7;
 const YAWN: i32 = 8;
+const BLEP: i32 = 9;
+const PANT: i32 = 10;
 
 fn paint_eyes(q: vec3<f32>, r: vec3<f32>, base: vec3<f32>, px: f32) -> vec3<f32> {
     let n = normalize(q / r);
@@ -90,7 +92,7 @@ fn paint_eyes(q: vec3<f32>, r: vec3<f32>, base: vec3<f32>, px: f32) -> vec3<f32>
             iris_c = u.palette[u32(u.iris.x)].rgb;
             pupil = u.iris.y;
         }
-        if look == OPEN {
+        if look == OPEN || look == BLEP {
             c = mix(c, iris_c, ink(ell(uv, ec, vec2<f32>(rx, ry)), aa));
             if pupil < 1.0 {
                 c = mix(c, ink_c, ink(ell(uv, ec, vec2<f32>(rx * pupil, ry * pupil)), aa));
@@ -114,7 +116,7 @@ fn paint_eyes(q: vec3<f32>, r: vec3<f32>, base: vec3<f32>, px: f32) -> vec3<f32>
         } else if look == SHUT || look == ASLEEP {
             let d = max(arc(uv, vec2<f32>(ec.x, ec.y + 0.5 * ry), 0.75 * rx, w), uv.y - (ec.y + 0.2 * ry));
             c = mix(c, ink_c, ink(d, aa));
-        } else if look == HAPPY || look == LAUGH {
+        } else if look == HAPPY || look == LAUGH || look == PANT {
             let d = max(arc(uv, vec2<f32>(ec.x, ec.y - 0.4 * ry), 0.75 * rx, w), -(uv.y - (ec.y - 0.25 * ry)));
             c = mix(c, ink_c, ink(d, aa));
         } else {
@@ -139,6 +141,14 @@ fn paint_eyes(q: vec3<f32>, r: vec3<f32>, base: vec3<f32>, px: f32) -> vec3<f32>
         c = mix(c, mix(mark, white, 0.55), ink(core * FLAME_R.x, aa) * whole);
     }
     return c;
+}
+
+// A tongue from `a` down to `b`, `r` wide, as face.rs `tongue`.
+fn tongue(c0: vec3<f32>, uv: vec2<f32>, a: vec2<f32>, b: vec2<f32>, r: f32, aa: f32) -> vec3<f32> {
+    let t = segment(uv, a, b, r);
+    let c = mix(c0, vec3<f32>(1.0, 0.52, 0.56), ink(t, aa));
+    let groove = max(segment(uv, vec2<f32>(a.x, a.y - 0.02), vec2<f32>(b.x, b.y + 0.6 * r), 0.012), t);
+    return mix(c, vec3<f32>(0.86, 0.36, 0.42), ink(groove, aa));
 }
 
 fn paint_mouth(q: vec3<f32>, r: vec3<f32>, base: vec3<f32>, px: f32) -> vec3<f32> {
@@ -167,11 +177,18 @@ fn paint_mouth(q: vec3<f32>, r: vec3<f32>, base: vec3<f32>, px: f32) -> vec3<f32
     } else if look == POUT {
         let d = max(arc(uv, vec2<f32>(0.0, -0.32), 0.10, 0.022), -(uv.y + 0.30));
         c = mix(c, ink_c, ink(d, aa));
+    } else if look == PANT {
+        let m = max(length(vec2<f32>(uv.x / 1.1, (uv.y + 0.22) / 0.8)) - 0.26, uv.y + 0.12);
+        c = mix(c, vec3<f32>(0.55, 0.18, 0.22), ink(m, aa));
+        c = tongue(c, uv, vec2<f32>(0.0, -0.28), vec2<f32>(0.0, -0.64), 0.17, aa);
     } else {
         for (var k = 0; k < 2; k++) {
             let s = select(-1.0, 1.0, k == 1);
             let d = max(arc(uv, vec2<f32>(0.15 * s, -0.10), 0.15, 0.022), uv.y + 0.10);
             c = mix(c, ink_c, ink(d, aa));
+        }
+        if look == BLEP {
+            c = tongue(c, uv, vec2<f32>(0.0, -0.2), vec2<f32>(0.0, -0.44), 0.13, aa);
         }
     }
     let ridge = max(abs(uv.x) - 0.022, max(uv.y + 0.10, -uv.y - 0.02));

@@ -79,6 +79,11 @@ impl Species {
         }
     }
 
+    /// Some of its blinks are slow ones: cats (a sign of trust) and the owl.
+    pub fn slow_blinks(self) -> bool {
+        matches!(self, Species::Munchkin | Species::Fold | Species::Owl)
+    }
+
     /// How keen it is on the grass stalk (狗尾草) on the cursor, 0.0–1.0:
     /// cats can't resist it, the fox and the Shiba chase it, the chick and
     /// duckling go after it a bit, the owl only watches it go by.

@@ -9,6 +9,8 @@ use chonkgene_core::Zone;
 use chonkgene_rig::math::{M3, V3, v3};
 use chonkgene_rig::{FLOOR, Model, builtin};
 
+use crate::fidget::{Fidgets, Kind, Out, ear_flick};
+
 /// A bone's move: a turn about its pivot (degrees, as [`M3::euler`]), then
 /// a shift.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
@@ -663,6 +665,17 @@ pub struct Walk {
     /// (rolled over, melted), and flatten it (melted), this frame.
     ground: f32,
     flatten: f32,
+    /// The little movements under every held pose, and this frame's.
+    fidgets: Fidgets,
+    fidget: Out,
+    /// Ears laid back less on a Fold: its ears are folded already.
+    ear_k: f32,
+    /// The fox's bell swinging on its cord (degrees about x and z).
+    bell: (Spring, Spring),
+    /// −1 … 1 over a breath: the belly rises and falls with it.
+    breath: f32,
+    /// A weight shift's lean last frame: shifting wobbles the belly.
+    shift: f32,
 }
 
 struct Bones {
@@ -674,6 +687,8 @@ struct Bones {
     belly: Option<usize>,
     butt: Option<usize>,
     chin: Option<usize>,
+    ears: [Option<usize>; 2],
+    bell: Option<usize>,
 }
 
 impl Walk {
@@ -750,6 +765,8 @@ impl Walk {
                 belly: sk.bone("belly"),
                 butt: sk.bone("butt"),
                 chin: sk.bone("chin"),
+                ears: [sk.bone("ear_l"), sk.bone("ear_r")],
+                bell: sk.bone("bell"),
             },
             n: sk.names.len(),
             busy: false,
@@ -767,12 +784,44 @@ impl Walk {
             body_h: sk.bone("body").map_or(0.8, |b| sk.pivots[b].y - FLOOR),
             ground: 0.0,
             flatten: 0.0,
+            fidgets: Fidgets::new("", 1),
+            fidget: Out::default(),
+            ear_k: 1.0,
+            bell: (Spring::default(), Spring::default()),
+            breath: 0.0,
+            shift: 0.0,
         })
     }
 
-    /// The species it is: dogs kick a hind leg when scratched.
+    /// The species it is: dogs kick a hind leg when scratched; each has its
+    /// own fidgets.
     pub fn set_species(&mut self, id: &str) {
         self.kicks = matches!(id, "shiba" | "fox");
+        self.fidgets = Fidgets::new(id, 1);
+        self.ear_k = if id == "fold" { 0.45 } else { 1.0 };
+    }
+
+    /// How lively it is (0 … 1) and a seed of its own, so two pets of a
+    /// kind never fidget in step.
+    pub fn set_fidgets(&mut self, species: &str, energy: f32, seed: u32) {
+        self.fidgets = Fidgets::new(species, seed);
+        self.fidgets.set_energy(energy);
+    }
+
+    /// Where it is in its breath, −1 … 1 (set every frame).
+    pub fn breathe(&mut self, b: f32) {
+        self.breath = b;
+    }
+
+    /// No fidgets (see [`Fidgets::stop`]).
+    pub fn still(&mut self) {
+        self.fidgets.stop();
+    }
+
+    /// The fidgets this frame (the face shows the tongue; quick ones need
+    /// smooth frames).
+    pub fn fidget(&self) -> &Out {
+        &self.fidget
     }
 
     /// How it feels and where it is touched (set every frame).
@@ -862,6 +911,12 @@ impl Walk {
         }
         let going = walking || s > STILL_GOING;
         let lv = self.moods.step(&self.feel, dt);
+        // Fidgets go on under any held pose: not walking, nor in a gesture
+        // that moves the whole body.
+        let f = self
+            .fidgets
+            .step(dt, !going && self.gesture.is_none(), self.lying);
+        self.fidget = f;
         // Eating, it turns to you, so you see it eat.
         let eating = self
             .gesture
@@ -1004,7 +1059,11 @@ impl Walk {
 
         // Tails: a wave runs from root to tip, faster and wider at pace;
         // the root bounces with the steps, and turning flings it out.
-        self.swish = (self.swish + dt * (SWISH_HZ.0 + (SWISH_HZ.1 - SWISH_HZ.0) * s)).fract();
+        // A burst of wagging: quicker and wider.
+        let wag = f.get(Kind::Wag).map_or(0.0, |w| w.0);
+        self.swish = (self.swish
+            + dt * (SWISH_HZ.0 + (SWISH_HZ.1 - SWISH_HZ.0) * s) * (1.0 + 2.5 * wag))
+            .fract();
         // Asleep, the tails hardly stir; a snack sets them going.
         let treat = self
             .gesture
@@ -1017,6 +1076,7 @@ impl Walk {
             * (1.0 - 0.75 * lie)
             * (1.0 + 0.8 * treat + 0.9 * lv.laugh)
             * (1.0 - 0.8 * lv.melt)
+            * (1.0 + 1.6 * wag)
             * if held_tail { 0.25 } else { 1.0 };
         for tail in &mut self.tails {
             // A poke on the tail or the bottom: a flick.
@@ -1062,7 +1122,8 @@ impl Walk {
             }
         }
         if let Some(i) = b.belly {
-            let y = self.belly.step(0.0, -acc, 3.6, 0.16, dt);
+            // The belly rises and falls with each breath.
+            let y = self.belly.step(-0.035 * self.breath, -acc, 3.6, 0.16, dt);
             j[i].shift = v3(0.0, y.clamp(-0.12, 0.12), 0.0);
         }
         if let Some(i) = b.butt {
@@ -1280,6 +1341,7 @@ impl Walk {
         }
         // Feelings and touches (PLAN §1.2), all facing you.
         self.react(&mut j, &lv, dt, facing, yaw, lie, &sw);
+        self.fidgets(&mut j, &f, &lv, sit, lie, dt);
         self.busy = s > 0.0
             || self.gesture.is_some()
             || self.yaw.v.abs() > 1.0
@@ -1289,6 +1351,184 @@ impl Walk {
             || self.roll.v.abs() > 2.0
             || lv.attend > 0.01;
         j
+    }
+
+    /// The little movements on top of the pose (see [`crate::fidget`]):
+    /// the ears twitch and listen, the tail tip flicks, the head sniffs and
+    /// tilts, a paw shuffles or scratches, the weight shifts, the fox's
+    /// bell swings. Legs stay put lying down, melted or rolled over.
+    fn fidgets(&mut self, j: &mut [Joint], f: &Out, lv: &Levels, sit: f32, lie: f32, dt: f32) {
+        use std::f32::consts::TAU;
+        let b = &self.bones;
+        let firm = (1.0 - lie) * (1.0 - lv.melt) * (1.0 - (self.roll.x / 90.0).clamp(0.0, 1.0));
+        // Ears: each twitches on its own clock, both turn to listen, and
+        // they lie back fed up or sulking, perk up pleased.
+        let back = lv.melt.max(lv.sulk);
+        let perk = lv.content.max(lv.head);
+        for (k, ear) in b.ears.iter().enumerate() {
+            let Some(e) = *ear else {
+                continue;
+            };
+            // Out to its own side: the left ear (+x) turns about z the
+            // negative way.
+            let out = if k == 0 { -1.0 } else { 1.0 };
+            let flick = f.ears[k].map_or(0.0, ear_flick);
+            j[e].rot.z += self.ear_k * out * (24.0 * flick + 16.0 * back - 4.0 * perk);
+            j[e].rot.x += self.ear_k * (-6.0 * flick.abs() - 30.0 * back + 6.0 * perk);
+            j[e].rot.y += self.ear_k * 16.0 * f.swivel;
+        }
+        let Some(run) = f.run else {
+            self.swing_bell(j, 0.0, dt);
+            self.shift = 0.0;
+            return;
+        };
+        let (e, t, side) = (run.e(), run.t, run.side);
+        let front = |side: f32| {
+            // The left front leg (+x) comes second in the step cycle.
+            let at = if side > 0.0 { 0.25 } else { 0.75 };
+            self.legs.iter().find(|l| l.1 == at).map(|l| l.0)
+        };
+        // A head shake knocks the bell into a swing as it starts.
+        let mut knock = 0.0;
+        let mut shift = 0.0;
+        match run.kind {
+            // Wagging hard, the whole bottom wags along.
+            Kind::Wag => j[b.hips].rot.y += 5.0 * e * (TAU * self.swish).sin(),
+            Kind::TipFlick | Kind::Ripple => {
+                // It glances back at the tail, the hips swaying with it.
+                j[b.head].rot.y -= side * 9.0 * e;
+                j[b.hips].rot.z += 3.0 * e * (TAU * 1.2 * t).sin();
+                let n_tails = self.tails.len();
+                for (i, tail) in self.tails.iter().enumerate() {
+                    let n = tail.bones.len();
+                    if run.kind == Kind::Ripple {
+                        // One tail after another lifts and settles.
+                        let lag = 0.6 * i as f32 / n_tails.max(1) as f32;
+                        let x = ((t - lag) / (run.len - 0.6).max(0.3)).clamp(0.0, 1.0);
+                        let bump = (std::f32::consts::PI * x).sin();
+                        if let Some(&root) = tail.bones.first() {
+                            j[root].rot.x -= 16.0 * bump;
+                        }
+                        continue;
+                    }
+                    // The last third curls and flicks.
+                    for (k, &bone) in tail.bones.iter().enumerate() {
+                        let w = ((k as f32 + 1.0) / n as f32 - 0.6).max(0.0) / 0.4;
+                        j[bone].rot.x += w * e * 24.0 * (TAU * 2.4 * t).sin();
+                        j[bone].rot.y += w * e * side * 14.0;
+                    }
+                }
+            }
+            Kind::Sniff => {
+                j[b.head].rot.x -= e * (7.0 + 2.5 * (TAU * 7.0 * t).sin());
+            }
+            // Tipped over and wondering, never quite still.
+            Kind::HeadTilt => {
+                j[b.head].rot.z += e * (side * 15.0 + 4.0 * (TAU * 0.7 * t).sin());
+            }
+            Kind::PawScratch if sit > 0.5 => {
+                // Sitting, a front paw comes up to the cheek or chest and
+                // scratches; the head leans into it.
+                if let Some(leg) = front(side) {
+                    j[leg].rot.x -= firm * e * (78.0 + 10.0 * (TAU * 6.0 * t).sin());
+                    j[leg].rot.z += firm * e * side * 14.0;
+                    j[leg].shift.y += firm * e * 0.16;
+                }
+                j[b.head].rot.z -= side * 12.0 * e;
+                j[b.head].rot.x += 8.0 * e;
+            }
+            Kind::PawShuffle | Kind::PawScratch | Kind::Dream => {
+                // A paw lifted and set down (asleep, a dreaming twitch).
+                if let Some(leg) = front(side) {
+                    if run.kind == Kind::Dream {
+                        j[leg].rot.x += e * 9.0 * (TAU * 5.0 * t).sin();
+                    } else {
+                        j[leg].rot.x -= firm * 22.0 * e;
+                        j[leg].shift.y += firm * 0.06 * e;
+                        j[b.body].rot.z -= side * 2.0 * e * firm;
+                        // Lying about (melted, rolled over), the paw only
+                        // twitches.
+                        j[leg].rot.x += (1.0 - firm) * e * 9.0 * (TAU * 5.0 * t).sin();
+                    }
+                }
+            }
+            Kind::Knead | Kind::Paddle => {
+                // Front paws in turn: kneading presses down, paddling swings.
+                let hz = if run.kind == Kind::Knead { 1.4 } else { 2.4 };
+                let mut k = 0.0;
+                for &(leg, _, is_front) in &self.legs {
+                    if !is_front {
+                        continue;
+                    }
+                    let p = (TAU * hz * t + std::f32::consts::PI * k).sin();
+                    if run.kind == Kind::Knead {
+                        j[leg].rot.x -= firm * e * 16.0 * p.max(0.0);
+                        j[leg].shift.y += firm * e * 0.05 * p.max(0.0);
+                    } else {
+                        j[leg].rot.x += firm * e * 14.0 * p;
+                    }
+                    j[leg].rot.x += (1.0 - firm) * e * 7.0 * p;
+                    k += 1.0;
+                }
+            }
+            Kind::WeightShift => {
+                shift = side * e;
+                // Lying about, the head lolls over instead.
+                j[b.head].rot.z += (1.0 - firm) * side * 9.0 * e;
+            }
+            Kind::Pant => {
+                // Quick shallow breaths, the chin up a little.
+                let pant = (TAU * 3.2 * t).sin();
+                j[0].shift.y += 0.01 * pant * e;
+                j[b.head].rot.x -= e * (4.0 + 2.0 * pant);
+                self.belly.v += 6.0 * pant * e * dt;
+            }
+            Kind::Lick => j[b.head].rot.x += 8.0 * e,
+            // A blep comes with a slow, silly tilt of the head.
+            Kind::Blep => {
+                j[b.head].rot.z += e * (side * 8.0 + 6.0 * (TAU * 0.6 * t).sin());
+                j[b.head].rot.x += 3.0 * e * (TAU * 0.45 * t).sin();
+            }
+            Kind::Jingle => {
+                let w = (TAU * 6.0 * t).sin();
+                j[b.head].rot.y += 10.0 * w * e;
+                j[b.head].rot.z += 5.0 * w * e;
+                if t <= dt {
+                    knock = side;
+                }
+            }
+            _ => {}
+        }
+        // Shifting its weight leans the body over and back; the belly
+        // wobbles with the change.
+        j[b.body].rot.z += 7.0 * shift * firm;
+        j[b.hips].rot.z -= 5.0 * shift * firm;
+        self.belly.v += 0.4 * (shift - self.shift).abs();
+        self.shift = shift;
+        self.swing_bell(j, knock, dt);
+    }
+
+    /// The fox's bell hangs from its cord: it keeps hanging down however
+    /// the body tips, swinging on a while after each change, trails back a
+    /// little walking, and a shake of the head (`knock`: which way) knocks
+    /// it into a swing.
+    fn swing_bell(&mut self, j: &mut [Joint], knock: f32, dt: f32) {
+        let Some(bell) = self.bones.bell else {
+            return;
+        };
+        let body = &j[self.bones.body];
+        let lean = (body.rot.x + j[0].rot.x, body.rot.z + j[0].rot.z);
+        if knock != 0.0 {
+            self.bell.1.v += 160.0 * knock;
+            self.bell.0.v += 60.0;
+        }
+        let x = self
+            .bell
+            .0
+            .step(-lean.0, -900.0 * self.speed, 1.7, 0.12, dt);
+        let z = self.bell.1.step(-lean.1, 0.0, 1.7, 0.12, dt);
+        j[bell].rot.x += x.clamp(-35.0, 35.0);
+        j[bell].rot.z += z.clamp(-35.0, 35.0);
     }
 
     /// The whole body's answer to a feeling or a touch: rolled over

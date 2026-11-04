@@ -28,6 +28,8 @@
     pivots: {
         "body": (0, -0.44, 0.2),
         "hips": (0, -0.44, -0.15),
+        "ear_l": (0.43, 0.76, 0.88),
+        "ear_r": (-0.43, 0.76, 0.88),
         "head": (0, -0.04, 0.75),
         "leg_fl": (0.3, -0.64, 0.5),
         "leg_fr": (-0.3, -0.64, 0.5),
@@ -44,6 +46,8 @@
     },
     parents: {
         "head": "body",
+        "ear_l": "head",
+        "ear_r": "head",
         "hips": "body",
         "leg_fl": "body",
         "leg_fr": "body",
@@ -96,8 +100,11 @@
             ]),
         (name: "muzzle", bone: "head", shape: Ellipsoid((0.26, 0.16, 0.17)), at: (0, 0.09, 1.55),
             blend: 0.14, color: "light", zone: "head"),
-        (name: "ear", bone: "head", shape: Cone(r1: 0.23, r2: 0.05, h: 0.39, flat: 2.2), at: (0.43, 0.76, 0.88),
-            rot: (-6, 0, -20), blend: 0.1, color: "fur", mirror: true, zone: "head",
+        (name: "ear_l", bone: "ear_l", shape: Cone(r1: 0.23, r2: 0.05, h: 0.39, flat: 2.2), at: (0.43, 0.76, 0.88),
+            rot: (-6, 0, -20), blend: 0.1, color: "fur", zone: "head",
+            marks: [(at: (0, 0.15, 0.1), radii: (0.11, 0.19, 0.07), color: "ear", soft: 0.35)]),
+        (name: "ear_r", bone: "ear_r", shape: Cone(r1: 0.23, r2: 0.05, h: 0.39, flat: 2.2), at: (-0.43, 0.76, 0.88),
+            rot: (-6, 0, 20), blend: 0.1, color: "fur", zone: "head",
             marks: [(at: (0, 0.15, 0.1), radii: (0.11, 0.19, 0.07), color: "ear", soft: 0.35)]),
         // Tiny legs.
         (name: "leg_fl", bone: "leg_fl", shape: Capsule(to: (0, -0.31, 0.02), r: 0.15), at: (0.3, -0.64, 0.5),

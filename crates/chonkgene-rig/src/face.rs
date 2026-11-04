@@ -112,7 +112,7 @@ pub fn eyes(scene: &Scene, shape: Shape, q: V3, base: V3, px: f32) -> V3 {
             .iris
             .map_or((ink_c, 1.0), |(slot, k)| (scene.color(slot), k));
         match scene.look() {
-            Look::Open => {
+            Look::Open | Look::Blep => {
                 c = c.lerp(iris_c, ink(ell(uv, ec, (rx, ry)), aa));
                 if pupil < 1.0 {
                     c = c.lerp(ink_c, ink(ell(uv, ec, (rx * pupil, ry * pupil)), aa));
@@ -142,7 +142,7 @@ pub fn eyes(scene: &Scene, shape: Shape, q: V3, base: V3, px: f32) -> V3 {
                     arc(uv, (ec.0, ec.1 + 0.5 * ry), 0.75 * rx, w).max(uv.1 - (ec.1 + 0.2 * ry));
                 c = c.lerp(ink_c, ink(d, aa));
             }
-            Look::Happy | Look::Laugh => {
+            Look::Happy | Look::Laugh | Look::Pant => {
                 // ^ : the upper half of a ring.
                 let d = arc(uv, (ec.0, ec.1 - 0.4 * ry), 0.75 * rx, w)
                     .max(-(uv.1 - (ec.1 - 0.25 * ry)));
@@ -176,6 +176,14 @@ fn liner(ec: (f32, f32), r: (f32, f32), side: f32) -> ((f32, f32), (f32, f32)) {
     )
 }
 
+/// A tongue from `a` down to `b`, `r` wide, a darker groove down its middle.
+fn tongue(c: V3, uv: P, a: P, b: P, r: f32, aa: f32) -> V3 {
+    let t = segment(uv, a, b, r);
+    let c = c.lerp(v3(1.0, 0.52, 0.56), ink(t, aa));
+    let groove = segment(uv, (a.0, a.1 - 0.02), (b.0, b.1 + 0.6 * r), 0.012).max(t);
+    c.lerp(v3(0.86, 0.36, 0.42), ink(groove, aa))
+}
+
 pub fn mouth(scene: &Scene, shape: Shape, q: V3, base: V3, px: f32) -> V3 {
     let Some((uv, ry)) = face_uv(shape, q, 0.3) else {
         return base;
@@ -205,6 +213,20 @@ pub fn mouth(scene: &Scene, shape: Shape, q: V3, base: V3, px: f32) -> V3 {
             // A small ∩.
             let d = arc(uv, (0.0, -0.32), 0.10, 0.022).max(-(uv.1 + 0.30));
             c = c.lerp(ink_c, ink(d, aa));
+        }
+        Look::Blep => {
+            // ω, the tip of the tongue peeping out under it.
+            for s in [-1.0, 1.0] {
+                let d = arc(uv, (0.15 * s, -0.10), 0.15, 0.022).max(uv.1 + 0.10);
+                c = c.lerp(ink_c, ink(d, aa));
+            }
+            c = tongue(c, uv, (0.0, -0.2), (0.0, -0.44), 0.13, aa);
+        }
+        Look::Pant => {
+            // A small open mouth, the tongue hanging out of it.
+            let m = (len((uv.0 / 1.1, (uv.1 + 0.22) / 0.8)) - 0.26).max(uv.1 + 0.12);
+            c = c.lerp(v3(0.55, 0.18, 0.22), ink(m, aa));
+            c = tongue(c, uv, (0.0, -0.28), (0.0, -0.64), 0.17, aa);
         }
         _ => {
             // ω

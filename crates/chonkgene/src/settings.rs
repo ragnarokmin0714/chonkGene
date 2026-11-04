@@ -320,6 +320,7 @@ fn show_pet(ui: &SettingsWindow, st: &mut State) {
             renderer,
             anim: Animator::new(p.id, p.chonk, species.waddle())
                 .with_habits(species.habits())
+                .with_slow_blinks(species.slow_blinks())
                 .with_pops(pops),
         });
     }

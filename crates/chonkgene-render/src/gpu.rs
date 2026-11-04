@@ -742,6 +742,8 @@ fn look_index(look: Look) -> f32 {
         Look::Pout => 6.0,
         Look::Asleep => 7.0,
         Look::Yawn => 8.0,
+        Look::Blep => 9.0,
+        Look::Pant => 10.0,
     }
 }
 

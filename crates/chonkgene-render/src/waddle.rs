@@ -16,6 +16,7 @@ use chonkgene_rig::{FLOOR, Model};
 
 use chonkgene_core::Zone;
 
+use crate::fidget::{Fidgets, Kind, Out};
 use crate::skin::{
     ATTEND_HZ, ATTEND_YAW, Feel, Gesture, Joint, Levels, MAX_SWING, Mood, Moods, REST_YAW, SIT_YAW,
     SPEED_UP, STILL_GOING, SULK_BACK, SULK_YAW, Skeleton, SleepPose, Spring, TURN_HZ, WALK_YAW,
@@ -65,6 +66,42 @@ impl Mover {
         match self {
             Self::Quad(w) => w.poke(kick),
             Self::Biped(w) => w.poke(kick),
+        }
+    }
+
+    /// How lively the pet is (0 … 1) and a seed of its own (see
+    /// [`Walk::set_fidgets`]).
+    pub fn set_fidgets(&mut self, species: &str, energy: f32, seed: u32) {
+        match self {
+            Self::Quad(w) => w.set_fidgets(species, energy, seed),
+            Self::Biped(w) => {
+                w.fidgets = Fidgets::new(species, seed);
+                w.fidgets.set_energy(energy);
+            }
+        }
+    }
+
+    /// No fidgets: poses can be compared (tests, looks of one pose).
+    pub fn still(&mut self) {
+        match self {
+            Self::Quad(w) => w.still(),
+            Self::Biped(w) => w.fidgets.stop(),
+        }
+    }
+
+    /// Where it is in its breath, −1 … 1 (set every frame).
+    pub fn breathe(&mut self, b: f32) {
+        match self {
+            Self::Quad(w) => w.breathe(b),
+            Self::Biped(w) => w.breath = b,
+        }
+    }
+
+    /// The fidgets this frame.
+    pub fn fidget(&self) -> &Out {
+        match self {
+            Self::Quad(w) => w.fidget(),
+            Self::Biped(w) => &w.fidget,
         }
     }
 
@@ -217,6 +254,11 @@ pub struct Waddle {
     /// Out: see [`Walk::ground`].
     ground: f32,
     flatten: f32,
+    /// The little movements under every held pose, and this frame's.
+    fidgets: Fidgets,
+    fidget: Out,
+    /// −1 … 1 over a breath: the belly rises and falls with it.
+    breath: f32,
 }
 
 impl Waddle {
@@ -272,6 +314,9 @@ impl Waddle {
             flick: Spring::default(),
             ground: 0.0,
             flatten: 0.0,
+            fidgets: Fidgets::new(&model.species, 1),
+            fidget: Out::default(),
+            breath: 0.0,
         })
     }
 
@@ -331,6 +376,10 @@ impl Waddle {
         let going = walking || s > STILL_GOING;
         let eating = self.gesture.is_some_and(|g| g.act == Act::Eat);
         let lv = self.moods.step(&self.feel, dt);
+        let f = self
+            .fidgets
+            .step(dt, !going && self.gesture.is_none(), self.lying);
+        self.fidget = f;
         // Touched, it turns to face you; a tail or a bottom touched, it only
         // looks back over its shoulder (turning round would hide them).
         let touched = self.feel.gaze.is_some() && !self.feel.behind();
@@ -468,7 +517,8 @@ impl Waddle {
         let _pace_acc = (s - self.pace) / dt;
         self.pace = s;
         if let Some(i) = self.soft[0] {
-            let y = self.belly.step(0.0, -acc, 3.6, 0.16, dt);
+            // The belly rises and falls with each breath.
+            let y = self.belly.step(-0.03 * self.breath, -acc, 3.6, 0.16, dt);
             j[i].shift = v3(0.0, y.clamp(-0.12, 0.12), 0.0);
         }
         if let Some(i) = self.soft[1] {
@@ -583,6 +633,7 @@ impl Waddle {
             }
         }
         self.react(&mut j, &lv, dt, facing);
+        self.fidgets(&mut j, &f, sit, dt);
         self.busy = s > 0.0
             || self.gesture.is_some()
             || self.yaw.v.abs() > 1.0
@@ -591,6 +642,100 @@ impl Waddle {
             || self.lie.v.abs() > 0.02
             || lv.attend > 0.01;
         j
+    }
+
+    /// A bird's little movements on top of the pose (see
+    /// [`crate::fidget`]): the head bobs and tilts, feathers puff up and
+    /// sleek, a wing shifts or both flutter, a foot scratches the head or
+    /// the toes re-grip, the bill dabbles, the tail waggles.
+    fn fidgets(&mut self, j: &mut [Joint], f: &Out, sit: f32, dt: f32) {
+        let Some(run) = f.run else {
+            return;
+        };
+        let (e, t, side) = (run.e(), run.t, run.side);
+        let x = (t / run.len).clamp(0.0, 1.0);
+        // Wing 0 is the left (+x): it opens about z the positive way.
+        let wing = |side: f32| {
+            let k = if side > 0.0 { 0 } else { 1 };
+            self.wings[k].map(|w| (w, if k == 0 { 1.0 } else { -1.0 }))
+        };
+        match run.kind {
+            Kind::HeadBob => {
+                let w = (TAU * 1.4 * t).sin();
+                j[self.head].shift.x += 0.05 * w * e;
+                j[self.head].rot.z += 6.0 * w * e;
+            }
+            Kind::HeadTilt => {
+                // An owl turns its head right over.
+                let deg = if self.neck < 1.0 { 26.0 } else { 17.0 };
+                j[self.head].rot.z += e * (side * deg + 4.0 * (TAU * 0.7 * t).sin());
+            }
+            Kind::Ruffle => {
+                // Puffed up, then a shiver as the feathers sleek down.
+                for (k, wing) in self.wings.iter().enumerate() {
+                    if let Some(w) = *wing {
+                        let sign = if k == 0 { 1.0 } else { -1.0 };
+                        j[w].rot.z += sign * 14.0 * e;
+                    }
+                }
+                j[self.body].shift.y += 0.02 * e;
+                let shiver = if x > 0.55 { 1.0 - x } else { 0.0 };
+                j[self.body].rot.z += 9.0 * shiver * (TAU * 11.0 * t).sin();
+                j[self.head].rot.z -= 6.0 * shiver * (TAU * 11.0 * t).sin();
+                self.belly.v += 0.6 * shiver * (TAU * 11.0 * t).cos() * dt * 30.0;
+            }
+            Kind::WingShift => {
+                if let Some((w, sign)) = wing(side) {
+                    j[w].rot.z += sign * 20.0 * e;
+                    j[w].rot.x -= 8.0 * e;
+                }
+            }
+            Kind::Flutter => {
+                for (k, wing) in self.wings.iter().enumerate() {
+                    if let Some(w) = *wing {
+                        let sign = if k == 0 { 1.0 } else { -1.0 };
+                        j[w].rot.z += sign * e * (12.0 + 12.0 * (TAU * 10.0 * t).sin());
+                    }
+                }
+            }
+            Kind::FootScratch => {
+                // Standing on one leg, the other foot comes up to scratch
+                // the head, which tips down to meet it.
+                let k = if side > 0.0 { 0 } else { 1 };
+                let leg = self.legs[k];
+                let up = e * (1.0 - 0.6 * sit);
+                j[leg].rot.x -= up * (70.0 + 10.0 * (TAU * 7.0 * t).sin());
+                j[leg].shift.y += up * 0.1;
+                j[self.body].rot.z -= side * 5.0 * up;
+                j[self.head].rot.z += side * 16.0 * e;
+                j[self.head].rot.x += 10.0 * e;
+            }
+            Kind::ToeGrip => {
+                // Rocking onto the foot that stays down.
+                j[self.body].rot.z += 3.0 * e * (TAU * 1.6 * t).sin();
+                for (k, &leg) in self.legs.iter().enumerate() {
+                    let p = (TAU * 1.6 * t + PI * k as f32).sin().max(0.0);
+                    j[leg].shift.y += 0.04 * p * e * (1.0 - sit);
+                    j[leg].rot.x -= 10.0 * p * e;
+                }
+            }
+            Kind::Dabble => {
+                j[self.head].rot.x += e * (7.0 + 4.0 * (TAU * 7.0 * t).sin());
+            }
+            Kind::Waggle => {
+                let w = (TAU * 6.0 * t).sin();
+                if let Some(tail) = self.tail {
+                    j[tail].rot.z += 22.0 * w * e;
+                }
+                self.butt_x.v += 0.8 * w * e * dt * 30.0;
+            }
+            Kind::HeadShake => {
+                let w = (TAU * 7.0 * t).sin() * (1.0 - x);
+                j[self.head].rot.y += 16.0 * w * e;
+                j[self.head].rot.z += 7.0 * w * e;
+            }
+            _ => {}
+        }
     }
 
     /// A bird's answer to a feeling or a touch (see [`Walk`]'s): rocking

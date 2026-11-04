@@ -29,6 +29,8 @@
     pivots: {
         "body": (0, -0.23, 0.2),
         "hips": (0, -0.23, -0.15),
+        "ear_l": (0.37, 1.06, 1.05),
+        "ear_r": (-0.37, 1.06, 1.05),
         "head": (0, 0.07, 0.75),
         "leg_fl": (0.3, -0.46, 0.48),
         "leg_fr": (-0.3, -0.46, 0.48),
@@ -45,6 +47,8 @@
     },
     parents: {
         "head": "body",
+        "ear_l": "head",
+        "ear_r": "head",
         "hips": "body",
         "leg_fl": "body",
         "leg_fr": "body",
@@ -93,9 +97,12 @@
         (name: "muzzle", bone: "head", shape: Ellipsoid((0.24, 0.145, 0.16)), at: (0, 0.31, 1.6),
             blend: 0.14, color: "light", zone: "head"),
         // Folded ears: small flaps lying forward against the head.
-        (name: "ear", bone: "head", shape: Cone(r1: 0.18, r2: 0.06, h: 0.21, flat: 2.2), at: (0.37, 1.06, 1.05),
+        (name: "ear_l", bone: "ear_l", shape: Cone(r1: 0.18, r2: 0.06, h: 0.21, flat: 2.2), at: (0.37, 1.06, 1.05),
             rot: (105, 0, -25), blend: 0.07, color: "fur",
-            marks: [(at: (0, 0.16, 0), radii: (0.24, 0.16, 0.24), color: "stripe", soft: 0.8)], mirror: true, zone: "head"),
+            marks: [(at: (0, 0.16, 0), radii: (0.24, 0.16, 0.24), color: "stripe", soft: 0.8)], zone: "head"),
+        (name: "ear_r", bone: "ear_r", shape: Cone(r1: 0.18, r2: 0.06, h: 0.21, flat: 2.2), at: (-0.37, 1.06, 1.05),
+            rot: (105, 0, 25), blend: 0.07, color: "fur",
+            marks: [(at: (0, 0.16, 0), radii: (0.24, 0.16, 0.24), color: "stripe", soft: 0.8)], zone: "head"),
         (name: "leg_fl", bone: "leg_fl", shape: Capsule(to: (0, -0.48, 0.02), r: 0.16), at: (0.3, -0.46, 0.48),
             blend: 0.12, color: "fur", chonk: 0.3, zone: "paw",
             marks: [(at: (0, -0.48, 0.03), radii: (0.2, 0.12, 0.2), color: "light", soft: 0.3)]),

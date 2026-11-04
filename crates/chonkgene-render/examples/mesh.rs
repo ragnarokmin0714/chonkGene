@@ -8,7 +8,9 @@
 //! bakes the mesh, then writes `<mode>-<frame>.png` at 30 fps. `walk`:
 //! walking right, turning, walking left, stopping, and a poke in the belly.
 //! `sit`: standing, sitting down, sitting a while, getting up. `lie`: lying
-//! down asleep and getting up. `look`: glances while sitting. A gesture
+//! down asleep and getting up. `look`: glances while sitting. `fidget`:
+//! sitting a while, then standing, fidgeting all along (each frame's
+//! fidget is printed). A gesture
 //! (`eat`, `dig`, `scratch`, `groom`, `shake`, `preen`, `peck`, `flap`,
 //! `stretch`, `yawn`, `wave`) is played through once. It prints the bake
 //! time, the mesh size and what each frame cost.
@@ -16,6 +18,7 @@
 use std::time::Instant;
 
 use chonkgene_core::anim::{Act, gesture_secs};
+use chonkgene_render::fidget::Tongue;
 use chonkgene_render::gpu::Gpu;
 use chonkgene_render::mesh::bake;
 use chonkgene_render::mesh_gpu::MeshCanvas;
@@ -86,6 +89,17 @@ fn look() -> (f32, Script) {
     )
 }
 
+/// Sitting six seconds, then standing six, fidgeting all the while.
+fn fidget() -> (f32, Script) {
+    (
+        12.0,
+        Box::new(|t, w| {
+            w.sit(t < 6.0);
+            (false, 1.0)
+        }),
+    )
+}
+
 /// A gesture from a second in, eased in and out over its length as the app
 /// does; sitting before it, and through it if it is done sitting.
 fn gesture(act: Act) -> (f32, Script) {
@@ -124,7 +138,7 @@ fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let (Some(mode), Some(id), Some(out)) = (args.first(), args.get(1), args.get(2)) else {
         eprintln!(
-            "usage: mesh peek|walk|sit|lie|look|<gesture> <species> <out dir> [scale] [coat]"
+            "usage: mesh peek|walk|sit|lie|look|fidget|<gesture> <species> <out dir> [scale] [coat]"
         );
         std::process::exit(2);
     };
@@ -141,6 +155,7 @@ fn main() {
         "sit" => sit(),
         "lie" => lie(),
         "look" => look(),
+        "fidget" => fidget(),
         g => match GESTURES.iter().find(|(name, _)| *name == g) {
             Some(&(_, act)) => gesture(act),
             None => panic!("no mode {mode:?}"),
@@ -197,7 +212,7 @@ fn run(
     } else {
         Look::Open
     };
-    let face = Scene::posed(model, coat, 0.33, &Pose::default(), look, Layer::All);
+    let face = |look| Scene::posed(model, coat, 0.33, &Pose::default(), look, Layer::All);
     let mut frame = Pixmap::new(w, h).expect("frame");
     let mut walker = Mover::new(sk, 1.0, model).expect("walk");
     let mut x = 0.0f32;
@@ -220,9 +235,25 @@ fn run(
             joints[0].rot.y += turn;
         }
         let bones = sk.pose(&joints);
+        // The tongue out, as the renderer shows it.
+        let fidget = walker.fidget();
+        let look = match fidget.tongue() {
+            Some(Tongue::Blep) if look == Look::Open => Look::Blep,
+            Some(Tongue::Pant) if look == Look::Open => Look::Pant,
+            _ => look,
+        };
+        if name == "fidget" {
+            let ears = fidget.ears.map(|e| if e.is_some() { "^" } else { "." });
+            println!(
+                "{f:03} {:?} ears {}{}",
+                fidget.run.map(|r| r.kind),
+                ears[0],
+                ears[1]
+            );
+        }
         let start = Instant::now();
         let secs = canvas
-            .draw(&gpu, &face, &bones, walker.yaw(), &mut frame)
+            .draw(&gpu, &face(look), &bones, walker.yaw(), &mut frame)
             .expect("draw");
         wall += start.elapsed().as_secs_f64();
         gpu_secs.extend(secs);

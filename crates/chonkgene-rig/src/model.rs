@@ -93,6 +93,10 @@ pub enum Look {
     Asleep,
     /// Eyes squeezed shut, mouth a tall open O.
     Yawn,
+    /// Open eyes, the tip of the tongue left out (blep, a lick).
+    Blep,
+    /// ^ ^ with the mouth open and the tongue out, panting.
+    Pant,
 }
 
 // ---- the file format ---------------------------------------------------------

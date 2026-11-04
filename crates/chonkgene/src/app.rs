@@ -1213,7 +1213,7 @@ fn spawn(
     let scale = save.size * ui_scale;
     let coat = kind.model.coat(&save.coat).unwrap_or(0);
     // The renderer first: a pet on all fours needs a wider window.
-    let renderer = Renderer::new(
+    let mut renderer = Renderer::new(
         Arc::clone(&kind.model),
         kind.quad.clone(),
         scale,
@@ -1221,6 +1221,11 @@ fn spawn(
         coat,
     )
     .ok_or("cannot allocate a pixmap")?;
+    // Its fidgets: as lively as it is, on a clock of its own.
+    renderer.set_fidgets(
+        save.personality().energy,
+        save.id as u32 ^ (save.id >> 32) as u32,
+    );
     let size = renderer.size();
     let size_f = (size.0 as f32, size.1 as f32);
     let span = (area.w - size_f.0).max(1.0);
@@ -1237,6 +1242,7 @@ fn spawn(
         mind: Mind::new(species, save.personality(), save.affinity()),
         anim: Animator::new(seed, save.chonk, species.waddle())
             .with_habits(species.habits())
+            .with_slow_blinks(species.slow_blinks())
             .with_pops(!renderer.is_gpu()),
         species,
         window,

@@ -7,6 +7,10 @@ use crate::spring::Spring;
 
 const BREATH_PERIOD: f32 = 3.2;
 const BLINK_SECS: f32 = 0.12;
+/// A cat's slow blink (a sign of trust): the lids come down and up slowly.
+const SLOW_BLINK_SECS: f32 = 0.7;
+/// A double blink follows the first after this long.
+const DOUBLE_BLINK_GAP: f32 = 0.16;
 const GIGGLE_EVERY: f32 = 0.22;
 /// Steps a second at walking pace.
 const STEP_HZ: f32 = 2.2;
@@ -172,6 +176,8 @@ pub struct PoseParams {
     /// 1.0 faces right, −1.0 faces left; in between mid-turn, squeezed thin.
     pub facing: f32,
     pub act: Act,
+    /// Mid-blink: every face blinks, smiling ones too.
+    pub blink: bool,
     /// Set on a steady walk: which of the step's [`BEATS`] this frame is.
     /// Everything else then follows from `act`, `beat` and `facing`, so
     /// frames with the same three look the same.
@@ -200,6 +206,7 @@ impl Default for PoseParams {
             sway: 0.0,
             facing: 1.0,
             act: Act::Rest,
+            blink: false,
             beat: None,
             stride: 0.0,
             clock: 0.0,
@@ -215,7 +222,10 @@ pub struct Animator {
     body: Spring,
     belly: Spring,
     next_blink: f32,
-    blink_until: f32,
+    /// The last blink: when it began and how long it lasts.
+    blink: (f32, f32),
+    /// Some blinks are slow (cats, the owl).
+    slow_blinks: bool,
     next_giggle: f32,
     rng: fastrand::Rng,
     pub expression: Expression,
@@ -266,7 +276,8 @@ impl Animator {
             body: Spring::for_chonk(chonk),
             belly: Spring::new(220.0, 7.0),
             next_blink: t + 1.0 + rng.f32() * 3.0,
-            blink_until: 0.0,
+            blink: (f32::NEG_INFINITY, BLINK_SECS),
+            slow_blinks: false,
             next_giggle: 0.0,
             next_gesture: t + 1.5 + rng.f32() * 2.5,
             habits: PLAIN_HABITS,
@@ -300,6 +311,13 @@ impl Animator {
         if habits.iter().any(|&(_, w)| w > 0) {
             self.habits = habits;
         }
+        self
+    }
+
+    /// The same animator, now and then blinking slowly (see
+    /// `Species::slow_blinks`).
+    pub fn with_slow_blinks(mut self, slow: bool) -> Self {
+        self.slow_blinks = slow;
         self
     }
 
@@ -511,8 +529,15 @@ impl Animator {
             self.next_giggle = self.t + GIGGLE_EVERY;
         }
         if self.t >= self.next_blink {
-            self.blink_until = self.t + BLINK_SECS;
-            self.next_blink = self.t + 3.5 + self.rng.f32() * 2.0;
+            // Now and then a slow blink, or a quick double one.
+            let slow = self.slow_blinks && self.rng.f32() < 0.3;
+            let len = if slow { SLOW_BLINK_SECS } else { BLINK_SECS };
+            self.blink = (self.t, len);
+            self.next_blink = if !slow && self.rng.f32() < 0.25 {
+                self.t + len + DOUBLE_BLINK_GAP
+            } else {
+                self.t + 3.5 + self.rng.f32() * 2.0
+            };
         }
 
         // Turning round: squeeze thin, flip, fill out, with a little hop.
@@ -626,7 +651,15 @@ impl Animator {
     pub fn params(&self) -> PoseParams {
         let tau = std::f32::consts::TAU;
         let pi = std::f32::consts::PI;
-        let blinking = self.t < self.blink_until;
+        let into = (self.t - self.blink.0) / self.blink.1;
+        let blinking = (0.0..1.0).contains(&into);
+        // How shut the lids are mid-blink: a slow one passes half shut on
+        // its way down and up.
+        let lids = if self.blink.1 > BLINK_SECS {
+            1.0 - 0.92 * (std::f32::consts::PI * into).sin()
+        } else {
+            0.12
+        };
 
         let (mut act, mut bob, mut roll, mut footfall) = (Act::Rest, 0.0, 0.0, 0.0);
         // A steady walk with nothing else going on repeats the same few
@@ -681,9 +714,9 @@ impl Animator {
                 Expression::Giggle | Expression::Happy => 0.18,
                 Expression::Sulk => 0.12,
                 Expression::Asleep => 0.06,
-                Expression::FedUp if blinking => 0.12,
+                Expression::FedUp if blinking => lids.min(0.5),
                 Expression::FedUp => 0.5,
-                Expression::Neutral if blinking => 0.12,
+                Expression::Neutral if blinking => lids,
                 Expression::Neutral => 1.0,
             },
             tail,
@@ -691,6 +724,7 @@ impl Animator {
             sway: self.sway + roll,
             facing: self.turn,
             act,
+            blink: blinking,
             beat,
             stride,
             clock: self.t,
@@ -857,6 +891,7 @@ mod tests {
                 assert_eq!(
                     PoseParams {
                         eyes_open: q.eyes_open,
+                        blink: q.blink,
                         clock: q.clock,
                         ..p
                     },

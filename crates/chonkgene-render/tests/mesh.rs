@@ -420,6 +420,8 @@ fn sitting_brings_the_bottom_down_and_keeps_the_front_paws_planted() {
         let paw = v3(0.3, -1.05, 0.5);
         let bottom = v3(0.0, -0.78, -0.48);
         let mut walk = Walk::new(&sk, 1.0).unwrap();
+        // Shifting its weight would move the bottom: compared without.
+        walk.still();
         let dt = 1.0 / 60.0;
         let settle = |walk: &mut Walk, secs: f32| {
             let mut j = Vec::new();
@@ -770,6 +772,8 @@ fn idle_gestures_move_every_mesh_pet() {
         // are measured from).
         let rest_joints = |sitting: bool| {
             let mut rest = Mover::new(&sk, 1.0, &model).unwrap();
+            // Fidgets would move it about on their own: compared without.
+            rest.still();
             rest.sit(sitting);
             let mut joints = Vec::new();
             for _ in 0..60 {
@@ -787,6 +791,7 @@ fn idle_gestures_move_every_mesh_pet() {
             .chain([Act::Eat]);
         for act in acts {
             let mut walk = Mover::new(&sk, 1.0, &model).unwrap();
+            walk.still();
             // Gestures done sitting are seen sitting.
             walk.sit(act.seated());
             let rest_joints = rest_joints(act.seated());
@@ -800,10 +805,11 @@ fn idle_gestures_move_every_mesh_pet() {
                 }));
                 joints = walk.step(1.0 / 60.0, false, 1.0);
             }
-            // (Tails and wings swish on their own clock, so they differ.)
+            // (Tails and wings swish on their own clock, and the fox's
+            // bell swings on, so they differ.)
             let off = |a: &[chonkgene_render::skin::Joint], b: &[chonkgene_render::skin::Joint]| {
                 (0..a.len())
-                    .filter(|&i| !sk.names[i].starts_with("tail"))
+                    .filter(|&i| !sk.names[i].starts_with("tail") && sk.names[i] != "bell")
                     .map(|i| (a[i].rot - b[i].rot).length())
                     .fold(0.0f32, f32::max)
             };
@@ -1451,4 +1457,167 @@ fn pressed_flesh_springs_back_when_let_go() {
     let out = after.iter().copied().fold(0.0f32, f32::min);
     assert!(out < -0.01, "let go, it sprang out only {out:.3}");
     assert_eq!(after.last(), Some(&0.0), "still pressed in at the end");
+}
+
+/// Roger, 2026-11-04: whatever a pet is doing (sitting, idling, smiling,
+/// looking back at you), it must not stop dead. Over a minute in each held
+/// pose, something besides the tail (which sways anyway) moves at least
+/// every 1.5 s; and without fidgets it would not.
+#[test]
+fn no_mesh_pet_ever_stops_dead() {
+    use chonkgene_core::Zone;
+    use chonkgene_render::skin::{Feel, Mood};
+    const DT: f32 = 1.0 / 30.0;
+    const WINDOW: usize = (1.5 / DT) as usize;
+    let poses: [(&str, bool, Feel); 6] = [
+        ("standing", false, Feel::default()),
+        ("sitting", true, Feel::default()),
+        (
+            "pleased",
+            true,
+            Feel {
+                mood: Mood::Content,
+                ..Feel::default()
+            },
+        ),
+        (
+            "fed up",
+            false,
+            Feel {
+                mood: Mood::FedUp,
+                ..Feel::default()
+            },
+        ),
+        (
+            "sulking",
+            false,
+            Feel {
+                mood: Mood::Sulk,
+                ..Feel::default()
+            },
+        ),
+        (
+            "looking back",
+            false,
+            Feel {
+                gaze: Some((0.0, 0.0)),
+                held: Some((Zone::Tail, None, 2.0)),
+                ..Feel::default()
+            },
+        ),
+    ];
+    // The most any bone but the root and the tails turned (degrees) or
+    // shifted (a hundredth of a world unit counting as a degree) over
+    // each 1.5 s, at the least.
+    let stillest = |id: &str, sitting: bool, feel: Feel, fidgets: bool| -> f32 {
+        let (model, sk) = mesh_model(id).unwrap();
+        let mut walk = Mover::new(&sk, 1.0, &model).unwrap();
+        walk.set_fidgets(id, 0.5, 0x5EED);
+        if !fidgets {
+            walk.still();
+        }
+        walk.sit(sitting);
+        walk.feel(feel);
+        let moving: Vec<usize> = (1..sk.names.len())
+            .filter(|&b| !sk.names[b].starts_with("tail"))
+            .collect();
+        let mut frames = Vec::new();
+        for k in 0..(62.0 / DT) as usize {
+            let j = walk.step(DT, false, 1.0);
+            // Settled into the pose first.
+            if k as f32 * DT > 2.0 {
+                frames.push(j);
+            }
+        }
+        frames
+            .windows(WINDOW)
+            .map(|w| {
+                moving
+                    .iter()
+                    .map(|&b| {
+                        let span = |f: &dyn Fn(&chonkgene_render::skin::Joint) -> f32| {
+                            let (lo, hi) = w
+                                .iter()
+                                .map(|j| f(&j[b]))
+                                .fold((f32::MAX, f32::MIN), |(lo, hi), x| (lo.min(x), hi.max(x)));
+                            hi - lo
+                        };
+                        [
+                            span(&|j| j.rot.x),
+                            span(&|j| j.rot.y),
+                            span(&|j| j.rot.z),
+                            100.0 * span(&|j| j.shift.x),
+                            100.0 * span(&|j| j.shift.y),
+                            100.0 * span(&|j| j.shift.z),
+                        ]
+                        .into_iter()
+                        .fold(0.0f32, f32::max)
+                    })
+                    .fold(0.0f32, f32::max)
+            })
+            .fold(f32::MAX, f32::min)
+    };
+    for id in QUAD_SPECIES.iter().chain(&BIPED_SPECIES) {
+        for (name, sitting, feel) in poses {
+            let least = stillest(id, sitting, feel, true);
+            assert!(least > 3.0, "{id} {name}: only {least:.2}° in 1.5 s");
+        }
+        let without = stillest(id, true, Feel::default(), false);
+        assert!(without < 3.0, "{id} moves {without:.2}° without fidgets");
+    }
+}
+
+/// Each pet fidgets its own way: the ears of those that have them twitch,
+/// the fox's bell swings, a bird's wings shift, and the tongue comes out
+/// for the Shiba (panting) and the Munchkin (a blep).
+#[test]
+fn every_species_fidgets_its_own_way() {
+    use chonkgene_render::fidget::Tongue;
+    const DT: f32 = 1.0 / 30.0;
+    for id in QUAD_SPECIES.iter().chain(&BIPED_SPECIES) {
+        let (model, sk) = mesh_model(id).unwrap();
+        let mut walk = Mover::new(&sk, 1.0, &model).unwrap();
+        walk.set_fidgets(id, 0.5, 0xF1D6);
+        walk.sit(true);
+        let watch: Vec<usize> = ["ear_l", "ear_r", "bell", "wing_l", "wing_r"]
+            .iter()
+            .filter_map(|n| sk.bone(n))
+            .collect();
+        let mut most = vec![0.0f32; watch.len()];
+        let mut tongues = Vec::new();
+        let mut rest = None;
+        for k in 0..(120.0 / DT) as usize {
+            let j = walk.step(DT, false, 1.0);
+            if let Some(t) = walk.fidget().tongue()
+                && !tongues.contains(&t)
+            {
+                tongues.push(t);
+            }
+            if k == (2.0 / DT) as usize {
+                rest = Some(j.clone());
+            }
+            if let Some(r) = &rest {
+                for (m, &b) in most.iter_mut().zip(&watch) {
+                    *m = m.max((j[b].rot - r[b].rot).length());
+                }
+            }
+        }
+        for (m, &b) in most.iter().zip(&watch) {
+            assert!(*m > 8.0, "{id}: {} only moved {m:.1}°", sk.names[b]);
+        }
+        let want: &[Tongue] = match *id {
+            "shiba" => &[Tongue::Pant],
+            "munchkin" | "fold" | "fox" => &[Tongue::Blep],
+            _ => &[],
+        };
+        assert_eq!(tongues, want, "{id}");
+        if QUAD_SPECIES.contains(id) {
+            assert!(
+                sk.bone("ear_l").is_some() && sk.bone("ear_r").is_some(),
+                "{id} ears"
+            );
+        }
+    }
+    let (_, fox) = mesh_model("fox").unwrap();
+    assert!(fox.bone("bell").is_some());
 }

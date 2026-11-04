@@ -8,6 +8,7 @@
 //! [`Renderer`] picks one.
 
 pub mod bubble;
+pub mod fidget;
 pub mod gpu;
 pub mod gpu_check;
 mod gpu_frames;
@@ -139,6 +140,14 @@ impl Renderer {
             Self::Sprites(r) => r.set_chonk(chonk),
             Self::Gpu(r) => r.set_chonk(chonk),
             Self::Mesh(r) => r.set_chonk(chonk),
+        }
+    }
+
+    /// How lively the pet is (0 … 1) and a seed of its own: a mesh pet's
+    /// fidgets (PLAN §8 "Roger's seventh pass") go by them.
+    pub fn set_fidgets(&mut self, energy: f32, seed: u32) {
+        if let Self::Mesh(r) = self {
+            r.set_fidgets(energy, seed);
         }
     }
 
@@ -285,9 +294,10 @@ pub fn key_for(expression: Expression, params: &PoseParams) -> Key {
     };
     let (pose, look) = match expression {
         Expression::Neutral => gesture(eyes),
+        // Smiling ^ ^ at rest; open-eyed in a gesture, blinking too.
         Expression::Happy => match params.act {
             Act::Rest => (PoseId::Sit, Look::Happy),
-            _ => gesture(Look::Open),
+            _ => gesture(if params.blink { Look::Shut } else { Look::Open }),
         },
         Expression::Giggle => (PoseId::BellyUp, Look::Laugh),
         Expression::FedUp => (
