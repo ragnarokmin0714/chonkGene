@@ -143,6 +143,15 @@ impl Renderer {
         }
     }
 
+    /// The fidget that began since this was last asked, if any (a mesh
+    /// pet's: the app gives some a sound).
+    pub fn take_fidget_start(&mut self) -> Option<fidget::Kind> {
+        match self {
+            Self::Mesh(r) => r.take_fidget_start(),
+            _ => None,
+        }
+    }
+
     /// How lively the pet is (0 … 1) and a seed of its own: a mesh pet's
     /// fidgets (PLAN §8 "Roger's seventh pass") go by them.
     pub fn set_fidgets(&mut self, energy: f32, seed: u32) {

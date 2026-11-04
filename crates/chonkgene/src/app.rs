@@ -13,7 +13,7 @@ use chonkgene_core::mind::{Line, Mind, Out, World, XP_PER_LEVEL};
 use chonkgene_core::motion::{Area, Body, Motion};
 use chonkgene_core::shake::ShakeDetector;
 use chonkgene_core::skit::{Actor, Cmd, Director};
-use chonkgene_core::sound::Sound;
+use chonkgene_core::sound::{Class, Sound, TAKES};
 use chonkgene_core::species::{Grumpiness, Play, Species};
 use chonkgene_core::terrain::{Terrain, Win};
 use chonkgene_platform::tray::{Tray, TrayCommand};
@@ -235,16 +235,28 @@ struct Ctx<'a> {
     volume: f32,
 }
 
-/// Placeholder sounds, rate-limited (PLAN §1.5).
+/// The pets' sounds (PLAN §1.5), several at once, each class rate-limited
+/// on its own so a purr or the bell does not use up the calls.
 struct Sounds {
     audio: Option<chonkgene_platform::audio::Audio>,
-    cache: HashMap<(Species, Sound), Vec<i16>>,
-    last: f64,
-    recent: HashMap<u64, Vec<f64>>,
+    /// Each sound's takes, made the first time they are wanted.
+    cache: HashMap<(Species, Sound, u32), Vec<i16>>,
+    /// The take each pet's sound played last.
+    takes: HashMap<(u64, Sound), u32>,
+    /// When each pet last made each class of sound, over the last minute.
+    recent: HashMap<(u64, Class), Vec<f64>>,
 }
 
-/// At most this many sounds per pet per minute, and this far apart overall.
-const SOUNDS_PER_MINUTE: usize = 6;
+/// At most this many sounds of a class per pet per minute.
+fn per_minute(class: Class) -> usize {
+    match class {
+        Class::Call => 6,
+        Class::Knock => 10,
+        Class::Soft => 8,
+    }
+}
+
+/// One pet's sounds of one class come at least this far apart.
 const SOUND_GAP: f64 = 0.15;
 
 impl Sounds {
@@ -252,36 +264,57 @@ impl Sounds {
         Self {
             audio: chonkgene_platform::audio::Audio::new(),
             cache: HashMap::new(),
-            last: f64::NEG_INFINITY,
+            takes: HashMap::new(),
             recent: HashMap::new(),
         }
     }
 
-    fn play(&mut self, pet: u64, species: Species, sound: Sound, now: f64, volume: f32) {
+    /// Play `sound` in `species`' voice, `pitch` times higher (see
+    /// [`voice_pitch`]), unless this pet has made enough of its kind lately.
+    #[allow(clippy::too_many_arguments)]
+    fn play(
+        &mut self,
+        pet: u64,
+        species: Species,
+        sound: Sound,
+        now: f64,
+        volume: f32,
+        pitch: f32,
+    ) {
         let Some(audio) = &self.audio else {
             return;
         };
-        if now - self.last < SOUND_GAP {
-            return;
-        }
-        let recent = self.recent.entry(pet).or_default();
+        let class = sound.class();
+        let recent = self.recent.entry((pet, class)).or_default();
         recent.retain(|t| now - t < 60.0);
-        if recent.len() >= SOUNDS_PER_MINUTE {
+        if recent.len() >= per_minute(class) || recent.last().is_some_and(|t| now - t < SOUND_GAP) {
             return;
         }
         recent.push(now);
-        self.last = now;
+        // The takes in turn, so the same sound twice is never the same.
+        let take = self.takes.entry((pet, sound)).or_insert(0);
+        *take = (*take + 1) % TAKES;
+        let take = *take;
         let samples = self
             .cache
-            .entry((species, sound))
-            .or_insert_with(|| chonkgene_core::sound::synth(species, sound, 7));
-        audio.play(samples, chonkgene_core::sound::RATE, volume);
+            .entry((species, sound, take))
+            .or_insert_with(|| chonkgene_core::sound::synth(species, sound, take));
+        audio.play(samples, chonkgene_core::sound::RATE, volume, pitch);
     }
 }
 
-/// Which sound goes with a line.
-fn line_sound(line: Line) -> Sound {
+/// How high a pet's voice is: a bigger or chubbier pet sounds lower.
+fn voice_pitch(size: f32, chonk: f32) -> f32 {
+    (size.max(0.2).powf(-0.3) * (1.0 - 0.12 * (chonk - 0.33))).clamp(0.8, 1.25)
+}
+
+/// Which sound goes with a line: a patted cat purrs.
+fn line_sound(line: Line, species: Species) -> Sound {
     match line {
+        Line::Pat if matches!(species, Species::Munchkin | Species::Fold) => Sound::Purr,
+        Line::Hello | Line::WelcomeBack | Line::MadeUp | Line::Forgive | Line::LevelUp => {
+            Sound::Greet
+        }
         Line::PokeSmall | Line::TurnOver => Sound::Poke,
         Line::Laugh | Line::SkitChase => Sound::Laugh,
         Line::FedUp
@@ -1346,6 +1379,41 @@ impl Pet {
         true
     }
 
+    /// How high this pet's voice is (see [`voice_pitch`]).
+    fn pitch(&self) -> f32 {
+        voice_pitch(self.save.size, self.save.chonk)
+    }
+
+    /// The sound of a fidget that just began: the Shiba panting, the fox's
+    /// bell, a bird's wings.
+    fn fidget_sound(&mut self, ctx: &mut Ctx) {
+        use chonkgene_render::fidget::Kind;
+        let Some(kind) = self.renderer.take_fidget_start() else {
+            return;
+        };
+        let sound = match kind {
+            Kind::Pant => Sound::Pant,
+            Kind::Jingle => Sound::Bell,
+            Kind::Flutter | Kind::Ruffle => Sound::Flutter,
+            _ => return,
+        };
+        if ctx.sound_on {
+            let pitch = if sound == Sound::Bell {
+                1.0
+            } else {
+                self.pitch()
+            };
+            ctx.sounds.play(
+                self.save.id,
+                self.species,
+                sound,
+                ctx.world.now,
+                ctx.volume,
+                pitch,
+            );
+        }
+    }
+
     fn say(&mut self, ctx: &mut Ctx, line: Line) {
         let Some(text) = ctx.lines.pick(
             self.species,
@@ -1400,9 +1468,10 @@ impl Pet {
             ctx.sounds.play(
                 self.save.id,
                 self.species,
-                line_sound(line),
+                line_sound(line, self.species),
                 ctx.world.now,
                 ctx.volume,
+                self.pitch(),
             );
         }
     }
@@ -1474,6 +1543,7 @@ impl Pet {
         toy: Option<(f32, f32)>,
     ) {
         let t = ctx.world.now;
+        self.fidget_sound(ctx);
         if let Some(at) = self.hello_at
             && t >= at
         {
@@ -1512,13 +1582,26 @@ impl Pet {
                 }
                 self.anim.land(landing.speed);
                 if ctx.sound_on && landing.speed > 600.0 {
+                    let pitch = self.pitch();
                     ctx.sounds.play(
                         self.save.id,
                         self.species,
                         Sound::Land,
                         ctx.world.now,
                         ctx.volume,
+                        pitch,
                     );
+                    // The fox's bell rings as it lands.
+                    if self.species == Species::Fox {
+                        ctx.sounds.play(
+                            self.save.id,
+                            self.species,
+                            Sound::Bell,
+                            ctx.world.now,
+                            ctx.volume,
+                            1.0,
+                        );
+                    }
                 }
             }
             let free = !self.mind.asleep() && self.act.is_none() && !self.in_skit;

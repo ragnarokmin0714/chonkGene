@@ -24,7 +24,7 @@ use chonkgene_rig::math::{M3, V3, v3};
 use chonkgene_rig::{FLOOR, Layer, Look, Model, Pose, Scene, ZONES};
 use tiny_skia::{Pixmap, Transform};
 
-use crate::fidget::Tongue;
+use crate::fidget::{Kind, Tongue};
 use crate::gpu::Gpu;
 use crate::mesh::{Mesh, bake};
 use crate::mesh_gpu::MeshCanvas;
@@ -112,6 +112,10 @@ pub struct MeshRenderer {
     /// For picking sleep poses; or the one pose to sleep in (tests, looks).
     seed: u32,
     sleep_in: Option<SleepPose>,
+    /// The fidget under way last frame, and one that has begun since the
+    /// app last asked.
+    fidget_was: Option<Kind>,
+    fidget_began: Option<Kind>,
 }
 
 impl MeshRenderer {
@@ -163,6 +167,8 @@ impl MeshRenderer {
             sleep: None,
             seed,
             sleep_in: None,
+            fidget_was: None,
+            fidget_began: None,
         })
     }
 
@@ -271,6 +277,11 @@ impl MeshRenderer {
         }
         self.collect(true);
         self.pixmap.data_mut().copy_from_slice(self.base.data());
+    }
+
+    /// The fidget that began since this was last asked, if any.
+    pub fn take_fidget_start(&mut self) -> Option<Kind> {
+        self.fidget_began.take()
     }
 
     /// How lively the pet is (0 … 1) and a seed of its own, for its
@@ -433,6 +444,11 @@ impl MeshRenderer {
         if let Some(root) = joints.first_mut() {
             root.shift.y += (-params.bob).max(0.0) / PPU;
         }
+        let now = self.walk.fidget().run.map(|r| r.kind);
+        if now.is_some() && now != self.fidget_was {
+            self.fidget_began = now;
+        }
+        self.fidget_was = now;
         self.bones = self.sk.pose(&joints);
         self.settle(params);
         self.dent(params, dt);

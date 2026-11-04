@@ -1,9 +1,15 @@
-//! Placeholder sounds, synthesised (PLAN §1.5, §10): short, soft and
-//! different per species until recorded sounds replace them.
+//! The pets' sounds, synthesised (PLAN §1.5, §8 "Roger's seventh pass",
+//! item 2): each call is a voice (a band-limited pulse with breath noise)
+//! shaped by formant filters, with its own pitch and vowel contours, so a
+//! Shiba barks 汪, a cat glides through 喵 and a duckling buzzes 呱. Every
+//! sound has a few takes, and each is normalised to its class's loudness,
+//! measured roughly as ears hear it (presence weighted), not by its peak.
 
 use crate::species::Species;
 
 pub const RATE: u32 = 44_100;
+/// Takes of each sound: repeats are never the same.
+pub const TAKES: u32 = 3;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Sound {
@@ -16,229 +22,804 @@ pub enum Sound {
     Snore,
     Land,
     Eat,
+    /// A cat's purr while patted (others hum contentedly).
+    Purr,
+    /// The Shiba panting, tongue out.
+    Pant,
+    /// The fox's bell.
+    Bell,
+    /// Wings flapping.
+    Flutter,
+    /// Glad to see you: hello, welcome back, made up.
+    Greet,
 }
 
-/// Base pitch (Hz) and timbre of each species' voice.
-fn voice_of(s: Species) -> (f32, Timbre) {
-    match s {
-        Species::Shiba => (560.0, Timbre::Bark),
-        Species::Munchkin => (760.0, Timbre::Meow),
-        Species::Fold => (680.0, Timbre::Meow),
-        Species::Owl => (360.0, Timbre::Hoot),
-        Species::Chick => (1900.0, Timbre::Chirp),
-        Species::Duck => (430.0, Timbre::Quack),
-        // A fox's yip: a bark, higher.
-        Species::Fox => (840.0, Timbre::Bark),
+impl Sound {
+    pub const ALL: [Sound; 13] = [
+        Sound::Voice,
+        Sound::Poke,
+        Sound::Laugh,
+        Sound::Sigh,
+        Sound::Grumpy,
+        Sound::Snore,
+        Sound::Land,
+        Sound::Eat,
+        Sound::Purr,
+        Sound::Pant,
+        Sound::Bell,
+        Sound::Flutter,
+        Sound::Greet,
+    ];
+
+    pub fn class(self) -> Class {
+        match self {
+            Sound::Voice | Sound::Laugh | Sound::Grumpy | Sound::Greet => Class::Call,
+            Sound::Poke | Sound::Land | Sound::Bell | Sound::Flutter => Class::Knock,
+            Sound::Sigh | Sound::Snore | Sound::Eat | Sound::Purr | Sound::Pant => Class::Soft,
+        }
     }
 }
 
+/// How loud a sound is meant to be.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum Class {
+    /// Calls: the voice, laughing, grumbling, greeting.
+    Call,
+    /// Pokes, landings, the bell, wings.
+    Knock,
+    /// Breathing, snoring, eating, purring: quiet, but clearly heard.
+    Soft,
+}
+
+impl Class {
+    /// Target loudness, dB below full scale (see [`loudness`]).
+    pub fn target(self) -> f32 {
+        match self {
+            Class::Call => -8.0,
+            Class::Knock => -12.0,
+            Class::Soft => -17.0,
+        }
+    }
+}
+
+/// The highest a sample goes after the limiter: −1 dBFS.
+pub const PEAK: f32 = 0.891;
+
+const TAU: f32 = std::f32::consts::TAU;
+
+fn ease(x: f32) -> f32 {
+    let x = x.clamp(0.0, 1.0);
+    x * x * (3.0 - 2.0 * x)
+}
+
+/// Linear through `(t, value)` points, held flat past either end.
+fn curve(points: &[(f32, f32)], t: f32) -> f32 {
+    match points {
+        [] => 0.0,
+        [(_, v)] => *v,
+        _ => {
+            if t <= points[0].0 {
+                return points[0].1;
+            }
+            for w in points.windows(2) {
+                let ((t0, v0), (t1, v1)) = (w[0], w[1]);
+                if t <= t1 {
+                    return v0 + (v1 - v0) * ((t - t0) / (t1 - t0).max(1e-6));
+                }
+            }
+            points[points.len() - 1].1
+        }
+    }
+}
+
+/// A resonant band-pass (RBJ, constant 0 dB peak), its centre and width
+/// changeable every sample.
+#[derive(Clone, Copy, Default)]
+struct Band {
+    x: [f32; 2],
+    y: [f32; 2],
+}
+
+impl Band {
+    fn run(&mut self, input: f32, hz: f32, q: f32) -> f32 {
+        let w = TAU * hz.clamp(40.0, 0.45 * RATE as f32) / RATE as f32;
+        let alpha = w.sin() / (2.0 * q);
+        let a0 = 1.0 + alpha;
+        let (b0, b2) = (alpha / a0, -alpha / a0);
+        let (a1, a2) = (-2.0 * w.cos() / a0, (1.0 - alpha) / a0);
+        let out = b0 * input + b2 * self.x[1] - a1 * self.y[0] - a2 * self.y[1];
+        self.x = [input, self.x[0]];
+        self.y = [out, self.y[0]];
+        out
+    }
+}
+
+/// One-pole low-pass, for smoothing noise and envelopes.
+#[derive(Clone, Copy, Default)]
+struct Low(f32);
+
+impl Low {
+    fn run(&mut self, x: f32, hz: f32) -> f32 {
+        let k = 1.0 - (-TAU * hz / RATE as f32).exp();
+        self.0 += (x - self.0) * k;
+        self.0
+    }
+}
+
+/// A small xorshift for noise and takes.
+struct Rng(u32);
+
+impl Rng {
+    fn new(seed: u32) -> Self {
+        Self(seed.wrapping_mul(0x9E37_79B9) | 1)
+    }
+    fn f(&mut self) -> f32 {
+        let mut x = self.0;
+        x ^= x << 13;
+        x ^= x >> 17;
+        x ^= x << 5;
+        self.0 = x;
+        (x >> 8) as f32 / (1u32 << 24) as f32
+    }
+    /// −1 … 1.
+    fn s(&mut self) -> f32 {
+        2.0 * self.f() - 1.0
+    }
+}
+
+/// A syllable of voice: what its pitch, vowel and loudness do over its
+/// length (`t` from 0 to 1 along each curve).
+struct Syllable<'a> {
+    at: f32,
+    secs: f32,
+    /// Hz along the syllable.
+    pitch: &'a [(f32, f32)],
+    /// Formant centres (Hz) along the syllable, up to three.
+    formants: [&'a [(f32, f32)]; 3],
+    /// Each formant's gain and sharpness.
+    gains: [f32; 3],
+    q: [f32; 3],
+    /// Breath noise against the voice, 0 … 1, along the syllable.
+    breath: &'a [(f32, f32)],
+    /// Brightness: how slowly the pulse's harmonics fall off (0 dull … 1
+    /// buzzing).
+    buzz: f32,
+    /// Amplitude: attack and release, seconds.
+    attack: f32,
+    release: f32,
+    /// A rough, growly flutter of the voice (Hz, depth).
+    rough: (f32, f32),
+    gain: f32,
+}
+
+impl Default for Syllable<'_> {
+    fn default() -> Self {
+        Self {
+            at: 0.0,
+            secs: 0.2,
+            pitch: &[(0.0, 400.0)],
+            formants: [&[(0.0, 800.0)], &[(0.0, 1600.0)], &[(0.0, 3000.0)]],
+            gains: [1.0, 0.6, 0.25],
+            q: [5.0, 7.0, 8.0],
+            breath: &[(0.0, 0.1)],
+            buzz: 0.6,
+            attack: 0.02,
+            release: 0.08,
+            rough: (0.0, 0.0),
+            gain: 1.0,
+        }
+    }
+}
+
+struct Buf {
+    s: Vec<f32>,
+    rng: Rng,
+    /// A pitch factor for the whole sound (a take's own), and vibrato depth.
+    pitch: f32,
+}
+
+impl Buf {
+    fn new(secs: f32, take: u32, pitch: f32) -> Self {
+        Self {
+            s: vec![0.0; (secs * RATE as f32) as usize],
+            rng: Rng::new(take.wrapping_add(17)),
+            pitch,
+        }
+    }
+
+    fn voice(&mut self, y: &Syllable) {
+        let start = (y.at * RATE as f32) as usize;
+        let n = (y.secs * RATE as f32) as usize;
+        let mut bands = [Band::default(); 3];
+        let mut breath_low = Low::default();
+        let mut phase = 0.0f32;
+        let mut wobble = Low::default();
+        // Harmonics fall off as 1/k^tilt: a buzz keeps its highs.
+        let tilt = 2.0 - 1.3 * y.buzz.clamp(0.0, 1.0);
+        for i in 0..n {
+            let Some(_) = self.s.get(start + i) else {
+                break;
+            };
+            let secs = i as f32 / RATE as f32;
+            let t = i as f32 / n as f32;
+            // A slow random wobble and a little vibrato keep it alive.
+            let jitter = wobble.run(self.rng.s(), 12.0) * 0.06;
+            let vib = 1.0 + 0.012 * (TAU * 5.5 * secs).sin();
+            let f0 = curve(y.pitch, t) * self.pitch * vib * (1.0 + jitter);
+            phase = (phase + f0 / RATE as f32).fract();
+            // The pulse: harmonics up to 7 kHz.
+            let top = ((7000.0 / f0.max(40.0)) as usize).clamp(1, 40);
+            let mut pulse = 0.0;
+            for k in 1..=top {
+                pulse += (TAU * k as f32 * phase).sin() / (k as f32).powf(tilt);
+            }
+            if y.rough.1 > 0.0 {
+                pulse *= 1.0 - y.rough.1 * (0.5 + 0.5 * (TAU * y.rough.0 * secs).sin());
+            }
+            let noise = breath_low.run(self.rng.s(), 6000.0) * 2.0;
+            let b = curve(y.breath, t).clamp(0.0, 1.0);
+            let src = pulse * (1.0 - b) + noise * b * 1.5;
+            let mut out = 0.0;
+            for (k, band) in bands.iter_mut().enumerate() {
+                out += band.run(src, curve(y.formants[k], t), y.q[k]) * y.gains[k];
+            }
+            // A little of the raw pulse for body under the formants.
+            out += 0.08 * pulse * (1.0 - b);
+            let attack = ease(secs / y.attack.max(1e-3));
+            let release = ease((y.secs - secs) / y.release.max(1e-3));
+            self.s[start + i] += out * attack * release * y.gain;
+        }
+    }
+
+    /// Filtered noise through a band (Hz, sharpness), shaped by `env`
+    /// (0 … 1 along it).
+    fn noise(&mut self, at: f32, secs: f32, hz: f32, q: f32, env: &dyn Fn(f32) -> f32, gain: f32) {
+        let start = (at * RATE as f32) as usize;
+        let n = (secs * RATE as f32) as usize;
+        let mut band = Band::default();
+        for i in 0..n {
+            let Some(out) = self.s.get_mut(start + i) else {
+                break;
+            };
+            let t = i as f32 / n as f32;
+            *out += band.run(self.rng.s(), hz, q) * env(t) * gain;
+        }
+    }
+
+    /// A sine gliding from `f0` to `f1`, with a quick attack and a decay.
+    fn tone(&mut self, at: f32, secs: f32, f0: f32, f1: f32, gain: f32) {
+        let start = (at * RATE as f32) as usize;
+        let n = (secs * RATE as f32) as usize;
+        let mut phase = 0.0f32;
+        for i in 0..n {
+            let Some(out) = self.s.get_mut(start + i) else {
+                break;
+            };
+            let t = i as f32 / n as f32;
+            phase = (phase + f0 * (f1 / f0).powf(t) / RATE as f32).fract();
+            let env = ease(t / 0.04) * (1.0 - t).powi(2);
+            *out += (TAU * phase).sin() * env * gain;
+        }
+    }
+
+    /// A struck bell: inharmonic partials ringing down.
+    fn bell(&mut self, at: f32, hz: f32, gain: f32) {
+        let start = (at * RATE as f32) as usize;
+        let n = (0.45 * RATE as f32) as usize;
+        let partials = [
+            (1.0, 1.0, 0.18),
+            (2.32, 0.55, 0.1),
+            (4.25, 0.3, 0.06),
+            (6.63, 0.15, 0.04),
+        ];
+        for i in 0..n {
+            let Some(out) = self.s.get_mut(start + i) else {
+                break;
+            };
+            let secs = i as f32 / RATE as f32;
+            let mut v = 0.0;
+            for (ratio, amp, decay) in partials {
+                v += (TAU * hz * ratio * secs).sin() * amp * (-secs / decay).exp();
+            }
+            *out += v * gain * ease(secs / 0.002);
+        }
+    }
+
+    /// Normalise to `class`'s loudness, then soft-limit the peaks to
+    /// [`PEAK`].
+    fn finish(self, class: Class) -> Vec<i16> {
+        // The limiter takes a little off loud peaks: measure again after it
+        // and make up the difference, twice.
+        let mut gain = 1.0;
+        for _ in 0..3 {
+            let out: Vec<f32> = self.s.iter().map(|x| limit(x * gain)).collect();
+            let now = loudness(&out);
+            if !now.is_finite() {
+                break;
+            }
+            gain *= 10f32.powf((class.target() - now) / 20.0);
+        }
+        self.s
+            .iter()
+            .map(|x| (limit(x * gain) * f32::from(i16::MAX)) as i16)
+            .collect()
+    }
+}
+
+/// A soft knee: untouched below 0.6 of full scale, then bending smoothly
+/// toward [`PEAK`], never past it.
+pub fn limit(x: f32) -> f32 {
+    const KNEE: f32 = 0.6;
+    let a = x.abs();
+    if a <= KNEE {
+        x
+    } else {
+        let room = PEAK - KNEE;
+        x.signum() * (KNEE + room * ((a - KNEE) / room).tanh())
+    }
+}
+
+/// How loud `samples` sound, dB below full scale: the RMS of the louder
+/// 50 ms blocks (quiet gaps do not count) after a presence weighting (bass
+/// below 100 Hz counts less, 1.5–5 kHz more), roughly as ears hear it.
+pub fn loudness(samples: &[f32]) -> f32 {
+    let mut low = Low::default();
+    let mut band = Band::default();
+    let weighted: Vec<f32> = samples
+        .iter()
+        .map(|&x| {
+            let bass = low.run(x, 100.0);
+            let presence = band.run(x, 3000.0, 0.7);
+            (x - 0.7 * bass) + 0.6 * presence
+        })
+        .collect();
+    let block = (0.05 * RATE as f32) as usize;
+    let mut power: Vec<f32> = weighted
+        .chunks(block)
+        .map(|c| c.iter().map(|x| x * x).sum::<f32>() / c.len() as f32)
+        .collect();
+    let top = power.iter().copied().fold(0.0f32, f32::max);
+    // Blocks within 20 dB of the loudest.
+    power.retain(|p| *p > top * 0.01);
+    let mean = power.iter().sum::<f32>() / power.len().max(1) as f32;
+    10.0 * mean.max(1e-12).log10()
+}
+
+/// The voice each species calls with (see [`call`]).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum Timbre {
+enum Kind {
     Bark,
+    Yip,
     Meow,
     Hoot,
     Chirp,
     Quack,
 }
 
-struct Buf {
-    samples: Vec<f32>,
-}
-
-impl Buf {
-    fn new(secs: f32) -> Self {
-        Self {
-            samples: vec![0.0; (secs * RATE as f32) as usize],
-        }
-    }
-
-    /// Add a voiced syllable starting at `at` seconds.
-    fn syllable(&mut self, at: f32, dur: f32, f_from: f32, f_to: f32, timbre: Timbre, gain: f32) {
-        let start = (at * RATE as f32) as usize;
-        let n = (dur * RATE as f32) as usize;
-        let mut phase = 0.0f32;
-        for i in 0..n {
-            let Some(out) = self.samples.get_mut(start + i) else {
-                break;
-            };
-            let t = i as f32 / n as f32;
-            // Meows rise then fall; everything else glides.
-            let f = match timbre {
-                Timbre::Meow => {
-                    let peak = f_from * 1.25;
-                    if t < 0.35 {
-                        f_from + (peak - f_from) * (t / 0.35)
-                    } else {
-                        peak + (f_to - peak) * ((t - 0.35) / 0.65)
-                    }
-                }
-                _ => f_from * (f_to / f_from).powf(t),
-            };
-            let vibrato =
-                1.0 + 0.012 * (i as f32 / RATE as f32 * std::f32::consts::TAU * 6.0).sin();
-            phase += f * vibrato / RATE as f32;
-            let p = phase * std::f32::consts::TAU;
-            let wave = match timbre {
-                Timbre::Bark => p.sin() + 0.45 * (2.0 * p).sin() + 0.2 * (3.0 * p).sin(),
-                Timbre::Meow => p.sin() + 0.3 * (2.0 * p).sin() + 0.12 * (4.0 * p).sin(),
-                Timbre::Hoot => p.sin() + 0.08 * (2.0 * p).sin(),
-                Timbre::Chirp => p.sin() + 0.15 * (2.0 * p).sin(),
-                // Odd harmonics give the nasal 呱.
-                Timbre::Quack => {
-                    p.sin() + 0.6 * (3.0 * p).sin() + 0.35 * (5.0 * p).sin() + 0.2 * (7.0 * p).sin()
-                }
-            };
-            let attack = (t / 0.08).min(1.0);
-            let release = ((1.0 - t) / 0.35).min(1.0);
-            *out += wave * attack * release * gain;
-        }
-    }
-
-    fn noise(&mut self, at: f32, dur: f32, gain: f32, smooth: f32, rng: &mut fastrand::Rng) {
-        let start = (at * RATE as f32) as usize;
-        let n = (dur * RATE as f32) as usize;
-        let mut low = 0.0f32;
-        for i in 0..n {
-            let Some(out) = self.samples.get_mut(start + i) else {
-                break;
-            };
-            let t = i as f32 / n as f32;
-            low += (rng.f32() * 2.0 - 1.0 - low) * smooth;
-            let env = (t / 0.1).min(1.0) * (1.0 - t).powf(1.5);
-            *out += low * env * gain;
-        }
-    }
-
-    fn tone(&mut self, at: f32, dur: f32, f_from: f32, f_to: f32, gain: f32) {
-        let start = (at * RATE as f32) as usize;
-        let n = (dur * RATE as f32) as usize;
-        let mut phase = 0.0f32;
-        for i in 0..n {
-            let Some(out) = self.samples.get_mut(start + i) else {
-                break;
-            };
-            let t = i as f32 / n as f32;
-            phase += (f_from * (f_to / f_from).powf(t)) / RATE as f32;
-            let env = (t / 0.05).min(1.0) * (1.0 - t).powi(2);
-            *out += (phase * std::f32::consts::TAU).sin() * env * gain;
-        }
-    }
-
-    /// Normalise to a gentle peak and convert.
-    fn finish(self, peak: f32) -> Vec<i16> {
-        let max = self
-            .samples
-            .iter()
-            .fold(0.0f32, |m, s| m.max(s.abs()))
-            .max(1e-6);
-        self.samples
-            .iter()
-            .map(|s| (s / max * peak * f32::from(i16::MAX)) as i16)
-            .collect()
+fn kind_of(s: Species) -> (Kind, f32) {
+    match s {
+        Species::Shiba => (Kind::Bark, 1.0),
+        Species::Fox => (Kind::Yip, 1.0),
+        Species::Munchkin => (Kind::Meow, 1.08),
+        Species::Fold => (Kind::Meow, 1.0),
+        Species::Owl => (Kind::Hoot, 1.0),
+        Species::Chick => (Kind::Chirp, 1.0),
+        Species::Duck => (Kind::Quack, 1.0),
     }
 }
 
-/// Mono 16-bit samples at [`RATE`] for `sound` in `species`' voice.
-pub fn synth(species: Species, sound: Sound, seed: u64) -> Vec<i16> {
-    let mut rng = fastrand::Rng::with_seed(seed);
-    let (f0, timbre) = voice_of(species);
-    let short = if timbre == Timbre::Chirp { 0.6 } else { 1.0 };
-    let (buf, peak) = match sound {
+/// One call of `kind` at `at` seconds, `len` times its usual length, its
+/// pitch times `up` (a laugh's quick ones go up, a grumble's down), `gain`.
+fn call(b: &mut Buf, kind: Kind, at: f32, len: f32, up: f32, gain: f32) -> f32 {
+    match kind {
+        // 汪: a noisy burst at the onset, the pitch jumping up and
+        // falling, the vowel opening from "w" to "a" and closing.
+        Kind::Bark => {
+            let secs = 0.2 * len;
+            let p = [(0.0, 470.0 * up), (0.18, 600.0 * up), (1.0, 380.0 * up)];
+            b.voice(&Syllable {
+                at,
+                secs,
+                pitch: &p,
+                formants: [
+                    &[(0.0, 500.0), (0.3, 1000.0), (1.0, 700.0)],
+                    &[(0.0, 1000.0), (0.3, 1500.0), (1.0, 1100.0)],
+                    &[(0.0, 2600.0)],
+                ],
+                gains: [1.0, 0.7, 0.35],
+                q: [4.0, 6.0, 7.0],
+                breath: &[(0.0, 0.7), (0.15, 0.2), (1.0, 0.35)],
+                buzz: 0.75,
+                attack: 0.006,
+                release: 0.07 * len,
+                rough: (70.0, 0.25),
+                gain,
+            });
+            secs
+        }
+        // A fox's yip: higher, shorter, sharper.
+        Kind::Yip => {
+            let secs = 0.13 * len;
+            let p = [(0.0, 760.0 * up), (0.25, 980.0 * up), (1.0, 700.0 * up)];
+            b.voice(&Syllable {
+                at,
+                secs,
+                pitch: &p,
+                formants: [
+                    &[(0.0, 800.0), (0.4, 1200.0), (1.0, 900.0)],
+                    &[(0.0, 1900.0), (1.0, 2300.0)],
+                    &[(0.0, 3400.0)],
+                ],
+                gains: [1.0, 0.8, 0.4],
+                q: [4.0, 6.0, 7.0],
+                breath: &[(0.0, 0.5), (0.2, 0.15)],
+                buzz: 0.7,
+                attack: 0.005,
+                release: 0.05 * len,
+                gain,
+                ..Syllable::default()
+            });
+            secs
+        }
+        // 喵: in through a nasal "m", up to "i", open to "a", closing on
+        // "u"; the pitch rises then falls.
+        Kind::Meow => {
+            let secs = 0.55 * len;
+            let p = [(0.0, 520.0 * up), (0.35, 760.0 * up), (1.0, 440.0 * up)];
+            b.voice(&Syllable {
+                at,
+                secs,
+                pitch: &p,
+                formants: [
+                    &[(0.0, 320.0), (0.15, 450.0), (0.45, 1000.0), (1.0, 500.0)],
+                    &[(0.0, 1300.0), (0.15, 2500.0), (0.45, 1600.0), (1.0, 950.0)],
+                    &[(0.0, 2800.0), (0.45, 3200.0), (1.0, 2700.0)],
+                ],
+                gains: [1.0, 0.75, 0.3],
+                q: [5.0, 7.0, 8.0],
+                breath: &[(0.0, 0.1), (0.8, 0.15), (1.0, 0.35)],
+                buzz: 0.55,
+                attack: 0.06,
+                release: 0.15 * len,
+                gain,
+                ..Syllable::default()
+            });
+            secs
+        }
+        // 咕: low, round and breathy.
+        Kind::Hoot => {
+            let secs = 0.3 * len;
+            let p = [(0.0, 360.0 * up), (0.3, 400.0 * up), (1.0, 330.0 * up)];
+            b.voice(&Syllable {
+                at,
+                secs,
+                pitch: &p,
+                formants: [&[(0.0, 400.0)], &[(0.0, 750.0)], &[(0.0, 2400.0)]],
+                gains: [1.0, 0.5, 0.08],
+                q: [3.0, 5.0, 6.0],
+                breath: &[(0.0, 0.45), (0.3, 0.3), (1.0, 0.45)],
+                buzz: 0.15,
+                attack: 0.05,
+                release: 0.12 * len,
+                gain,
+                ..Syllable::default()
+            });
+            secs
+        }
+        // 啾: a quick, clear sweep up and down.
+        Kind::Chirp => {
+            let secs = 0.09 * len;
+            let p = [(0.0, 2600.0 * up), (0.45, 4200.0 * up), (1.0, 3100.0 * up)];
+            b.voice(&Syllable {
+                at,
+                secs,
+                pitch: &p,
+                formants: [
+                    &[(0.0, 2800.0), (0.45, 4200.0), (1.0, 3200.0)],
+                    &[(0.0, 6000.0)],
+                    &[(0.0, 8000.0)],
+                ],
+                gains: [1.0, 0.15, 0.05],
+                q: [2.0, 3.0, 3.0],
+                breath: &[(0.0, 0.05)],
+                buzz: 0.0,
+                attack: 0.008,
+                release: 0.03 * len,
+                gain,
+                ..Syllable::default()
+            });
+            secs
+        }
+        // 呱: a nasal buzz, flat and a little rough, the pitch sagging.
+        Kind::Quack => {
+            let secs = 0.26 * len;
+            let p = [(0.0, 440.0 * up), (0.3, 470.0 * up), (1.0, 360.0 * up)];
+            b.voice(&Syllable {
+                at,
+                secs,
+                pitch: &p,
+                formants: [
+                    &[(0.0, 900.0), (0.3, 1150.0), (1.0, 950.0)],
+                    &[(0.0, 2300.0), (1.0, 2600.0)],
+                    &[(0.0, 3600.0)],
+                ],
+                gains: [1.0, 0.9, 0.45],
+                q: [9.0, 9.0, 8.0],
+                breath: &[(0.0, 0.15)],
+                buzz: 1.0,
+                attack: 0.01,
+                release: 0.06 * len,
+                rough: (55.0, 0.35),
+                gain,
+            });
+            secs
+        }
+    }
+}
+
+/// How many times a species calls in a row for its voice, and the gap.
+fn repeats(kind: Kind, take: u32) -> (u32, f32) {
+    match kind {
+        Kind::Bark => (1 + take % 2, 0.09),
+        Kind::Yip => (2 + take % 2, 0.06),
+        Kind::Meow => (1, 0.0),
+        Kind::Hoot => (2, 0.12),
+        Kind::Chirp => (2 + take % 2, 0.05),
+        Kind::Quack => (1 + (take + 1) % 2, 0.08),
+    }
+}
+
+/// Mono 16-bit samples at [`RATE`] for `sound` in `species`' voice, take
+/// `take` (any number; they repeat every [`TAKES`]).
+pub fn synth(species: Species, sound: Sound, take: u32) -> Vec<i16> {
+    let take = take % TAKES;
+    let (kind, own) = kind_of(species);
+    // Each take a little higher or lower.
+    let pitch = own * [1.0, 1.05, 0.95][take as usize];
+    let mut b = Buf::new(2.0, take, pitch);
+    let end = match sound {
         Sound::Voice => {
-            let mut b = Buf::new(0.45);
-            b.syllable(0.0, 0.32 * short, f0, f0 * 0.82, timbre, 1.0);
-            if timbre == Timbre::Chirp {
-                b.syllable(0.2, 0.18, f0 * 1.1, f0 * 0.95, timbre, 0.8);
+            let (n, gap) = repeats(kind, take);
+            let mut at = 0.0;
+            for k in 0..n {
+                let last = k + 1 == n;
+                at += call(&mut b, kind, at, 1.0, if last { 0.96 } else { 1.0 }, 1.0) + gap;
             }
-            (b, 0.55)
+            at
         }
-        Sound::Poke => {
-            let mut b = Buf::new(0.14);
-            b.tone(0.0, 0.12, 320.0, 210.0, 1.0);
-            (b, 0.45)
+        Sound::Greet => {
+            // Glad: a short call, then a longer one going up.
+            let first = call(&mut b, kind, 0.0, 0.7, 1.05, 0.85);
+            let at = first + 0.08;
+            at + call(&mut b, kind, at, 1.2, 1.22, 1.0)
         }
         Sound::Laugh => {
-            let mut b = Buf::new(0.8);
-            for k in 0..4 {
-                let f = f0 * (1.25 - 0.06 * k as f32);
-                b.syllable(
-                    0.17 * k as f32,
-                    0.12 * short,
-                    f,
-                    f * 0.9,
-                    timbre,
+            // Quick bursts, each a little lower, in the voice.
+            let mut at = 0.0;
+            for k in 0..5 {
+                let len = if kind == Kind::Meow { 0.32 } else { 0.6 };
+                let up = 1.25 - 0.06 * k as f32;
+                at += call(&mut b, kind, at, len, up, 1.0 - 0.1 * k as f32) + 0.05;
+            }
+            at
+        }
+        Sound::Grumpy => {
+            // Short and low, with a growl in it.
+            let secs = 0.32;
+            let (f0, f1) = match kind {
+                Kind::Chirp => (1800.0, 1400.0),
+                Kind::Yip | Kind::Meow => (300.0, 240.0),
+                _ => (200.0, 160.0),
+            };
+            let p = [(0.0, f0), (0.4, f0 * 1.1), (1.0, f1)];
+            b.voice(&Syllable {
+                secs,
+                pitch: &p,
+                formants: [&[(0.0, 650.0)], &[(0.0, 1300.0)], &[(0.0, 2600.0)]],
+                gains: [1.0, 0.6, 0.3],
+                breath: &[(0.0, 0.35)],
+                buzz: 0.85,
+                attack: 0.02,
+                release: 0.1,
+                rough: (32.0, 0.6),
+                ..Syllable::default()
+            });
+            secs
+        }
+        Sound::Sigh => {
+            // A long breath out, a soft "hmm" fading in it.
+            b.noise(
+                0.0,
+                0.8,
+                900.0,
+                0.6,
+                &|t| ease(t / 0.15) * (1.0 - t).powf(1.4),
+                1.0,
+            );
+            let p = [(0.0, 260.0), (1.0, 190.0)];
+            b.voice(&Syllable {
+                at: 0.05,
+                secs: 0.55,
+                pitch: &p,
+                formants: [&[(0.0, 450.0)], &[(0.0, 900.0)], &[(0.0, 2400.0)]],
+                gains: [1.0, 0.4, 0.1],
+                breath: &[(0.0, 0.6)],
+                buzz: 0.3,
+                attack: 0.1,
+                release: 0.3,
+                gain: 0.4,
+                ..Syllable::default()
+            });
+            0.8
+        }
+        Sound::Snore => {
+            // A slow, rumbling breath in.
+            let p = [(0.0, 75.0), (0.5, 88.0), (1.0, 70.0)];
+            b.voice(&Syllable {
+                secs: 1.0,
+                pitch: &p,
+                formants: [&[(0.0, 300.0)], &[(0.0, 700.0)], &[(0.0, 1800.0)]],
+                gains: [1.0, 0.5, 0.2],
+                breath: &[(0.0, 0.5)],
+                buzz: 0.7,
+                attack: 0.3,
+                release: 0.35,
+                rough: (22.0, 0.5),
+                ..Syllable::default()
+            });
+            1.0
+        }
+        Sound::Poke => {
+            // Boop: a soft, quick drop with a tiny click.
+            b.tone(0.0, 0.13, 760.0 * pitch, 330.0 * pitch, 1.0);
+            b.tone(0.0, 0.1, 1520.0 * pitch, 660.0 * pitch, 0.25);
+            b.noise(0.0, 0.012, 3000.0, 1.0, &|t| 1.0 - t, 0.3);
+            0.14
+        }
+        Sound::Land => {
+            // A soft thump and a patter of paws.
+            b.tone(0.0, 0.16, 150.0, 60.0, 1.0);
+            for k in 0..3 {
+                let at = 0.02 + 0.045 * k as f32;
+                b.noise(at, 0.03, 1800.0, 1.5, &|t| (1.0 - t).powi(2), 0.35);
+            }
+            0.18
+        }
+        Sound::Eat => {
+            // Nom, nom: crunchy bites.
+            for k in 0..3 {
+                let at = 0.11 * k as f32;
+                b.noise(at, 0.05, 2600.0, 1.2, &|t| (1.0 - t).powf(1.5), 1.0);
+                b.tone(at, 0.06, 220.0, 150.0, 0.4);
+            }
+            0.34
+        }
+        Sound::Purr => {
+            // About 26 throbs a second, low and buzzing, in and out.
+            let p = [(0.0, 26.0)];
+            b.voice(&Syllable {
+                secs: 1.6,
+                pitch: &p,
+                formants: [&[(0.0, 180.0)], &[(0.0, 450.0)], &[(0.0, 1200.0)]],
+                gains: [1.0, 0.7, 0.3],
+                q: [2.0, 3.0, 3.0],
+                breath: &[(0.0, 0.35)],
+                buzz: 1.0,
+                attack: 0.2,
+                release: 0.3,
+                rough: (0.6, 0.5),
+                ..Syllable::default()
+            });
+            1.6
+        }
+        Sound::Pant => {
+            // Hah-hah-hah: quick breaths, out louder than in.
+            for k in 0..8 {
+                let at = 0.155 * k as f32;
+                let out = k % 2 == 0;
+                let hz = if out { 1500.0 } else { 1100.0 };
+                let g = if out { 1.0 } else { 0.55 };
+                b.noise(at, 0.12, hz, 1.2, &|t| ease(t / 0.2) * (1.0 - t), g);
+            }
+            1.25
+        }
+        Sound::Bell => {
+            // A small bell (suzu) shaken: a few strikes, one after another.
+            let hz = 2350.0;
+            for (k, g) in [1.0, 0.7, 0.5, 0.35].into_iter().enumerate() {
+                let at = 0.07 * k as f32 + 0.01 * b.rng.f();
+                let detune = 1.0 + 0.01 * b.rng.s();
+                b.bell(at, hz * detune, g);
+            }
+            0.7
+        }
+        Sound::Flutter => {
+            // Wing beats: soft whooshes.
+            for k in 0..5 {
+                let at = 0.075 * k as f32;
+                b.noise(
+                    at,
+                    0.065,
+                    700.0,
+                    0.8,
+                    &|t| (std::f32::consts::PI * t).sin(),
                     1.0 - 0.1 * k as f32,
                 );
             }
-            (b, 0.5)
-        }
-        Sound::Sigh => {
-            let mut b = Buf::new(0.75);
-            b.noise(0.0, 0.7, 0.8, 0.08, &mut rng);
-            b.syllable(0.05, 0.5, f0 * 0.7, f0 * 0.5, timbre, 0.25);
-            (b, 0.35)
-        }
-        Sound::Grumpy => {
-            let mut b = Buf::new(0.3);
-            b.syllable(0.0, 0.24 * short.max(0.8), f0 * 1.3, f0 * 1.7, timbre, 1.0);
-            (b, 0.5)
-        }
-        Sound::Snore => {
-            let mut b = Buf::new(1.0);
-            b.tone(0.0, 0.9, 95.0, 80.0, 0.7);
-            b.noise(0.05, 0.85, 0.4, 0.03, &mut rng);
-            (b, 0.25)
-        }
-        Sound::Land => {
-            let mut b = Buf::new(0.16);
-            b.tone(0.0, 0.14, 140.0, 55.0, 1.0);
-            (b, 0.5)
-        }
-        Sound::Eat => {
-            let mut b = Buf::new(0.32);
-            for k in 0..3 {
-                b.noise(0.1 * k as f32, 0.035, 1.0, 0.6, &mut rng);
-            }
-            (b, 0.35)
+            0.42
         }
     };
-    buf.finish(peak)
+    let n = ((end + 0.03) * RATE as f32) as usize;
+    b.s.truncate(n.min(b.s.len()));
+    b.finish(sound.class())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
+    fn floats(v: &[i16]) -> Vec<f32> {
+        v.iter()
+            .map(|&s| f32::from(s) / f32::from(i16::MAX))
+            .collect()
+    }
+
     #[test]
-    fn every_sound_is_short_audible_and_not_clipping() {
+    fn every_sound_is_short_at_its_loudness_and_never_clips() {
         for s in Species::ALL {
-            for sound in [
-                Sound::Voice,
-                Sound::Poke,
-                Sound::Laugh,
-                Sound::Sigh,
-                Sound::Grumpy,
-                Sound::Snore,
-                Sound::Land,
-                Sound::Eat,
-            ] {
-                let samples = synth(s, sound, 1);
-                assert!(!samples.is_empty());
-                assert!(
-                    samples.len() <= RATE as usize * 2,
-                    "{s:?} {sound:?} is too long"
-                );
-                let peak = samples.iter().map(|v| v.unsigned_abs()).max().unwrap();
-                assert!(peak > 3000, "{s:?} {sound:?} is silent");
-                assert!(peak < 25_000, "{s:?} {sound:?} is too loud");
+            for sound in Sound::ALL {
+                for take in 0..TAKES {
+                    let samples = synth(s, sound, take);
+                    assert!(!samples.is_empty());
+                    assert!(
+                        samples.len() <= RATE as usize * 2,
+                        "{s:?} {sound:?} is too long"
+                    );
+                    let peak = samples.iter().map(|v| v.unsigned_abs()).max().unwrap();
+                    assert!(
+                        f32::from(peak) <= PEAK * f32::from(i16::MAX) + 1.0,
+                        "{s:?} {sound:?} clips"
+                    );
+                    let loud = loudness(&floats(&samples));
+                    let want = sound.class().target();
+                    assert!(
+                        (loud - want).abs() < 2.0,
+                        "{s:?} {sound:?} take {take}: {loud:.1} dB, meant {want} dB"
+                    );
+                }
             }
         }
     }
 
     #[test]
-    fn species_sound_different() {
-        let a = synth(Species::Chick, Sound::Voice, 1);
-        let b = synth(Species::Duck, Sound::Voice, 1);
-        assert_ne!(a, b);
+    fn calls_are_louder_than_soft_sounds() {
+        let voice = loudness(&floats(&synth(Species::Shiba, Sound::Voice, 0)));
+        let snore = loudness(&floats(&synth(Species::Shiba, Sound::Snore, 0)));
+        assert!(voice - snore > 6.0, "{voice} vs {snore}");
+    }
+
+    #[test]
+    fn takes_and_species_sound_different() {
+        for s in Species::ALL {
+            let takes: Vec<_> = (0..TAKES).map(|t| synth(s, Sound::Voice, t)).collect();
+            assert_ne!(takes[0], takes[1], "{s:?}");
+            assert_ne!(takes[1], takes[2], "{s:?}");
+        }
+        assert_ne!(
+            synth(Species::Chick, Sound::Voice, 0),
+            synth(Species::Duck, Sound::Voice, 0)
+        );
+    }
+
+    #[test]
+    fn the_limiter_bends_peaks_but_leaves_quiet_samples_alone() {
+        assert_eq!(limit(0.3), 0.3);
+        assert_eq!(limit(-0.5), -0.5);
+        for x in [0.7, 1.0, 3.0, 100.0] {
+            let y = limit(x);
+            assert!(y > 0.6 && y <= PEAK, "{x} → {y}");
+            assert_eq!(limit(-x), -y);
+        }
+        assert!(limit(1.0) > limit(0.8));
     }
 }
