@@ -16,8 +16,10 @@ use windows_sys::Win32::Graphics::Gdi::{
     EnumDisplayMonitors, GetDC, GetMonitorInfoW, HBITMAP, HDC, HGDIOBJ, HMONITOR, MONITORINFO,
     ReleaseDC, SelectObject,
 };
+use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows_sys::Win32::System::SystemInformation::GetTickCount;
 use windows_sys::Win32::System::Threading::GetCurrentProcessId;
+use windows_sys::Win32::UI::HiDpi::{GetDpiForWindow, GetSystemMetricsForDpi};
 use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
     GetAsyncKeyState, GetLastInputInfo, LASTINPUTINFO, VK_LBUTTON, VK_RBUTTON,
 };
@@ -27,12 +29,40 @@ use windows_sys::Win32::UI::Shell::{
 use windows_sys::Win32::UI::WindowsAndMessaging::{
     AllowSetForegroundWindow, BringWindowToTop, EnumWindows, GWL_EXSTYLE, GetClassNameW,
     GetCursorPos, GetWindowLongPtrW, GetWindowRect, GetWindowTextLengthW, GetWindowThreadProcessId,
-    IsIconic, IsWindowVisible, SPI_GETWORKAREA, SW_RESTORE, SetForegroundWindow, SetWindowLongPtrW,
-    ShowWindow, SystemParametersInfoW, ULW_ALPHA, UpdateLayeredWindow, WS_EX_LAYERED,
+    ICON_BIG, ICON_SMALL, IMAGE_ICON, IsIconic, IsWindowVisible, LR_SHARED, LoadImageW, SM_CXICON,
+    SM_CXSMICON, SPI_GETWORKAREA, SW_RESTORE, SendMessageW, SetForegroundWindow, SetWindowLongPtrW,
+    ShowWindow, SystemParametersInfoW, ULW_ALPHA, UpdateLayeredWindow, WM_SETICON, WS_EX_LAYERED,
     WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TRANSPARENT,
 };
 use winit::raw_window_handle::{HasWindowHandle, RawWindowHandle};
 use winit::window::Window;
+
+/// See [`crate::use_exe_icon`].
+pub fn use_exe_icon(window: &dyn HasWindowHandle) {
+    let Ok(handle) = window.window_handle() else {
+        return;
+    };
+    let RawWindowHandle::Win32(h) = handle.as_raw() else {
+        return;
+    };
+    let hwnd = h.hwnd.get() as HWND;
+    // The icon build.rs embeds, under the resource id winresource gives it.
+    let id = std::ptr::without_provenance::<u16>(1);
+    // SAFETY: plain Win32 calls on a live window of this process. The icons
+    // are loaded shared from this exe's own resources, so they stay valid for
+    // the life of the process and are never destroyed by us.
+    unsafe {
+        let module = GetModuleHandleW(null());
+        let dpi = GetDpiForWindow(hwnd);
+        for (kind, metric) in [(ICON_SMALL, SM_CXSMICON), (ICON_BIG, SM_CXICON)] {
+            let px = GetSystemMetricsForDpi(metric, dpi);
+            let icon = LoadImageW(module, id, IMAGE_ICON, px, px, LR_SHARED);
+            if !icon.is_null() {
+                SendMessageW(hwnd, WM_SETICON, kind as usize, icon as isize);
+            }
+        }
+    }
+}
 
 /// Windows needs no shared connection; this keeps the API the same as X11.
 pub struct Shared;

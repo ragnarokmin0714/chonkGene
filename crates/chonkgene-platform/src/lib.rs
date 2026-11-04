@@ -37,6 +37,16 @@ pub struct WinRect {
     pub h: i32,
 }
 
+/// Gives a window of ours the icon embedded in the exe, picked by Windows at
+/// the title-bar and Alt-Tab sizes for the window's DPI. Elsewhere the
+/// toolkit sets the window icon itself, so this does nothing.
+pub fn use_exe_icon(window: &dyn winit::raw_window_handle::HasWindowHandle) {
+    #[cfg(windows)]
+    windows::use_exe_icon(window);
+    #[cfg(not(windows))]
+    let _ = window;
+}
+
 /// v1 speaks X11 on Linux, XWayland included (PLAN §0).
 pub fn configure_event_loop<T>(builder: &mut EventLoopBuilder<T>) {
     #[cfg(target_os = "linux")]

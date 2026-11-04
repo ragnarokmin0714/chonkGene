@@ -187,6 +187,12 @@ v1 has seven species (the 九尾狐 joined on 2026-10-28). A species only sets *
 - Theme colour follows the selected pet: Shiba red-orange, Munchkin milk tea, Fold blue-grey, Owl chestnut with moon yellow, Chick yolk yellow, Duckling pond blue.
 - Dark mode uses warm dark greys, never pure black.
 
+**Program icon** (Roger picked it 2026-11-04 from five directions on the design canvas <https://claude.ai/artifact/HavsTSzXHh5Yb4m4NN4KkW>: a Shiba face, a chubby blob, a paw pad with a face, a nest, a mochi on a desk edge)
+- **一窩 (the nest)**: the Shiba in front, the Fold and the chick on either side, piled into a woven nest; brown outline `#4B3528`, the pets' own coat colours.
+- Sources in `assets/icon/src`: the 256 px drawing, plus 16, 24 and 32 px versions drawn on their own pixel grid (scaled down, the 256 px drawing blurs the faces into blobs). `tools/iconbake` (a developer tool outside the workspace, using resvg) bakes them into `assets/icon/chonkgene-{16…256}.png` and `chonkgene.ico` (16, 20, 24, 32, 40, 48, 64, 256), which are committed; rerun it after changing a source.
+- Where it shows: the exe's icon resource (Explorer, taskbar, Alt-Tab; `build.rs` with winresource, which also sets the name Task Manager shows, 「肉肉賴桌」); the settings window (Windows: loaded back from the exe at the title-bar and Alt-Tab sizes for its DPI, `chonkgene_platform::use_exe_icon`; Linux: the 256 px image through Slint); the tray (Windows: one image at 16 px × display scale; Linux: 16–64 px for the StatusNotifierItem host to choose). It replaces the paw drawn in code.
+- Not yet: the Linux app-menu entry of §2.1 (「加到應用程式選單」) is still to be built, and will install `chonkgene-256.png` with its `.desktop` file; whether the settings window gets icons of its own (tabs, buttons) is still Roger's call.
+
 **Floor**: text contrast meets WCAG AA, minimum text size 13 px; wobbling elements stay restrained and respect reduced motion.
 
 ### 1.10 Tray, menu, hotkey, start at login

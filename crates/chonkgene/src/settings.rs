@@ -20,6 +20,7 @@ use slint::{
     TimerMode, VecModel,
 };
 
+use crate::brand;
 use crate::ipc::{self, Msg};
 use crate::lines::{MAX_NAME, MAX_YOU};
 use crate::store::{self, DataDir, PetSave, Pets, Settings};
@@ -673,6 +674,7 @@ pub fn run(data: Option<PathBuf>, pet: Option<u64>) -> Result<(), String> {
     let (st, _timers) = setup(&ui, data, pet)?;
     let _repaints = repaint_when_shown(&ui);
     let _front = come_forward_when_asked(&ui, &st);
+    let _icon = use_program_icon(&ui);
     ui.run().map_err(|e| e.to_string())?;
     let mut st = st.borrow_mut();
     if st.settings_dirty {
@@ -745,6 +747,34 @@ fn repaint_when_shown(ui: &SettingsWindow) -> [Timer; 3] {
                 }
             },
         );
+        t
+    })
+}
+
+/// The window's icon (PLAN §1.9, "Program icon"). Windows loads the exe's
+/// own icon at its title-bar and Alt-Tab sizes, which needs the window to
+/// exist, so it is tried as the window comes up; a single image given to
+/// Slint would be squeezed down for the title bar instead.
+fn use_program_icon(ui: &SettingsWindow) -> [Timer; 3] {
+    if !cfg!(windows) {
+        let px = 256;
+        let buf = SharedPixelBuffer::<Rgba8Pixel>::clone_from_slice(&brand::rgba(px), px, px);
+        ui.set_window_icon(Image::from_rgba8(buf));
+    }
+    [0, 100, 600].map(|ms| {
+        let ui = ui.as_weak();
+        let t = Timer::default();
+        if cfg!(windows) {
+            t.start(
+                TimerMode::SingleShot,
+                Duration::from_millis(ms),
+                move || {
+                    if let Some(ui) = ui.upgrade() {
+                        chonkgene_platform::use_exe_icon(&ui.window().window_handle());
+                    }
+                },
+            );
+        }
         t
     })
 }

@@ -28,13 +28,16 @@ pub struct Tray {
     _handle: ksni::blocking::Handle<Sni>,
 }
 
-/// `rgba` is a straight-alpha RGBA image of `size` × `size` pixels.
+/// Each icon is a straight-alpha RGBA image and its side in pixels. Windows
+/// shows the first; a StatusNotifierItem host picks the size it needs.
 pub fn create(
-    rgba: Vec<u8>,
-    size: u32,
+    icons: Vec<(Vec<u8>, u32)>,
     on: impl Fn(TrayCommand) + Send + Sync + Clone + 'static,
 ) -> Result<Tray, String> {
-    imp::create(rgba, size, on)
+    if icons.is_empty() {
+        return Err("no icon for the tray".into());
+    }
+    imp::create(icons, on)
 }
 
 #[cfg(windows)]
@@ -45,8 +48,7 @@ mod imp {
     use super::{LABELS, TOOLTIP, Tray, TrayCommand};
 
     pub fn create(
-        rgba: Vec<u8>,
-        size: u32,
+        icons: Vec<(Vec<u8>, u32)>,
         on: impl Fn(TrayCommand) + Send + Sync + Clone + 'static,
     ) -> Result<Tray, String> {
         let menu = Menu::new();
@@ -60,6 +62,7 @@ mod imp {
             ids.push((item.id().clone(), *command));
             menu.append(&item).map_err(|e| e.to_string())?;
         }
+        let (rgba, size) = icons.into_iter().next().ok_or("no icon for the tray")?;
         let icon = Icon::from_rgba(rgba, size, size).map_err(|e| e.to_string())?;
         let tray = TrayIconBuilder::new()
             .with_menu(Box::new(menu))
@@ -90,7 +93,7 @@ mod imp {
 
 #[cfg(target_os = "linux")]
 pub struct Sni {
-    icon: ksni::Icon,
+    icons: Vec<ksni::Icon>,
     on: Box<dyn Fn(TrayCommand) + Send + Sync>,
 }
 
@@ -105,7 +108,7 @@ impl ksni::Tray for Sni {
     }
 
     fn icon_pixmap(&self) -> Vec<ksni::Icon> {
-        vec![self.icon.clone()]
+        self.icons.clone()
     }
 
     fn activate(&mut self, _x: i32, _y: i32) {
@@ -139,19 +142,23 @@ mod imp {
     use super::{Sni, Tray, TrayCommand};
 
     pub fn create(
-        rgba: Vec<u8>,
-        size: u32,
+        icons: Vec<(Vec<u8>, u32)>,
         on: impl Fn(TrayCommand) + Send + Sync + Clone + 'static,
     ) -> Result<Tray, String> {
         // StatusNotifierItem wants ARGB32 in network byte order.
-        let (px, _) = rgba.as_chunks::<4>();
-        let data = px.iter().flat_map(|p| [p[3], p[0], p[1], p[2]]).collect();
+        let icons = icons
+            .into_iter()
+            .map(|(rgba, size)| {
+                let (px, _) = rgba.as_chunks::<4>();
+                ksni::Icon {
+                    width: size as i32,
+                    height: size as i32,
+                    data: px.iter().flat_map(|p| [p[3], p[0], p[1], p[2]]).collect(),
+                }
+            })
+            .collect();
         let sni = Sni {
-            icon: ksni::Icon {
-                width: size as i32,
-                height: size as i32,
-                data,
-            },
+            icons,
             on: Box::new(on),
         };
         let handle = sni.spawn().map_err(|e| e.to_string())?;

@@ -1,0 +1,13 @@
+[package]
+name = "iconbake"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+# A developer tool, not part of the workspace: rasterises the program icon's
+# SVG sources in assets/icon/src into the PNGs and .ico the app embeds, so the
+# app itself needs no SVG renderer (PLAN §1.9, "Program icon").
+[workspace]
+
+[dependencies]
+resvg = { version = "=0.48.1", default-features = false }
