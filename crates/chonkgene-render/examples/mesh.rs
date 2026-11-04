@@ -10,7 +10,8 @@
 //! `sit`: standing, sitting down, sitting a while, getting up. `lie`: lying
 //! down asleep and getting up. `look`: glances while sitting. `fidget`:
 //! sitting a while, then standing, fidgeting all along (each frame's
-//! fidget is printed). A gesture
+//! fidget is printed). `life`: 20 s left alone as the app leaves it, its
+//! animator choosing the species' gestures and blinking. A gesture
 //! (`eat`, `dig`, `scratch`, `groom`, `shake`, `preen`, `peck`, `flap`,
 //! `stretch`, `yawn`, `wave`) is played through once. It prints the bake
 //! time, the mesh size and what each frame cost.
@@ -89,6 +90,68 @@ fn look() -> (f32, Script) {
     )
 }
 
+thread_local! {
+    /// The eyes the `life` script's animator wants this frame.
+    static EYES: std::cell::Cell<Option<Look>> = const { std::cell::Cell::new(None) };
+}
+
+/// Left alone 20 s, as the app leaves a pet: its animator picks the
+/// species' own gestures and blinks; resting, it sits down, as
+/// mesh_frames.rs does.
+fn life(id: &str) -> (f32, Script) {
+    use chonkgene_core::anim::{Animator, Expression};
+    use chonkgene_core::species::Species;
+    let species = Species::from_id(id).expect("species");
+    let anim = Animator::new(5, 0.33, species.waddle())
+        .with_habits(species.habits())
+        .with_slow_blinks(species.slow_blinks());
+    // The animator, the gesture under way and since when, since when it
+    // has rested, and the script's clock last call.
+    let state = std::cell::RefCell::new((anim, None::<(Act, f32)>, None::<f32>, 0.0f32));
+    (
+        20.0,
+        Box::new(move |t, w| {
+            let (anim, gesture, rest, last) = &mut *state.borrow_mut();
+            anim.step((t - *last).max(1e-4));
+            *last = t;
+            let p = anim.params();
+            if gesture.map(|g| g.0) != Some(p.act) {
+                *gesture = gesture_secs(p.act).map(|_| (p.act, p.clock));
+            }
+            let standing = gesture.is_some_and(|(act, _)| !act.seated());
+            let seated = gesture.is_some_and(|(act, _)| act.seated());
+            if standing {
+                *rest = None;
+            } else {
+                rest.get_or_insert(p.clock);
+            }
+            let rested = rest.is_some_and(|since| p.clock - since > 0.8);
+            w.sit(!standing && (rested || seated));
+            w.look(match p.act {
+                Act::LookLeft => 35.0,
+                Act::LookRight => -35.0,
+                _ => 0.0,
+            });
+            w.gesture(gesture.and_then(|(act, since)| {
+                let secs = gesture_secs(act)?;
+                let at = (p.clock - since).max(0.0);
+                Some(Gesture {
+                    act,
+                    e: (std::f32::consts::PI * (at / secs).min(1.0)).sin().sqrt(),
+                    t: at,
+                })
+            }));
+            w.breathe(p.breath);
+            EYES.with(|e| {
+                e.set(Some(
+                    chonkgene_render::key_for(Expression::Neutral, &p).look,
+                ))
+            });
+            (false, 1.0)
+        }),
+    )
+}
+
 /// Sitting six seconds, then standing six, fidgeting all the while.
 fn fidget() -> (f32, Script) {
     (
@@ -138,7 +201,7 @@ fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let (Some(mode), Some(id), Some(out)) = (args.first(), args.get(1), args.get(2)) else {
         eprintln!(
-            "usage: mesh peek|walk|sit|lie|look|fidget|<gesture> <species> <out dir> [scale] [coat]"
+            "usage: mesh peek|walk|sit|lie|look|fidget|life|<gesture> <species> <out dir> [scale] [coat]"
         );
         std::process::exit(2);
     };
@@ -156,6 +219,7 @@ fn main() {
         "lie" => lie(),
         "look" => look(),
         "fidget" => fidget(),
+        "life" => life(id),
         g => match GESTURES.iter().find(|(name, _)| *name == g) {
             Some(&(_, act)) => gesture(act),
             None => panic!("no mode {mode:?}"),
@@ -235,7 +299,9 @@ fn run(
             joints[0].rot.y += turn;
         }
         let bones = sk.pose(&joints);
-        // The tongue out, as the renderer shows it.
+        // The animator's eyes (`life`), and the tongue out, as the
+        // renderer shows them.
+        let look = EYES.with(|e| e.get()).unwrap_or(look);
         let fidget = walker.fidget();
         let look = match fidget.tongue() {
             Some(Tongue::Blep) if look == Look::Open => Look::Blep,

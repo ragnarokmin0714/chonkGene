@@ -5,6 +5,11 @@
 //! shifted, the tongue out), each species from its own list; the ears
 //! twitch on clocks of their own, so nothing moves in step.
 //!
+//! Under all of it the head and body drift a little, slowly and without
+//! end ([`Out::calm`]), so even between fidgets nothing stands frozen;
+//! during a gesture the tail and ears keep going; a fidget cut short (the
+//! pet sets off) fades out rather than snapping back.
+//!
 //! [`Fidgets`] only says what runs and how far into it; the walks
 //! ([`crate::skin::Walk`], [`crate::waddle::Waddle`]) move the bones.
 
@@ -111,6 +116,14 @@ impl Kind {
                 | Self::Waggle
                 | Self::HeadShake
                 | Self::Wag
+        )
+    }
+
+    /// Moves only the tail: it can go on while a gesture moves the rest.
+    pub fn light(self) -> bool {
+        matches!(
+            self,
+            Self::Wag | Self::TipFlick | Self::Ripple | Self::Waggle
         )
     }
 
@@ -229,6 +242,8 @@ const SLEEP_GAP: (f32, f32) = (1.5, 4.0);
 /// An ear twitches every this many seconds, each on its own clock.
 const EAR_EVERY: (f32, f32) = (1.6, 4.5);
 const EAR_EVERY_ASLEEP: (f32, f32) = (5.0, 11.0);
+/// A fidget cut short fades out over this long, seconds.
+const FADE_SECS: f32 = 0.3;
 /// An ear flick's length, seconds.
 pub const EAR_SECS: f32 = 0.45;
 /// The ears turn to listen somewhere new every this many seconds.
@@ -243,14 +258,27 @@ pub struct Run {
     pub len: f32,
     /// −1 or +1: which side (a paw, a tilt, a wing).
     pub side: f32,
+    /// 1 while it runs; cut short, it falls to 0 over [`FADE_SECS`].
+    pub fade: f32,
 }
 
 impl Run {
-    /// 0 … 1 … 0 over its length, eased in and out.
+    /// 0 … 1 … 0 over its length, eased in and out (and faded, cut short).
     pub fn e(&self) -> f32 {
         let x = (self.t / self.len).clamp(0.0, 1.0);
-        (std::f32::consts::PI * x).sin().sqrt()
+        (std::f32::consts::PI * x).sin().sqrt() * self.fade
     }
+}
+
+/// What the pet's body is doing, as the fidgets see it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Hold {
+    /// A pose held (sitting, idling, a feeling): any fidget.
+    Free,
+    /// A gesture moves the body: only the tail's.
+    Busy,
+    /// Walking: none.
+    Off,
 }
 
 /// What the fidgets come to this frame.
@@ -261,6 +289,10 @@ pub struct Out {
     pub ears: [Option<f32>; 2],
     /// Where the ears listen: −1 … 1 (+ toward the pet's left), eased.
     pub swivel: f32,
+    /// The slow drift under everything: its clock (seconds), and how much
+    /// of it shows (0 walking … 1 at rest, eased; less asleep or busy).
+    pub t: f32,
+    pub calm: f32,
 }
 
 impl Out {
@@ -295,6 +327,7 @@ pub struct Fidgets {
     next: f32,
     ears: [(f32, Option<f32>); 2],
     swivel: (f32, f32, f32),
+    calm: f32,
     /// Off: none at all (tests and looks that compare poses).
     off: bool,
 }
@@ -313,6 +346,7 @@ impl Fidgets {
             next: 0.0,
             ears: [(0.0, None); 2],
             swivel: (0.0, 0.0, 0.0),
+            calm: 0.0,
             off: false,
         };
         f.next = f.between(0.3, MAX_GAP);
@@ -320,6 +354,8 @@ impl Fidgets {
             f.ears[k].0 = f.between(0.5, EAR_EVERY.1);
         }
         f.swivel.2 = f.between(SWIVEL_EVERY.0, SWIVEL_EVERY.1);
+        // Each pet drifts on a clock of its own.
+        f.t = f.between(0.0, 60.0);
         f
     }
 
@@ -375,18 +411,27 @@ impl Fidgets {
         kit[0].0
     }
 
-    /// Advance `dt` seconds. `held`: the pet is in a pose fidgets go on
-    /// under (anything but walking or a gesture moving the whole body);
-    /// `asleep` keeps to the quiet ones.
-    pub fn step(&mut self, dt: f32, held: bool, asleep: bool) -> Out {
+    /// Advance `dt` seconds, with the body doing `hold`; `asleep` keeps to
+    /// the quiet ones.
+    pub fn step(&mut self, dt: f32, hold: Hold, asleep: bool) -> Out {
         if self.off {
             return Out::default();
         }
         self.t += dt;
+        let allowed = |kind: Kind| match hold {
+            Hold::Free => !asleep || asleep_ok(kind),
+            Hold::Busy => kind.light(),
+            Hold::Off => false,
+        };
         if let Some(r) = &mut self.run {
-            r.t += dt;
-            // A walk or a gesture takes over the body: it stops at once.
-            if r.t >= r.len || !held || (asleep && !asleep_ok(r.kind)) {
+            // A walk or a gesture takes over the body: it fades out from
+            // where it was.
+            if !allowed(r.kind) || r.fade < 1.0 {
+                r.fade -= dt / FADE_SECS;
+            } else {
+                r.t += dt;
+            }
+            if r.t >= r.len || r.fade <= 0.0 {
                 self.run = None;
                 let gap = if asleep {
                     self.between(SLEEP_GAP.0, SLEEP_GAP.1)
@@ -397,9 +442,13 @@ impl Fidgets {
                 self.next = self.t + gap;
             }
         }
-        if self.run.is_none() && held && self.t >= self.next {
-            let kit = if asleep { self.asleep } else { self.awake };
-            let kind = self.pick(kit);
+        let kit: Vec<(Kind, u32)> = if asleep { self.asleep } else { self.awake }
+            .iter()
+            .copied()
+            .filter(|&(k, _)| allowed(k))
+            .collect();
+        if self.run.is_none() && !kit.is_empty() && self.t >= self.next {
+            let kind = self.pick(&kit);
             let (lo, hi) = kind.secs();
             let len = self.between(lo, hi);
             let side = if self.roll() < 0.5 { -1.0 } else { 1.0 };
@@ -408,6 +457,7 @@ impl Fidgets {
                 t: 0.0,
                 len,
                 side,
+                fade: 1.0,
             });
             self.last = Some(kind);
         }
@@ -439,10 +489,19 @@ impl Fidgets {
             self.swivel.2 = self.t + self.between(SWIVEL_EVERY.0, SWIVEL_EVERY.1);
         }
         self.swivel.0 += (self.swivel.1 - self.swivel.0) * (dt * 2.5).min(1.0);
+        let calm = match (hold, asleep) {
+            (Hold::Off, _) => 0.0,
+            (_, true) => 0.35,
+            (Hold::Busy, false) => 0.5,
+            (Hold::Free, false) => 1.0,
+        };
+        self.calm += (calm - self.calm) * (dt * 2.0).min(1.0);
         Out {
             run: self.run,
             ears,
             swivel: self.swivel.0,
+            t: self.t,
+            calm: self.calm,
         }
     }
 }
@@ -477,7 +536,7 @@ mod tests {
             let (mut gap, mut worst) = (0.0f32, 0.0f32);
             let mut seen = std::collections::HashSet::new();
             for _ in 0..(120.0 / DT) as usize {
-                let out = f.step(DT, true, false);
+                let out = f.step(DT, Hold::Free, false);
                 match out.run {
                     Some(r) => {
                         seen.insert(r.kind);
@@ -497,13 +556,59 @@ mod tests {
     fn no_fidget_while_walking_and_only_quiet_ones_asleep() {
         let mut f = Fidgets::new("shiba", 3);
         for _ in 0..(20.0 / DT) as usize {
-            assert_eq!(f.step(DT, false, false).run, None);
+            assert_eq!(f.step(DT, Hold::Off, false).run, None);
         }
         for _ in 0..(60.0 / DT) as usize {
-            if let Some(r) = f.step(DT, true, true).run {
+            if let Some(r) = f.step(DT, Hold::Free, true).run {
                 assert!(matches!(r.kind, Kind::Dream | Kind::TipFlick), "{r:?}");
             }
         }
+    }
+
+    #[test]
+    fn in_a_gesture_only_the_tail_fidgets_and_a_cut_fidget_fades() {
+        let mut f = Fidgets::new("shiba", 5);
+        let mut seen = false;
+        for _ in 0..(60.0 / DT) as usize {
+            if let Some(r) = f.step(DT, Hold::Busy, false).run {
+                assert!(r.kind.light(), "{r:?} in a gesture");
+                seen = true;
+            }
+        }
+        assert!(seen, "the tail kept still through every gesture");
+        // A sniff under way, then the pet sets off: it fades, no snap.
+        let mut f = Fidgets::new("fox", 9);
+        let run = loop {
+            if let Some(r) = f.step(DT, Hold::Free, false).run
+                && !r.kind.light()
+                && r.t > 0.1
+            {
+                break r;
+            }
+        };
+        let mut last = run.e();
+        let mut frames = 0;
+        while let Some(r) = f.step(DT, Hold::Off, false).run {
+            assert!(r.e() <= last + 1e-3, "it grew again");
+            assert!(last - r.e() < 0.2, "it snapped from {last} to {}", r.e());
+            last = r.e();
+            frames += 1;
+        }
+        assert!(frames >= 3, "gone in {frames} frames");
+    }
+
+    #[test]
+    fn the_drift_shows_at_rest_and_not_walking() {
+        let mut f = Fidgets::new("owl", 3);
+        let mut calm = 0.0;
+        for _ in 0..(3.0 / DT) as usize {
+            calm = f.step(DT, Hold::Free, false).calm;
+        }
+        assert!(calm > 0.95, "{calm}");
+        for _ in 0..(3.0 / DT) as usize {
+            calm = f.step(DT, Hold::Off, false).calm;
+        }
+        assert!(calm < 0.05, "{calm}");
     }
 
     #[test]
@@ -511,7 +616,7 @@ mod tests {
         let mut f = Fidgets::new("fox", 11);
         let (mut left, mut right, mut apart) = (0, 0, 0);
         for _ in 0..(60.0 / DT) as usize {
-            let out = f.step(DT, true, false);
+            let out = f.step(DT, Hold::Free, false);
             let [l, r] = out.ears.map(|e| e == Some(0.0));
             left += l as u32;
             right += r as u32;

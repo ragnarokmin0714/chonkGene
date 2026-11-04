@@ -835,6 +835,8 @@ fn asleep_every_mesh_pet_lies_down_and_gets_up_again() {
         let (model, sk) = mesh_model(id).unwrap();
         let head = sk.bone("head").unwrap();
         let mut walk = Mover::new(&sk, 1.0, &model).unwrap();
+        // Compared without fidgets: they move the head about.
+        walk.still();
         let settle = |walk: &mut Mover, secs: f32| {
             let mut j = Vec::new();
             for _ in 0..(secs * 60.0) as usize {
@@ -864,6 +866,8 @@ fn a_mesh_pet_sits_down_after_standing_about() {
         eprintln!("skipped: no GPU");
         return;
     };
+    // Measured without fidgets: the head's drift changes the height too.
+    r.still();
     // How tall the picture stands: sitting up, the pet is taller.
     let tall = |pm: &Pixmap| {
         let w = pm.width() as usize;

@@ -22,6 +22,7 @@ use crate::skin::{
     SPEED_UP, STILL_GOING, SULK_BACK, SULK_YAW, Skeleton, SleepPose, Spring, TURN_HZ, WALK_YAW,
     Walk, bite, peck, tempo_split,
 };
+use crate::skin::{drift, hold};
 
 /// The pace the pet's window moves at, world units a second (60 px/s at
 /// 100%): a planted foot slides back at this speed.
@@ -378,7 +379,7 @@ impl Waddle {
         let lv = self.moods.step(&self.feel, dt);
         let f = self
             .fidgets
-            .step(dt, !going && self.gesture.is_none(), self.lying);
+            .step(dt, hold(going, self.gesture.is_some()), self.lying);
         self.fidget = f;
         // Touched, it turns to face you; a tail or a bottom touched, it only
         // looks back over its shoulder (turning round would hide them).
@@ -649,6 +650,19 @@ impl Waddle {
     /// sleek, a wing shifts or both flutter, a foot scratches the head or
     /// the toes re-grip, the bill dabbles, the tail waggles.
     fn fidgets(&mut self, j: &mut [Joint], f: &Out, sit: f32, dt: f32) {
+        // The slow drift under it all; the wings breathe with it.
+        let (dx, dy, dz, body) = drift(f.t);
+        j[self.head].rot.x += f.calm * dx;
+        j[self.head].rot.y += f.calm * dy * self.neck;
+        j[self.body].rot.y += f.calm * dy * (1.0 - self.neck);
+        j[self.head].rot.z += f.calm * dz;
+        j[self.body].rot.z += f.calm * body;
+        for (k, wing) in self.wings.iter().enumerate() {
+            if let Some(w) = *wing {
+                let sign = if k == 0 { 1.0 } else { -1.0 };
+                j[w].rot.z += sign * f.calm * 3.0 * (0.5 + 0.5 * (TAU * 0.3 * f.t).sin());
+            }
+        }
         let Some(run) = f.run else {
             return;
         };

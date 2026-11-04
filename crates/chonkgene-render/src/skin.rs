@@ -9,7 +9,7 @@ use chonkgene_core::Zone;
 use chonkgene_rig::math::{M3, V3, v3};
 use chonkgene_rig::{FLOOR, Model, builtin};
 
-use crate::fidget::{Fidgets, Kind, Out, ear_flick};
+use crate::fidget::{Fidgets, Hold, Kind, Out, ear_flick};
 
 /// A bone's move: a turn about its pivot (degrees, as [`M3::euler`]), then
 /// a shift.
@@ -570,6 +570,31 @@ const EAT_CROUCH: f32 = 0.3;
 const BUTT_WADDLE: f32 = 0.05;
 const BUTT_PLOP: f32 = 1.8;
 
+/// What the body is doing, for the fidgets: walking, in a gesture, or a
+/// pose held.
+pub(crate) fn hold(going: bool, gesture: bool) -> Hold {
+    if going {
+        Hold::Off
+    } else if gesture {
+        Hold::Busy
+    } else {
+        Hold::Free
+    }
+}
+
+/// The slow drift under every held pose (degrees): the head tips, turns
+/// and nods a little and the body sways, each on its own slow beat, so it
+/// never stands frozen between fidgets. Head (x, y, z), then body z.
+pub(crate) fn drift(t: f32) -> (f32, f32, f32, f32) {
+    use std::f32::consts::TAU;
+    (
+        4.0 * (TAU * 0.29 * t + 2.0).sin(),
+        8.0 * (TAU * 0.13 * t + 1.0).sin(),
+        7.0 * (TAU * 0.21 * t).sin(),
+        2.5 * (TAU * 0.17 * t + 0.5).sin(),
+    )
+}
+
 /// Tail swish: how far each segment bends against the one before, degrees,
 /// standing and walking. The bend runs down the tail as a wave, each
 /// segment `WAVE_LAG` radians behind the one before, so a tail sways like
@@ -911,11 +936,11 @@ impl Walk {
         }
         let going = walking || s > STILL_GOING;
         let lv = self.moods.step(&self.feel, dt);
-        // Fidgets go on under any held pose: not walking, nor in a gesture
-        // that moves the whole body.
+        // Fidgets go on under any held pose; in a gesture only the tail's;
+        // walking, none.
         let f = self
             .fidgets
-            .step(dt, !going && self.gesture.is_none(), self.lying);
+            .step(dt, hold(going, self.gesture.is_some()), self.lying);
         self.fidget = f;
         // Eating, it turns to you, so you see it eat.
         let eating = self
@@ -1123,7 +1148,7 @@ impl Walk {
         }
         if let Some(i) = b.belly {
             // The belly rises and falls with each breath.
-            let y = self.belly.step(-0.035 * self.breath, -acc, 3.6, 0.16, dt);
+            let y = self.belly.step(-0.05 * self.breath, -acc, 3.6, 0.16, dt);
             j[i].shift = v3(0.0, y.clamp(-0.12, 0.12), 0.0);
         }
         if let Some(i) = b.butt {
@@ -1373,10 +1398,16 @@ impl Walk {
             // negative way.
             let out = if k == 0 { -1.0 } else { 1.0 };
             let flick = f.ears[k].map_or(0.0, ear_flick);
-            j[e].rot.z += self.ear_k * out * (24.0 * flick + 16.0 * back - 4.0 * perk);
-            j[e].rot.x += self.ear_k * (-6.0 * flick.abs() - 30.0 * back + 6.0 * perk);
-            j[e].rot.y += self.ear_k * 16.0 * f.swivel;
+            j[e].rot.z += self.ear_k * out * (34.0 * flick + 16.0 * back - 4.0 * perk);
+            j[e].rot.x += self.ear_k * (-8.0 * flick.abs() - 30.0 * back + 6.0 * perk);
+            j[e].rot.y += self.ear_k * 24.0 * f.swivel;
         }
+        // The slow drift under it all (lying about, the body stays put).
+        let (dx, dy, dz, body) = drift(f.t);
+        j[b.head].rot.x += f.calm * dx;
+        j[b.head].rot.y += f.calm * dy;
+        j[b.head].rot.z += f.calm * dz;
+        j[b.body].rot.z += f.calm * firm * body;
         let Some(run) = f.run else {
             self.swing_bell(j, 0.0, dt);
             self.shift = 0.0;
@@ -1420,11 +1451,11 @@ impl Walk {
                 }
             }
             Kind::Sniff => {
-                j[b.head].rot.x -= e * (7.0 + 2.5 * (TAU * 7.0 * t).sin());
+                j[b.head].rot.x -= e * (10.0 + 4.0 * (TAU * 7.0 * t).sin());
             }
             // Tipped over and wondering, never quite still.
             Kind::HeadTilt => {
-                j[b.head].rot.z += e * (side * 15.0 + 4.0 * (TAU * 0.7 * t).sin());
+                j[b.head].rot.z += e * (side * 20.0 + 5.0 * (TAU * 0.7 * t).sin());
             }
             Kind::PawScratch if sit > 0.5 => {
                 // Sitting, a front paw comes up to the cheek or chest and
@@ -1443,8 +1474,8 @@ impl Walk {
                     if run.kind == Kind::Dream {
                         j[leg].rot.x += e * 9.0 * (TAU * 5.0 * t).sin();
                     } else {
-                        j[leg].rot.x -= firm * 22.0 * e;
-                        j[leg].shift.y += firm * 0.06 * e;
+                        j[leg].rot.x -= firm * 30.0 * e;
+                        j[leg].shift.y += firm * 0.08 * e;
                         j[b.body].rot.z -= side * 2.0 * e * firm;
                         // Lying about (melted, rolled over), the paw only
                         // twitches.
@@ -1501,8 +1532,8 @@ impl Walk {
         }
         // Shifting its weight leans the body over and back; the belly
         // wobbles with the change.
-        j[b.body].rot.z += 7.0 * shift * firm;
-        j[b.hips].rot.z -= 5.0 * shift * firm;
+        j[b.body].rot.z += 9.0 * shift * firm;
+        j[b.hips].rot.z -= 6.0 * shift * firm;
         self.belly.v += 0.4 * (shift - self.shift).abs();
         self.shift = shift;
         self.swing_bell(j, knock, dt);

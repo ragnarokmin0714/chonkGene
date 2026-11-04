@@ -643,6 +643,11 @@ impl MeshRenderer {
         self.press.map_or(0.0, |(_, depth, _)| depth)
     }
 
+    /// No fidgets, so poses can be compared (tests, looks of one pose).
+    pub fn still(&mut self) {
+        self.walk.still();
+    }
+
     /// Always sleep in `pose` (tests, looking at the poses); none: pick as
     /// the species likes.
     pub fn sleep_in(&mut self, pose: Option<SleepPose>) {
@@ -695,7 +700,7 @@ impl MeshRenderer {
     fn settle(&mut self, params: &PoseParams) {
         let sq =
             (0.35 * params.squash + 0.15 * params.belly + self.walk.flatten()).clamp(-0.3, 0.3);
-        let breath = 0.02 * params.breath;
+        let breath = 0.03 * params.breath;
         let wide = 1.0 + 0.5 * sq;
         let feet = v3(0.0, FLOOR, crate::skin::ROOT_PIVOT.z);
         let squash = Affine::about(M3::diag(v3(wide, (1.0 - sq) * (1.0 + breath), wide)), feet);
