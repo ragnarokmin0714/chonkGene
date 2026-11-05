@@ -55,10 +55,24 @@ pub enum Line {
     SkitMakeUp,
     SkitTalk,
     SkitShrug,
+    /// Doing as it was asked (「叫牠…」).
+    Obey,
+    /// Doing as it was asked, in a bad mood, after a while.
+    ObeyLater,
+    /// Bringing a thrown toy back.
+    Fetch,
+    /// At the catnip: a cat in bliss, anyone else in character.
+    Catnip,
+    /// A cat that does not care for catnip.
+    CatnipMeh,
+    /// Asking another pet to play.
+    SkitPlay,
+    /// Starting its own little scene.
+    Scene,
 }
 
 impl Line {
-    pub const ALL: [Line; 27] = [
+    pub const ALL: [Line; 34] = [
         Line::Hello,
         Line::WelcomeBack,
         Line::PokeSmall,
@@ -86,6 +100,13 @@ impl Line {
         Line::SkitMakeUp,
         Line::SkitTalk,
         Line::SkitShrug,
+        Line::Obey,
+        Line::ObeyLater,
+        Line::Fetch,
+        Line::Catnip,
+        Line::CatnipMeh,
+        Line::SkitPlay,
+        Line::Scene,
     ];
 
     /// Key in the line tables.
@@ -118,6 +139,13 @@ impl Line {
             Line::SkitMakeUp => "skit_make_up",
             Line::SkitTalk => "skit_talk",
             Line::SkitShrug => "skit_shrug",
+            Line::Obey => "obey",
+            Line::ObeyLater => "obey_later",
+            Line::Fetch => "fetch",
+            Line::Catnip => "catnip",
+            Line::CatnipMeh => "catnip_meh",
+            Line::SkitPlay => "skit_play",
+            Line::Scene => "scene",
         }
     }
 }

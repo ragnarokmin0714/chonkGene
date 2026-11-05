@@ -16,6 +16,7 @@ pub mod menu;
 pub mod mesh;
 mod mesh_frames;
 pub mod mesh_gpu;
+pub mod props;
 pub mod raymarch;
 pub mod skin;
 mod sprite_frames;
@@ -262,6 +263,20 @@ impl Renderer {
         }
     }
 
+    /// Where something carried in the mouth goes, in pixmap pixels: under
+    /// the nose of a mesh pet; for the rest, a guess from the top of the
+    /// head and the way it faces.
+    pub fn mouth(&self, facing: f32) -> (f32, f32) {
+        if let Self::Mesh(r) = self
+            && let Some(at) = r.mouth()
+        {
+            return at;
+        }
+        let (x, y) = self.anchor();
+        let (w, h) = self.size();
+        (x + facing.signum() * 0.16 * w as f32, y + 0.32 * h as f32)
+    }
+
     /// Where a speech bubble points, in pixmap pixels: the top of the head.
     pub fn anchor(&self) -> (f32, f32) {
         match self {
@@ -301,7 +316,12 @@ pub fn key_for(expression: Expression, params: &PoseParams) -> Key {
         Act::Preen => (PoseId::LookLeft, Look::Happy),
         Act::Flap => (PoseId::Wave, Look::Happy),
         Act::Wiggle | Act::Bounce | Act::Spin => (PoseId::Stretch, Look::Happy),
-        Act::Knead => (PoseId::Sit, Look::Happy),
+        Act::Knead | Act::Tap | Act::Chew => (PoseId::Sit, Look::Happy),
+        Act::Paw => (PoseId::Wave, eyes),
+        Act::Tilt => (PoseId::LookLeft, eyes),
+        Act::Sniff | Act::Rub => (PoseId::Stretch, eyes),
+        Act::Bliss => (PoseId::BellyUp, Look::Happy),
+        Act::Swish => (PoseId::LookLeft, Look::Happy),
     };
     let (pose, look) = match expression {
         Expression::Neutral => gesture(eyes),

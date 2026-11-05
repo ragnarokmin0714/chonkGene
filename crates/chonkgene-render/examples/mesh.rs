@@ -8,7 +8,8 @@
 //! bakes the mesh, then writes `<mode>-<frame>.png` at 30 fps. `walk`:
 //! walking right, turning, walking left, stopping, and a poke in the belly.
 //! `sit`: standing, sitting down, sitting a while, getting up. `lie`: lying
-//! down asleep and getting up. `look`: glances while sitting. `fidget`:
+//! down asleep and getting up; `rest`: lying down awake, tapping along;
+//! `fly`, `swim` (birds). `look`: glances while sitting. `fidget`:
 //! sitting a while, then standing, fidgeting all along (each frame's
 //! fidget is printed). `life`: 20 s left alone as the app leaves it, its
 //! animator choosing the species' gestures and blinking; `smile`: the same,
@@ -58,6 +59,39 @@ fn sit() -> (f32, Script) {
         5.0,
         Box::new(|t, w| {
             w.sit((0.6..3.4).contains(&t));
+            (false, 1.0)
+        }),
+    )
+}
+
+/// Lying down awake (趴下), tapping along as if you typed, then up.
+fn rest() -> (f32, Script) {
+    (
+        6.0,
+        Box::new(|t, w| {
+            w.rest((0.3..5.0).contains(&t));
+            let at = t - 2.5;
+            w.gesture((0.0..1.8).contains(&at).then(|| Gesture {
+                act: Act::Tap,
+                e: (std::f32::consts::PI * at / 1.8).sin().sqrt(),
+                t: at,
+            }));
+            (false, 1.0)
+        }),
+    )
+}
+
+/// A bird flying (wings beating, feet tucked), then swimming.
+fn fly_swim(swim: bool) -> (f32, Script) {
+    (
+        4.0,
+        Box::new(move |t, w| {
+            let on = (0.3..3.4).contains(&t);
+            if swim {
+                w.swim(on);
+            } else {
+                w.fly(on);
+            }
             (false, 1.0)
         }),
     )
@@ -206,7 +240,7 @@ fn gesture(act: Act) -> (f32, Script) {
     )
 }
 
-const GESTURES: [(&str, Act); 15] = [
+const GESTURES: [(&str, Act); 22] = [
     ("stretch", Act::Stretch),
     ("yawn", Act::Yawn),
     ("wave", Act::Wave),
@@ -222,6 +256,13 @@ const GESTURES: [(&str, Act); 15] = [
     ("bounce", Act::Bounce),
     ("spin", Act::Spin),
     ("knead", Act::Knead),
+    ("paw", Act::Paw),
+    ("tap", Act::Tap),
+    ("tilt", Act::Tilt),
+    ("sniff", Act::Sniff),
+    ("rub", Act::Rub),
+    ("chew", Act::Chew),
+    ("swish", Act::Swish),
 ];
 
 fn main() {
@@ -244,6 +285,9 @@ fn main() {
         "walk" => walk(),
         "sit" => sit(),
         "lie" => lie(),
+        "rest" => rest(),
+        "fly" => fly_swim(false),
+        "swim" => fly_swim(true),
         "look" => look(),
         "fidget" => fidget(),
         "life" => life(id, false),

@@ -82,6 +82,39 @@ pub enum Act {
     Spin,
     /// A cat kneading: sitting, the front paws treading in turn.
     Knead,
+    /// 握手: a front paw held out to you, shaking (a bird: a wing).
+    Paw,
+    /// Typing along with you: the front paws tapping quickly.
+    Tap,
+    /// The head tipped right over to one side, listening (a fast burst of
+    /// typing).
+    Tilt,
+    /// Nose down at the floor, sniffing.
+    Sniff,
+    /// A cheek rubbed along the floor (catnip).
+    Rub,
+    /// Rolled onto its back, paws kicking, eyes glazed (catnip).
+    Bliss,
+    /// Lying down, gnawing at a bone held in the front paws.
+    Chew,
+    /// The fox's tails swung round hard at someone (a play-fight).
+    Swish,
+}
+
+/// How the whole body is held for a while, under any gesture: as it likes,
+/// or as it was asked or as a scene has it.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Posture {
+    #[default]
+    Free,
+    /// Sitting and staying (坐下).
+    Sit,
+    /// Lying down awake (趴下, a still mouse, chewing a bone).
+    Lie,
+    /// Flying: wings beating, legs tucked.
+    Fly,
+    /// Swimming: low in the water, paddling.
+    Swim,
 }
 
 impl Act {
@@ -90,7 +123,15 @@ impl Act {
     pub fn seated(self) -> bool {
         matches!(
             self,
-            Act::Yawn | Act::Scratch | Act::Groom | Act::Preen | Act::Knead
+            Act::Yawn
+                | Act::Scratch
+                | Act::Groom
+                | Act::Preen
+                | Act::Knead
+                | Act::Paw
+                | Act::Tap
+                | Act::Tilt
+                | Act::Chew
         )
     }
 }
@@ -141,6 +182,14 @@ pub fn gesture_secs(act: Act) -> Option<f32> {
         Act::Bounce => Some(1.3),
         Act::Spin => Some(1.4),
         Act::Knead => Some(2.4),
+        Act::Paw => Some(2.4),
+        Act::Tap => Some(1.8),
+        Act::Tilt => Some(1.1),
+        Act::Sniff => Some(1.6),
+        Act::Rub => Some(2.4),
+        Act::Bliss => Some(4.0),
+        Act::Chew => Some(3.2),
+        Act::Swish => Some(1.2),
         _ => None,
     }
 }
@@ -217,6 +266,7 @@ pub struct PoseParams {
     /// slow it): legs drawn every frame step to match.
     pub pace: f32,
     pub touch: Touch,
+    pub posture: Posture,
 }
 
 impl Default for PoseParams {
@@ -237,6 +287,7 @@ impl Default for PoseParams {
             clock: 0.0,
             pace: 1.0,
             touch: Touch::default(),
+            posture: Posture::Free,
         }
     }
 }
@@ -257,6 +308,9 @@ pub struct Animator {
     pub walking: bool,
     /// Walking speed multiplier (zoomies run faster).
     pub pace: f32,
+    /// How the body is held (asked to sit, lying down, flying, swimming);
+    /// lying, flying or swimming it picks no gestures of its own.
+    pub posture: Posture,
     pub sway: f32,
     /// The way the pet wants to face; the shown facing turns towards it.
     pub facing: f32,
@@ -319,6 +373,7 @@ impl Animator {
             expression: Expression::Neutral,
             walking: false,
             pace: 1.0,
+            posture: Posture::Free,
             sway: 0.0,
             facing: 1.0,
             pops: true,
@@ -460,6 +515,11 @@ impl Animator {
     pub fn eat(&mut self) {
         self.walking = false;
         self.start(Act::Eat);
+    }
+
+    /// The gesture under way, if any.
+    pub fn doing(&self) -> Option<Act> {
+        self.gesture.map(|(act, ..)| act)
     }
 
     /// Start a gesture now if the pet is free for it (a wave hello).
@@ -650,7 +710,10 @@ impl Animator {
                     self.sway = 6.0;
                 }
             }
-        } else if self.free() && self.t >= self.next_gesture {
+        } else if self.free()
+            && matches!(self.posture, Posture::Free | Posture::Sit)
+            && self.t >= self.next_gesture
+        {
             let act = self.pick_gesture();
             self.start(act);
         }
@@ -794,6 +857,7 @@ impl Animator {
                     .filter(|&(.., ago)| ago < TOUCH_SHOWS_SECS),
                 watch: self.watch,
             },
+            posture: self.posture,
         }
     }
 }

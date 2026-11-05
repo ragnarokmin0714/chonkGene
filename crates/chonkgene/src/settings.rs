@@ -414,6 +414,7 @@ fn setup(
         ui.set_irrational(s.irrational);
         ui.set_squabble(i32::from(s.squabble.min(2)));
         ui.set_hide_fullscreen(s.hide_in_fullscreen);
+        ui.set_react_input(s.react_to_input);
         ui.set_start_login(s.start_at_login);
         ui.set_desktop_limit(s.on_desktop.min(i32::MAX as u32) as i32);
         let where_ = if st.data.portable {
@@ -574,6 +575,10 @@ fn setup(
     });
     on!(on_hide_fullscreen_toggled, |_ui, st, v: bool| {
         st.settings.hide_in_fullscreen = v;
+        st.send_settings();
+    });
+    on!(on_react_input_toggled, |_ui, st, v: bool| {
+        st.settings.react_to_input = v;
         st.send_settings();
     });
     on!(on_start_login_toggled, |_ui, st, v: bool| {

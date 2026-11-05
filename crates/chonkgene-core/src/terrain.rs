@@ -25,6 +25,8 @@ pub enum Support {
     Floor(usize),
     /// The top edge of a window.
     Window(u64),
+    /// Something put on the desktop to stand on: the owl's branch.
+    Perch(u32),
 }
 
 /// A stretch of edge a pet can stand on: feet at `y`, from `x0` to `x1`.
@@ -107,6 +109,18 @@ impl Terrain {
             windows: windows.to_vec(),
             ledges,
         }
+    }
+
+    /// The same desktop with a perch on it too (the owl's branch), from
+    /// `x0` to `x1` at height `y`.
+    pub fn with_perch(mut self, id: u32, y: f32, x0: f32, x1: f32) -> Self {
+        self.ledges.push(Ledge {
+            y,
+            x0,
+            x1,
+            on: Support::Perch(id),
+        });
+        self
     }
 
     pub fn ledges(&self) -> &[Ledge] {

@@ -4,7 +4,7 @@
 
 use std::collections::HashMap;
 
-use crate::anim::Expression;
+use crate::anim::{Act, Expression};
 use crate::mind::Line;
 use crate::species::Species;
 
@@ -17,6 +17,12 @@ const TALK_EVERY: f64 = 1.3;
 const TALK_ROUNDS: u32 = 4;
 const SHRUG_SECS: f64 = 1.8;
 const MAKE_UP_SECS: f64 = 3.0;
+/// Playing, pets come this close (pixels between centres): their bodies
+/// touch, the windows overlapping.
+const CONTACT: f32 = 95.0;
+/// Each turn of a play-fight, seconds, and how many turns.
+const PLAY_TURN: f64 = 1.9;
+const PLAY_TURNS: u32 = 6;
 /// The same pair rests at least this long between skits.
 const PAIR_COOLDOWN: f64 = 600.0;
 
@@ -52,6 +58,50 @@ pub enum Cmd {
         id: u64,
         expression: Expression,
     },
+    /// Do this gesture now.
+    Act {
+        id: u64,
+        act: Act,
+    },
+    /// A pounce: one big hop.
+    Hop {
+        id: u64,
+    },
+}
+
+/// How each species plays at fighting (PLAN §8, Roger's fourth pass,
+/// item 5).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Move {
+    /// A play bow, then zoomies round and back (the Shiba).
+    BowZoom,
+    /// One swat, then the back turned (the Fold).
+    SwatTurn,
+    /// Rolls onto its back and cannot roll back (the Munchkin).
+    RollStuck,
+    /// Pecks and hops at it (the chick).
+    PeckHop,
+    /// Quacks and runs off (the duckling).
+    QuackFlee,
+    /// Puffs up and stares (the owl).
+    PuffStare,
+    /// Swats with its tails, the bell ringing; tickles with a tail tip
+    /// (the fox).
+    TailSwat,
+}
+
+impl Species {
+    pub fn play_move(self) -> Move {
+        match self {
+            Species::Shiba => Move::BowZoom,
+            Species::Fold => Move::SwatTurn,
+            Species::Munchkin => Move::RollStuck,
+            Species::Chick => Move::PeckHop,
+            Species::Duck => Move::QuackFlee,
+            Species::Owl => Move::PuffStare,
+            Species::Fox => Move::TailSwat,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -60,6 +110,8 @@ enum Kind {
     GlareChase,
     /// 雞同鴨講: chick and duckling talk past each other.
     TalkPast,
+    /// A play-fight: up close, in turns, each its own way.
+    Play,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -70,6 +122,8 @@ enum Phase {
     Talk(u32),
     Shrug,
     MakeUp,
+    /// Turn `n` of a play-fight.
+    Play(u32),
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -176,7 +230,8 @@ impl Director {
         let mut out = Vec::new();
         match s.phase {
             Phase::Approach => {
-                if (a.x - b.x).abs() <= MEET || now >= s.until {
+                let meet = if s.kind == Kind::Play { CONTACT } else { MEET };
+                if (a.x - b.x).abs() <= meet || now >= s.until {
                     out.extend([
                         Cmd::Face { id: a.id, x: b.x },
                         Cmd::Face { id: b.id, x: a.x },
@@ -197,6 +252,14 @@ impl Director {
                         Kind::TalkPast => {
                             s.phase = Phase::Talk(0);
                             s.until = now;
+                        }
+                        Kind::Play => {
+                            s.phase = Phase::Play(0);
+                            s.until = now;
+                            out.push(Cmd::Say {
+                                id: a.id,
+                                line: Line::SkitPlay,
+                            });
                         }
                     }
                 } else {
@@ -273,6 +336,44 @@ impl Director {
                     s.until = now + TALK_EVERY;
                 }
             }
+            Phase::Play(turn) if now >= s.until => {
+                if turn >= PLAY_TURNS {
+                    // Played out: both pleased, no making up needed.
+                    self.rested.insert(pair(s.a, s.b), now);
+                    self.skit = None;
+                    return vec![
+                        Cmd::Face { id: a.id, x: b.x },
+                        Cmd::Face { id: b.id, x: a.x },
+                        Cmd::Express {
+                            id: a.id,
+                            expression: Expression::Happy,
+                        },
+                        Cmd::Express {
+                            id: b.id,
+                            expression: Expression::Happy,
+                        },
+                    ];
+                }
+                let (me, other) = if turn % 2 == 0 { (a, b) } else { (b, a) };
+                out.extend(play_turn(me, other));
+                s.phase = Phase::Play(turn + 1);
+                s.until = now + PLAY_TURN;
+            }
+            Phase::Play(_) => {
+                // Between turns, the zoomies and the flight come back.
+                for (p, q) in [(a, b), (b, a)] {
+                    if (p.x - q.x).abs() > 2.5 * CONTACT
+                        && matches!(p.species.play_move(), Move::BowZoom | Move::QuackFlee)
+                        && now >= s.until - 0.9
+                    {
+                        out.push(Cmd::Walk {
+                            id: p.id,
+                            x: q.x,
+                            pace: 2.6,
+                        });
+                    }
+                }
+            }
             Phase::Shrug if now >= s.until => {
                 self.skit = Some(s);
                 return self.make_up(now, actors);
@@ -314,6 +415,8 @@ impl Director {
         });
         let (kind, (a, b)) = match talk {
             Some(i) if rng.bool() => (Kind::TalkPast, pairs[i]),
+            // Half the time they play instead of squabbling.
+            _ if rng.bool() => (Kind::Play, pairs[rng.usize(..pairs.len())]),
             _ => (Kind::GlareChase, pairs[rng.usize(..pairs.len())]),
         };
         self.skit = Some(Skit {
@@ -337,6 +440,82 @@ impl Director {
             },
         ]
     }
+}
+
+/// One pet's turn at a play-fight against `other`: its own move, and how
+/// the other takes it.
+fn play_turn(me: Actor, other: Actor) -> Vec<Cmd> {
+    let away = |d: f32| if me.x >= other.x { me.x + d } else { me.x - d };
+    let mut out = match me.species.play_move() {
+        Move::BowZoom => vec![
+            Cmd::Act {
+                id: me.id,
+                act: Act::Stretch,
+            },
+            Cmd::Walk {
+                id: me.id,
+                x: away(320.0),
+                pace: 3.4,
+            },
+        ],
+        Move::SwatTurn => vec![
+            Cmd::Act {
+                id: me.id,
+                act: Act::Paw,
+            },
+            Cmd::Face {
+                id: me.id,
+                x: away(100.0),
+            },
+        ],
+        Move::RollStuck => vec![Cmd::Express {
+            id: me.id,
+            expression: Expression::Giggle,
+        }],
+        Move::PeckHop => vec![
+            Cmd::Act {
+                id: me.id,
+                act: Act::Peck,
+            },
+            Cmd::Hop { id: me.id },
+        ],
+        Move::QuackFlee => vec![
+            Cmd::Say {
+                id: me.id,
+                line: Line::SkitHuff,
+            },
+            Cmd::Walk {
+                id: me.id,
+                x: away(260.0),
+                pace: 2.8,
+            },
+        ],
+        Move::PuffStare => vec![
+            Cmd::Act {
+                id: me.id,
+                act: Act::Flap,
+            },
+            Cmd::Express {
+                id: me.id,
+                expression: Expression::FedUp,
+            },
+        ],
+        Move::TailSwat => vec![Cmd::Act {
+            id: me.id,
+            act: Act::Swish,
+        }],
+    };
+    // The fox's tail tip tickles: the other one giggles. Anyone else
+    // gets a hop of surprise.
+    out.push(if me.species == Species::Fox {
+        Cmd::Express {
+            id: other.id,
+            expression: Expression::Giggle,
+        }
+    } else {
+        Cmd::Hop { id: other.id }
+    });
+    out
 }
 
 #[cfg(test)]
@@ -389,11 +568,28 @@ mod tests {
         t
     }
 
+    /// A director that has just started a skit of `kind` between pets 1
+    /// and 2 (trying seeds until one does), and when.
+    fn started_as(kind: Kind, cast: &[Actor]) -> (Director, f64) {
+        for seed in 0..50 {
+            let mut rng = fastrand::Rng::with_seed(seed);
+            let mut dir = Director::default();
+            let mut t = 0.0;
+            while !dir.involves(1) {
+                dir.tick(t, true, 2, cast, &mut rng);
+                t += 1.0;
+            }
+            if dir.skit.is_some_and(|s| s.kind == kind) {
+                return (dir, t);
+            }
+        }
+        panic!("never started a {kind:?}");
+    }
+
     #[test]
     fn a_squabble_always_ends_in_making_up() {
         let cast = actors([Species::Shiba, Species::Fold], [100.0, 900.0]);
-        let mut dir = Director::default();
-        let t = started(&mut dir, &cast);
+        let (mut dir, t) = started_as(Kind::GlareChase, &cast);
         let lines = play(&mut dir, cast, t);
         assert_eq!(lines.first(), Some(&Line::SkitGlare));
         assert_eq!(lines.last(), Some(&Line::SkitMakeUp));
@@ -401,10 +597,52 @@ mod tests {
     }
 
     #[test]
+    fn a_play_fight_is_up_close_in_turns_and_ends_happy() {
+        let cast = actors([Species::Fox, Species::Munchkin], [100.0, 900.0]);
+        let (mut dir, t) = started_as(Kind::Play, &cast);
+        let mut cast = cast;
+        let mut rng = fastrand::Rng::with_seed(3);
+        let (mut closest, mut swats, mut giggles, mut happy) = (f32::MAX, 0, 0, 0);
+        let mut now = t;
+        for _ in 0..4000 {
+            for cmd in dir.tick(now, true, 2, &cast, &mut rng) {
+                match cmd {
+                    Cmd::Walk { id, x, .. } => {
+                        let p = cast.iter_mut().find(|p| p.id == id).unwrap();
+                        p.x += (x - p.x).clamp(-4.0, 4.0);
+                    }
+                    Cmd::Act {
+                        id: 1,
+                        act: Act::Swish,
+                    } => swats += 1,
+                    Cmd::Express {
+                        id: 2,
+                        expression: Expression::Giggle,
+                    } => giggles += 1,
+                    Cmd::Express {
+                        expression: Expression::Happy,
+                        ..
+                    } => happy += 1,
+                    _ => {}
+                }
+            }
+            closest = closest.min((cast[0].x - cast[1].x).abs());
+            if !dir.involves(1) {
+                break;
+            }
+            now += 0.05;
+        }
+        assert!(!dir.involves(1), "never ended");
+        assert!(closest <= CONTACT, "never closer than {closest}");
+        assert_eq!(swats, 3, "the fox swatted {swats} times");
+        assert!(giggles >= 3, "tickled {giggles} times");
+        assert_eq!(happy, 2);
+    }
+
+    #[test]
     fn breaking_it_up_makes_them_make_up_at_once() {
         let cast = actors([Species::Shiba, Species::Owl], [100.0, 900.0]);
-        let mut dir = Director::default();
-        let t = started(&mut dir, &cast);
+        let (mut dir, t) = started_as(Kind::GlareChase, &cast);
         let cmds = dir.interrupt(2, t + 1.0, &cast);
         assert!(cmds.contains(&Cmd::Say {
             id: 1,

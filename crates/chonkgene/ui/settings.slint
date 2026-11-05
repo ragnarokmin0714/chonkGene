@@ -358,6 +358,8 @@ export component SettingsWindow inherits Window {
     // Don't disturb.
     in-out property <bool> hide-fullscreen;
     callback hide-fullscreen-toggled(bool);
+    in-out property <bool> react-input;
+    callback react-input-toggled(bool);
 
     // General.
     in-out property <bool> start-login;
@@ -789,6 +791,15 @@ export component SettingsWindow inherits Window {
                                     Hint { text: "看影片、玩遊戲或簡報時，牠們會先躲起來，結束後再回來。"; }
                                 }
                                 PawSwitch { checked <=> root.hide-fullscreen; toggled(v) => { root.hide-fullscreen-toggled(v); } }
+                            }
+                            Row {
+                                VerticalLayout {
+                                    alignment: center;
+                                    spacing: 4px;
+                                    Label { text: "陪你打字和看書"; }
+                                    Hint { text: "打字時牠們會跟著拍拍腳，滑鼠停著時會趴下來陪你。只看鍵盤和滑鼠有沒有在用，不會讀你打的字。"; }
+                                }
+                                PawSwitch { checked <=> root.react-input; toggled(v) => { root.react-input-toggled(v); } }
                             }
                             Row {
                                 VerticalLayout {

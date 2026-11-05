@@ -42,6 +42,9 @@ const TUCK_LEAN: f32 = 26.0;
 const TUCK_DROP: f32 = 0.08;
 /// Body rise over a planted leg, world units; the body's slide over it.
 const BOB: f32 = 0.03;
+/// How far a swimming bird sinks, world units: its feet and the bottom of
+/// its body under the water.
+pub const SWIM_SINK: f32 = 0.2;
 const SLIDE: f32 = 0.045;
 
 /// Walks either way.
@@ -152,6 +155,28 @@ impl Mover {
         }
     }
 
+    /// Lie down awake (趴下, a still mouse); a bird sits.
+    pub fn rest(&mut self, on: bool) {
+        match self {
+            Self::Quad(w) => w.rest(on),
+            Self::Biped(w) => w.rest(on),
+        }
+    }
+
+    /// Fly (birds only; the rest have no wings to).
+    pub fn fly(&mut self, on: bool) {
+        if let Self::Biped(w) = self {
+            w.fly(on);
+        }
+    }
+
+    /// Swim (birds only).
+    pub fn swim(&mut self, on: bool) {
+        if let Self::Biped(w) = self {
+            w.swim(on);
+        }
+    }
+
     pub fn look(&mut self, deg: f32) {
         match self {
             Self::Quad(w) => w.look(deg),
@@ -216,6 +241,14 @@ pub struct Waddle {
     sit: Spring,
     lying: bool,
     lie: Spring,
+    /// Sitting down awake for a while (趴下, a still mouse): no tuck.
+    resting: bool,
+    /// In the air, and how far into the flying pose; on the water, and how
+    /// far down in it.
+    flying: bool,
+    fly: Spring,
+    swimming: bool,
+    swim: Spring,
     gesture: Option<Gesture>,
     tempo: f32,
     look: Spring,
@@ -283,6 +316,11 @@ impl Waddle {
             sit: Spring::default(),
             lying: false,
             lie: Spring::default(),
+            resting: false,
+            flying: false,
+            fly: Spring::default(),
+            swimming: false,
+            swim: Spring::default(),
             gesture: None,
             tempo: 1.0,
             look: Spring::default(),
@@ -340,6 +378,21 @@ impl Waddle {
         self.lying = on;
     }
 
+    /// Settle down awake: a bird just sits, head up.
+    pub fn rest(&mut self, on: bool) {
+        self.resting = on;
+    }
+
+    /// Fly: wings beating, feet tucked up, side on to where it goes.
+    pub fn fly(&mut self, on: bool) {
+        self.flying = on;
+    }
+
+    /// Swim: low in the water, paddling, bobbing on it.
+    pub fn swim(&mut self, on: bool) {
+        self.swimming = on;
+    }
+
     pub fn look(&mut self, deg: f32) {
         self.look_goal = deg;
     }
@@ -386,7 +439,7 @@ impl Waddle {
         let touched = self.feel.gaze.is_some() && !self.feel.behind();
         let yaw = self.yaw.step(
             facing
-                * if going {
+                * if going || self.flying {
                     WALK_YAW
                 } else if self.feel.mood == Mood::Sulk {
                     SULK_YAW
@@ -413,7 +466,11 @@ impl Waddle {
         let up_hz = if walking { 2.5 } else { 1.2 };
         // Laughing, melted or sulking, a bird sits down for it.
         let moody = matches!(self.feel.mood, Mood::Laugh | Mood::FedUp | Mood::Sulk);
-        let sit_goal = if (self.sitting || self.lying || moody) && !walking {
+        let sit_goal = if (self.sitting || self.lying || self.resting || moody)
+            && !walking
+            && !self.flying
+            && !self.swimming
+        {
             1.0
         } else {
             0.0
@@ -666,6 +723,34 @@ impl Waddle {
                         j[leg].shift.y += e * 0.05 * p.cos().max(0.0);
                     }
                 }
+                // 握手 for a bird: a wing held out to you, shaking.
+                Act::Paw => {
+                    let shake = (TAU * 2.6 * g.t).sin();
+                    let (k, sign) = if facing > 0.0 { (0, 1.0) } else { (1, -1.0) };
+                    if let Some(w) = self.wings[k] {
+                        j[w].rot.z += sign * e * (55.0 + 8.0 * shake);
+                        j[w].rot.x -= e * 30.0;
+                    }
+                    j[self.head].rot.z += facing * 10.0 * e;
+                }
+                // Typing along: the feet patter in turn.
+                Act::Tap => {
+                    for (k, &leg) in self.legs.iter().enumerate() {
+                        let p = TAU * 4.5 * g.t + PI * k as f32;
+                        j[leg].shift.y += e * 0.05 * p.sin().max(0.0);
+                    }
+                    j[self.head].rot.x += e * 5.0 * (TAU * 4.5 * g.t).sin().abs();
+                }
+                // The head tipped right over, listening.
+                Act::Tilt => {
+                    j[self.head].rot.z += facing * 30.0 * e;
+                }
+                // Beak down at the floor, poking about.
+                Act::Sniff | Act::Rub => {
+                    let poke = peck(g.t, 2.4);
+                    j[self.body].rot.x += e * 12.0;
+                    j[self.head].rot.x += e * (20.0 + 10.0 * poke);
+                }
                 // One wing up, waving.
                 Act::Wave => {
                     let wiggle = (TAU * 2.2 * g.t).sin();
@@ -676,6 +761,47 @@ impl Waddle {
                 _ => {}
             }
         }
+        // Flying: the body tips forward, the feet tuck up behind, the
+        // wings beat wide and the head stays up looking ahead.
+        let fly = self
+            .fly
+            .step(if self.flying { 1.0 } else { 0.0 }, 0.0, 2.5, 1.0, dt)
+            .clamp(0.0, 1.0);
+        if fly > 0.0 {
+            let beat = (TAU * 4.2 * self.moods.clock()).sin();
+            j[self.body].rot.x += 24.0 * fly;
+            j[self.head].rot.x -= 22.0 * fly;
+            for &leg in &self.legs {
+                j[leg].rot.x += 55.0 * fly;
+            }
+            for (side, wing) in self.wings.iter().enumerate() {
+                if let Some(w) = *wing {
+                    let sign = if side == 0 { 1.0 } else { -1.0 };
+                    j[w].rot.z += sign * fly * (55.0 + 45.0 * beat);
+                    j[w].rot.x -= 10.0 * fly * beat;
+                }
+            }
+            j[self.body].shift.y += 0.03 * fly * beat;
+        }
+        // Swimming: sunk to the waterline (the water is drawn over the
+        // rest), the feet paddling under it, bobbing gently.
+        let swim = self
+            .swim
+            .step(if self.swimming { 1.0 } else { 0.0 }, 0.0, 1.2, 1.0, dt)
+            .clamp(0.0, 1.0);
+        if swim > 0.0 {
+            let t = self.moods.clock();
+            j[0].shift.y -= SWIM_SINK * swim;
+            j[self.body].shift.y += 0.015 * swim * (TAU * 0.9 * t).sin();
+            j[self.body].rot.z += 3.0 * swim * (TAU * 0.6 * t).sin();
+            for (k, &leg) in self.legs.iter().enumerate() {
+                let p = TAU * 1.8 * t + PI * k as f32;
+                j[leg].rot.x += swim * 28.0 * p.sin();
+            }
+            if let Some(tl) = self.tail {
+                j[tl].rot.z += swim * 10.0 * (TAU * 1.4 * t).sin();
+            }
+        }
         self.react(&mut j, &lv, dt, facing);
         self.fidgets(&mut j, &f, sit, dt);
         self.busy = s > 0.0
@@ -684,6 +810,8 @@ impl Waddle {
             || self.look.v.abs() > 1.0
             || self.sit.v.abs() > 0.02
             || self.lie.v.abs() > 0.02
+            || fly > 0.0
+            || swim > 0.0
             || lv.attend > 0.01;
         j
     }

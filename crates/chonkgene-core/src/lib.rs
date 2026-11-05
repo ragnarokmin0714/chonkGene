@@ -3,9 +3,11 @@
 //! Time is passed in as seconds (`f64`) so every rule can be tested without
 //! a clock.
 
+pub mod activity;
 pub mod anim;
 pub mod mind;
 pub mod motion;
+pub mod play;
 pub mod shake;
 pub mod skit;
 pub mod sound;

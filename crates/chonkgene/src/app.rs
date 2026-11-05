@@ -11,6 +11,7 @@ use chonkgene_core::Zone;
 use chonkgene_core::anim::{Act, Animator, Expression, HOLD_SECS};
 use chonkgene_core::mind::{Line, Mind, Out, World, XP_PER_LEVEL};
 use chonkgene_core::motion::{Area, Body, Motion};
+use chonkgene_core::play::{Command as Ask, Thing};
 use chonkgene_core::shake::ShakeDetector;
 use chonkgene_core::skit::{Actor, Cmd, Director};
 use chonkgene_core::sound::{Class, Sound, TAKES};
@@ -35,6 +36,8 @@ use crate::brand;
 use crate::ipc::{self, Claim, Msg};
 use crate::lines::Lines;
 use crate::store::{self, DataDir, PetSave, Pets, Settings};
+
+mod play;
 
 const STATS_EVERY: Duration = Duration::from_secs(5);
 const SAVE_EVERY: Duration = Duration::from_secs(5);
@@ -187,6 +190,8 @@ struct Pet {
     playing: bool,
     play_at: f64,
     pounce_at: Option<f64>,
+    /// Toys, commands, scenes, effects (app/play.rs).
+    fun: play::Fun,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -203,6 +208,13 @@ enum Action {
     Bye,
     /// Take out the grass stalk, or put it away.
     Toy,
+    /// The page of things to ask it (叫牠…), and back from it.
+    Commands,
+    Back,
+    Command(Ask),
+    /// Throw a ball or a frisbee; put down catnip (or take it away).
+    Throw(Thing),
+    Catnip,
 }
 
 struct Menu {
@@ -356,6 +368,8 @@ struct App {
     pets: Vec<Pet>,
     menu: Option<Menu>,
     toy: Option<Toy>,
+    /// Things on the desktop to play with (app/play.rs).
+    play: play::Playground,
     hidden: bool,
     fullscreen: bool,
     user_idle: f64,
@@ -440,6 +454,7 @@ impl App {
             pets: Vec::new(),
             menu: None,
             toy: None,
+            play: play::Playground::default(),
             hidden: false,
             fullscreen: false,
             user_idle: 0.0,
@@ -548,7 +563,9 @@ impl App {
             .map(|p| p.body.size.1)
             .fold(0.0, f32::max)
             .max(1.0);
-        let terrain = Terrain::new(floors, &windows, headroom);
+        let terrain = self
+            .play
+            .with_perch(Terrain::new(floors, &windows, headroom));
         let now = Instant::now();
         let dt = (now - self.terrain_read).as_secs_f32();
         self.terrain_read = now;
@@ -691,12 +708,66 @@ impl App {
                 self.set_visible();
             }
             TrayCommand::Toy => self.toggle_toy(el),
+            TrayCommand::Ball => self.throw(el, Thing::Ball),
+            TrayCommand::Frisbee => self.throw(el, Thing::Frisbee),
+            TrayCommand::Catnip => self.catnip(el),
             TrayCommand::Settings => self.open_settings(None),
             TrayCommand::Quit => {
                 self.save_now();
                 el.exit();
             }
         }
+    }
+
+    /// Throw a ball or a frisbee from where the cursor is (PLAN §8,
+    /// Roger's fourth pass, item 2).
+    fn throw(&mut self, el: &ActiveEventLoop, thing: Thing) {
+        let Some(shared) = &self.shared else {
+            return;
+        };
+        if self.hidden || self.fullscreen {
+            return;
+        }
+        let at = shared.cursor().unwrap_or((
+            (self.area.x + self.area.w / 2.0) as i32,
+            (self.area.y + self.area.h / 2.0) as i32,
+        ));
+        let now = self.secs(Instant::now());
+        self.play.throw(
+            el,
+            shared,
+            &mut self.pets,
+            thing,
+            (at.0 as f32, at.1 as f32),
+            self.area,
+            self.ui_scale,
+            now,
+        );
+    }
+
+    /// Put down a sprig of catnip under the cursor, or take it away (PLAN
+    /// §8 "Catnip").
+    fn catnip(&mut self, el: &ActiveEventLoop) {
+        let Some(shared) = &self.shared else {
+            return;
+        };
+        if self.hidden || self.fullscreen {
+            return;
+        }
+        let at = shared.cursor().unwrap_or((
+            (self.area.x + self.area.w / 2.0) as i32,
+            (self.area.y + self.area.h / 2.0) as i32,
+        ));
+        // Dropped from just under the cursor onto whatever is below.
+        let now = self.secs(Instant::now());
+        self.play.catnip(
+            el,
+            shared,
+            &mut self.pets,
+            (at.0 as f32, at.1 as f32 + 20.0),
+            self.ui_scale,
+            now,
+        );
     }
 
     /// Take out the grass stalk (a window on the cursor that lets clicks
@@ -806,6 +877,10 @@ impl App {
             toy.window.set_visible(visible);
             toy.presenter.restyle();
         }
+        if let Some(shared) = &self.shared {
+            let now = self.secs(Instant::now());
+            self.play.set_visible(shared, now, visible);
+        }
     }
 
     fn handle(&mut self, el: &ActiveEventLoop, msg: Msg) {
@@ -899,22 +974,36 @@ impl App {
         }
     }
 
-    fn open_menu(&mut self, el: &ActiveEventLoop, i: usize, world: &World) {
-        let Some(shared) = &self.shared else {
-            return;
-        };
+    /// The pet's right-click menu at the cursor (or with its top-left at
+    /// `at`: turning to the commands page and back keeps it in place);
+    /// `commands`: the page of things to ask it (叫牠…).
+    fn open_menu(
+        &mut self,
+        el: &ActiveEventLoop,
+        i: usize,
+        world: &World,
+        commands: bool,
+        at: Option<(i32, i32)>,
+    ) {
         let p = &self.pets[i];
         let asleep = p.mind.asleep();
         let snacks = p.mind.snacks_left(world.day);
-        let kind = &self.kinds[&p.species];
-        let coat = kind.model.coat(&p.save.coat).unwrap_or(0);
-        let avatar = kind.model.coats[coat].swatch();
         let item = |label: &str, hint: Option<String>, icon, separated| Item {
             label: label.into(),
             hint,
             icon,
             separated,
         };
+        if commands {
+            let mut items: Vec<Item> = ["坐下", "趴下", "過來", "轉圈", "握手"]
+                .iter()
+                .map(|label| item(label, None, Icon::Paw, false))
+                .collect();
+            let mut actions: Vec<Action> = Ask::ALL.iter().map(|&c| Action::Command(c)).collect();
+            items.push(item("返回", None, Icon::Back, true));
+            actions.push(Action::Back);
+            return self.show_menu(el, i, items, actions, at);
+        }
         let mut items = vec![
             item("摸摸頭", None, Icon::Heart, false),
             item(
@@ -949,6 +1038,27 @@ impl App {
             false,
         ));
         actions.push(Action::Toy);
+        // Things to play with (PLAN §8, Roger's fourth pass, item 2, and
+        // "Catnip"); asking it to do something only while it is awake.
+        if !asleep {
+            items.push(item("叫牠…", None, Icon::Paw, false));
+            actions.push(Action::Commands);
+        }
+        items.push(item("丟球給牠們", None, Icon::Ball, false));
+        actions.push(Action::Throw(Thing::Ball));
+        items.push(item("丟飛盤給牠們", None, Icon::Frisbee, false));
+        actions.push(Action::Throw(Thing::Frisbee));
+        items.push(item(
+            if self.play.has(Thing::Catnip) {
+                "把貓薄荷收起來"
+            } else {
+                "放一把貓薄荷"
+            },
+            None,
+            Icon::Leaf,
+            false,
+        ));
+        actions.push(Action::Catnip);
         items.push(item("說再見…", None, Icon::Bye, false));
         actions.push(Action::Bye);
         items.push(item(
@@ -960,6 +1070,26 @@ impl App {
         items.push(item("設定…", None, Icon::Sliders, false));
         items.push(item("結束肉肉賴桌", None, Icon::Exit, false));
         actions.extend([Action::HideAll, Action::Settings, Action::Quit]);
+        self.show_menu(el, i, items, actions, at);
+    }
+
+    /// Draw and open the menu of pet `i` with these rows.
+    fn show_menu(
+        &mut self,
+        el: &ActiveEventLoop,
+        i: usize,
+        items: Vec<Item>,
+        actions: Vec<Action>,
+        at: Option<(i32, i32)>,
+    ) {
+        let Some(shared) = &self.shared else {
+            return;
+        };
+        let p = &self.pets[i];
+        let asleep = p.mind.asleep();
+        let kind = &self.kinds[&p.species];
+        let coat = kind.model.coat(&p.save.coat).unwrap_or(0);
+        let avatar = kind.model.coats[coat].swatch();
         let status = if asleep {
             Some("睡覺中".to_string())
         } else if p.mind.grumpy() {
@@ -991,9 +1121,10 @@ impl App {
             self.area.w as i32,
             self.area.h as i32,
         );
+        let pos = at.unwrap_or((cursor.0 + 4, cursor.1 - h / 3));
         let pos = (
-            (cursor.0 + 4).clamp(ax, (ax + aw - w).max(ax)),
-            (cursor.1 - h / 3).clamp(ay, (ay + ah - h).max(ay)),
+            pos.0.clamp(ax, (ax + aw - w).max(ax)),
+            pos.1.clamp(ay, (ay + ah - h).max(ay)),
         );
         let attrs = chonkgene_platform::pet_window((w as u32, h as u32), pos, "肉肉賴桌");
         let Ok(window) = el.create_window(attrs) else {
@@ -1032,10 +1163,29 @@ impl App {
     }
 
     fn act(&mut self, el: &ActiveEventLoop, pet: u64, action: Action) {
-        self.menu = None;
+        let at = self.menu.take().map(|m| m.pos);
         let now = Instant::now();
         let world = self.world(now);
         match action {
+            Action::Commands | Action::Back => {
+                if let Some(i) = self.pets.iter().position(|p| p.save.id == pet) {
+                    self.open_menu(el, i, &world, action == Action::Commands, at);
+                }
+                return;
+            }
+            Action::Throw(thing) => return self.throw(el, thing),
+            Action::Catnip => return self.catnip(el),
+            Action::Command(command) => {
+                if let Some(p) = self.pets.iter_mut().find(|p| p.save.id == pet) {
+                    let moody = p.mind.grumpy()
+                        || matches!(p.anim.expression, Expression::FedUp | Expression::Sulk);
+                    let roll = p.rng.f32();
+                    p.fun
+                        .ask(command, world.now, p.mind.affinity.level, moody, roll);
+                    p.next = now;
+                }
+                return;
+            }
             Action::HideAll => {
                 self.hidden = true;
                 self.set_visible();
@@ -1144,7 +1294,7 @@ fn pending_save(dirty: bool, save_at: Instant) -> Option<Instant> {
 }
 
 /// The pets as the skit director sees them.
-fn actors(pets: &[Pet]) -> Vec<Actor> {
+fn actors(pets: &[Pet], now: f64) -> Vec<Actor> {
     pets.iter()
         .map(|p| Actor {
             id: p.save.id,
@@ -1155,7 +1305,9 @@ fn actors(pets: &[Pet]) -> Vec<Actor> {
                 && p.act.is_none()
                 && p.press.is_none()
                 && p.body.motion != Motion::Fall
-                && p.anim.expression != Expression::Sulk,
+                && p.anim.expression != Expression::Sulk
+                // Busy with a toy, a scene, catnip or something asked.
+                && !p.fun.busy(now),
         })
         .collect()
 }
@@ -1166,7 +1318,9 @@ fn direct(pets: &mut [Pet], ctx: &mut Ctx, cmds: Vec<Cmd>) {
             Cmd::Walk { id, .. }
             | Cmd::Face { id, .. }
             | Cmd::Say { id, .. }
-            | Cmd::Express { id, .. } => id,
+            | Cmd::Express { id, .. }
+            | Cmd::Act { id, .. }
+            | Cmd::Hop { id } => id,
         };
         let Some(p) = pets.iter_mut().find(|p| p.save.id == id) else {
             continue;
@@ -1193,6 +1347,24 @@ fn direct(pets: &mut [Pet], ctx: &mut Ctx, cmds: Vec<Cmd>) {
                     p.happy_until = ctx.world.now + HAPPY_SECS;
                 }
             }
+            Cmd::Act { act, .. } => {
+                if p.body.motion == Motion::Walk {
+                    p.body.motion = Motion::Idle;
+                }
+                p.anim.gesture(act);
+                // The fox's bell rings as its tails swing.
+                if act == Act::Swish && ctx.sound_on {
+                    ctx.sounds.play(
+                        p.save.id,
+                        p.species,
+                        Sound::Bell,
+                        ctx.world.now,
+                        ctx.volume,
+                        1.0,
+                    );
+                }
+            }
+            Cmd::Hop { .. } => p.anim.pounce(),
         }
     }
 }
@@ -1270,6 +1442,7 @@ fn spawn(
         playing: false,
         play_at: 0.0,
         pounce_at: None,
+        fun: play::Fun::new(scale),
         save,
     })
 }
@@ -1474,9 +1647,11 @@ impl Pet {
             self.switch_at = self.switch_at.max(done);
         }
         if let Some(e) = out.expression {
-            // Cheered up (a pat): a happy double hop.
+            // Cheered up (a pat): a happy double hop, and hearts.
             if e == Expression::Happy && self.anim.expression != Expression::Happy && !eating {
                 self.anim.cheer();
+                self.fun
+                    .effect(chonkgene_render::props::Fx::Hearts, ctx.world.now);
             }
             self.anim.expression = e;
             if e == Expression::Happy {
@@ -1496,6 +1671,10 @@ impl Pet {
                 }
                 _ => {}
             }
+        }
+        if out.level_up {
+            self.fun
+                .effect(chonkgene_render::props::Fx::Sparkles, ctx.world.now);
         }
         let line = out.line.or(out.level_up.then_some(Line::LevelUp));
         if let Some(line) = line {
@@ -1551,6 +1730,9 @@ impl Pet {
                     println!("pet {i}: lands on a window");
                 }
                 self.anim.land(landing.speed);
+                if landing.speed > 600.0 {
+                    self.fun.effect(chonkgene_render::props::Fx::Dust, t);
+                }
                 if ctx.sound_on && landing.speed > 600.0 {
                     let pitch = self.pitch();
                     ctx.sounds.play(
@@ -1574,11 +1756,12 @@ impl Pet {
                     }
                 }
             }
-            let free = !self.mind.asleep() && self.act.is_none() && !self.in_skit;
-            if !self.in_skit && self.act.is_none() && self.body.pace != 1.0 {
+            let busy = self.fun.busy(t);
+            let free = !self.mind.asleep() && self.act.is_none() && !self.in_skit && !busy;
+            if !self.in_skit && self.act.is_none() && !busy && self.body.pace != 1.0 {
                 self.body.pace = 1.0;
             }
-            if self.mind.asleep() && self.body.motion == Motion::Walk {
+            if self.mind.asleep() && self.body.motion == Motion::Walk && !busy {
                 self.body.motion = Motion::Idle;
             }
             let playing = free
@@ -1710,14 +1893,22 @@ impl Pet {
         } else {
             self.renderer.render(&params, self.anim.expression);
         }
-        if !self.renderer.changed() && !self.repaint {
-            return Duration::ZERO;
-        }
-        self.repaint = false;
+        // Effects, a toy in its mouth, water, fire: drawn over a copy of
+        // its picture, every frame while they are on.
+        let had = self.fun.had_overlay;
+        let changed = self.renderer.changed();
+        let overlay = self.compose(t);
+        let pixmap = match &self.fun.canvas {
+            Some(pm) if overlay => pm,
+            _ if changed || self.repaint || had => self.renderer.pixmap(),
+            _ => return Duration::ZERO,
+        };
         let started = Instant::now();
-        if let Err(e) = self.presenter.present(shared, self.renderer.pixmap()) {
+        if let Err(e) = self.presenter.present(shared, pixmap) {
             eprintln!("present failed: {e}");
         }
+        self.repaint = false;
+        self.fun.had_overlay = overlay;
         started.elapsed()
     }
 
@@ -1878,7 +2069,7 @@ impl ApplicationHandler<UserEvent> for App {
                         let clicked = self.pets[i].press.as_ref().is_some_and(|p| !p.moved);
                         let cmds = if clicked && self.director.involves(id) {
                             // 勸架: a click on a squabbling pet makes both make up.
-                            let cast = actors(&self.pets);
+                            let cast = actors(&self.pets, world.now);
                             self.director.interrupt(id, world.now, &cast)
                         } else {
                             Vec::new()
@@ -1964,7 +2155,9 @@ impl ApplicationHandler<UserEvent> for App {
                         p.next = now;
                         self.dirty = true;
                     }
-                    (MouseButton::Right, ElementState::Pressed) => self.open_menu(el, i, &world),
+                    (MouseButton::Right, ElementState::Pressed) => {
+                        self.open_menu(el, i, &world, false, None)
+                    }
                     _ => {}
                 }
             }
@@ -2057,6 +2250,7 @@ impl ApplicationHandler<UserEvent> for App {
             director,
             settings,
             rng,
+            play,
             ..
         } = self;
         let shared = shared.as_ref().expect("checked above");
@@ -2079,7 +2273,7 @@ impl ApplicationHandler<UserEvent> for App {
             world,
         };
         if visible {
-            let cast = actors(pets);
+            let cast = actors(pets, world.now);
             let cmds = director.tick(
                 world.now,
                 settings.irrational,
@@ -2092,6 +2286,7 @@ impl ApplicationHandler<UserEvent> for App {
                 p.in_skit = director.involves(p.save.id);
             }
         }
+        play::tick(play, pets, &mut ctx, visible, settings.react_to_input);
         for (i, p) in pets.iter_mut().enumerate() {
             if !visible || p.next > now {
                 continue;
@@ -2106,7 +2301,11 @@ impl ApplicationHandler<UserEvent> for App {
             // A pet blending between poses on the GPU, or with a frame on
             // its way, needs frames to show it, even when its animation is
             // otherwise at rest; so does one slowing to a stop.
-            let gliding = if p.body.moving_on() { 30 } else { 0 };
+            let gliding = if p.body.moving_on() || p.fun.had_overlay {
+                30
+            } else {
+                0
+            };
             let fps = p
                 .anim
                 .fps(p.moving())
@@ -2115,6 +2314,10 @@ impl ApplicationHandler<UserEvent> for App {
             p.next = now + Duration::from_secs_f64(1.0 / f64::from(fps));
         }
 
+        // A branch came or went: the owl's perch.
+        if std::mem::take(&mut self.play.terrain_dirty) {
+            self.refresh_terrain();
+        }
         if self.dirty && now >= self.save_at {
             self.save_at = now + SAVE_EVERY;
             self.save_now();
@@ -2134,6 +2337,10 @@ impl ApplicationHandler<UserEvent> for App {
             self.menu.is_some().then(|| now + Duration::from_millis(33)),
             // The grass stalk follows the cursor smoothly.
             (visible && self.toy.is_some()).then(|| now + Duration::from_millis(16)),
+            // Things thrown fly smoothly; the rest move on their own.
+            (visible && !self.play.things.is_empty()).then(|| now + Duration::from_millis(16)),
+            // The input timing is sampled a few times a second.
+            (visible && self.settings.react_to_input).then(|| now + Duration::from_millis(200)),
             self.stats.then_some(self.stats_at),
             // Always ahead of now: it is moved on whenever it is reached.
             visible.then_some(self.terrain_at),

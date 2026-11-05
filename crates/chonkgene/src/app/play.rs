@@ -1,0 +1,1353 @@
+//! Play on the desktop (PLAN §8, Roger's fourth pass, items 2, 4 and 5,
+//! and "Catnip"): things in windows of their own (a ball or a frisbee
+//! thrown, catnip put down, the props of a species' scene), the pets going
+//! after them, doing as they are asked (「叫牠…」), reacting to a still
+//! mouse and to typing, their own little scenes, and the effects drawn
+//! over a pet's picture (hearts, sparkles, dust, the water it swims in, the
+//! fox's fire, a toy in its mouth).
+
+use chonkgene_core::activity::{Activity, Watcher};
+use chonkgene_core::anim::{Act, Expression, Posture};
+use chonkgene_core::mind::Line;
+use chonkgene_core::motion::Motion;
+use chonkgene_core::play::{
+    Chase, Command, Fetch, Order, Prop, SCENE_GAP, Scene, Thing, obey_delay, stay_secs,
+};
+use chonkgene_core::sound::Sound;
+use chonkgene_core::species::Species;
+use chonkgene_platform::{Presenter, Shared};
+use chonkgene_render::props::{self, Fx};
+use chonkgene_render::raymarch::FLOOR_PX;
+use tiny_skia::{Pixmap, PixmapPaint, Transform};
+use winit::dpi::PhysicalPosition;
+use winit::event_loop::ActiveEventLoop;
+use winit::window::Window;
+
+use super::{Ctx, Pet};
+
+/// A thrown toy stays this long after it comes to rest unplayed with,
+/// seconds; catnip is used up over this long.
+const TOY_STAYS: f64 = 60.0;
+const CATNIP_SECS: f64 = 60.0;
+/// Pets go for a thing within this far either side, pixels.
+const REACH: f32 = 1100.0;
+/// How often the input timing is sampled.
+const WATCH_EVERY: f64 = 0.2;
+/// Pixels a world unit at 100% (raymarch.rs).
+const PPU: f32 = 58.0;
+/// Things that move on their own (smell rising, water rippling, a
+/// butterfly) are drawn at this many frames a second.
+const ALIVE_FPS: f64 = 15.0;
+
+/// A thing in a window of its own; it lets every click through.
+pub(super) struct PropWin {
+    pub id: u32,
+    pub prop: Prop,
+    window: Window,
+    presenter: Presenter,
+    pixmap: Pixmap,
+    foot: (f32, f32),
+    placed: (i32, i32),
+    /// When it goes (the app's clock).
+    pub until: f64,
+    /// In a pet's mouth (the pet draws it), so not shown here.
+    pub carrier: Option<u64>,
+    /// Branches grow out from the right edge unless flipped.
+    flip: bool,
+    born: f64,
+    drawn: Option<(f64, (f32, f32), f32, bool)>,
+    shown: bool,
+}
+
+impl PropWin {
+    fn new(
+        el: &ActiveEventLoop,
+        shared: &Shared,
+        id: u32,
+        prop: Prop,
+        now: f64,
+        until: f64,
+    ) -> Option<Self> {
+        let (size, foot) = props::canvas(prop.thing, prop.scale);
+        let pos = Self::pos_for(&prop, foot);
+        let window = el
+            .create_window(chonkgene_platform::pet_window(size, pos, "肉肉賴桌"))
+            .ok()?;
+        let mut presenter = Presenter::new(shared, &window).ok()?;
+        if let Err(e) = presenter.set_ghost(shared) {
+            eprintln!("a thing on the desktop: {e}");
+        }
+        let _ = window.set_cursor_hittest(false);
+        Some(Self {
+            id,
+            prop,
+            window,
+            presenter,
+            pixmap: Pixmap::new(size.0, size.1)?,
+            foot,
+            placed: pos,
+            until,
+            carrier: None,
+            flip: false,
+            born: now,
+            drawn: None,
+            shown: true,
+        })
+    }
+
+    fn pos_for(prop: &Prop, foot: (f32, f32)) -> (i32, i32) {
+        (
+            (prop.pos.0 - foot.0).round() as i32,
+            (prop.pos.1 - foot.1).round() as i32,
+        )
+    }
+
+    /// How used up it is (catnip, seeds; a sunbeam fading), 0 … 1.
+    fn used(&self, now: f64) -> f32 {
+        match self.prop.thing {
+            Thing::Catnip => ((now - self.born) / CATNIP_SECS).clamp(0.0, 1.0) as f32,
+            Thing::Seeds | Thing::Sunbeam => {
+                let span = (self.until - self.born).max(1.0);
+                let left = (self.until - now) / span;
+                if self.prop.thing == Thing::Seeds {
+                    (1.0 - left).clamp(0.0, 1.0) as f32
+                } else {
+                    // A sunbeam fades out over its last two seconds.
+                    (1.0 - (self.until - now) / 2.0).clamp(0.0, 1.0) as f32
+                }
+            }
+            _ => 0.0,
+        }
+    }
+
+    /// Move the window with the thing and draw it again if it changed.
+    fn show(&mut self, shared: &Shared, now: f64, visible: bool) {
+        let visible = visible && self.carrier.is_none();
+        if visible != self.shown {
+            self.window.set_visible(visible);
+            self.presenter.restyle();
+            self.shown = visible;
+            self.drawn = None;
+        }
+        if !visible {
+            return;
+        }
+        let pos = Self::pos_for(&self.prop, self.foot);
+        if pos != self.placed {
+            self.window
+                .set_outer_position(PhysicalPosition::new(pos.0, pos.1));
+            self.placed = pos;
+        }
+        let alive = matches!(
+            self.prop.thing,
+            Thing::Catnip | Thing::Pond | Thing::Sunbeam | Thing::Butterfly | Thing::Branch
+        );
+        let grounded = self.prop.resting || (self.prop.vel.1 == 0.0 && self.prop.thing.falls());
+        let fresh = self.drawn.is_some_and(|(at, _, spin, g)| {
+            (!alive || now - at < 1.0 / ALIVE_FPS) && spin == self.prop.spin && g == grounded
+        });
+        if fresh {
+            return;
+        }
+        self.pixmap.fill(tiny_skia::Color::TRANSPARENT);
+        let look = props::Look {
+            spin: self.prop.spin,
+            t: (now - self.born) as f32,
+            used: self.used(now),
+            grounded,
+            flip: self.flip,
+        };
+        props::draw(
+            &mut self.pixmap,
+            self.prop.thing,
+            self.foot,
+            self.prop.scale,
+            look,
+        );
+        if let Err(e) = self.presenter.present(shared, &self.pixmap) {
+            eprintln!("present failed: {e}");
+        }
+        self.drawn = Some((now, self.prop.pos, self.prop.spin, grounded));
+    }
+}
+
+/// A scene under way.
+#[derive(Clone, Copy, Debug)]
+pub(super) struct Run {
+    pub scene: Scene,
+    /// Its thing's window.
+    prop: Option<u32>,
+    /// 0 going there, 1 doing it, 2 coming back.
+    phase: u8,
+    since: f64,
+    pub until: f64,
+    /// Where it was when the scene began (the owl flies back down here).
+    home: (f32, f32),
+}
+
+/// At the catnip.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Nip {
+    Going,
+    /// Doing something there (the gesture under way), until.
+    At(u8),
+    Leaving,
+}
+
+/// What a pet is up to besides its ordinary life.
+#[derive(Default)]
+pub(super) struct Fun {
+    pub scale: f32,
+    chase: Option<(u32, Chase)>,
+    /// In its mouth.
+    pub carry: Option<Thing>,
+    /// Asked to do something: what, when it gets round to it, and whether
+    /// it was in a mood.
+    order: Option<(Command, f64, bool)>,
+    /// Walking over to here (screen x of its feet).
+    goto: Option<f32>,
+    /// A held posture lasts until then.
+    hold_until: f64,
+    pub scene: Option<Run>,
+    next_scene: f64,
+    nip: Option<(Nip, f64, u8)>,
+    /// Effects under way, since when.
+    pub fx: Vec<(Fx, f64)>,
+    /// Lying about while you read, until then; little things to do there.
+    lounge_until: f64,
+    next_habit: f64,
+    next_tap: f64,
+    next_tilt: f64,
+    /// Curled up by you for this stretch of typing; dozed off to it.
+    curled: bool,
+    dozed: bool,
+    /// Its picture with the effects over it.
+    pub canvas: Option<Pixmap>,
+    /// Drawn with effects last frame: the plain picture must be shown again
+    /// once they are gone.
+    pub had_overlay: bool,
+}
+
+impl Fun {
+    pub fn new(scale: f32) -> Self {
+        Self {
+            scale,
+            ..Self::default()
+        }
+    }
+
+    /// Up to something that the pet's own wandering must leave alone.
+    pub fn busy(&self, now: f64) -> bool {
+        self.chase.is_some()
+            || self.order.is_some()
+            || self.goto.is_some()
+            || self.scene.is_some()
+            || self.nip.is_some()
+            || self.carry.is_some()
+            || now < self.hold_until
+            || now < self.lounge_until
+    }
+
+    pub fn effect(&mut self, fx: Fx, now: f64) {
+        self.fx.retain(|(f, _)| *f != fx);
+        self.fx.push((fx, now));
+    }
+
+    /// Asked from the menu: done after a moment's thought (more in a bad
+    /// mood).
+    pub fn ask(&mut self, command: Command, now: f64, level: u32, moody: bool, roll: f32) {
+        self.order = Some((command, now + obey_delay(level, moody, roll), moody));
+        self.hold_until = 0.0;
+        self.lounge_until = 0.0;
+    }
+}
+
+/// Everything on the desktop to play with, and an eye on the input.
+#[derive(Default)]
+pub(super) struct Playground {
+    pub things: Vec<PropWin>,
+    next_id: u32,
+    watcher: Watcher,
+    watch_at: f64,
+    pub activity: Option<Activity>,
+    /// Where the cursor was when last looked at (screen pixels).
+    pub cursor: Option<(i32, i32)>,
+    /// The clock last go round.
+    last: f64,
+    /// The owl's branch to stand on: (id, y, x0, x1).
+    pub perch: Option<(u32, f32, f32, f32)>,
+    /// The terrain must be read again (a branch came or went).
+    pub terrain_dirty: bool,
+    rng: Option<fastrand::Rng>,
+}
+
+impl Playground {
+    fn roll(&mut self) -> f32 {
+        self.rng.get_or_insert_with(fastrand::Rng::new).f32()
+    }
+
+    fn add(
+        &mut self,
+        el: &ActiveEventLoop,
+        shared: &Shared,
+        prop: Prop,
+        now: f64,
+        until: f64,
+    ) -> Option<u32> {
+        self.next_id += 1;
+        let id = self.next_id;
+        let w = PropWin::new(el, shared, id, prop, now, until)?;
+        self.things.push(w);
+        Some(id)
+    }
+
+    fn get(&self, id: u32) -> Option<&PropWin> {
+        self.things.iter().find(|w| w.id == id)
+    }
+
+    fn get_mut(&mut self, id: u32) -> Option<&mut PropWin> {
+        self.things.iter_mut().find(|w| w.id == id)
+    }
+
+    fn remove(&mut self, id: u32) {
+        self.things.retain(|w| w.id != id);
+        if self.perch.is_some_and(|p| p.0 == id) {
+            self.perch = None;
+            self.terrain_dirty = true;
+        }
+    }
+
+    pub fn has(&self, thing: Thing) -> bool {
+        self.things.iter().any(|w| w.prop.thing == thing)
+    }
+
+    /// Show or hide every thing (the pets are put away, a full-screen app).
+    pub fn set_visible(&mut self, shared: &Shared, now: f64, visible: bool) {
+        for w in &mut self.things {
+            w.show(shared, now, visible);
+        }
+    }
+
+    /// Throw a ball or a frisbee from `from` (screen pixels) toward the
+    /// side with more room; every pet awake goes after it its own way.
+    #[allow(clippy::too_many_arguments)]
+    pub fn throw(
+        &mut self,
+        el: &ActiveEventLoop,
+        shared: &Shared,
+        pets: &mut [Pet],
+        thing: Thing,
+        from: (f32, f32),
+        area: chonkgene_core::motion::Area,
+        scale: f32,
+        now: f64,
+    ) {
+        // One of each at a time: a new throw takes the old one back.
+        let old: Vec<u32> = self
+            .things
+            .iter()
+            .filter(|w| w.prop.thing == thing)
+            .map(|w| w.id)
+            .collect();
+        for id in old {
+            for p in pets.iter_mut() {
+                if p.fun.chase.as_ref().is_some_and(|(c, _)| *c == id) {
+                    p.fun.chase = None;
+                    p.fun.carry = None;
+                }
+            }
+            self.remove(id);
+        }
+        let side = if from.0 < area.x + area.w / 2.0 {
+            1.0
+        } else {
+            -1.0
+        };
+        let prop = Prop::thrown(thing, from, side, scale);
+        let Some(id) = self.add(el, shared, prop, now, now + TOY_STAYS) else {
+            return;
+        };
+        println!("a {thing:?} thrown");
+        for p in pets.iter_mut() {
+            if !p.free_to_play(now) {
+                continue;
+            }
+            println!("{}: goes for the {thing:?}", p.save.name);
+            let roll = self.roll();
+            p.fun.chase = Some((id, Chase::new(p.species.fetch(), from.0, now, roll)));
+            p.fun.lounge_until = 0.0;
+            p.fun.hold_until = 0.0;
+            p.anim.posture = Posture::Free;
+        }
+    }
+
+    /// Put down a sprig of catnip under `at`, or take it away if there is
+    /// one already.
+    pub fn catnip(
+        &mut self,
+        el: &ActiveEventLoop,
+        shared: &Shared,
+        pets: &mut [Pet],
+        at: (f32, f32),
+        scale: f32,
+        now: f64,
+    ) {
+        if let Some(id) = self
+            .things
+            .iter()
+            .find(|w| w.prop.thing == Thing::Catnip)
+            .map(|w| w.id)
+        {
+            self.remove(id);
+            for p in pets.iter_mut() {
+                p.fun.nip = None;
+            }
+            return;
+        }
+        let prop = Prop::put(Thing::Catnip, at, scale);
+        if self.add(el, shared, prop, now, now + CATNIP_SECS).is_none() {
+            return;
+        }
+        println!("catnip put down at ({:.0}, {:.0})", at.0, at.1);
+        for p in pets.iter_mut() {
+            if p.free_to_play(now) && p.fun.chase.is_none() {
+                p.fun.nip = Some((Nip::Going, now, 0));
+            }
+        }
+    }
+
+    /// The terrain with the owl's branch on it, if out.
+    pub fn with_perch(
+        &self,
+        t: chonkgene_core::terrain::Terrain,
+    ) -> chonkgene_core::terrain::Terrain {
+        match self.perch {
+            Some((id, y, x0, x1)) => t.with_perch(id, y, x0, x1),
+            None => t,
+        }
+    }
+}
+
+impl Pet {
+    /// Awake and free to go after a thing.
+    fn free_to_play(&self, now: f64) -> bool {
+        !self.mind.asleep()
+            && !self.in_skit
+            && self.act.is_none()
+            && self.press.is_none()
+            && matches!(self.body.motion, Motion::Idle | Motion::Walk)
+            && self.fun.scene.is_none()
+            && now >= self.fun.hold_until
+    }
+
+    /// Walk to screen x `x` (its feet) at `pace`; true once there.
+    fn walk_to(&mut self, x: f32, pace: f32) -> bool {
+        let (fx, _) = self.body.feet();
+        let near = 0.12 * self.body.size.0;
+        if (x - fx).abs() <= near {
+            if self.body.motion == Motion::Walk {
+                self.body.motion = Motion::Idle;
+            }
+            return true;
+        }
+        self.body.facing = if x < fx { -1.0 } else { 1.0 };
+        self.body.motion = Motion::Walk;
+        self.body.pace = pace;
+        false
+    }
+
+    fn stop(&mut self) {
+        if self.body.motion == Motion::Walk {
+            self.body.motion = Motion::Idle;
+        }
+        self.body.pace = 1.0;
+    }
+
+    /// A gesture if it is standing free for one (not still walking); true
+    /// if it started.
+    fn try_gesture(&mut self, act: Act) -> bool {
+        if self.body.speed > 0.0 || self.anim.walking {
+            self.stop();
+            return false;
+        }
+        self.anim.gesture(act);
+        self.anim.doing() == Some(act)
+    }
+
+    fn bell(&self, ctx: &mut Ctx) {
+        if ctx.sound_on && self.species == Species::Fox {
+            ctx.sounds.play(
+                self.save.id,
+                self.species,
+                Sound::Bell,
+                ctx.world.now,
+                ctx.volume,
+                1.0,
+            );
+        }
+    }
+
+    /// A thing drawn in its mouth, effects over its picture, the water it
+    /// swims in, the fox's fire: its picture with them in `fun.canvas`;
+    /// false if none are on.
+    pub(super) fn compose(&mut self, t: f64) -> bool {
+        let s = self.fun.scale;
+        self.fun
+            .fx
+            .retain(|(fx, since)| t - since < f64::from(fx.secs()));
+        let swimming = self.anim.posture == Posture::Swim;
+        let fire = self
+            .fun
+            .scene
+            .is_some_and(|r| r.scene == Scene::Foxfire && r.phase == 1);
+        let any = !self.fun.fx.is_empty() || self.fun.carry.is_some() || swimming || fire;
+        if !any {
+            return false;
+        }
+        let base = self.renderer.pixmap();
+        let fits = self
+            .fun
+            .canvas
+            .as_ref()
+            .is_some_and(|c| c.width() == base.width() && c.height() == base.height());
+        if !fits {
+            self.fun.canvas = Pixmap::new(base.width(), base.height());
+        }
+        let Some(canvas) = self.fun.canvas.as_mut() else {
+            return false;
+        };
+        let (w, h) = (base.width() as f32, base.height() as f32);
+        let floor = h - FLOOR_PX * s;
+        canvas.fill(tiny_skia::Color::TRANSPARENT);
+        if fire {
+            // Behind it, then the pet, then the ones in front: drawn twice
+            // over is near enough, the orbs being small.
+            props::foxfire(
+                canvas,
+                (w / 2.0, floor - 0.4 * h),
+                (0.42 * w, 0.18 * h),
+                s,
+                t as f32,
+            );
+        }
+        canvas.draw_pixmap(
+            0,
+            0,
+            base.as_ref(),
+            &PixmapPaint::default(),
+            Transform::identity(),
+            None,
+        );
+        if swimming {
+            let line = floor - 0.13 * PPU * s;
+            props::water(canvas, w / 2.0, line, 0.42 * w, s, t as f32);
+        }
+        if let Some(thing) = self.fun.carry {
+            let at = self.renderer.mouth(self.anim.facing);
+            let (_, th) = thing.size();
+            let look = props::Look {
+                spin: if thing == Thing::Bone { 0.0 } else { 0.4 },
+                t: t as f32,
+                ..props::Look::default()
+            };
+            // Held across the mouth, a little smaller than on the floor.
+            props::draw(canvas, thing, (at.0, at.1 + 0.4 * th * s), 0.8 * s, look);
+        }
+        let head = self.renderer.anchor();
+        let mouth = self.renderer.mouth(self.anim.facing);
+        for &(fx, since) in &self.fun.fx {
+            let at = match fx {
+                Fx::Hearts => head,
+                Fx::Sparkles => mouth,
+                Fx::Dust => (w / 2.0, floor),
+                Fx::Splash => (w / 2.0, floor - 0.13 * PPU * s),
+            };
+            props::effect(canvas, fx, at, s, (t - since) as f32);
+        }
+        true
+    }
+}
+
+/// One go round the playground: the input timing, the things' physics,
+/// every pet's chase, order, scene and catnip, and reactions to what you
+/// are doing. `visible`: the pets are out.
+pub(super) fn tick(
+    ground: &mut Playground,
+    pets: &mut [Pet],
+    ctx: &mut Ctx,
+    visible: bool,
+    react: bool,
+) {
+    let now = ctx.world.now;
+    let dt = (now - ground.last).clamp(0.0, 0.1) as f32;
+    ground.last = now;
+    if now >= ground.watch_at {
+        ground.watch_at = now + WATCH_EVERY;
+        ground.cursor = ctx.shared.cursor();
+        ground
+            .watcher
+            .feed(now, ground.cursor, ctx.shared.idle_secs());
+        ground.activity = Some(ground.watcher.activity(now));
+    }
+    let cursor = ground.cursor;
+    // The things fall, bounce and roll; the used up go.
+    let gone: Vec<u32> = ground
+        .things
+        .iter()
+        .filter(|w| now >= w.until && w.carrier.is_none())
+        .map(|w| w.id)
+        .collect();
+    for id in gone {
+        for p in pets.iter_mut() {
+            if p.fun.chase.as_ref().is_some_and(|(c, _)| *c == id) {
+                p.fun.chase = None;
+            }
+        }
+        if ground
+            .get(id)
+            .is_some_and(|w| w.prop.thing == Thing::Catnip)
+        {
+            for p in pets.iter_mut() {
+                if p.fun.nip.is_some() {
+                    p.fun.nip = Some((Nip::Leaving, now, 0));
+                }
+            }
+        }
+        ground.remove(id);
+    }
+    for w in &mut ground.things {
+        if w.carrier.is_none()
+            && let Some(hit) = w.prop.step(dt, ctx.terrain)
+            && w.prop.thing == Thing::Ball
+            && hit > 300.0
+            && ctx.sound_on
+        {
+            ctx.sounds.play(
+                u64::MAX,
+                Species::Shiba,
+                Sound::Land,
+                now,
+                ctx.volume * 0.6,
+                1.7,
+            );
+        }
+        if w.prop.resting && w.prop.thing.falls() && w.carrier.is_none() {
+            // Left lying about: it goes after a while.
+            w.until = w.until.min(now + TOY_STAYS);
+        }
+    }
+    if !visible {
+        ground.set_visible(ctx.shared, now, false);
+        return;
+    }
+
+    let activity = if react {
+        ground.activity.unwrap_or(Activity::Busy)
+    } else {
+        Activity::Busy
+    };
+    let typing_for = ground.watcher.typing_for(now);
+    let scene_on = pets.iter().any(|p| p.fun.scene.is_some());
+    let mut start_scene = !scene_on;
+    for i in 0..pets.len() {
+        chase(ground, pets, i, ctx);
+        let p = &mut pets[i];
+        order(p, ctx, cursor);
+        nip(ground, p, ctx);
+        if start_scene && maybe_scene(ground, p, ctx) {
+            start_scene = false;
+        }
+        scene(ground, p, ctx);
+        if !p.fun.busy(now) || now < p.fun.lounge_until {
+            react_to(p, ctx, activity, typing_for, cursor, dt);
+        }
+        // How the body is held this frame.
+        p.anim.posture = if p.body.motion == Motion::Fly {
+            Posture::Fly
+        } else if p
+            .fun
+            .scene
+            .is_some_and(|r| r.scene == Scene::Pond && r.phase == 1)
+        {
+            Posture::Swim
+        } else if now < p.fun.hold_until || now < p.fun.lounge_until {
+            p.anim.posture.max_hold()
+        } else {
+            Posture::Free
+        };
+    }
+    ground.set_visible(ctx.shared, now, true);
+}
+
+trait Held {
+    /// The held posture to keep (sitting or lying), or lying if none.
+    fn max_hold(self) -> Posture;
+}
+
+impl Held for Posture {
+    fn max_hold(self) -> Posture {
+        match self {
+            Posture::Sit => Posture::Sit,
+            _ => Posture::Lie,
+        }
+    }
+}
+
+/// A pet going after a thrown toy.
+fn chase(ground: &mut Playground, pets: &mut [Pet], i: usize, ctx: &mut Ctx) {
+    let now = ctx.world.now;
+    let Some((id, mut c)) = pets[i].fun.chase.take() else {
+        return;
+    };
+    let me = pets[i].save.id;
+    let Some(w) = ground.get(id) else {
+        pets[i].fun.carry = None;
+        pets[i].stop();
+        return;
+    };
+    let prop = w.prop;
+    let taken = w.carrier.is_some_and(|c| c != me);
+    let p = &mut pets[i];
+    let order = c.tick(now, p.body.feet(), p.body.size, &prop, taken);
+    let mut keep = true;
+    match order {
+        Order::Watch => {
+            p.stop();
+            if p.body.speed == 0.0 {
+                p.body.facing = if prop.pos.0 < p.body.feet().0 {
+                    -1.0
+                } else {
+                    1.0
+                };
+            }
+        }
+        Order::Run { x, pace } => {
+            p.walk_to(x, pace);
+        }
+        Order::Grab => {
+            println!("{}: got the {:?}", p.save.name, prop.thing);
+            if prop.flying() {
+                p.anim.pounce();
+            }
+            p.stop();
+            p.fun.carry = Some(prop.thing);
+            p.fun.effect(Fx::Sparkles, now);
+            if let Some(w) = ground.get_mut(id) {
+                w.carrier = Some(me);
+            }
+            p.bell(ctx);
+        }
+        Order::Drop => {
+            p.stop();
+            p.fun.carry = None;
+            let (fx, fy) = p.body.feet();
+            if let Some(w) = ground.get_mut(id) {
+                w.carrier = None;
+                w.prop = Prop {
+                    resting: true,
+                    vel: (0.0, 0.0),
+                    ..Prop::put(
+                        prop.thing,
+                        (fx + p.body.facing * 0.2 * p.body.size.0, fy),
+                        prop.scale,
+                    )
+                };
+                w.until = now + TOY_STAYS;
+            }
+            // Back where you threw it, wagging: throw it again!
+            p.body.facing = -p.body.facing;
+            p.say(ctx, Line::Fetch);
+            cheer(p, ctx);
+            keep = false;
+        }
+        Order::Bat { side } => {
+            if p.try_gesture(Act::Wave)
+                && let Some(w) = ground.get_mut(id)
+            {
+                let s = prop.scale.max(0.5);
+                w.prop.bat((side * 380.0 * s, -260.0 * s));
+            }
+        }
+        Order::Peck => {
+            p.try_gesture(Act::Peck);
+        }
+        Order::Done => {
+            p.stop();
+            if p.fun.carry.take().is_some()
+                && let Some(w) = ground.get_mut(id)
+            {
+                let (fx, fy) = p.body.feet();
+                w.carrier = None;
+                w.prop = Prop::put(prop.thing, (fx, fy), prop.scale);
+            }
+            // A cat that has had enough sits and washes; a bird gives up.
+            match p.species.fetch() {
+                Fetch::Bat => {
+                    p.try_gesture(Act::Groom);
+                }
+                Fetch::Chase => p.say(ctx, Line::Fetch),
+                _ => {}
+            }
+            keep = false;
+        }
+    }
+    if keep {
+        p.fun.chase = Some((id, c));
+    }
+}
+
+/// Pleased: a hop and hearts.
+fn cheer(p: &mut Pet, ctx: &mut Ctx) {
+    let now = ctx.world.now;
+    if p.anim.expression != Expression::Happy {
+        p.anim.cheer();
+    }
+    p.anim.expression = Expression::Happy;
+    p.happy_until = now + super::HAPPY_SECS;
+    p.fun.effect(Fx::Hearts, now);
+}
+
+/// Doing as it was asked, once it gets round to it.
+fn order(p: &mut Pet, ctx: &mut Ctx, cursor: Option<(i32, i32)>) {
+    let now = ctx.world.now;
+    if let Some(x) = p.fun.goto {
+        if p.walk_to(x, 1.6) || p.mind.asleep() {
+            p.fun.goto = None;
+            p.stop();
+            // There: sits by you.
+            p.anim.posture = Posture::Sit;
+            p.fun.hold_until = now + 4.0;
+            if p.fun.curled {
+                p.fun.hold_until = 0.0;
+                p.fun.lounge_until = now + 30.0;
+                p.anim.posture = Posture::Lie;
+            }
+        }
+        return;
+    }
+    let Some((command, due, moody)) = p.fun.order else {
+        return;
+    };
+    if now < due {
+        return;
+    }
+    if p.mind.asleep() {
+        p.fun.order = None;
+        return;
+    }
+    // A mood passes once it gets round to it.
+    if matches!(
+        p.anim.expression,
+        Expression::FedUp | Expression::Sulk | Expression::Giggle
+    ) {
+        p.anim.expression = Expression::Neutral;
+    }
+    let done = match command {
+        Command::Sit | Command::Lie => {
+            p.stop();
+            p.anim.posture = if command == Command::Sit {
+                Posture::Sit
+            } else {
+                Posture::Lie
+            };
+            p.fun.hold_until = now + stay_secs(command);
+            true
+        }
+        Command::Come => {
+            let to = cursor.map_or(p.body.feet().0, |c| c.0 as f32);
+            p.fun.goto = Some(to);
+            true
+        }
+        Command::Spin => p.try_gesture(Act::Spin),
+        Command::Paw => p.try_gesture(Act::Paw),
+    };
+    // Still walking: it tries again in a moment (but not for ever).
+    if done || now > due + 3.0 {
+        println!("{}: asked to {command:?}, done: {done}", p.save.name);
+        p.fun.order = None;
+        if done {
+            if moody {
+                p.say(ctx, Line::ObeyLater);
+            } else if p.rng.f32() < 0.5 {
+                p.say(ctx, Line::Obey);
+            }
+        }
+    }
+}
+
+/// At the catnip (PLAN §8 "Catnip"): cats that like it sniff, rub their
+/// cheeks on it and roll about blissed; the rest stay in character.
+fn nip(ground: &mut Playground, p: &mut Pet, ctx: &mut Ctx) {
+    let now = ctx.world.now;
+    let Some((stage, since, n)) = p.fun.nip else {
+        return;
+    };
+    if p.press.is_some() || p.mind.asleep() {
+        p.fun.nip = None;
+        return;
+    }
+    let Some(sprig) = ground
+        .things
+        .iter()
+        .find(|w| w.prop.thing == Thing::Catnip)
+        .map(|w| w.prop)
+    else {
+        p.fun.nip = None;
+        return;
+    };
+    let (fx, fy) = p.body.feet();
+    let (w, h) = p.body.size;
+    let likes = p.species.likes_catnip(p.save.id);
+    let cat = matches!(p.species, Species::Munchkin | Species::Fold);
+    match stage {
+        Nip::Going => {
+            let dx = sprig.pos.0 - fx;
+            // Out of reach (another window, too far): not worth it.
+            if dx.abs() > REACH || (fy - sprig.pos.1).abs() > 0.3 * h {
+                println!("{}: the catnip is out of reach", p.save.name);
+                p.fun.nip = None;
+                return;
+            }
+            if p.species == Species::Owl {
+                p.body.facing = dx.signum();
+                p.say(ctx, Line::Catnip);
+                p.fun.nip = None;
+                return;
+            }
+            // Beside it, so it shows.
+            let x = sprig.pos.0 - dx.signum() * 0.18 * w;
+            if p.walk_to(x, 1.4) {
+                println!("{}: at the catnip (likes it: {likes})", p.save.name);
+                p.body.facing = dx.signum();
+                p.fun.nip = Some((Nip::At(0), now, 0));
+            }
+        }
+        Nip::At(step) => {
+            if p.anim.doing().is_some() {
+                return;
+            }
+            let next = |p: &mut Pet, act: Act| p.try_gesture(act);
+            match (p.species, likes, step) {
+                (_, _, 0) => {
+                    if next(p, sniff_act(p.species)) {
+                        p.fun.nip = Some((Nip::At(1), now, n));
+                    }
+                }
+                // Cats that like it: rub, roll, rub, roll… until it is gone.
+                (_, true, _) => {
+                    let act = if step % 2 == 1 { Act::Rub } else { Act::Bliss };
+                    if next(p, act) {
+                        if act == Act::Bliss && n == 0 {
+                            p.say(ctx, Line::Catnip);
+                            p.fun.effect(Fx::Hearts, now);
+                        }
+                        p.fun.nip = Some((Nip::At(step + 1), now, n + 1));
+                    }
+                }
+                (_, false, _) if cat => {
+                    p.say(ctx, Line::CatnipMeh);
+                    p.fun.nip = Some((Nip::Leaving, now, n));
+                }
+                (Species::Shiba, ..) => {
+                    p.say(ctx, Line::Catnip);
+                    p.try_gesture(Act::Shake);
+                    p.fun.nip = Some((Nip::Leaving, now, n));
+                }
+                (Species::Fox, ..) => {
+                    if next(p, Act::Wave) {
+                        p.say(ctx, Line::Catnip);
+                        p.fun.nip = Some((Nip::Leaving, now, n));
+                    }
+                }
+                (Species::Chick | Species::Duck, ..) => {
+                    if step < 3 {
+                        if next(p, Act::Peck) {
+                            p.fun.nip = Some((Nip::At(step + 1), now, n));
+                        }
+                    } else {
+                        p.say(ctx, Line::Catnip);
+                        p.fun.nip = Some((Nip::Leaving, now, n));
+                    }
+                }
+                _ => p.fun.nip = Some((Nip::Leaving, now, n)),
+            }
+        }
+        Nip::Leaving => {
+            if p.anim.doing().is_none() || now - since > 4.0 {
+                p.fun.nip = None;
+                if likes {
+                    cheer(p, ctx);
+                }
+            }
+        }
+    }
+}
+
+fn sniff_act(species: Species) -> Act {
+    match species {
+        Species::Chick | Species::Duck | Species::Owl => Act::Peck,
+        _ => Act::Sniff,
+    }
+}
+
+/// Now and then, a pet with nothing on starts its own little scene
+/// (one at a time on the desktop); true if one began.
+fn maybe_scene(ground: &mut Playground, p: &mut Pet, ctx: &mut Ctx) -> bool {
+    let now = ctx.world.now;
+    if p.fun.next_scene == 0.0 {
+        p.fun.next_scene = now + SCENE_GAP * (0.3 + f64::from(ground.roll()));
+        return false;
+    }
+    if now < p.fun.next_scene
+        || !p.free_to_play(now)
+        || p.fun.busy(now)
+        || p.playing
+        || p.anim.expression != Expression::Neutral
+        || p.body.motion != Motion::Idle
+        || p.body.on_window()
+    {
+        return false;
+    }
+    p.fun.next_scene = now + SCENE_GAP * (1.0 + f64::from(ground.roll()));
+    let scenes = p.species.scenes();
+    let pick = scenes[(ground.roll() * scenes.len() as f32) as usize % scenes.len()];
+    start_scene(ground, p, ctx, pick)
+}
+
+/// Start `scene` for `p` now (its thing put out beside it).
+pub(super) fn start_scene(
+    ground: &mut Playground,
+    p: &mut Pet,
+    ctx: &mut Ctx,
+    scene: Scene,
+) -> bool {
+    let now = ctx.world.now;
+    let s = p.fun.scale;
+    let (fx, fy) = p.body.feet();
+    let (w, _) = p.body.size;
+    // The side with more room.
+    let a = ctx.area;
+    let side = if fx < a.x + a.w / 2.0 { 1.0 } else { -1.0 };
+    let beside = fx + side * 1.1 * w;
+    let mut prop = None;
+    if let Some(thing) = scene.thing() {
+        let at = match scene {
+            Scene::Perch => {
+                // Out from the nearer edge of the screen, well up.
+                let left = fx < a.x + a.w / 2.0;
+                let (tw, _) = thing.size();
+                let x = if left {
+                    a.x + 0.5 * tw * s
+                } else {
+                    a.x + a.w - 0.5 * tw * s
+                };
+                (x, fy - (a.h * 0.45).min(420.0 * s))
+            }
+            Scene::Butterfly => (beside, fy - 90.0 * s),
+            _ => (beside, fy),
+        };
+        let mut put = Prop::put(thing, at, s);
+        put.resting = true;
+        let until = now + scene.secs() + 1.0;
+        let Some(id) = ground.add(ctx.el, ctx.shared, put, now, until) else {
+            return false;
+        };
+        if scene == Scene::Perch {
+            let left = at.0 < a.x + a.w / 2.0;
+            if let Some(w) = ground.get_mut(id) {
+                w.flip = left;
+            }
+            let half = 0.36 * thing.size().0 * s;
+            ground.perch = Some((id, at.1, at.0 - half, at.0 + half));
+            ground.terrain_dirty = true;
+        }
+        prop = Some(id);
+    }
+    p.fun.scene = Some(Run {
+        scene,
+        prop,
+        phase: 0,
+        since: now,
+        until: now + scene.secs(),
+        home: (fx, fy),
+    });
+    println!("{}: starts its scene, {scene:?}", p.save.name);
+    p.say(ctx, Line::Scene);
+    true
+}
+
+/// A scene under way, phase by phase.
+fn scene(ground: &mut Playground, p: &mut Pet, ctx: &mut Ctx) {
+    let now = ctx.world.now;
+    let Some(mut run) = p.fun.scene else {
+        return;
+    };
+    // Picked up, or fallen asleep: it ends.
+    let interrupted = p.press.is_some() || p.mind.asleep() || p.in_skit;
+    let prop = run.prop.and_then(|id| ground.get(id)).map(|w| w.prop);
+    let end = |ground: &mut Playground, p: &mut Pet, run: &Run| {
+        if let Some(id) = run.prop {
+            ground.remove(id);
+        }
+        p.fun.carry = None;
+        p.fun.scene = None;
+        p.fun.hold_until = 0.0;
+        p.stop();
+    };
+    if interrupted || (run.prop.is_some() && prop.is_none()) {
+        if p.body.motion == Motion::Fly {
+            p.body.motion = Motion::Fall;
+            p.body.flight = None;
+        }
+        end(ground, p, &run);
+        return;
+    }
+    let w = p.body.size.0;
+    match (run.scene, run.phase) {
+        // Off to the thing.
+        (Scene::Perch, 0) => {
+            // Once the branch is in the terrain, fly up to it.
+            let Some((id, y, x0, x1)) = ground.perch else {
+                return end(ground, p, &run);
+            };
+            let ready = ctx
+                .terrain
+                .ledges()
+                .iter()
+                .any(|l| l.on == chonkgene_core::terrain::Support::Perch(id));
+            if ready && p.body.motion != Motion::Fly {
+                p.stop();
+                p.body.fly_to(0.5 * (x0 + x1), y);
+                run.phase = 1;
+            }
+        }
+        (Scene::Perch, 1) => {
+            if p.body.motion == Motion::Idle && p.body.flight.is_none() {
+                // Perched: stays put, looking about, until it is time.
+                p.stop();
+                if now >= run.until {
+                    p.body.fly_to(run.home.0, run.home.1);
+                    run.phase = 2;
+                }
+            }
+        }
+        (Scene::Perch, _) => {
+            if p.body.motion != Motion::Fly {
+                return end(ground, p, &run);
+            }
+        }
+        (Scene::Foxfire, 0) => {
+            run.phase = 1;
+        }
+        (Scene::Foxfire, _) => {
+            // Chasing its own tails round in the fire.
+            if now >= run.until {
+                p.fun.scene = None;
+                cheer(p, ctx);
+                return;
+            }
+            if p.anim.doing().is_none() && p.try_gesture(Act::Spin) {
+                p.bell(ctx);
+            }
+        }
+        (Scene::Butterfly, _) => {
+            // The butterfly flutters about; the cat stalks and pounces as
+            // at the grass stalk.
+            let Some(id) = run.prop else {
+                return end(ground, p, &run);
+            };
+            let t = (now - run.since) as f32;
+            let s = p.fun.scale;
+            let (hx, hy) = (run.home.0 + 1.1 * w, run.home.1 - 90.0 * s);
+            let leaving = now >= run.until;
+            let away = if leaving {
+                (now - run.until) as f32
+            } else {
+                0.0
+            };
+            let at = (
+                hx + 120.0 * s * (0.7 * t).sin() + 40.0 * s * (2.3 * t).sin() + 200.0 * s * away,
+                hy + 35.0 * s * (1.1 * t).sin() - 160.0 * s * away,
+            );
+            if let Some(b) = ground.get_mut(id) {
+                b.prop.pos = at;
+            }
+            if leaving {
+                p.stop();
+                p.anim.watch(None);
+                if away > 2.0 {
+                    end(ground, p, &run);
+                    return;
+                }
+            } else {
+                p.play(at, now);
+            }
+        }
+        (_, 0) => {
+            let Some(at) = prop else {
+                return end(ground, p, &run);
+            };
+            if p.walk_to(at.pos.0, 1.3) {
+                run.phase = 1;
+                run.since = now;
+                match run.scene {
+                    Scene::Bone => {
+                        // Picks it up and lies down to chew it.
+                        if let Some(id) = run.prop
+                            && let Some(b) = ground.get_mut(id)
+                        {
+                            b.carrier = Some(p.save.id);
+                        }
+                        p.fun.carry = Some(Thing::Bone);
+                        p.anim.posture = Posture::Lie;
+                    }
+                    Scene::Sunbeam => p.anim.posture = Posture::Lie,
+                    Scene::Pond => p.fun.effect(Fx::Splash, now),
+                    _ => {}
+                }
+            }
+        }
+        (_, 1) => {
+            if now >= run.until {
+                run.phase = 2;
+                if run.scene == Scene::Pond {
+                    p.fun.effect(Fx::Splash, now);
+                }
+                p.fun.carry = None;
+                p.fun.scene = Some(run);
+                return;
+            }
+            p.fun.hold_until = now + 0.5;
+            match run.scene {
+                Scene::Bone => {
+                    p.anim.posture = Posture::Lie;
+                    if p.anim.doing().is_none() {
+                        p.try_gesture(Act::Chew);
+                    }
+                }
+                Scene::Seeds => {
+                    p.fun.hold_until = 0.0;
+                    if p.anim.doing().is_none() {
+                        p.try_gesture(Act::Peck);
+                    }
+                }
+                Scene::Sunbeam => {
+                    p.anim.posture = Posture::Lie;
+                }
+                Scene::Pond => {
+                    // Paddling slowly to and fro across the water.
+                    p.fun.hold_until = 0.0;
+                    if let Some(pond) = prop {
+                        let half = 0.25 * pond.px().0;
+                        let x = pond.pos.0 + p.body.facing * half;
+                        p.body.pace = 0.35;
+                        if p.walk_to(x, 0.35) {
+                            p.body.facing = -p.body.facing;
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+        (_, _) => {
+            // Over: out of the water with a shake, or up from the sun.
+            p.fun.hold_until = 0.0;
+            if run.scene == Scene::Pond {
+                let Some(pond) = prop else {
+                    return end(ground, p, &run);
+                };
+                let out = pond.pos.0 + p.body.facing * (0.5 * pond.px().0 + 0.3 * w);
+                if !p.walk_to(out, 1.0) {
+                    return;
+                }
+                p.try_gesture(Act::Shake);
+                p.fun.effect(Fx::Splash, now);
+            }
+            end(ground, p, &run);
+            cheer(p, ctx);
+            return;
+        }
+    }
+    p.fun.scene = Some(run);
+}
+
+/// What you are doing, as the pets see it: read with the mouse still and
+/// they lie about and see to an itch; type and they tap along, tip their
+/// heads at a burst, a cat curls up by you and the Shiba nods off.
+fn react_to(
+    p: &mut Pet,
+    ctx: &mut Ctx,
+    activity: Activity,
+    typing_for: f64,
+    cursor: Option<(i32, i32)>,
+    dt: f32,
+) {
+    let now = ctx.world.now;
+    if p.mind.asleep() || p.in_skit || p.act.is_some() || p.press.is_some() || p.playing {
+        return;
+    }
+    match activity {
+        Activity::Reading(_) => {
+            if now >= p.fun.lounge_until {
+                // Each pet in its own time: about one in seven a second.
+                if p.body.motion != Motion::Idle || p.rng.f32() > 0.15 * dt {
+                    return;
+                }
+                p.stop();
+                p.fun.lounge_until = now + 20.0 + 20.0 * f64::from(p.rng.f32());
+                p.fun.next_habit = now + 4.0;
+                p.anim.posture = Posture::Lie;
+            } else if now >= p.fun.next_habit {
+                p.fun.next_habit = now + 5.0 + 5.0 * f64::from(p.rng.f32());
+                let act = match p.species {
+                    Species::Shiba => Act::Scratch,
+                    Species::Munchkin | Species::Fold | Species::Fox => {
+                        if p.rng.bool() {
+                            Act::Groom
+                        } else {
+                            Act::Scratch
+                        }
+                    }
+                    _ => Act::Preen,
+                };
+                p.anim.gesture(act);
+            }
+        }
+        Activity::Typing { fast } => {
+            if fast && now >= p.fun.next_tilt {
+                p.fun.next_tilt = now + 8.0 + 6.0 * f64::from(p.rng.f32());
+                p.try_gesture(Act::Tilt);
+            } else if now >= p.fun.next_tap && p.anim.doing().is_none() {
+                p.fun.next_tap = now + 5.0 + 5.0 * f64::from(p.rng.f32());
+                if p.body.motion == Motion::Idle {
+                    p.try_gesture(Act::Tap);
+                }
+            }
+            let cat = matches!(p.species, Species::Munchkin | Species::Fold);
+            if cat && typing_for > 30.0 && !p.fun.curled && p.fun.goto.is_none() {
+                // Comes to curl up by you (the cursor is near what you type).
+                if let Some(c) = cursor {
+                    p.fun.curled = true;
+                    p.fun.goto = Some(c.0 as f32);
+                }
+            }
+            if p.species == Species::Shiba && typing_for > 120.0 && !p.fun.dozed {
+                p.fun.dozed = true;
+                let mut rng = p.rng.clone();
+                let out = p.mind.put_to_sleep(&ctx.world, &mut rng);
+                p.rng = rng;
+                p.apply(ctx, out);
+            }
+        }
+        Activity::Busy | Activity::Away => {
+            // Back to the mouse: up they get.
+            if now < p.fun.lounge_until && matches!(activity, Activity::Busy) {
+                p.fun.lounge_until = 0.0;
+            }
+            if typing_for == 0.0 {
+                p.fun.curled = false;
+                p.fun.dozed = false;
+            }
+        }
+    }
+}

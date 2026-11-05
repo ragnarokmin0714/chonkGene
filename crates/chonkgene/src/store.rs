@@ -89,6 +89,9 @@ pub struct Settings {
     /// 0 偶爾, 1 常常, 2 超常.
     pub squabble: u8,
     pub hide_in_fullscreen: bool,
+    /// The pets react to typing and to a still mouse (input timing only,
+    /// PLAN §1.3, §6).
+    pub react_to_input: bool,
     pub start_at_login: bool,
     /// How many pets are on the desktop at once; no upper limit (PLAN §1.1).
     pub on_desktop: u32,
@@ -105,6 +108,7 @@ impl Default for Settings {
             irrational: true,
             squabble: 0,
             hide_in_fullscreen: true,
+            react_to_input: true,
             start_at_login: false,
             on_desktop: 6,
             welcomed: false,

@@ -18,7 +18,7 @@ use std::sync::mpsc::{Receiver, TryRecvError, channel};
 
 use chonkgene_core::Zone;
 use chonkgene_core::anim::{
-    Act, BITE_SECS, EAT_SECS, Expression, HOLD_SECS, PoseParams, Touch, gesture_secs,
+    Act, BITE_SECS, EAT_SECS, Expression, HOLD_SECS, PoseParams, Posture, Touch, gesture_secs,
 };
 use chonkgene_rig::math::{M3, V3, v3};
 use chonkgene_rig::{FLOOR, Layer, Look, Model, Pose, Scene, ZONES};
@@ -301,6 +301,10 @@ impl MeshRenderer {
                 _ => look,
             };
         }
+        // Catnip: rolled over, eyes glazed.
+        if params.act == Act::Bliss {
+            look = Look::Half;
+        }
         let eating = (params.act == Act::Eat)
             .then_some(self.gesture)
             .flatten()
@@ -401,16 +405,32 @@ impl MeshRenderer {
         let rested = self
             .rest_since
             .is_some_and(|since| params.clock - since > IDLE_SIT);
-        self.walk.lie(asleep && !walking);
+        // Lying down awake (asked to, or a still mouse), head up, on its
+        // front.
+        let resting = params.posture == Posture::Lie && !asleep && !walking;
+        if asleep {
+            self.walk.lie(!walking);
+        } else {
+            self.walk.rest(resting);
+        }
         // Laughing, fed up and sulking are poses of their own (see
-        // `Feel`); pleased, it sits.
+        // `Feel`); pleased, or asked to, it sits.
         self.walk.sit(
             !walking
                 && !asleep
                 && !standing
-                && (rested || seated || expression == Expression::Happy),
+                && !resting
+                && (rested
+                    || seated
+                    || expression == Expression::Happy
+                    || params.posture == Posture::Sit),
         );
+        self.walk.fly(params.posture == Posture::Fly);
+        self.walk.swim(params.posture == Posture::Swim);
         self.sleep_pose(asleep, params.clock);
+        if resting {
+            self.walk.sleep_pose(SleepPose::Chin);
+        }
         let feel = self.feel(params, expression);
         self.walk.feel(feel);
         self.walk.look(match params.act {
@@ -596,6 +616,8 @@ impl MeshRenderer {
     /// as a pose, and where the finger is (it turns to you and looks).
     fn feel(&mut self, params: &PoseParams, expression: Expression) -> Feel {
         let mood = match expression {
+            // Catnip rolls it over like a laugh, paws kicking.
+            _ if params.act == Act::Bliss => Mood::Laugh,
             Expression::Giggle => Mood::Laugh,
             Expression::FedUp => Mood::FedUp,
             Expression::Sulk => Mood::Sulk,
@@ -780,6 +802,17 @@ impl MeshRenderer {
     fn canvas_forward(&self) -> V3 {
         let (s, c) = crate::raymarch::TILT_DEG.to_radians().sin_cos();
         v3(0.0, -s, -c)
+    }
+
+    /// Where something carried in the mouth goes: just under the nose (or
+    /// beak, or bill) of the pose shown, pixels.
+    pub fn mouth(&self) -> Option<(f32, f32)> {
+        let part = ["nose", "beak", "bill"]
+            .iter()
+            .find_map(|n| self.model.part(n))?;
+        self.live.as_ref()?;
+        let (x, y) = self.project_on(Some(part), v3(0.0, -0.12, 0.0));
+        Some((x, y))
     }
 
     /// Where a speech bubble points: the top of the head (the middle of

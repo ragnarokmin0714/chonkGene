@@ -332,6 +332,11 @@ pub(crate) struct Moods {
 }
 
 impl Moods {
+    /// Seconds the moods have run (a clock for beats that need one).
+    pub fn clock(&self) -> f32 {
+        self.t
+    }
+
     pub fn step(&mut self, feel: &Feel, dt: f32) -> Levels {
         use std::f32::consts::TAU;
         self.t += dt;
@@ -653,8 +658,10 @@ pub struct Walk {
     yaw_v: f32,
     /// Asked to sit, and how far down it is (0 standing … 1 sitting).
     sitting: bool,
-    /// Asked to lie down (asleep), and how far down it is.
+    /// Asked to lie down (asleep, or `awake`: 趴下, a still mouse), and how
+    /// far down it is.
     lying: bool,
+    awake: bool,
     lie: Spring,
     /// The head's extra turn, and where it is heading.
     look: Spring,
@@ -772,6 +779,7 @@ impl Walk {
             yaw_v: 0.0,
             sitting: false,
             lying: false,
+            awake: false,
             lie: Spring::default(),
             look: Spring::default(),
             look_goal: 0.0,
@@ -896,6 +904,14 @@ impl Walk {
     /// Lie down to sleep (or get up); walking gets it up first.
     pub fn lie(&mut self, on: bool) {
         self.lying = on;
+        self.awake = false;
+    }
+
+    /// Lie down awake (or get up): head up, looking about, fidgeting as
+    /// usual.
+    pub fn rest(&mut self, on: bool) {
+        self.lying = on;
+        self.awake = on;
     }
 
     /// Turn the head this far (degrees, + to the pet's left) on top of
@@ -938,9 +954,11 @@ impl Walk {
         let lv = self.moods.step(&self.feel, dt);
         // Fidgets go on under any held pose; in a gesture only the tail's;
         // walking, none.
-        let f = self
-            .fidgets
-            .step(dt, hold(going, self.gesture.is_some()), self.lying);
+        let f = self.fidgets.step(
+            dt,
+            hold(going, self.gesture.is_some()),
+            self.lying && !self.awake,
+        );
         self.fidget = f;
         // Eating, it turns to you, so you see it eat.
         let eating = self
@@ -1257,6 +1275,11 @@ impl Walk {
             }
             j[b.head].rot.x -= 14.0 * side + 40.0 * up;
             j[b.head].rot.z += facing * (16.0 * side + 50.0 * up);
+            // Awake, the head stays up off the paws, looking about.
+            if self.awake {
+                j[b.head].rot.x -= 30.0 * lie;
+                j[b.head].shift.y += 0.16 * lie;
+            }
         }
 
         // Some gestures are done sitting (see `Act::seated`); the rest
@@ -1413,6 +1436,100 @@ impl Walk {
                     }
                     j[b.body].rot.z += e * 3.0 * (TAU * 1.6 * g.t).sin();
                     j[b.head].rot.x += e * 6.0;
+                }
+                // 握手: a front paw held out to you, shaking up and down a
+                // little as if in your hand; the head tips, pleased.
+                Act::Paw => {
+                    let shake = (TAU * 2.6 * g.t).sin();
+                    if let Some(&(leg, ..)) = self.legs.iter().find(|l| l.1 == 0.25) {
+                        j[leg].rot.x -= e * (62.0 + 8.0 * shake);
+                        j[leg].rot.y += facing * 18.0 * e;
+                        j[leg].shift.y += e * 0.06;
+                    }
+                    j[b.body].rot.z -= 3.0 * e;
+                    j[b.head].rot.z += facing * 10.0 * e;
+                }
+                // Typing along: the front paws tap quickly in turn,
+                // lying (paws out in front) or sitting.
+                Act::Tap => {
+                    let mut k = 0.0;
+                    for &(leg, _, front) in &self.legs {
+                        if front {
+                            let p = TAU * 4.5 * g.t + PI * k;
+                            let up = p.sin().max(0.0);
+                            if lie > 0.5 {
+                                j[leg].shift.y += e * 0.07 * up;
+                            } else {
+                                j[leg].rot.x -= e * (8.0 + 14.0 * up);
+                                j[leg].shift.y += e * 0.05 * up;
+                            }
+                            k += 1.0;
+                        }
+                    }
+                    j[b.head].rot.x += e * 4.0 * (TAU * 4.5 * g.t).sin().abs();
+                }
+                // The head tipped right over to one side, listening.
+                Act::Tilt => {
+                    let side = facing.signum();
+                    j[b.head].rot.z += side * 28.0 * e;
+                    j[b.head].rot.y += side * 6.0 * e;
+                }
+                // Nose down to the floor, sniffing (quick little nods).
+                Act::Sniff => {
+                    let sniff = (TAU * 6.0 * g.t).sin();
+                    j[b.body].rot.x += 10.0 * e;
+                    j[b.head].rot.x += e * (26.0 + 3.0 * sniff);
+                    for &(leg, _, front) in &self.legs {
+                        if front {
+                            j[leg].rot.x -= 8.0 * e;
+                        }
+                    }
+                }
+                // A cheek rubbed along the floor: head down and turned
+                // over, pushed one way and the other.
+                Act::Rub => {
+                    let rub = (TAU * 0.9 * g.t).sin();
+                    j[b.body].rot.x += 12.0 * e;
+                    j[b.body].rot.z += 8.0 * e * rub;
+                    j[b.head].rot.x += 30.0 * e;
+                    j[b.head].rot.z += e * (24.0 + 10.0 * rub) * facing;
+                    j[b.head].rot.y += e * 12.0 * rub;
+                    for &(leg, _, front) in &self.legs {
+                        if front {
+                            j[leg].rot.x -= 16.0 * e;
+                        }
+                    }
+                }
+                // Lying with a bone between the front paws: the head
+                // turned over to gnaw at it with the side teeth, the jaw
+                // working.
+                Act::Chew => {
+                    let gnaw = (TAU * 3.2 * g.t).sin();
+                    j[b.head].rot.x += e * (24.0 + 4.0 * gnaw);
+                    j[b.head].rot.z += e * 22.0 * facing;
+                    j[b.head].shift.y -= 0.1 * e * lie;
+                    if gnaw > 0.7 {
+                        self.chin.v -= 0.3 * e;
+                    }
+                    for &(leg, _, front) in &self.legs {
+                        if front {
+                            j[leg].rot.y += e * 10.0 * if leg % 2 == 0 { 1.0 } else { -1.0 };
+                        }
+                    }
+                }
+                // The tails swung round hard at someone, the body
+                // twisting into it, the bell knocked swinging.
+                Act::Swish => {
+                    let sweep = (TAU * 1.6 * g.t).sin();
+                    for tail in &self.tails {
+                        if let Some(&root) = tail.bones.first() {
+                            j[root].rot.y += facing * e * 60.0 * sweep;
+                            j[root].rot.x -= 18.0 * e;
+                        }
+                    }
+                    j[b.hips].rot.y -= facing * e * 14.0 * sweep;
+                    j[b.head].rot.y += facing * 16.0 * e;
+                    self.bell.1.v += e * 40.0 * sweep * dt * 30.0;
                 }
                 // A front paw up, waving.
                 Act::Wave => {

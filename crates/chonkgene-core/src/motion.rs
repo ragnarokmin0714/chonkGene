@@ -47,7 +47,24 @@ pub enum Motion {
     Walk,
     Held,
     Fall,
+    /// Flying somewhere (a bird to its perch and back down): see
+    /// [`Body::fly_to`].
+    Fly,
 }
+
+/// A flight from one place to another: the feet from `from` to `to`
+/// (screen pixels) over `secs`, arcing up by `arc` pixels on the way.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Flight {
+    pub from: (f32, f32),
+    pub to: (f32, f32),
+    pub secs: f32,
+    pub t: f32,
+    pub arc: f32,
+}
+
+/// Flying, pixels a second (wings beating, not falling).
+const FLY_SPEED: f32 = 320.0;
 
 /// Where a pet window is and how it moves. `pos` is the window's top-left;
 /// `size` is the window size; the feet are `foot` pixels above its bottom
@@ -68,6 +85,8 @@ pub struct Body {
     pub speed: f32,
     /// What the feet are on; none in the air.
     pub on: Option<Support>,
+    /// Under way while flying.
+    pub flight: Option<Flight>,
 }
 
 /// Something worth a squash: the speed of a landing.
@@ -89,6 +108,7 @@ impl Body {
             pace: 1.0,
             speed: 0.0,
             on: None,
+            flight: None,
         };
         if let Some(l) = terrain.floor_under(b.feet().0) {
             b.pos.0 = b.pos.0.clamp(l.x0 - size.0 / 2.0, l.x1 - size.0 / 2.0);
@@ -147,6 +167,27 @@ impl Body {
         self.on = None;
     }
 
+    /// Fly so the feet come down at `(x, y)` (a perch, or the floor),
+    /// arcing up over the way there.
+    pub fn fly_to(&mut self, x: f32, y: f32) {
+        let from = self.feet();
+        let d = (x - from.0).hypot(y - from.1);
+        let secs = (d / FLY_SPEED).clamp(0.8, 4.0);
+        self.flight = Some(Flight {
+            from,
+            to: (x, y),
+            secs,
+            t: 0.0,
+            arc: (0.25 * d).clamp(40.0, 160.0),
+        });
+        if x != from.0 {
+            self.facing = (x - from.0).signum();
+        }
+        self.motion = Motion::Fly;
+        self.speed = 0.0;
+        self.on = None;
+    }
+
     /// Walking or slowing to a stop: the window is still going.
     pub fn moving_on(&self) -> bool {
         matches!(self.motion, Motion::Idle | Motion::Walk) && self.speed > 0.0
@@ -176,6 +217,40 @@ impl Body {
         let right = (right - self.size.0).max(left);
         match self.motion {
             Motion::Held => None,
+            Motion::Fly => {
+                let Some(f) = self.flight.as_mut() else {
+                    self.motion = Motion::Fall;
+                    return None;
+                };
+                f.t += dt;
+                let u = (f.t / f.secs).min(1.0);
+                // Eased along, over an arc that comes in level to land.
+                let e = u * u * (3.0 - 2.0 * u);
+                let up = f.arc * (std::f32::consts::PI * u).sin();
+                let (x, y) = (
+                    f.from.0 + (f.to.0 - f.from.0) * e,
+                    f.from.1 + (f.to.1 - f.from.1) * e - up,
+                );
+                let (to, done) = (f.to, u >= 1.0);
+                self.pos = (x - self.size.0 / 2.0, y - self.size.1 + self.foot);
+                self.vel = (0.0, 0.0);
+                if !done {
+                    return None;
+                }
+                self.flight = None;
+                match terrain.ledge_level(to.0, to.1) {
+                    Some(l) => {
+                        self.stand(&l);
+                        self.motion = Motion::Idle;
+                        Some(Landing { speed: 300.0 })
+                    }
+                    // Its perch went away under it: down it goes.
+                    None => {
+                        self.motion = Motion::Fall;
+                        None
+                    }
+                }
+            }
             Motion::Idle | Motion::Walk => {
                 // Getting going and slowing down take a moment (quicker at
                 // a faster pace), rather than the window jumping to full
@@ -287,6 +362,31 @@ mod tests {
             }
         }
         landings
+    }
+
+    #[test]
+    fn a_bird_flies_up_to_its_perch_and_stands_on_it() {
+        use crate::terrain::Support;
+        let t = flat().with_perch(1, 500.0, 1200.0, 1360.0);
+        let mut b = Body::on_ground(&t, 300.0, SIZE, FOOT);
+        b.fly_to(1280.0, 500.0);
+        let mut highest = f32::MAX;
+        let mut landed = 0;
+        for _ in 0..(5 * 60) {
+            if b.step(1.0 / 60.0, &t).is_some() {
+                landed += 1;
+            }
+            highest = highest.min(b.feet().1);
+        }
+        assert_eq!(landed, 1);
+        assert_eq!(b.motion, Motion::Idle);
+        assert_eq!(b.on, Some(Support::Perch(1)));
+        assert!((b.feet().0 - 1280.0).abs() < 1.0 && (b.feet().1 - 500.0).abs() < 0.5);
+        assert!(highest < 480.0, "never rose above the perch: {highest}");
+        // Taken away from under it, it falls back to the floor.
+        let floor = flat();
+        run(&mut b, &floor, 3.0);
+        assert_eq!(b.feet().1, 1032.0);
     }
 
     #[test]

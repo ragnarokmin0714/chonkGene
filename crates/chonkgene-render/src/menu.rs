@@ -22,6 +22,16 @@ pub enum Icon {
     Bye,
     /// A stalk of foxtail grass (狗尾草), for teasing.
     Grass,
+    /// A paw print: asking the pet to do something (叫牠…).
+    Paw,
+    /// A ball with a seam.
+    Ball,
+    /// A frisbee seen from the side.
+    Frisbee,
+    /// A sprig of leaves: catnip.
+    Leaf,
+    /// An arrow back to the first page of the menu.
+    Back,
 }
 
 #[derive(Clone, Debug)]
@@ -440,6 +450,76 @@ fn icon(pm: &mut Pixmap, icon: Icon, ts: Transform, bg: [u8; 4]) {
                 &[
                     ('M', &[3.5, 15.0]),
                     ('C', &[2.5, 16.5, 2.8, 18.5, 4.0, 19.5]),
+                ],
+            );
+        }
+        Icon::Paw => {
+            ring(pm, 12.0, 15.0, 4.2);
+            for (x, y) in [(6.0, 9.5), (10.0, 6.0), (14.0, 6.0), (18.0, 9.5)] {
+                ring(pm, x, y, 1.9);
+            }
+        }
+        Icon::Ball => {
+            ring(pm, 12.0, 12.0, 8.0);
+            stroke(
+                pm,
+                &[
+                    ('M', &[4.5, 9.5]),
+                    ('C', &[9.0, 13.5, 15.0, 13.5, 19.5, 9.5]),
+                ],
+            );
+        }
+        Icon::Frisbee => {
+            stroke(
+                pm,
+                &[
+                    ('M', &[3.0, 13.0]),
+                    ('C', &[3.0, 9.0, 21.0, 9.0, 21.0, 13.0]),
+                    ('C', &[21.0, 16.0, 3.0, 16.0, 3.0, 13.0]),
+                    ('Z', &[]),
+                ],
+            );
+            stroke(
+                pm,
+                &[
+                    ('M', &[8.0, 11.5]),
+                    ('C', &[10.5, 10.5, 13.5, 10.5, 16.0, 11.5]),
+                ],
+            );
+        }
+        Icon::Leaf => {
+            stroke(
+                pm,
+                &[
+                    ('M', &[5.0, 20.0]),
+                    ('C', &[9.0, 15.0, 13.0, 10.0, 18.0, 5.0]),
+                ],
+            );
+            for (x, y, dx, dy) in [
+                (8.5, 15.5, -4.5, -2.5),
+                (11.5, 12.0, 3.5, 3.0),
+                (14.5, 8.5, -4.0, -3.0),
+            ] {
+                stroke(
+                    pm,
+                    &[
+                        ('M', &[x, y]),
+                        (
+                            'C',
+                            &[x + dx, y + 0.3 * dy, x + dx, y + dy, x + 0.4 * dx, y + dy],
+                        ),
+                    ],
+                );
+            }
+        }
+        Icon::Back => {
+            stroke(pm, &[('M', &[19.0, 12.0]), ('L', &[5.5, 12.0])]);
+            stroke(
+                pm,
+                &[
+                    ('M', &[10.5, 7.0]),
+                    ('L', &[5.5, 12.0]),
+                    ('L', &[10.5, 17.0]),
                 ],
             );
         }
