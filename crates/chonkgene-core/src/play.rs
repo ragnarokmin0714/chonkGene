@@ -63,7 +63,7 @@ impl Thing {
             Thing::Catnip => (40.0, 34.0),
             Thing::Bone => (46.0, 24.0),
             Thing::Seeds => (70.0, 14.0),
-            Thing::Branch => (170.0, 60.0),
+            Thing::Branch => (260.0, 60.0),
             Thing::Pond => (230.0, 50.0),
             Thing::Sunbeam => (200.0, 300.0),
             Thing::Butterfly => (28.0, 24.0),

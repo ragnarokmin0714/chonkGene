@@ -183,6 +183,8 @@ pub(super) struct Run {
     pub until: f64,
     /// Where it was when the scene began (the owl flies back down here).
     home: (f32, f32),
+    /// Where on its thing it goes (the owl lands here on the branch).
+    spot: f32,
 }
 
 /// At the catnip.
@@ -1030,17 +1032,21 @@ pub(super) fn start_scene(
     let side = if fx < a.x + a.w / 2.0 { 1.0 } else { -1.0 };
     let beside = fx + side * 1.1 * w;
     let mut prop = None;
+    let mut spot = beside;
     if let Some(thing) = scene.thing() {
         let at = match scene {
             Scene::Perch => {
-                // Out from the nearer edge of the screen, well up.
+                // Out from the nearer edge of the screen, well up; the owl
+                // lands far enough out for all of it to stay on the screen.
                 let left = fx < a.x + a.w / 2.0;
-                let (tw, _) = thing.size();
-                let x = if left {
-                    a.x + 0.5 * tw * s
+                let bw = thing.size().0 * s;
+                let out = (0.5 * w + 4.0).min(0.85 * bw);
+                let (x, land) = if left {
+                    (a.x + 0.5 * bw, a.x + out)
                 } else {
-                    a.x + a.w - 0.5 * tw * s
+                    (a.x + a.w - 0.5 * bw, a.x + a.w - out)
                 };
+                spot = land;
                 (x, fy - (a.h * 0.45).min(420.0 * s))
             }
             Scene::Butterfly => (beside, fy - 90.0 * s),
@@ -1057,7 +1063,7 @@ pub(super) fn start_scene(
             if let Some(w) = ground.get_mut(id) {
                 w.flip = left;
             }
-            let half = 0.36 * thing.size().0 * s;
+            let half = 0.48 * thing.size().0 * s;
             ground.perch = Some((id, at.1, at.0 - half, at.0 + half));
             ground.terrain_dirty = true;
         }
@@ -1070,6 +1076,7 @@ pub(super) fn start_scene(
         since: now,
         until: now + scene.secs(),
         home: (fx, fy),
+        spot,
     });
     println!("{}: starts its scene, {scene:?}", p.save.name);
     p.say(ctx, Line::Scene);
@@ -1107,7 +1114,7 @@ fn scene(ground: &mut Playground, p: &mut Pet, ctx: &mut Ctx) {
         // Off to the thing.
         (Scene::Perch, 0) => {
             // Once the branch is in the terrain, fly up to it.
-            let Some((id, y, x0, x1)) = ground.perch else {
+            let Some((id, y, ..)) = ground.perch else {
                 return end(ground, p, &run);
             };
             let ready = ctx
@@ -1117,7 +1124,7 @@ fn scene(ground: &mut Playground, p: &mut Pet, ctx: &mut Ctx) {
                 .any(|l| l.on == chonkgene_core::terrain::Support::Perch(id));
             if ready && p.body.motion != Motion::Fly {
                 p.stop();
-                p.body.fly_to(0.5 * (x0 + x1), y);
+                p.body.fly_to(run.spot, y);
                 run.phase = 1;
             }
         }
