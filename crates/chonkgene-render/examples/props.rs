@@ -3,8 +3,8 @@
 //!
 //! `cargo run --release -p chonkgene-render --example props -- <out dir> [scale]`
 //! writes `props.png`: each thing at three moments (its spin and clock
-//! moving on), then each effect part way through, the water and the
-//! fox's fire.
+//! moving on), then each effect part way through, a body swimming in the
+//! pond and the fox's fire.
 
 use chonkgene_core::play::Thing;
 use chonkgene_render::props::{self, Fx, Look};
@@ -48,6 +48,7 @@ fn main() {
                 used: 0.0,
                 grounded: true,
                 flip: false,
+                turn: 0.0,
             },
         );
         let (cx, cy) = ((i as u32 % 3) * cell, (i as u32 / 3) * row);
@@ -85,13 +86,49 @@ fn main() {
         None,
     );
     let mut last = Pixmap::new(cell * 3, row).expect("last");
-    props::water(
+    // The pond, with a round body sunk in it and the pond's front drawn
+    // over the body (the body's picture is its own, as a pet's is).
+    let pond = (0.5 * cell as f32, 0.8 * row as f32);
+    props::draw(
         &mut last,
-        0.5 * cell as f32,
-        0.6 * row as f32,
-        90.0 * scale,
+        Thing::Pond,
+        pond,
         scale,
-        1.3,
+        Look {
+            t: 1.3,
+            ..Look::default()
+        },
+    );
+    let mut body = Pixmap::new(cell * 3, row).expect("body");
+    if let Some(r) = tiny_skia::Rect::from_xywh(
+        pond.0 - 30.0 * scale,
+        pond.1 - 60.0 * scale,
+        60.0 * scale,
+        64.0 * scale,
+    ) {
+        let mut pb = tiny_skia::PathBuilder::new();
+        pb.push_oval(r);
+        let mut paint = tiny_skia::Paint::default();
+        paint.set_color_rgba8(0xF6, 0xD3, 0x6B, 255);
+        if let Some(path) = pb.finish() {
+            body.fill_path(
+                &path,
+                &paint,
+                tiny_skia::FillRule::Winding,
+                Transform::identity(),
+                None,
+            );
+        }
+    }
+    let (_, cy, _, ry) = props::pond_oval(pond, scale);
+    props::pond_front(&mut body, pond, pond.0, cy + 0.2 * ry, scale, 1.3);
+    last.draw_pixmap(
+        0,
+        0,
+        body.as_ref(),
+        &PixmapPaint::default(),
+        Transform::identity(),
+        None,
     );
     props::foxfire(
         &mut last,

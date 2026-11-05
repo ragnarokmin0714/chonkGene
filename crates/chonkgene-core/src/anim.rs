@@ -158,6 +158,14 @@ pub const PLAIN_JOYS: Habits = &[(Act::Wiggle, 40), (Act::Bounce, 35), (Act::Wav
 /// a still picture.
 const JOY_GAP: (f32, f32) = (0.5, 0.8);
 
+/// Walking at this pace or faster is running; after this many seconds of
+/// it a pet is out of breath, for this long after it stops plus as long as
+/// it ran (at most [`RUN_MOST`] seconds counted).
+const RUN_PACE: f32 = 1.5;
+const PUFF_AFTER: f32 = 1.0;
+const PUFF_SECS: f32 = 3.0;
+const RUN_MOST: f32 = 6.0;
+
 /// How long a snack takes, and each bite of it.
 pub const EAT_SECS: f32 = 3.6;
 pub const BITE_SECS: f32 = 1.2;
@@ -188,7 +196,7 @@ pub fn gesture_secs(act: Act) -> Option<f32> {
         Act::Sniff => Some(1.6),
         Act::Rub => Some(2.4),
         Act::Bliss => Some(4.0),
-        Act::Chew => Some(3.2),
+        Act::Chew => Some(6.0),
         Act::Swish => Some(1.2),
         _ => None,
     }
@@ -267,6 +275,13 @@ pub struct PoseParams {
     pub pace: f32,
     pub touch: Touch,
     pub posture: Posture,
+    /// Pleased, or busy with something fun (a scene, a toy, catnip, a
+    /// play-fight): the tail, ears and wings keep going all the while, even
+    /// through gestures (Roger: smiles and scenes still looked still).
+    pub lively: bool,
+    /// Out of breath from a run (a fetch, zoomies, a chase), or still
+    /// running: a dog pants with its tongue out.
+    pub puffed: bool,
 }
 
 impl Default for PoseParams {
@@ -288,6 +303,8 @@ impl Default for PoseParams {
             pace: 1.0,
             touch: Touch::default(),
             posture: Posture::Free,
+            lively: false,
+            puffed: false,
         }
     }
 }
@@ -311,6 +328,12 @@ pub struct Animator {
     /// How the body is held (asked to sit, lying down, flying, swimming);
     /// lying, flying or swimming it picks no gestures of its own.
     pub posture: Posture,
+    /// Busy with something fun (set from outside: a scene, a toy, catnip,
+    /// a play-fight); pleased counts too (see [`PoseParams::lively`]).
+    pub lively: bool,
+    /// Seconds run so far on this run, and until when it is out of breath.
+    run: f32,
+    puffed_until: f32,
     pub sway: f32,
     /// The way the pet wants to face; the shown facing turns towards it.
     pub facing: f32,
@@ -374,6 +397,9 @@ impl Animator {
             walking: false,
             pace: 1.0,
             posture: Posture::Free,
+            lively: false,
+            run: 0.0,
+            puffed_until: f32::NEG_INFINITY,
             sway: 0.0,
             facing: 1.0,
             pops: true,
@@ -666,6 +692,16 @@ impl Animator {
         } else {
             self.stride = 0.0;
         }
+        // Running hard puts it out of breath for a while after: longer the
+        // longer it ran.
+        if self.running() {
+            self.run = (self.run + dt).min(RUN_MOST);
+        } else if self.run > 0.0 {
+            if self.run >= PUFF_AFTER {
+                self.puffed_until = self.t + PUFF_SECS + self.run;
+            }
+            self.run = 0.0;
+        }
 
         if self.hopping() {
             self.hop_vel += HOP_GRAVITY * dt;
@@ -732,6 +768,15 @@ impl Animator {
             self.body.kick(-1.4);
             self.next_huff = self.t + 2.5 + self.rng.f32() * 2.0;
         }
+    }
+
+    fn running(&self) -> bool {
+        self.walking && self.pace >= RUN_PACE
+    }
+
+    /// Out of breath, or running long enough to be.
+    fn puffed(&self) -> bool {
+        (self.running() && self.run >= PUFF_AFTER) || self.t < self.puffed_until
     }
 
     /// Where the walk is: which step and how far through it (0.0–1.0).
@@ -858,6 +903,12 @@ impl Animator {
                 watch: self.watch,
             },
             posture: self.posture,
+            lively: match self.expression {
+                Expression::Happy => true,
+                Expression::Neutral => self.lively,
+                _ => false,
+            },
+            puffed: self.expression != Expression::Asleep && self.puffed(),
         }
     }
 }
@@ -978,6 +1029,47 @@ mod tests {
             assert!(first < 1.2, "{species:?}: first joy {first:.1} s in");
             assert!(longest < 1.4, "{species:?}: sat {longest:.1} s smiling");
         }
+    }
+
+    /// Pleased, or busy with something fun, a pet shows it all the while
+    /// (the renderers keep tail, ears and wings going); not in a mood.
+    #[test]
+    fn pleased_or_at_play_is_lively_and_a_mood_is_not() {
+        let mut a = Animator::new(3, 0.33, 0.35);
+        assert!(!a.params().lively);
+        a.expression = Expression::Happy;
+        assert!(a.params().lively);
+        a.expression = Expression::Neutral;
+        a.lively = true;
+        assert!(a.params().lively);
+        for mood in [Expression::FedUp, Expression::Sulk, Expression::Asleep] {
+            a.expression = mood;
+            assert!(!a.params().lively, "{mood:?}");
+        }
+    }
+
+    /// Roger: the dog should stick its tongue out too. A run (a fetch,
+    /// zoomies) puts it out of breath, for longer after a longer run; an
+    /// ordinary walk does not.
+    #[test]
+    fn a_run_leaves_it_out_of_breath_for_a_while() {
+        let mut a = Animator::new(5, 0.33, 0.35);
+        a.walking = true;
+        run(&mut a, 8.0, |a| {
+            assert!(!a.params().puffed, "puffed from a walk")
+        });
+        a.pace = 2.2;
+        run(&mut a, 0.5, |_| {});
+        assert!(!a.params().puffed, "puffed at once");
+        run(&mut a, 3.0, |_| {});
+        assert!(a.params().puffed, "not puffed running");
+        a.walking = false;
+        a.pace = 1.0;
+        run(&mut a, 5.5, |a| {
+            assert!(a.params().puffed, "got its breath back early")
+        });
+        run(&mut a, 2.0, |_| {});
+        assert!(!a.params().puffed, "still out of breath");
     }
 
     #[test]

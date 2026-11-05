@@ -13,8 +13,8 @@ use std::f32::consts::{PI, TAU};
 
 use chonkgene_core::play::Thing;
 use tiny_skia::{
-    Color, FillRule, GradientStop, LineCap, Paint, PathBuilder, Pixmap, Point, RadialGradient,
-    Rect, SpreadMode, Stroke, Transform,
+    BlendMode, Color, FillRule, GradientStop, LineCap, Mask, Paint, Path, PathBuilder, Pixmap,
+    Point, RadialGradient, Rect, SpreadMode, Stroke, Transform,
 };
 
 /// Room around a thing in its own window, pixels at 100%: for its shadow,
@@ -146,6 +146,9 @@ pub struct Look {
     pub grounded: bool,
     /// Facing left (the branch grows out from the right).
     pub flip: bool,
+    /// Held in a mouth, turned with the head this far, radians (+ is
+    /// clockwise on the screen).
+    pub turn: f32,
 }
 
 /// Draw `thing` with the middle of its bottom at `at` (pixels of `pm`).
@@ -183,7 +186,7 @@ pub fn draw(pm: &mut Pixmap, thing: Thing, at: (f32, f32), s: f32, look: Look) {
             // Tipped a little toward you, wobbling as it spins.
             let tilt = 6.0 * (look.spin * 0.5).sin();
             let (cx, cy) = (x, y - 0.55 * h * s);
-            let ts = Transform::from_rotate_at(tilt, cx, cy);
+            let ts = Transform::from_rotate_at(tilt + look.turn.to_degrees(), cx, cy);
             oval(pm, cx, cy + 0.25 * ry, rx, ry, [0x2E, 0x8C, 0x8A, 255], ts);
             oval(pm, cx, cy, rx, ry, [0x5C, 0xC8, 0xC2, 255], ts);
             oval(
@@ -272,7 +275,8 @@ pub fn draw(pm: &mut Pixmap, thing: Thing, at: (f32, f32), s: f32, look: Look) {
             }
             // Tipped a little this way or that (gnawed at, carried).
             let (cx, cy) = (x, y - 0.5 * h * s);
-            let ts = Transform::from_rotate_at(8.0 * look.spin.sin(), cx, cy);
+            let ts =
+                Transform::from_rotate_at(8.0 * look.spin.sin() + look.turn.to_degrees(), cx, cy);
             let rim = [0xD8, 0xC6, 0xA4, 255];
             let fill = [0xFB, 0xF2, 0xDF, 255];
             let half = 0.36 * w * s;
@@ -360,8 +364,7 @@ pub fn draw(pm: &mut Pixmap, thing: Thing, at: (f32, f32), s: f32, look: Look) {
             }
         }
         Thing::Pond => {
-            let (rx, ry) = (0.5 * w * s, 0.3 * h * s);
-            let (cx, cy) = (x, y - 0.35 * h * s);
+            let (cx, cy, rx, ry) = pond_oval(at, s);
             oval(
                 pm,
                 cx,
@@ -371,24 +374,9 @@ pub fn draw(pm: &mut Pixmap, thing: Thing, at: (f32, f32), s: f32, look: Look) {
                 [0x9C, 0x8B, 0x74, 200],
                 Transform::identity(),
             );
-            oval(
-                pm,
-                cx,
-                cy,
-                rx,
-                ry,
-                [0x6F, 0xB8, 0xE0, 235],
-                Transform::identity(),
-            );
-            oval(
-                pm,
-                cx - 0.1 * rx,
-                cy - 0.15 * ry,
-                0.7 * rx,
-                0.55 * ry,
-                [0x93, 0xCF, 0xEE, 200],
-                Transform::identity(),
-            );
+            oval(pm, cx, cy, rx, ry, POND_WATER, Transform::identity());
+            let (hx, hy, hrx, hry) = pond_light(cx, cy, rx, ry);
+            oval(pm, hx, hy, hrx, hry, POND_LIGHT, Transform::identity());
             // Rings spreading on the water.
             for k in 0..3 {
                 let p = (look.t * 0.35 + k as f32 / 3.0).fract();
@@ -701,57 +689,117 @@ fn star(pm: &mut Pixmap, x: f32, y: f32, r: f32, c: [u8; 4]) {
     }
 }
 
-/// The water a pet swims in, over the bottom of its picture from the
-/// waterline `y` down, `half` either side of `x`: the part of the body
-/// under it shows faintly through, rings spread from the pet.
-pub fn water(pm: &mut Pixmap, x: f32, y: f32, half: f32, s: f32, t: f32) {
-    let h = pm.height() as f32;
+/// The pond's water and its lighter middle.
+const POND_WATER: [u8; 4] = [0x6F, 0xB8, 0xE0, 235];
+const POND_LIGHT: [u8; 4] = [0x93, 0xCF, 0xEE, 200];
+
+/// The pond's water, an oval: middle and radii, for the pond with the
+/// middle of its bottom at `at`.
+pub fn pond_oval(at: (f32, f32), s: f32) -> (f32, f32, f32, f32) {
+    let (w, h) = Thing::Pond.size();
+    (at.0, at.1 - 0.35 * h * s, 0.5 * w * s, 0.3 * h * s)
+}
+
+/// The lighter middle of the pond's water (middle and radii).
+fn pond_light(cx: f32, cy: f32, rx: f32, ry: f32) -> (f32, f32, f32, f32) {
+    (cx - 0.1 * rx, cy - 0.15 * ry, 0.7 * rx, 0.55 * ry)
+}
+
+fn oval_path(cx: f32, cy: f32, rx: f32, ry: f32) -> Option<Path> {
+    let r = Rect::from_xywh(cx - rx, cy - ry, 2.0 * rx, 2.0 * ry)?;
     let mut pb = PathBuilder::new();
-    pb.move_to(x - half, y);
-    let n = 16;
+    pb.push_oval(r);
+    pb.finish()
+}
+
+/// The pond's water over a duckling swimming in it (PLAN §8 "Roger's
+/// tenth pass", item 2): from the waterline `line` down, the pond's own
+/// blues clipped to the pond's oval, so the body under the water shows
+/// faintly through the same colours as the pond behind it; whatever of
+/// the picture hangs below the pond's near edge is wiped out (it would
+/// show under the pond). `pond` is where the middle of the pond's bottom
+/// lies on `pm` (its own window is behind), `x` the middle of the body,
+/// for the rings spreading from it.
+pub fn pond_front(pm: &mut Pixmap, pond: (f32, f32), x: f32, line: f32, s: f32, t: f32) {
+    let (w, h) = (pm.width(), pm.height());
+    let (cx, cy, rx, ry) = pond_oval(pond, s);
+    let (Some(water), Some(mut inside)) = (oval_path(cx, cy, rx, ry), Mask::new(w, h)) else {
+        return;
+    };
+    inside.fill_path(&water, FillRule::Winding, true, Transform::identity());
+    // Under a waterline that laps a little.
+    let mut pb = PathBuilder::new();
+    let n = 24;
     for k in 0..=n {
         let u = k as f32 / n as f32;
-        let wx = x - half + 2.0 * half * u;
-        let wy = y + 1.2 * s * (TAU * (2.0 * u + 0.6 * t)).sin();
-        pb.line_to(wx, wy);
+        let wx = u * w as f32;
+        let wy = line + 1.1 * s * (TAU * (u * w as f32 / (60.0 * s) + 0.6 * t)).sin();
+        if k == 0 {
+            pb.move_to(wx, wy);
+        } else {
+            pb.line_to(wx, wy);
+        }
     }
-    pb.line_to(x + half, h);
-    pb.line_to(x - half, h);
+    pb.line_to(w as f32, h as f32);
+    pb.line_to(0.0, h as f32);
     pb.close();
-    if let Some(p) = pb.finish() {
+    let Some(under) = pb.finish() else {
+        return;
+    };
+    let id = Transform::identity();
+    // Below the pond's near edge, nothing of the body shows.
+    let mut outside = inside.clone();
+    outside.invert();
+    let clear = Paint {
+        blend_mode: BlendMode::Clear,
+        ..Paint::default()
+    };
+    pm.fill_path(&under, &clear, FillRule::Winding, id, Some(&outside));
+    // In the water: the pond's blues over the body, a touch thinner.
+    let mut wet = inside.clone();
+    wet.intersect_path(&under, FillRule::Winding, true, id);
+    pm.fill_path(
+        &under,
+        &paint(with_alpha(POND_WATER, 0.92)),
+        FillRule::Winding,
+        id,
+        Some(&wet),
+    );
+    let (hx, hy, hrx, hry) = pond_light(cx, cy, rx, ry);
+    if let Some(light) = oval_path(hx, hy, hrx, hry) {
         pm.fill_path(
-            &p,
-            &paint([0x6F, 0xB8, 0xE0, 215]),
+            &light,
+            &paint(with_alpha(POND_LIGHT, 0.92)),
             FillRule::Winding,
-            Transform::identity(),
-            None,
+            id,
+            Some(&wet),
         );
     }
-    // A bright line along the top and rings spreading from the body.
+    // A bright line along the waterline and rings spreading from the
+    // body, on the water only.
+    let stroke = |pm: &mut Pixmap, pb: PathBuilder, c: [u8; 4], width: f32| {
+        let Some(path) = pb.finish() else {
+            return;
+        };
+        let st = Stroke {
+            width,
+            line_cap: LineCap::Round,
+            ..Stroke::default()
+        };
+        pm.stroke_path(&path, &paint(c), &st, id, Some(&inside));
+    };
     let mut top = PathBuilder::new();
-    top.move_to(x - 0.8 * half, y + 1.0 * s);
-    top.line_to(x + 0.8 * half, y + 1.0 * s);
-    stroke_path(
-        pm,
-        top,
-        [0xC8, 0xE8, 0xF8, 200],
-        1.5 * s,
-        Transform::identity(),
-    );
+    top.move_to(x - 0.3 * rx, line + 1.0 * s);
+    top.line_to(x + 0.3 * rx, line + 1.0 * s);
+    stroke(pm, top, [0xC8, 0xE8, 0xF8, 210], 1.5 * s);
     for k in 0..2 {
         let p = (t * 0.5 + k as f32 * 0.5).fract();
+        let (ex, ey) = ((0.2 + 0.25 * p) * rx, (2.0 + 4.0 * p) * s);
         let mut ring = PathBuilder::new();
-        let (rx, ry) = ((0.35 + 0.6 * p) * half, (2.0 + 4.0 * p) * s);
-        if let Some(r) = Rect::from_xywh(x - rx, y + 2.0 * s - ry, 2.0 * rx, 2.0 * ry) {
+        if let Some(r) = Rect::from_xywh(x - ex, line + 2.0 * s - ey, 2.0 * ex, 2.0 * ey) {
             ring.push_oval(r);
         }
-        stroke_path(
-            pm,
-            ring,
-            with_alpha([255, 255, 255, 170], 1.0 - p),
-            1.1 * s,
-            Transform::identity(),
-        );
+        stroke(pm, ring, with_alpha([255, 255, 255, 170], 1.0 - p), 1.1 * s);
     }
 }
 

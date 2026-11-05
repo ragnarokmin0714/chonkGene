@@ -10,7 +10,7 @@ use std::time::{Duration, Instant};
 use chonkgene_core::Zone;
 use chonkgene_core::anim::{Act, Animator, Expression, HOLD_SECS};
 use chonkgene_core::mind::{Line, Mind, Out, World, XP_PER_LEVEL};
-use chonkgene_core::motion::{Area, Body, Motion};
+use chonkgene_core::motion::{Area, Body, Heading, Motion};
 use chonkgene_core::play::{Command as Ask, Thing};
 use chonkgene_core::shake::ShakeDetector;
 use chonkgene_core::skit::{Actor, Cmd, Director};
@@ -185,6 +185,8 @@ struct Pet {
     bubble: Option<Bubble>,
     /// Walking is up to the skit director while this is set.
     in_skit: bool,
+    /// In a play-fight (a skit, not a squabble).
+    play_fight: bool,
     /// Going for the grass stalk; when it next tries something, and when a
     /// crouch turns into a pounce.
     playing: bool,
@@ -1328,9 +1330,10 @@ fn direct(pets: &mut [Pet], ctx: &mut Ctx, cmds: Vec<Cmd>) {
         p.next = Instant::now();
         match cmd {
             Cmd::Walk { x, pace, .. } => {
-                p.body.facing = if x >= p.center_x() { 1.0 } else { -1.0 };
-                p.body.motion = Motion::Walk;
-                p.body.pace = pace;
+                // Stopping short of the spot, never turned back and forth
+                // at an edge it cannot pass (see `Body::head_for`).
+                let near = 0.12 * p.body.size.0;
+                p.body.head_for(x, pace, near, ctx.terrain);
             }
             Cmd::Face { x, .. } => {
                 p.body.facing = if x >= p.center_x() { 1.0 } else { -1.0 };
@@ -1439,6 +1442,7 @@ fn spawn(
         act: None,
         bubble: None,
         in_skit: false,
+        play_fight: false,
         playing: false,
         play_at: 0.0,
         pounce_at: None,
@@ -1457,7 +1461,7 @@ impl Pet {
     /// it, then crouch and pounce (cats), pounce and swat (dogs, the fox),
     /// or peck and flap at it (birds); the owl only watches. False if it
     /// is out of reach (too far, or below the floor the pet is on).
-    fn play(&mut self, tip: (f32, f32), t: f64) -> bool {
+    fn play(&mut self, tip: (f32, f32), t: f64, terrain: &Terrain) -> bool {
         let (w, h) = self.body.size;
         let (fx, fy) = self.body.feet();
         let dx = tip.0 - fx;
@@ -1475,15 +1479,22 @@ impl Pet {
             }
             return true;
         }
-        self.body.facing = if dx < 0.0 { -1.0 } else { 1.0 };
-        if dx.abs() > 0.3 * w {
-            self.body.motion = Motion::Walk;
-            self.body.pace = 1.0 + 0.8 * keen;
-            self.pounce_at = None;
-            return true;
+        // Up to it (or as close as it gets, watching it from there), never
+        // turned back and forth at an edge it cannot pass.
+        match self
+            .body
+            .head_for(tip.0, 1.0 + 0.8 * keen, 0.2 * w, terrain)
+        {
+            Heading::Going => {
+                self.pounce_at = None;
+                return true;
+            }
+            Heading::Blocked => return true,
+            Heading::There => {}
         }
-        if self.body.motion == Motion::Walk {
-            self.body.motion = Motion::Idle;
+        // Close by, it turns to whichever side the tip is on, once stopped.
+        if self.body.speed == 0.0 && dx.abs() > 0.1 * w {
+            self.body.facing = if dx < 0.0 { -1.0 } else { 1.0 };
         }
         if let Some(at) = self.pounce_at
             && t >= at
@@ -1766,7 +1777,7 @@ impl Pet {
             }
             let playing = free
                 && matches!(self.body.motion, Motion::Idle | Motion::Walk)
-                && toy.is_some_and(|tip| self.play(tip, t));
+                && toy.is_some_and(|tip| self.play(tip, t, ctx.terrain));
             if self.playing && !playing {
                 self.anim.watch(None);
                 if self.body.motion == Motion::Walk {
@@ -2029,6 +2040,32 @@ impl ApplicationHandler<UserEvent> for App {
             }
             return;
         }
+        // A toy on the desktop: picked up, dragged and thrown, or knocked
+        // along with a click.
+        if self.play.owns(id) {
+            match event {
+                WindowEvent::CursorMoved { position, .. } => {
+                    self.play
+                        .cursor_on(id, (position.x as f32, position.y as f32));
+                }
+                WindowEvent::MouseInput {
+                    state,
+                    button: MouseButton::Left,
+                    ..
+                } => {
+                    if state == ElementState::Pressed {
+                        self.menu = None;
+                        let at = self.shared.as_ref().and_then(|s| s.cursor());
+                        self.play.press(id, &mut self.pets, at);
+                    } else {
+                        let now = self.world(Instant::now()).now;
+                        self.play.release(id, &mut self.pets, now);
+                    }
+                }
+                _ => {}
+            }
+            return;
+        }
         let Some(i) = self.pets.iter().position(|p| p.window.id() == id) else {
             return;
         };
@@ -2284,6 +2321,7 @@ impl ApplicationHandler<UserEvent> for App {
             direct(pets, &mut ctx, cmds);
             for p in pets.iter_mut() {
                 p.in_skit = director.involves(p.save.id);
+                p.play_fight = director.playing(p.save.id);
             }
         }
         play::tick(play, pets, &mut ctx, visible, settings.react_to_input);

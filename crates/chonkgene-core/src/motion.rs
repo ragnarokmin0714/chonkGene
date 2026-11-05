@@ -66,6 +66,27 @@ pub struct Flight {
 /// Flying, pixels a second (wings beating, not falling).
 const FLY_SPEED: f32 = 320.0;
 
+/// Where a walk toward a spot stands (see [`Body::head_for`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Heading {
+    /// On its way (or stopping to turn round).
+    Going,
+    /// Close enough: stopped, or slowing to a stop, there.
+    There,
+    /// It cannot get there from here (the edge of the screens, a gap
+    /// between monitors): stopped as close as it gets, facing it.
+    Blocked,
+}
+
+/// On its way somewhere, a pet turns round at most this often, seconds,
+/// and only once it has stopped: a spot darting about (a rolling ball, the
+/// middle between two pets) never sets it flipping back and forth on the
+/// spot (Roger, 2026-11-05: anxious movements crossing the terrain).
+const TURN_GAP: f32 = 0.8;
+/// Stood still that close to a spot, a pet sets off again only once it is
+/// this many times further than its stopping distance.
+const RESTART: f32 = 2.0;
+
 /// Where a pet window is and how it moves. `pos` is the window's top-left;
 /// `size` is the window size; the feet are `foot` pixels above its bottom
 /// edge (the contact shadow goes below them).
@@ -87,6 +108,8 @@ pub struct Body {
     pub on: Option<Support>,
     /// Under way while flying.
     pub flight: Option<Flight>,
+    /// Seconds since [`Body::head_for`] last turned it round.
+    since_turn: f32,
 }
 
 /// Something worth a squash: the speed of a landing.
@@ -109,6 +132,7 @@ impl Body {
             speed: 0.0,
             on: None,
             flight: None,
+            since_turn: TURN_GAP,
         };
         if let Some(l) = terrain.floor_under(b.feet().0) {
             b.pos.0 = b.pos.0.clamp(l.x0 - size.0 / 2.0, l.x1 - size.0 / 2.0);
@@ -193,6 +217,72 @@ impl Body {
         matches!(self.motion, Motion::Idle | Motion::Walk) && self.speed > 0.0
     }
 
+    /// How far the feet can walk from where they are, left and right: to
+    /// the edges of the screens, never across a gap between monitors.
+    pub fn reach(&self, terrain: &Terrain) -> (f32, f32) {
+        let (left, right) = terrain.bounds();
+        let half = self.size.0 / 2.0;
+        let (fx, _) = self.feet();
+        let (a, b) = terrain.span_at(fx).unwrap_or((left, right));
+        let lo = a.max(left + half) + 1.0;
+        (lo, (b.min(right - half) - 1.0).max(lo))
+    }
+
+    /// Walk toward screen x `x` (its feet) at `pace`, stopping `near`
+    /// short of it. A spot it cannot reach (past the edge of the screens,
+    /// across a gap between monitors) it walks as close to as it can and
+    /// stops there facing it, instead of being turned back at the edge and
+    /// turning round for it again every frame. Stood still near a spot, it
+    /// sets off again only once the spot is twice as far; turning round, it
+    /// stops first and turns at most every [`TURN_GAP`] seconds. Only
+    /// standing or walking: in the air it does nothing.
+    pub fn head_for(&mut self, x: f32, pace: f32, near: f32, terrain: &Terrain) -> Heading {
+        if !matches!(self.motion, Motion::Idle | Motion::Walk) {
+            return Heading::Going;
+        }
+        let (fx, _) = self.feet();
+        let (lo, hi) = self.reach(terrain);
+        let goal = x.clamp(lo, hi);
+        let blocked = (goal - x).abs() > near;
+        let dx = goal - fx;
+        let side = if dx < 0.0 { -1.0 } else { 1.0 };
+        let walking = self.motion == Motion::Walk;
+        let band = if walking && side == self.facing {
+            near
+        } else {
+            RESTART * near
+        };
+        if dx.abs() <= band {
+            if walking {
+                self.motion = Motion::Idle;
+            }
+            if !blocked {
+                return Heading::There;
+            }
+            // At the edge: it looks across at the spot, turning once.
+            let toward = if x < fx { -1.0 } else { 1.0 };
+            if toward != self.facing && self.speed == 0.0 && self.since_turn >= TURN_GAP {
+                self.facing = toward;
+                self.since_turn = 0.0;
+            }
+            return Heading::Blocked;
+        }
+        if side != self.facing {
+            // Slow to a stop first, and not again straight after a turn.
+            if self.speed > 0.0 || self.since_turn < TURN_GAP {
+                if walking {
+                    self.motion = Motion::Idle;
+                }
+                return Heading::Going;
+            }
+            self.facing = side;
+            self.since_turn = 0.0;
+        }
+        self.motion = Motion::Walk;
+        self.pace = pace;
+        Heading::Going
+    }
+
     /// The desktop changed over `dt` seconds: a pet on a window that moved
     /// moves with it, and one yanked hard is thrown off.
     pub fn carry(&mut self, old: &Terrain, new: &Terrain, dt: f32) {
@@ -213,6 +303,7 @@ impl Body {
     }
 
     pub fn step(&mut self, dt: f32, terrain: &Terrain) -> Option<Landing> {
+        self.since_turn += dt;
         let (left, right) = terrain.bounds();
         let right = (right - self.size.0).max(left);
         match self.motion {
@@ -609,6 +700,89 @@ mod tests {
         assert_eq!(b.on, Some(Support::Window(7)));
         // It lands on the spot and bounces once, sliding a little on.
         assert!((b.feet().0 - x).abs() < 24.0, "{} vs {x}", b.feet().0);
+    }
+
+    /// Head for `x` (a function of the time) every frame for `secs`:
+    /// the last heading, and every time it turned round.
+    fn head(b: &mut Body, t: &Terrain, secs: f32, x: impl Fn(f32) -> f32) -> (Heading, Vec<f32>) {
+        let dt = 1.0 / 60.0;
+        let (mut last, mut turns, mut facing) = (Heading::Going, Vec::new(), b.facing);
+        for f in 0..(secs / dt) as usize {
+            let now = f as f32 * dt;
+            last = b.head_for(x(now), 1.6, 0.12 * SIZE.0, t);
+            b.step(dt, t);
+            if b.facing != facing {
+                turns.push(now);
+                facing = b.facing;
+            }
+        }
+        (last, turns)
+    }
+
+    #[test]
+    fn a_walk_to_a_spot_stops_short_of_it_without_turning() {
+        let t = flat();
+        let mut b = Body::on_ground(&t, 400.0, SIZE, FOOT);
+        let (last, turns) = head(&mut b, &t, 20.0, |_| 1200.0);
+        assert_eq!(last, Heading::There);
+        assert!(turns.is_empty(), "turned at {turns:?}");
+        assert_eq!(b.speed, 0.0);
+        assert!(
+            (b.feet().0 - 1200.0).abs() <= 0.12 * SIZE.0,
+            "{}",
+            b.feet().0
+        );
+    }
+
+    /// Roger, 2026-11-05: pets crossing the terrain toward something far
+    /// off kept making anxious movements. A spot it cannot reach (across a
+    /// gap between monitors, past the edge of the screens) used to turn it
+    /// back at the edge and round again every frame; now it walks as close
+    /// as it can, stops and looks across.
+    #[test]
+    fn a_pet_sent_somewhere_it_cannot_reach_settles_instead_of_flipping() {
+        let right = Area { x: 2200.0, ..AREA };
+        let t = Terrain::new(vec![AREA, right], &[], 0.0);
+        let mut b = Body::on_ground(&t, 1300.0, SIZE, FOOT);
+        let (last, turns) = head(&mut b, &t, 15.0, |_| 2600.0);
+        assert_eq!(last, Heading::Blocked);
+        assert!(turns.is_empty(), "turned at {turns:?}");
+        assert_eq!((b.motion, b.speed), (Motion::Idle, 0.0));
+        assert!(
+            b.feet().0 > 1800.0 && b.feet().0 <= 1920.0,
+            "{}",
+            b.feet().0
+        );
+        // Past the left edge of the screens: the same, facing it.
+        let (last, turns) = head(&mut b, &t, 40.0, |_| -500.0);
+        assert_eq!(last, Heading::Blocked);
+        assert_eq!(turns.len(), 1, "turned at {turns:?}");
+        assert_eq!((b.motion, b.speed, b.facing), (Motion::Idle, 0.0, -1.0));
+        assert!(b.pos.0 < 30.0, "{}", b.pos.0);
+    }
+
+    /// A spot darting about either side of the pet (a ball rolling to and
+    /// fro, the middle of two pets coming together) never flips it back and
+    /// forth: it turns only once stopped, and not again straight away.
+    #[test]
+    fn a_spot_darting_about_never_sets_it_flipping() {
+        let t = flat();
+        let mut b = Body::on_ground(&t, 800.0, SIZE, FOOT);
+        let x0 = b.feet().0;
+        let (_, turns) = head(&mut b, &t, 12.0, |s| x0 + 90.0 * (5.0 * s).sin());
+        assert!(turns.len() <= 12, "turned {} times", turns.len());
+        for w in turns.windows(2) {
+            assert!(
+                w[1] - w[0] >= TURN_GAP - 0.02,
+                "turned again after {}",
+                w[1] - w[0]
+            );
+        }
+        // Jiggling a little about where it stopped does not start it off.
+        let x = b.feet().0;
+        let (last, turns) = head(&mut b, &t, 5.0, |s| x + 30.0 * (3.0 * s).sin());
+        assert!(turns.len() <= 1, "{turns:?}");
+        assert_eq!((last, b.speed), (Heading::There, 0.0));
     }
 
     #[test]

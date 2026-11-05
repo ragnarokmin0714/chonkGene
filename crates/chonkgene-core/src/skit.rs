@@ -161,6 +161,11 @@ impl Director {
         self.skit.is_some_and(|s| s.a == id || s.b == id)
     }
 
+    /// Is `id` in a play-fight (not a squabble)?
+    pub fn playing(&self, id: u64) -> bool {
+        self.involves(id) && self.skit.is_some_and(|s| s.kind == Kind::Play)
+    }
+
     /// 勸架 (PLAN §1.4): clicking either pet ends the skit in making up.
     pub fn interrupt(&mut self, id: u64, now: f64, actors: &[Actor]) -> Vec<Cmd> {
         match self.skit {

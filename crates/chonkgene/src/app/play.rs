@@ -9,12 +9,13 @@
 use chonkgene_core::activity::{Activity, Watcher};
 use chonkgene_core::anim::{Act, Expression, Posture};
 use chonkgene_core::mind::Line;
-use chonkgene_core::motion::Motion;
+use chonkgene_core::motion::{Heading, Motion};
 use chonkgene_core::play::{
     Chase, Command, Fetch, Order, Prop, SCENE_GAP, Scene, Thing, obey_delay, stay_secs,
 };
 use chonkgene_core::sound::Sound;
 use chonkgene_core::species::Species;
+use chonkgene_core::terrain::Terrain;
 use chonkgene_platform::{Presenter, Shared};
 use chonkgene_render::props::{self, Fx};
 use chonkgene_render::raymarch::FLOOR_PX;
@@ -38,8 +39,33 @@ const PPU: f32 = 58.0;
 /// Things that move on their own (smell rising, water rippling, a
 /// butterfly) are drawn at this many frames a second.
 const ALIVE_FPS: f64 = 15.0;
+/// Swimming, the duckling paddles this share of the pond's width either
+/// side of its middle, so its body stays inside the water.
+const POND_PADDLE: f32 = 0.16;
 
-/// A thing in a window of its own; it lets every click through.
+/// Thrown with the mouse, a toy goes at most this fast (pixels a second
+/// at 100%); let go slower than this, it just drops.
+const THROW_MOST: f32 = 2400.0;
+const THROW_LEAST: f32 = 80.0;
+/// A click on a toy knocks it along this fast (pixels a second at 100%).
+const KNOCK: (f32, f32) = (380.0, -260.0);
+
+/// A toy picked up with the mouse.
+#[derive(Clone, Copy, Debug)]
+struct Grab {
+    /// Where on its window the cursor took hold.
+    at: (f32, f32),
+    /// Dragged (not just a click).
+    moved: bool,
+    /// The cursor's screen position when pressed.
+    down: (f32, f32),
+    /// Its speed, smoothed, pixels a second.
+    vel: (f32, f32),
+}
+
+/// A thing in a window of its own. The ball and the frisbee can be picked
+/// up, dragged and thrown with the mouse, or knocked along with a click;
+/// everything else lets every click through.
 pub(super) struct PropWin {
     pub id: u32,
     pub prop: Prop,
@@ -57,6 +83,9 @@ pub(super) struct PropWin {
     born: f64,
     drawn: Option<(f64, (f32, f32), f32, bool)>,
     shown: bool,
+    /// Where the cursor is on its window, and the mouse holding it.
+    cursor: (f32, f32),
+    grab: Option<Grab>,
 }
 
 impl PropWin {
@@ -74,10 +103,12 @@ impl PropWin {
             .create_window(chonkgene_platform::pet_window(size, pos, "肉肉賴桌"))
             .ok()?;
         let mut presenter = Presenter::new(shared, &window).ok()?;
-        if let Err(e) = presenter.set_ghost(shared) {
-            eprintln!("a thing on the desktop: {e}");
+        if !prop.thing.grabbed() {
+            if let Err(e) = presenter.set_ghost(shared) {
+                eprintln!("a thing on the desktop: {e}");
+            }
+            let _ = window.set_cursor_hittest(false);
         }
-        let _ = window.set_cursor_hittest(false);
         Some(Self {
             id,
             prop,
@@ -92,6 +123,8 @@ impl PropWin {
             born: now,
             drawn: None,
             shown: true,
+            cursor: (0.0, 0.0),
+            grab: None,
         })
     }
 
@@ -156,6 +189,7 @@ impl PropWin {
             used: self.used(now),
             grounded,
             flip: self.flip,
+            turn: 0.0,
         };
         props::draw(
             &mut self.pixmap,
@@ -212,6 +246,9 @@ pub(super) struct Fun {
     hold_until: f64,
     pub scene: Option<Run>,
     next_scene: f64,
+    /// Swimming in the pond, with the middle of its bottom here (screen
+    /// pixels): the pond's front is drawn over the pet.
+    pond: Option<(f32, f32)>,
     nip: Option<(Nip, f64, u8)>,
     /// Effects under way, since when.
     pub fx: Vec<(Fx, f64)>,
@@ -370,17 +407,113 @@ impl Playground {
             return;
         };
         println!("a {thing:?} thrown");
+        self.after(pets, id, thing, from.0, now);
+    }
+
+    /// Every pet awake and free goes after toy `id`, thrown from screen x
+    /// `from`, its own way.
+    fn after(&mut self, pets: &mut [Pet], id: u32, thing: Thing, from: f32, now: f64) {
         for p in pets.iter_mut() {
             if !p.free_to_play(now) {
                 continue;
             }
             println!("{}: goes for the {thing:?}", p.save.name);
             let roll = self.roll();
-            p.fun.chase = Some((id, Chase::new(p.species.fetch(), from.0, now, roll)));
+            p.fun.chase = Some((id, Chase::new(p.species.fetch(), from, now, roll)));
             p.fun.lounge_until = 0.0;
             p.fun.hold_until = 0.0;
             p.anim.posture = Posture::Free;
         }
+    }
+
+    /// Is this window one of the things'?
+    pub fn owns(&self, window: winit::window::WindowId) -> bool {
+        self.things.iter().any(|w| w.window.id() == window)
+    }
+
+    /// The cursor moved on a thing's window, to `at` on it.
+    pub fn cursor_on(&mut self, window: winit::window::WindowId, at: (f32, f32)) {
+        if let Some(w) = self.things.iter_mut().find(|w| w.window.id() == window) {
+            w.cursor = at;
+        }
+    }
+
+    /// The mouse pressed on a toy's window, the cursor at `screen`: it is
+    /// picked up (pets after it stop and wait).
+    pub fn press(
+        &mut self,
+        window: winit::window::WindowId,
+        pets: &mut [Pet],
+        screen: Option<(i32, i32)>,
+    ) {
+        let Some(w) = self
+            .things
+            .iter_mut()
+            .find(|w| w.window.id() == window && w.prop.thing.grabbed() && w.carrier.is_none())
+        else {
+            return;
+        };
+        let down = screen.map_or(
+            (
+                w.placed.0 as f32 + w.cursor.0,
+                w.placed.1 as f32 + w.cursor.1,
+            ),
+            |(x, y)| (x as f32, y as f32),
+        );
+        w.grab = Some(Grab {
+            at: w.cursor,
+            moved: false,
+            down,
+            vel: (0.0, 0.0),
+        });
+        let id = w.id;
+        for p in pets.iter_mut() {
+            if p.fun.chase.as_ref().is_some_and(|(c, _)| *c == id) {
+                p.fun.chase = None;
+                p.stop();
+            }
+        }
+    }
+
+    /// The mouse let go of a toy: dragged, it flies off at the speed it was
+    /// moving; clicked, it is knocked along away from the cursor. Either
+    /// way the pets go after it.
+    pub fn release(&mut self, window: winit::window::WindowId, pets: &mut [Pet], now: f64) {
+        let Some(w) = self.things.iter_mut().find(|w| w.window.id() == window) else {
+            return;
+        };
+        let Some(g) = w.grab.take() else {
+            return;
+        };
+        let s = w.prop.scale.max(0.5);
+        if g.moved {
+            let (vx, vy) = g.vel;
+            let speed = vx.hypot(vy);
+            let most = THROW_MOST * s;
+            w.prop.vel = if speed < THROW_LEAST * s {
+                (0.0, 1.0)
+            } else if speed > most {
+                (vx * most / speed, vy * most / speed)
+            } else {
+                (vx, vy.max(-most))
+            };
+            if w.prop.vel.1 == 0.0 {
+                // Level throws still count as in the air.
+                w.prop.vel.1 = -1.0;
+            }
+            println!(
+                "a {:?} thrown by hand at ({:.0}, {:.0}) px/s",
+                w.prop.thing, w.prop.vel.0, w.prop.vel.1
+            );
+        } else {
+            let side = if g.at.0 < w.foot.0 { 1.0 } else { -1.0 };
+            w.prop.bat((side * KNOCK.0 * s, KNOCK.1 * s));
+            println!("a {:?} knocked along", w.prop.thing);
+        }
+        w.prop.resting = false;
+        w.until = now + TOY_STAYS;
+        let (id, thing, from) = (w.id, w.prop.thing, w.prop.pos.0);
+        self.after(pets, id, thing, from, now);
     }
 
     /// Put down a sprig of catnip under `at`, or take it away if there is
@@ -442,20 +575,11 @@ impl Pet {
             && now >= self.fun.hold_until
     }
 
-    /// Walk to screen x `x` (its feet) at `pace`; true once there.
-    fn walk_to(&mut self, x: f32, pace: f32) -> bool {
-        let (fx, _) = self.body.feet();
+    /// Walk to screen x `x` (its feet) at `pace` (see [`Body::head_for`]):
+    /// there, or as close as it gets, or still on its way.
+    fn walk_to(&mut self, x: f32, pace: f32, terrain: &Terrain) -> Heading {
         let near = 0.12 * self.body.size.0;
-        if (x - fx).abs() <= near {
-            if self.body.motion == Motion::Walk {
-                self.body.motion = Motion::Idle;
-            }
-            return true;
-        }
-        self.body.facing = if x < fx { -1.0 } else { 1.0 };
-        self.body.motion = Motion::Walk;
-        self.body.pace = pace;
-        false
+        self.body.head_for(x, pace, near, terrain)
     }
 
     fn stop(&mut self) {
@@ -540,16 +664,22 @@ impl Pet {
             Transform::identity(),
             None,
         );
-        if swimming {
-            let line = floor - 0.13 * PPU * s;
-            props::water(canvas, w / 2.0, line, 0.42 * w, s, t as f32);
+        if swimming && let Some(pond) = self.fun.pond {
+            // The pond's front over the lower body, matching the pond's
+            // own window behind it, the waterline a little in front of the
+            // pond's middle.
+            let at = (pond.0 - self.placed.0 as f32, pond.1 - self.placed.1 as f32);
+            let (_, cy, _, ry) = props::pond_oval(at, s);
+            props::pond_front(canvas, at, w / 2.0, cy + 0.2 * ry, s, t as f32);
         }
         if let Some(thing) = self.fun.carry {
             let at = self.renderer.mouth(self.anim.facing);
             let (_, th) = thing.size();
+            // Turned with the head as it gnaws or trots along.
             let look = props::Look {
                 spin: if thing == Thing::Bone { 0.0 } else { 0.4 },
                 t: t as f32,
+                turn: self.renderer.head_roll(),
                 ..props::Look::default()
             };
             // Held across the mouth, a little smaller than on the floor.
@@ -596,7 +726,7 @@ pub(super) fn tick(
     let gone: Vec<u32> = ground
         .things
         .iter()
-        .filter(|w| now >= w.until && w.carrier.is_none())
+        .filter(|w| now >= w.until && w.carrier.is_none() && w.grab.is_none())
         .map(|w| w.id)
         .collect();
     for id in gone {
@@ -617,8 +747,33 @@ pub(super) fn tick(
         }
         ground.remove(id);
     }
+    // A toy held by the mouse follows the cursor, keeping its speed for
+    // the throw.
+    let held = ground.things.iter().any(|w| w.grab.is_some());
+    if held && let Some((cx, cy)) = ctx.shared.cursor() {
+        for w in &mut ground.things {
+            if let Some(g) = &mut w.grab {
+                let (cx, cy) = (cx as f32, cy as f32);
+                if !g.moved && (cx - g.down.0).hypot(cy - g.down.1) > super::DRAG_START {
+                    g.moved = true;
+                }
+                if g.moved {
+                    let to = (cx - g.at.0 + w.foot.0, cy - g.at.1 + w.foot.1);
+                    if dt > 0.0 {
+                        let v = ((to.0 - w.prop.pos.0) / dt, (to.1 - w.prop.pos.1) / dt);
+                        let k = (dt * 12.0).min(1.0);
+                        g.vel = (g.vel.0 + (v.0 - g.vel.0) * k, g.vel.1 + (v.1 - g.vel.1) * k);
+                    }
+                    w.prop.pos = to;
+                    w.prop.vel = (0.0, 0.0);
+                    w.prop.resting = false;
+                }
+            }
+        }
+    }
     for w in &mut ground.things {
         if w.carrier.is_none()
+            && w.grab.is_none()
             && let Some(hit) = w.prop.step(dt, ctx.terrain)
             && w.prop.thing == Thing::Ball
             && hit > 300.0
@@ -663,6 +818,13 @@ pub(super) fn tick(
         if !p.fun.busy(now) || now < p.fun.lounge_until {
             react_to(p, ctx, activity, typing_for, cursor, dt);
         }
+        // Busy with something fun, it shows it all the while: the tail,
+        // ears and wings keep going (Roger: scenes looked still).
+        p.anim.lively = p.fun.scene.is_some()
+            || p.fun.chase.is_some()
+            || p.fun.nip.is_some()
+            || p.playing
+            || p.play_fight;
         // How the body is held this frame.
         p.anim.posture = if p.body.motion == Motion::Fly {
             Posture::Fly
@@ -710,7 +872,20 @@ fn chase(ground: &mut Playground, pets: &mut [Pet], i: usize, ctx: &mut Ctx) {
     let prop = w.prop;
     let taken = w.carrier.is_some_and(|c| c != me);
     let p = &mut pets[i];
-    let order = c.tick(now, p.body.feet(), p.body.size, &prop, taken);
+    let mut order = c.tick(now, p.body.feet(), p.body.size, &prop, taken);
+    // Out of reach (across a gap between monitors, past the edge of the
+    // screens): put down where it got to, or given up on.
+    if let Order::Run { x, pace } = order
+        && p.walk_to(x, pace, ctx.terrain) == Heading::Blocked
+        && (c.carrying() || !prop.flying())
+    {
+        println!("{}: the {:?} is out of reach", p.save.name, prop.thing);
+        order = if c.carrying() {
+            Order::Drop
+        } else {
+            Order::Done
+        };
+    }
     let mut keep = true;
     match order {
         Order::Watch => {
@@ -723,9 +898,7 @@ fn chase(ground: &mut Playground, pets: &mut [Pet], i: usize, ctx: &mut Ctx) {
                 };
             }
         }
-        Order::Run { x, pace } => {
-            p.walk_to(x, pace);
-        }
+        Order::Run { .. } => {}
         Order::Grab => {
             println!("{}: got the {:?}", p.save.name, prop.thing);
             if prop.flying() {
@@ -813,7 +986,7 @@ fn cheer(p: &mut Pet, ctx: &mut Ctx) {
 fn order(p: &mut Pet, ctx: &mut Ctx, cursor: Option<(i32, i32)>) {
     let now = ctx.world.now;
     if let Some(x) = p.fun.goto {
-        if p.walk_to(x, 1.6) || p.mind.asleep() {
+        if p.walk_to(x, 1.6, ctx.terrain) != Heading::Going || p.mind.asleep() {
             p.fun.goto = None;
             p.stop();
             // There: sits by you.
@@ -918,7 +1091,13 @@ fn nip(ground: &mut Playground, p: &mut Pet, ctx: &mut Ctx) {
             }
             // Beside it, so it shows.
             let x = sprig.pos.0 - dx.signum() * 0.18 * w;
-            if p.walk_to(x, 1.4) {
+            let heading = p.walk_to(x, 1.4, ctx.terrain);
+            if heading == Heading::Blocked {
+                println!("{}: the catnip is out of reach", p.save.name);
+                p.fun.nip = None;
+                return;
+            }
+            if heading == Heading::There {
                 println!("{}: at the catnip (likes it: {likes})", p.save.name);
                 p.body.facing = dx.signum();
                 p.fun.nip = Some((Nip::At(0), now, 0));
@@ -1098,6 +1277,7 @@ fn scene(ground: &mut Playground, p: &mut Pet, ctx: &mut Ctx) {
         }
         p.fun.carry = None;
         p.fun.scene = None;
+        p.fun.pond = None;
         p.fun.hold_until = 0.0;
         p.stop();
     };
@@ -1187,14 +1367,18 @@ fn scene(ground: &mut Playground, p: &mut Pet, ctx: &mut Ctx) {
                     return;
                 }
             } else {
-                p.play(at, now);
+                p.play(at, now, ctx.terrain);
             }
         }
         (_, 0) => {
             let Some(at) = prop else {
                 return end(ground, p, &run);
             };
-            if p.walk_to(at.pos.0, 1.3) {
+            let heading = p.walk_to(at.pos.0, 1.3, ctx.terrain);
+            if heading == Heading::Blocked {
+                return end(ground, p, &run);
+            }
+            if heading == Heading::There {
                 run.phase = 1;
                 run.since = now;
                 match run.scene {
@@ -1219,6 +1403,7 @@ fn scene(ground: &mut Playground, p: &mut Pet, ctx: &mut Ctx) {
                 run.phase = 2;
                 if run.scene == Scene::Pond {
                     p.fun.effect(Fx::Splash, now);
+                    p.fun.pond = None;
                 }
                 p.fun.carry = None;
                 p.fun.scene = Some(run);
@@ -1242,13 +1427,17 @@ fn scene(ground: &mut Playground, p: &mut Pet, ctx: &mut Ctx) {
                     p.anim.posture = Posture::Lie;
                 }
                 Scene::Pond => {
-                    // Paddling slowly to and fro across the water.
+                    // Paddling slowly to and fro, well inside the water:
+                    // over to one side, a stop, round, and back.
                     p.fun.hold_until = 0.0;
+                    p.fun.pond = prop.map(|pond| pond.pos);
                     if let Some(pond) = prop {
-                        let half = 0.25 * pond.px().0;
+                        let half = POND_PADDLE * pond.px().0;
                         let x = pond.pos.0 + p.body.facing * half;
-                        p.body.pace = 0.35;
-                        if p.walk_to(x, 0.35) {
+                        let near = 4.0 * p.fun.scale;
+                        if p.body.head_for(x, 0.35, near, ctx.terrain) == Heading::There
+                            && p.body.speed == 0.0
+                        {
                             p.body.facing = -p.body.facing;
                         }
                     }
@@ -1264,7 +1453,7 @@ fn scene(ground: &mut Playground, p: &mut Pet, ctx: &mut Ctx) {
                     return end(ground, p, &run);
                 };
                 let out = pond.pos.0 + p.body.facing * (0.5 * pond.px().0 + 0.3 * w);
-                if !p.walk_to(out, 1.0) {
+                if p.walk_to(out, 1.0, ctx.terrain) == Heading::Going {
                     return;
                 }
                 p.try_gesture(Act::Shake);

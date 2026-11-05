@@ -10,6 +10,12 @@
 //! during a gesture the tail and ears keep going; a fidget cut short (the
 //! pet sets off) fades out rather than snapping back.
 //!
+//! Pleased, or busy with something fun (a scene, a toy), a pet is
+//! *lively* (PLAN §8 "Roger's tenth pass", item 3): the ears flick and turn
+//! more often, the drift goes on through gestures, and [`Out::lively`]
+//! tells the walks to keep the tail, ears and wings going all the while. A
+//! dog out of breath or lively pants ([`Out::pant`]), tongue out.
+//!
 //! [`Fidgets`] only says what runs and how far into it; the walks
 //! ([`crate::skin::Walk`], [`crate::waddle::Waddle`]) move the bones.
 
@@ -237,6 +243,13 @@ fn kit(species: &str) -> (Kit, Kit) {
 /// seconds, for the laziest pet (a lively one waits less): with breathing
 /// and the tail, nothing is ever still longer than this.
 pub const MAX_GAP: f32 = 1.0;
+/// Pleased or at play, the gaps are this share as long.
+const LIVELY_GAP: f32 = 0.45;
+/// Pleased or at play, the ears twitch and turn this often instead.
+const EAR_EVERY_LIVELY: (f32, f32) = (0.6, 1.6);
+const SWIVEL_EVERY_LIVELY: (f32, f32) = (0.8, 2.0);
+/// How fast liveliness and panting come and go (per second, eased).
+const MOOD_HZ: f32 = 2.5;
 /// Asleep, the gaps: only now and then.
 const SLEEP_GAP: (f32, f32) = (1.5, 4.0);
 /// An ear twitches every this many seconds, each on its own clock.
@@ -293,15 +306,27 @@ pub struct Out {
     /// of it shows (0 walking … 1 at rest, eased; less asleep or busy).
     pub t: f32,
     pub calm: f32,
+    /// How lively it is, 0 … 1 (eased): pleased or at play, the tail, ears
+    /// and wings keep going all the while.
+    pub lively: f32,
+    /// Panting, tongue out, 0 … 1 (eased; dogs only).
+    pub pant: f32,
 }
 
 impl Out {
-    /// Needs smooth frames: a quick fidget or an ear flick is on.
+    /// Needs smooth frames: a quick fidget or an ear flick is on, or it is
+    /// lively or panting (always moving).
     pub fn quick(&self) -> bool {
-        self.run.is_some_and(|r| r.kind.quick()) || self.ears.iter().any(Option::is_some)
+        self.run.is_some_and(|r| r.kind.quick())
+            || self.ears.iter().any(Option::is_some)
+            || self.lively > 0.05
+            || self.pant > 0.05
     }
 
     pub fn tongue(&self) -> Option<Tongue> {
+        if self.pant >= 0.5 {
+            return Some(Tongue::Pant);
+        }
         self.run.and_then(|r| r.kind.tongue())
     }
 
@@ -328,6 +353,13 @@ pub struct Fidgets {
     ears: [(f32, Option<f32>); 2],
     swivel: (f32, f32, f32),
     calm: f32,
+    /// Pleased or at play; out of breath; and how much each shows.
+    lively: bool,
+    puffed: bool,
+    lively_e: f32,
+    pant_e: f32,
+    /// It pants (a dog): its kit has panting in it.
+    pants: bool,
     /// Off: none at all (tests and looks that compare poses).
     off: bool,
 }
@@ -347,6 +379,11 @@ impl Fidgets {
             ears: [(0.0, None); 2],
             swivel: (0.0, 0.0, 0.0),
             calm: 0.0,
+            lively: false,
+            puffed: false,
+            lively_e: 0.0,
+            pant_e: 0.0,
+            pants: awake.iter().any(|k| k.0 == Kind::Pant),
             off: false,
         };
         f.next = f.between(0.3, MAX_GAP);
@@ -362,6 +399,31 @@ impl Fidgets {
     /// How lively the pet is (0 … 1): a lively one fidgets more often.
     pub fn set_energy(&mut self, energy: f32) {
         self.energy = energy.clamp(0.0, 1.0);
+    }
+
+    /// Pleased or busy with something fun (`lively`), out of breath
+    /// (`puffed`): set every frame.
+    pub fn set_mood(&mut self, lively: bool, puffed: bool) {
+        self.lively = lively;
+        self.puffed = puffed;
+    }
+
+    /// Start `kind` now (a lick of the nose after a snack), cutting short
+    /// whatever was under way.
+    pub fn now(&mut self, kind: Kind) {
+        if self.off {
+            return;
+        }
+        let (lo, hi) = kind.secs();
+        let len = self.between(lo, hi);
+        self.run = Some(Run {
+            kind,
+            t: 0.0,
+            len,
+            side: 1.0,
+            fade: 1.0,
+        });
+        self.last = Some(kind);
     }
 
     /// No fidgets at all from now on, so poses can be compared (tests,
@@ -436,8 +498,11 @@ impl Fidgets {
                 let gap = if asleep {
                     self.between(SLEEP_GAP.0, SLEEP_GAP.1)
                 } else {
-                    // A lively pet waits at most two thirds as long.
-                    self.between(0.15, MAX_GAP * (1.0 - 0.35 * self.energy))
+                    // A lively pet waits at most two thirds as long, and
+                    // less again pleased or at play.
+                    let most = MAX_GAP * (1.0 - 0.35 * self.energy);
+                    let most = if self.lively { most * LIVELY_GAP } else { most };
+                    self.between(0.15, most)
                 };
                 self.next = self.t + gap;
             }
@@ -462,7 +527,14 @@ impl Fidgets {
             self.last = Some(kind);
         }
         // The ears, each on its own clock, walking too.
-        let every = if asleep { EAR_EVERY_ASLEEP } else { EAR_EVERY };
+        let lively = self.lively && !asleep;
+        let every = if asleep {
+            EAR_EVERY_ASLEEP
+        } else if lively {
+            EAR_EVERY_LIVELY
+        } else {
+            EAR_EVERY
+        };
         let mut ears = [None; 2];
         for (k, ear) in ears.iter_mut().enumerate() {
             if let Some(since) = self.ears[k].1 {
@@ -486,22 +558,40 @@ impl Fidgets {
         // The ears listen somewhere new now and then, gliding there.
         if self.t >= self.swivel.2 {
             self.swivel.1 = if asleep { 0.0 } else { self.between(-1.0, 1.0) };
-            self.swivel.2 = self.t + self.between(SWIVEL_EVERY.0, SWIVEL_EVERY.1);
+            let (lo, hi) = if lively {
+                SWIVEL_EVERY_LIVELY
+            } else {
+                SWIVEL_EVERY
+            };
+            self.swivel.2 = self.t + self.between(lo, hi);
         }
         self.swivel.0 += (self.swivel.1 - self.swivel.0) * (dt * 2.5).min(1.0);
         let calm = match (hold, asleep) {
             (Hold::Off, _) => 0.0,
             (_, true) => 0.35,
+            // Lively, the drift goes on through gestures too.
+            (Hold::Busy, false) if lively => 1.0,
             (Hold::Busy, false) => 0.5,
             (Hold::Free, false) => 1.0,
         };
         self.calm += (calm - self.calm) * (dt * 2.0).min(1.0);
+        let ease = (dt * MOOD_HZ).min(1.0);
+        let goal = if lively { 1.0 } else { 0.0 };
+        self.lively_e += (goal - self.lively_e) * ease;
+        let goal = if self.pants && !asleep && (self.puffed || lively) {
+            1.0
+        } else {
+            0.0
+        };
+        self.pant_e += (goal - self.pant_e) * ease;
         Out {
             run: self.run,
             ears,
             swivel: self.swivel.0,
             t: self.t,
             calm: self.calm,
+            lively: self.lively_e,
+            pant: self.pant_e,
         }
     }
 }
@@ -609,6 +699,43 @@ mod tests {
             calm = f.step(DT, Hold::Off, false).calm;
         }
         assert!(calm < 0.05, "{calm}");
+    }
+
+    /// Pleased or at play, the ears go more often, the drift goes on
+    /// through gestures, and only a dog pants (out of breath or lively).
+    #[test]
+    fn lively_pets_flick_their_ears_more_and_dogs_pant() {
+        let flicks = |lively: bool| {
+            let mut f = Fidgets::new("fox", 11);
+            f.set_mood(lively, false);
+            let mut n = 0;
+            for _ in 0..(60.0 / DT) as usize {
+                n += f
+                    .step(DT, Hold::Busy, false)
+                    .ears
+                    .iter()
+                    .filter(|e| **e == Some(0.0))
+                    .count();
+            }
+            n
+        };
+        let (calm, lively) = (flicks(false), flicks(true));
+        assert!(lively as f32 > 1.8 * calm as f32, "{calm} → {lively}");
+        let mut f = Fidgets::new("shiba", 2);
+        f.set_mood(true, false);
+        let mut out = Out::default();
+        for _ in 0..(3.0 / DT) as usize {
+            out = f.step(DT, Hold::Busy, false);
+        }
+        assert!(out.calm > 0.95 && out.lively > 0.95, "{out:?}");
+        assert_eq!(out.tongue(), Some(Tongue::Pant));
+        for species in ["fold", "munchkin", "fox", "owl", "chick", "duck"] {
+            let mut f = Fidgets::new(species, 2);
+            f.set_mood(true, true);
+            for _ in 0..(3.0 / DT) as usize {
+                assert_eq!(f.step(DT, Hold::Off, false).pant, 0.0, "{species}");
+            }
+        }
     }
 
     #[test]

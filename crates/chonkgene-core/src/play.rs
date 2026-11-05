@@ -84,6 +84,12 @@ impl Thing {
     pub fn carried(self) -> bool {
         matches!(self, Thing::Ball | Thing::Frisbee | Thing::Bone)
     }
+
+    /// Can you pick it up with the mouse and throw it (PLAN §8 "Roger's
+    /// tenth pass", item 1)? The rest let every click through.
+    pub fn grabbed(self) -> bool {
+        matches!(self, Thing::Ball | Thing::Frisbee)
+    }
 }
 
 /// A thing and where it is: `pos` is the middle of its bottom, screen

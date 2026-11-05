@@ -277,6 +277,15 @@ impl Renderer {
         (x + facing.signum() * 0.16 * w as f32, y + 0.32 * h as f32)
     }
 
+    /// How far the head is tipped over, radians (+ clockwise on the
+    /// screen); 0 where frames are pictures cut beforehand.
+    pub fn head_roll(&self) -> f32 {
+        match self {
+            Self::Mesh(r) => r.head_roll(),
+            _ => 0.0,
+        }
+    }
+
     /// Where a speech bubble points, in pixmap pixels: the top of the head.
     pub fn anchor(&self) -> (f32, f32) {
         match self {

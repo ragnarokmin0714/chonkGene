@@ -85,6 +85,15 @@ impl Mover {
         }
     }
 
+    /// Pleased or at play (`lively`), out of breath (`puffed`): set every
+    /// frame (see [`Fidgets::set_mood`]).
+    pub fn set_mood(&mut self, lively: bool, puffed: bool) {
+        match self {
+            Self::Quad(w) => w.set_mood(lively, puffed),
+            Self::Biped(w) => w.fidgets.set_mood(lively, puffed),
+        }
+    }
+
     /// No fidgets: poses can be compared (tests, looks of one pose).
     pub fn still(&mut self) {
         match self {
@@ -794,6 +803,8 @@ impl Waddle {
             j[0].shift.y -= SWIM_SINK * swim;
             j[self.body].shift.y += 0.015 * swim * (TAU * 0.9 * t).sin();
             j[self.body].rot.z += 3.0 * swim * (TAU * 0.6 * t).sin();
+            // Drifting round a little this way and that on the water.
+            j[0].rot.y += 10.0 * swim * (TAU * 0.22 * t + 0.7).sin();
             for (k, &leg) in self.legs.iter().enumerate() {
                 let p = TAU * 1.8 * t + PI * k as f32;
                 j[leg].rot.x += swim * 28.0 * p.sin();
@@ -834,6 +845,7 @@ impl Waddle {
                 j[w].rot.z += sign * f.calm * 3.0 * (0.5 + 0.5 * (TAU * 0.3 * f.t).sin());
             }
         }
+        self.lively(j, f, dt);
         let Some(run) = f.run else {
             return;
         };
@@ -921,6 +933,33 @@ impl Waddle {
             }
             _ => {}
         }
+    }
+
+    /// Pleased or at play, a bird never stops (PLAN §8 "Roger's tenth
+    /// pass", item 3): the wings shift and flutter, each on its own beat,
+    /// the tail waggles, the head bobs a little, gestures or not.
+    fn lively(&mut self, j: &mut [Joint], f: &Out, dt: f32) {
+        let (l, t) = (f.lively, f.t);
+        if l <= 0.0 {
+            return;
+        }
+        for (k, wing) in self.wings.iter().enumerate() {
+            if let Some(w) = *wing {
+                let sign = if k == 0 { 1.0 } else { -1.0 };
+                let k = k as f32;
+                // Lifting and settling, and now and then a quick flutter.
+                let shift = (TAU * 0.8 * t + 2.1 * k).sin().max(0.0);
+                let burst = (TAU * 0.3 * t + 1.3 * k).sin().max(0.0).powi(4);
+                j[w].rot.z += sign * l * (4.0 + 9.0 * shift + 8.0 * burst * (TAU * 9.0 * t).sin());
+            }
+        }
+        let waggle = (TAU * 2.4 * t).sin();
+        if let Some(tail) = self.tail {
+            j[tail].rot.z += l * 14.0 * waggle;
+        }
+        self.butt_x.v += 0.4 * l * waggle * dt * 30.0;
+        j[self.head].rot.z += l * 5.0 * (TAU * 0.6 * t + 0.4).sin();
+        j[self.head].rot.x += l * 3.0 * (TAU * 1.1 * t).sin();
     }
 
     /// A bird's answer to a feeling or a touch (see [`Walk`]'s): rocking

@@ -1630,3 +1630,114 @@ fn every_species_fidgets_its_own_way() {
     let (_, fox) = mesh_model("fox").unwrap();
     assert!(fox.bone("bell").is_some());
 }
+
+/// Roger, 2026-11-05: a smiling pet, and one in its scene, still looked
+/// still, and the Shiba chewing its bone held stiller than anything: during
+/// a gesture only the tail fidgeted, and a held scene pose had only the
+/// ordinary fidgets. Lively (pleased or at play), the tail, ears and wings
+/// keep going all the while, through a gesture as much as between them:
+/// in every second of a long one they swing well over what they did.
+#[test]
+fn a_lively_pet_keeps_tail_ears_and_wings_going_through_gestures() {
+    use chonkgene_core::anim::Act;
+    use chonkgene_render::skin::Gesture;
+    const DT: f32 = 1.0 / 30.0;
+    const WINDOW: usize = (1.0 / DT) as usize;
+    // The least, over every second, of the most any watched bone turned.
+    let stillest = |id: &str, lively: bool| -> f32 {
+        let (model, sk) = mesh_model(id).unwrap();
+        let mut walk = Mover::new(&sk, 1.0, &model).unwrap();
+        walk.set_fidgets(id, 0.5, 0x11FE);
+        let quad = QUAD_SPECIES.contains(&id);
+        // Lying gnawing at a bone, or a bird pecking about.
+        let act = if quad { Act::Chew } else { Act::Peck };
+        walk.rest(quad);
+        let watch: Vec<usize> = (0..sk.names.len())
+            .filter(|&b| {
+                let n = &sk.names[b];
+                n.starts_with("tail") || n.starts_with("ear_") || n.starts_with("wing_")
+            })
+            .collect();
+        let mut frames = Vec::new();
+        for k in 0..(30.0 / DT) as usize {
+            let t = k as f32 * DT;
+            walk.set_mood(lively, false);
+            walk.gesture(Some(Gesture { act, e: 1.0, t }));
+            let j = walk.step(DT, false, 1.0);
+            if t > 2.0 {
+                frames.push(j);
+            }
+        }
+        frames
+            .windows(WINDOW)
+            .map(|w| {
+                watch
+                    .iter()
+                    .map(|&b| {
+                        let r0 = w[0][b].rot;
+                        w.iter()
+                            .map(|j| (j[b].rot - r0).length())
+                            .fold(0.0, f32::max)
+                    })
+                    .fold(0.0f32, f32::max)
+            })
+            .fold(f32::MAX, f32::min)
+    };
+    for id in QUAD_SPECIES.iter().chain(&BIPED_SPECIES) {
+        let (before, after) = (stillest(id, false), stillest(id, true));
+        println!("{id}: {before:.1}° → {after:.1}°");
+        assert!(after > 12.0, "{id}: only {after:.1}° in a second, lively");
+        assert!(after > 2.0 * before, "{id}: {before:.1}° → {after:.1}°");
+    }
+}
+
+/// Roger: the dog should stick its tongue out too. Out of breath (after a
+/// run) or lively, the Shiba pants, tongue out, all the while, walking
+/// too; the cats and the fox do not. And a snack done, a pet licks its
+/// nose.
+#[test]
+fn a_dog_pants_after_a_run_and_a_pet_licks_its_nose_after_a_snack() {
+    use chonkgene_core::anim::{Act, EAT_SECS};
+    use chonkgene_render::fidget::{Kind, Tongue};
+    use chonkgene_render::skin::Gesture;
+    const DT: f32 = 1.0 / 30.0;
+    // Frames it takes to start panting.
+    const SETTLE: usize = 30;
+    for id in QUAD_SPECIES {
+        let (model, sk) = mesh_model(id).unwrap();
+        let mut walk = Mover::new(&sk, 1.0, &model).unwrap();
+        walk.set_fidgets(id, 0.5, 0x7A57);
+        let mut panting: usize = 0;
+        let n = (10.0 / DT) as usize;
+        for k in 0..n {
+            walk.set_mood(false, true);
+            walk.step(DT, k < n / 2, 1.0);
+            if k >= SETTLE && walk.fidget().tongue() == Some(Tongue::Pant) {
+                panting += 1;
+            }
+        }
+        let want = if id == "shiba" { n - SETTLE } else { 0 };
+        assert_eq!(panting, want, "{id}: panting frames");
+        // A snack, then a lick.
+        let mut walk = Mover::new(&sk, 1.0, &model).unwrap();
+        walk.set_fidgets(id, 0.5, 0x7A57);
+        let mut t = 0.0;
+        while t < EAT_SECS {
+            walk.gesture(Some(Gesture {
+                act: Act::Eat,
+                e: 1.0,
+                t,
+            }));
+            walk.step(DT, false, 1.0);
+            t += DT;
+        }
+        walk.gesture(None);
+        walk.step(DT, false, 1.0);
+        assert_eq!(
+            walk.fidget().run.map(|r| r.kind),
+            Some(Kind::Lick),
+            "{id} after its snack"
+        );
+        assert_eq!(walk.fidget().tongue(), Some(Tongue::Blep), "{id}");
+    }
+}

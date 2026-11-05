@@ -147,6 +147,21 @@ impl Terrain {
         self.floors.iter().any(|a| x >= a.x && x <= a.x + a.w)
     }
 
+    /// The stretch of monitors side by side with no gap between them that
+    /// `x` is over, left to right: as far as anything can walk from there.
+    pub fn span_at(&self, x: f32) -> Option<(f32, f32)> {
+        let mut spans: Vec<(f32, f32)> = self.floors.iter().map(|a| (a.x, a.x + a.w)).collect();
+        spans.sort_by(|a, b| a.0.total_cmp(&b.0));
+        let mut merged: Vec<(f32, f32)> = Vec::new();
+        for (a, b) in spans {
+            match merged.last_mut() {
+                Some(last) if a <= last.1 + 1.0 => last.1 = last.1.max(b),
+                _ => merged.push((a, b)),
+            }
+        }
+        merged.into_iter().find(|&(a, b)| x >= a && x <= b)
+    }
+
     /// The ledge belonging to `on` that holds `x`, if any.
     pub fn ledge_on(&self, on: Support, x: f32) -> Option<Ledge> {
         self.ledges

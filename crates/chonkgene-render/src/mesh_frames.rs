@@ -116,6 +116,8 @@ pub struct MeshRenderer {
     /// app last asked.
     fidget_was: Option<Kind>,
     fidget_began: Option<Kind>,
+    /// Its shadow on the floor shows (not swimming or flying).
+    floor_shadow: bool,
 }
 
 impl MeshRenderer {
@@ -169,6 +171,7 @@ impl MeshRenderer {
             sleep_in: None,
             fidget_was: None,
             fidget_began: None,
+            floor_shadow: true,
         })
     }
 
@@ -294,8 +297,11 @@ impl MeshRenderer {
         let mut look = key_for(expression, params).look;
         if matches!(expression, Expression::Neutral | Expression::Happy) {
             look = touched_look(&params.touch).unwrap_or(look);
-            // The tongue out (a blep, a lick, panting), unless it blinks.
-            look = match (self.walk.fidget().tongue(), look) {
+            // The tongue out (a blep, a lick, panting), unless it blinks
+            // or has its mouth full (eating, gnawing a bone).
+            let full = matches!(params.act, Act::Eat | Act::Chew);
+            let tongue = self.walk.fidget().tongue().filter(|_| !full);
+            look = match (tongue, look) {
                 (Some(Tongue::Blep), Look::Open) => Look::Blep,
                 (Some(Tongue::Pant), Look::Open | Look::Happy) => Look::Pant,
                 _ => look,
@@ -446,6 +452,9 @@ impl MeshRenderer {
         }));
         self.walk.set_pace(params.pace);
         self.walk.breathe(params.breath);
+        self.walk.set_mood(params.lively, params.puffed);
+        // In the water or the air there is no floor under it to shade.
+        self.floor_shadow = !matches!(params.posture, Posture::Swim | Posture::Fly);
         // A poke jiggles the animator's belly: jolt the mesh's.
         if params.belly > 0.15 && self.belly <= 0.15 {
             self.walk.poke(2.0);
@@ -507,6 +516,7 @@ impl MeshRenderer {
         );
         let yaw = self.walk.yaw();
         live.canvas.press = self.press;
+        live.canvas.floor_shadow = self.floor_shadow;
         let sent = if force {
             live.canvas
                 .submit(self.gpu, &scene, &self.bones, yaw)
@@ -813,6 +823,23 @@ impl MeshRenderer {
         self.live.as_ref()?;
         let (x, y) = self.project_on(Some(part), v3(0.0, -0.12, 0.0));
         Some((x, y))
+    }
+
+    /// How far the head is tipped over in the picture shown, radians (+ is
+    /// clockwise on the screen): what the mouth holds turns with it.
+    pub fn head_roll(&self) -> f32 {
+        let (Some(live), Some(head)) = (&self.live, self.sk.bone("head")) else {
+            return 0.0;
+        };
+        let bone = &self.shown_bones[head];
+        let at = self.sk.pivots[head];
+        let (x0, y0) = live.canvas.project(bone.apply(at));
+        let (x1, y1) = live.canvas.project(bone.apply(at + v3(0.0, 0.3, 0.0)));
+        let (dx, dy) = (x1 - x0, y1 - y0);
+        if dx.hypot(dy) < 1.0 {
+            return 0.0;
+        }
+        dx.atan2(-dy)
     }
 
     /// Where a speech bubble points: the top of the head (the middle of

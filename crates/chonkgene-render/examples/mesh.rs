@@ -13,7 +13,10 @@
 //! sitting a while, then standing, fidgeting all along (each frame's
 //! fidget is printed). `life`: 20 s left alone as the app leaves it, its
 //! animator choosing the species' gestures and blinking; `smile`: the same,
-//! pleased (a pat), smiling at you. A gesture
+//! pleased (a pat), smiling at you; `scene`: 20 s in the species' own
+//! scene (lying chewing a bone, lying in the sun, swimming, perched,
+//! pecking at seeds, spinning in the fox-fire), lively as the app has it
+//! (`NOLIVE=1`: as before 2026-11-05, not lively). A gesture
 //! (`eat`, `dig`, `scratch`, `groom`, `shake`, `preen`, `peck`, `flap`,
 //! `stretch`, `yawn`, `wave`) is played through once. It prints the bake
 //! time, the mesh size and what each frame cost.
@@ -203,7 +206,72 @@ fn life(id: &str, smiling: bool) -> (f32, Script) {
                 })
             }));
             w.breathe(p.breath);
+            w.set_mood(p.lively && std::env::var_os("NOLIVE").is_none(), p.puffed);
             EYES.with(|e| e.set(Some(chonkgene_render::key_for(expression, &p).look)));
+            (false, 1.0)
+        }),
+    )
+}
+
+/// 20 s in the species' own scene as the app plays it: lying chewing a
+/// bone (Shiba), lying in the sun (cats), swimming (duckling), perched
+/// looking about (owl), pecking at seeds (chick), spinning among its fire
+/// (fox); its gesture again as soon as the last is done, lively.
+fn scene(id: &str) -> (f32, Script) {
+    use chonkgene_core::anim::{Animator, Posture};
+    use chonkgene_core::species::Species;
+    let species = Species::from_id(id).expect("species");
+    let mut anim = Animator::new(9, 0.33, species.waddle())
+        .with_habits(species.habits())
+        .with_slow_blinks(species.slow_blinks())
+        .with_pops(false);
+    let (posture, act) = match species {
+        Species::Shiba => (Posture::Lie, Some(Act::Chew)),
+        Species::Munchkin | Species::Fold => (Posture::Lie, None),
+        Species::Duck => (Posture::Swim, None),
+        Species::Chick => (Posture::Free, Some(Act::Peck)),
+        Species::Fox => (Posture::Free, Some(Act::Spin)),
+        Species::Owl => (Posture::Free, None),
+    };
+    anim.posture = posture;
+    anim.lively = std::env::var_os("NOLIVE").is_none();
+    let state = std::cell::RefCell::new((anim, None::<(Act, f32)>, 0.0f32));
+    (
+        20.0,
+        Box::new(move |t, w| {
+            let (anim, gesture, last) = &mut *state.borrow_mut();
+            if let Some(act) = act
+                && anim.doing().is_none()
+            {
+                anim.gesture(act);
+            }
+            anim.step((t - *last).max(1e-4));
+            *last = t;
+            let p = anim.params();
+            if gesture.map(|g| g.0) != Some(p.act) {
+                *gesture = gesture_secs(p.act).map(|_| (p.act, p.clock));
+            }
+            w.rest(posture == Posture::Lie);
+            w.swim(posture == Posture::Swim);
+            w.sit(posture == Posture::Free && gesture.is_none_or(|(a, _)| a.seated()));
+            HOP.with(|h| h.set((-p.bob).max(0.0) / PPU));
+            w.look(match p.act {
+                Act::LookLeft => 35.0,
+                Act::LookRight => -35.0,
+                _ => 0.0,
+            });
+            w.gesture(gesture.and_then(|(act, since)| {
+                let secs = gesture_secs(act)?;
+                let at = (p.clock - since).max(0.0);
+                Some(Gesture {
+                    act,
+                    e: (std::f32::consts::PI * (at / secs).min(1.0)).sin().sqrt(),
+                    t: at,
+                })
+            }));
+            w.breathe(p.breath);
+            w.set_mood(p.lively, p.puffed);
+            EYES.with(|e| e.set(Some(chonkgene_render::key_for(anim.expression, &p).look)));
             (false, 1.0)
         }),
     )
@@ -269,7 +337,7 @@ fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let (Some(mode), Some(id), Some(out)) = (args.first(), args.get(1), args.get(2)) else {
         eprintln!(
-            "usage: mesh peek|walk|sit|lie|look|fidget|life|smile|<gesture> <species> <out dir> [scale] [coat]"
+            "usage: mesh peek|walk|sit|lie|look|fidget|life|smile|scene|<gesture> <species> <out dir> [scale] [coat]"
         );
         std::process::exit(2);
     };
@@ -292,6 +360,7 @@ fn main() {
         "fidget" => fidget(),
         "life" => life(id, false),
         "smile" => life(id, true),
+        "scene" => scene(id),
         g => match GESTURES.iter().find(|(name, _)| *name == g) {
             Some(&(_, act)) => gesture(act),
             None => panic!("no mode {mode:?}"),
@@ -378,7 +447,7 @@ fn run(
         let fidget = walker.fidget();
         let look = match fidget.tongue() {
             Some(Tongue::Blep) if look == Look::Open => Look::Blep,
-            Some(Tongue::Pant) if look == Look::Open => Look::Pant,
+            Some(Tongue::Pant) if matches!(look, Look::Open | Look::Happy) => Look::Pant,
             _ => look,
         };
         if name == "fidget" {

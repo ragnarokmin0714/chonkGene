@@ -59,6 +59,9 @@ pub struct MeshCanvas {
     /// A finger pressing in: where (posed, world), how deep, how wide
     /// (see mesh.wgsl); none when nothing presses.
     pub press: Option<(V3, f32, f32)>,
+    /// The soft shadow on the floor under the pet; off in the water or in
+    /// the air, where there is no floor under it.
+    pub floor_shadow: bool,
 }
 
 impl MeshCanvas {
@@ -257,6 +260,7 @@ impl MeshCanvas {
             measured: 0.0,
             frames: 0,
             press: None,
+            floor_shadow: true,
         }
     }
 
@@ -376,8 +380,10 @@ impl MeshCanvas {
                 ..Default::default()
             });
             pass.set_bind_group(0, &self.bind, &[]);
-            pass.set_pipeline(&self.shadow);
-            pass.draw(0..4, 0..1);
+            if self.floor_shadow {
+                pass.set_pipeline(&self.shadow);
+                pass.draw(0..4, 0..1);
+            }
             pass.set_pipeline(&self.pet);
             pass.set_vertex_buffer(0, self.vertices.slice(..));
             pass.set_index_buffer(self.indices.slice(..), wgpu::IndexFormat::Uint32);
