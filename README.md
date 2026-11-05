@@ -16,7 +16,7 @@ The UI is in Traditional Chinese first, with English to follow.
 
 ## Status
 
-Working toward beta `0.6.0-beta.1` (the `0.5.0` betas are withdrawn): seven pets as skinned 3D meshes that walk across the desktop and its windows, sit, sleep, eat, play with a grass stalk, answer touch and never stop fidgeting, with synthesised voices. See [docs/PLAN.md §8](docs/PLAN.md#8-phases) for what is in it and what is left.
+Working toward beta `0.6.0-beta.1` (the `0.5.0` betas are withdrawn): seven pets as skinned 3D meshes that walk across the desktop and its windows, sit, sleep, eat, play with a grass stalk, a ball, a frisbee and catnip, do as they are asked (sit, lie down, come, spin, shake hands), keep you company while you read or type, have little scenes of their own and play together, answer touch and never stop fidgeting, with synthesised voices. See [docs/PLAN.md §8](docs/PLAN.md#8-phases) for what is in it and what is left.
 
 ## Trying it
 
