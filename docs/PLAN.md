@@ -998,6 +998,7 @@ Roger's notes after the tenth pass; nothing below is built yet, to be done after
    - **魅惑**: hearts float from the fox to one pet, whose eyes turn to hearts and who follows the fox about for a while, then shakes it off.
    - Lines and sounds: the fox 「定！」/「變！」, the others 「欸欸欸？！」, a shimmering synth chime with the bell.
    - Pieces it needs: a floating motion (held up in place, then let fall), pausing a pet's animation, a bubble and spell-ring effect (`props::effect`), the fox's casting gesture (rising on its hind legs, tails fanned, a paw raised), skits that pick a spell by the cast and their personalities.
+7. **Don't forget the tongue.** Roger, the same day: the tongue-out behaviour (tenth pass, item 4: the Shiba panting after a run, pleased or at play; a lick of the nose after a snack) must carry through this pass and show on Windows. Check it there first (if it does not show, suspect the face's `Look::Pant`/`Look::Blep` on the GPU path or the tongue hidden by a gesture), and keep it in the new animations: tongue out rolled over laughing, a blep or a lick leaning into a scratch, panting after a tussle or chasing fox-fire, a lick after a frisbee catch; none with a toy in the mouth.
 
 ### Phase 1: Shiba prototype (feel) — `v0.1.0`
 
