@@ -623,6 +623,49 @@ impl Waddle {
                     }
                     self.butt_x.v += e * fade * 1.2 * (w - 0.9).cos() * dt * 30.0;
                 }
+                // Pleased: a little dance from foot to foot, the body
+                // rocking, the wings held out, the tail waggling hard.
+                Act::Wiggle => {
+                    let w = TAU * 2.8 * g.t;
+                    j[self.body].rot.z += e * 12.0 * w.sin();
+                    j[self.head].rot.z -= e * 8.0 * (w - 0.8).sin();
+                    for (k, &leg) in self.legs.iter().enumerate() {
+                        let up = if k == 0 { w.sin() } else { -w.sin() }.max(0.0);
+                        j[leg].shift.y += e * 0.06 * up;
+                    }
+                    for (side, wing) in self.wings.iter().enumerate() {
+                        if let Some(wg) = *wing {
+                            let sign = if side == 0 { 1.0 } else { -1.0 };
+                            j[wg].rot.z += sign * e * 22.0;
+                        }
+                    }
+                    if let Some(t) = self.tail {
+                        j[t].rot.z += e * 18.0 * (2.0 * w).sin();
+                    }
+                }
+                // Two little hops (the animator lifts it): wings out and
+                // fluttering, head up.
+                Act::Bounce => {
+                    let beat = (TAU * 7.0 * g.t).sin();
+                    for (side, wing) in self.wings.iter().enumerate() {
+                        if let Some(wg) = *wing {
+                            let sign = if side == 0 { 1.0 } else { -1.0 };
+                            j[wg].rot.z += sign * e * (24.0 + 14.0 * beat);
+                        }
+                    }
+                    j[self.head].rot.x -= 10.0 * e;
+                }
+                // A turn right round on the spot, the feet pattering.
+                Act::Spin => {
+                    let secs = chonkgene_core::anim::gesture_secs(Act::Spin).unwrap_or(1.4);
+                    let u = (g.t / secs).clamp(0.0, 1.0);
+                    j[0].rot.y += facing * 360.0 * u * u * (3.0 - 2.0 * u);
+                    for (k, &leg) in self.legs.iter().enumerate() {
+                        let p = TAU * 3.5 * g.t + PI * k as f32;
+                        j[leg].rot.x += e * 14.0 * p.sin();
+                        j[leg].shift.y += e * 0.05 * p.cos().max(0.0);
+                    }
+                }
                 // One wing up, waving.
                 Act::Wave => {
                     let wiggle = (TAU * 2.2 * g.t).sin();

@@ -1085,15 +1085,23 @@ impl Walk {
         // Tails: a wave runs from root to tip, faster and wider at pace;
         // the root bounces with the steps, and turning flings it out.
         // A burst of wagging: quicker and wider.
-        let wag = f.get(Kind::Wag).map_or(0.0, |w| w.0);
-        self.swish = (self.swish
-            + dt * (SWISH_HZ.0 + (SWISH_HZ.1 - SWISH_HZ.0) * s) * (1.0 + 2.5 * wag))
-            .fract();
         // Asleep, the tails hardly stir; a snack sets them going.
         let treat = self
             .gesture
             .filter(|g| g.act == chonkgene_core::anim::Act::Eat)
             .map_or(0.0, |g| g.e);
+        // Pleased (a wiggle, a hop, a spin), the tail goes like mad.
+        let joy = self
+            .gesture
+            .filter(|g| {
+                use chonkgene_core::anim::Act;
+                matches!(g.act, Act::Wiggle | Act::Bounce | Act::Spin)
+            })
+            .map_or(0.0, |g| g.e);
+        let wag = f.get(Kind::Wag).map_or(0.0, |w| w.0).max(joy);
+        self.swish = (self.swish
+            + dt * (SWISH_HZ.0 + (SWISH_HZ.1 - SWISH_HZ.0) * s) * (1.0 + 2.5 * wag))
+            .fract();
         // Laughing it thrashes its tail; melted it lies limp; held, it goes
         // stiff in your hand.
         let held_tail = matches!(self.feel.held, Some((Zone::Tail, ..)));
@@ -1351,6 +1359,60 @@ impl Walk {
                     j[b.hips].rot.z -= e * fade * 22.0 * (w - 0.9).sin();
                     self.butt_x.v += e * fade * 1.5 * (w - 0.9).cos() * dt * 30.0;
                     self.chin.v += e * fade * 0.8 * w.cos() * dt * 30.0;
+                }
+                // Pleased: the front dips, the bottom wiggles side to side
+                // (the hips swinging round, the bottom flung after them),
+                // the head bobbing along a beat behind.
+                Act::Wiggle => {
+                    let w = TAU * 3.2 * g.t;
+                    j[b.body].rot.x += 7.0 * e;
+                    j[b.head].rot.x -= 10.0 * e;
+                    j[b.hips].rot.y += e * 20.0 * w.sin();
+                    j[b.hips].rot.z += e * 9.0 * w.sin();
+                    j[b.body].rot.y -= e * 6.0 * w.sin();
+                    j[b.head].rot.z += e * 8.0 * (w - 1.2).sin();
+                    self.butt_x.v += e * 2.2 * w.cos() * dt * 30.0;
+                }
+                // Two little hops on the spot (the animator lifts it): it
+                // crouches for each, nose up, and tucks its legs in the air.
+                Act::Bounce => {
+                    let w = TAU * g.t / 0.62;
+                    let crouch = (-w.cos()).max(0.0);
+                    j[0].shift.y -= e * 0.1 * self.leg_len * crouch;
+                    j[b.head].rot.x -= e * 12.0;
+                    for &(leg, _, front) in &self.legs {
+                        j[leg].rot.x += if front { -14.0 } else { 14.0 } * e * (1.0 - crouch);
+                    }
+                }
+                // A turn right round on the spot, the legs stepping it round.
+                Act::Spin => {
+                    let secs = chonkgene_core::anim::gesture_secs(Act::Spin).unwrap_or(1.4);
+                    let u = (g.t / secs).clamp(0.0, 1.0);
+                    j[0].rot.y += facing * 360.0 * u * u * (3.0 - 2.0 * u);
+                    let mut k = 0.0;
+                    for &(leg, offset, _) in &self.legs {
+                        let p = TAU * (3.0 * g.t + offset + 0.5 * k);
+                        j[leg].rot.x += e * 16.0 * p.sin();
+                        j[leg].shift.y += e * 0.05 * p.cos().max(0.0);
+                        k += 1.0;
+                    }
+                    j[b.head].rot.y += facing * 14.0 * e;
+                }
+                // Kneading: sitting, the front paws tread in turn, the
+                // body rocking onto each, eyes half shut with pleasure.
+                Act::Knead => {
+                    let mut k = 0.0;
+                    for &(leg, _, front) in &self.legs {
+                        if front {
+                            let p = TAU * 1.6 * g.t + PI * k;
+                            let up = p.sin().max(0.0);
+                            j[leg].rot.x -= e * (14.0 + 22.0 * up);
+                            j[leg].shift.y += e * 0.08 * up;
+                            k += 1.0;
+                        }
+                    }
+                    j[b.body].rot.z += e * 3.0 * (TAU * 1.6 * g.t).sin();
+                    j[b.head].rot.x += e * 6.0;
                 }
                 // A front paw up, waving.
                 Act::Wave => {

@@ -180,6 +180,62 @@ impl Species {
         }
     }
 
+    /// What it does pleased, smiling at you (see
+    /// [`Animator::with_joys`](crate::anim::Animator::with_joys)): dogs and
+    /// the fox wiggle, hop and spin, cats knead, birds hop, flap and
+    /// dance from foot to foot.
+    pub fn joys(self) -> Habits {
+        match self {
+            Species::Shiba => &[
+                (Act::Wiggle, 32),
+                (Act::Bounce, 24),
+                (Act::Spin, 18),
+                (Act::Wave, 12),
+                (Act::Stretch, 8),
+            ],
+            Species::Fox => &[
+                (Act::Wiggle, 22),
+                (Act::Spin, 26),
+                (Act::Bounce, 20),
+                (Act::Wave, 12),
+                (Act::Groom, 8),
+            ],
+            Species::Munchkin => &[
+                (Act::Knead, 30),
+                (Act::Bounce, 16),
+                (Act::Wiggle, 14),
+                (Act::Wave, 12),
+                (Act::Groom, 10),
+            ],
+            Species::Fold => &[
+                (Act::Knead, 36),
+                (Act::Wave, 14),
+                (Act::Groom, 14),
+                (Act::Bounce, 10),
+                (Act::Stretch, 8),
+            ],
+            Species::Chick => &[
+                (Act::Bounce, 30),
+                (Act::Flap, 24),
+                (Act::Wiggle, 22),
+                (Act::Spin, 10),
+            ],
+            Species::Duck => &[
+                (Act::Wiggle, 30),
+                (Act::Flap, 22),
+                (Act::Bounce, 18),
+                (Act::Spin, 10),
+            ],
+            Species::Owl => &[
+                (Act::Wiggle, 22),
+                (Act::Flap, 22),
+                (Act::Bounce, 12),
+                (Act::LookLeft, 10),
+                (Act::LookRight, 10),
+            ],
+        }
+    }
+
     /// Display name (zh-TW).
     pub fn label(self) -> &'static str {
         match self {

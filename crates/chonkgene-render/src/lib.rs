@@ -300,6 +300,8 @@ pub fn key_for(expression: Expression, params: &PoseParams) -> Key {
         Act::Shake => (PoseId::Sit, Look::Shut),
         Act::Preen => (PoseId::LookLeft, Look::Happy),
         Act::Flap => (PoseId::Wave, Look::Happy),
+        Act::Wiggle | Act::Bounce | Act::Spin => (PoseId::Stretch, Look::Happy),
+        Act::Knead => (PoseId::Sit, Look::Happy),
     };
     let (pose, look) = match expression {
         Expression::Neutral => gesture(eyes),

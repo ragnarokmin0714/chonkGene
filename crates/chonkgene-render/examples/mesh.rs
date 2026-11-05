@@ -11,7 +11,8 @@
 //! down asleep and getting up. `look`: glances while sitting. `fidget`:
 //! sitting a while, then standing, fidgeting all along (each frame's
 //! fidget is printed). `life`: 20 s left alone as the app leaves it, its
-//! animator choosing the species' gestures and blinking. A gesture
+//! animator choosing the species' gestures and blinking; `smile`: the same,
+//! pleased (a pat), smiling at you. A gesture
 //! (`eat`, `dig`, `scratch`, `groom`, `shake`, `preen`, `peck`, `flap`,
 //! `stretch`, `yawn`, `wave`) is played through once. It prints the bake
 //! time, the mesh size and what each frame cost.
@@ -93,18 +94,30 @@ fn look() -> (f32, Script) {
 thread_local! {
     /// The eyes the `life` script's animator wants this frame.
     static EYES: std::cell::Cell<Option<Look>> = const { std::cell::Cell::new(None) };
+    /// How high the `life` script's animator has the pet hopping, world
+    /// units.
+    static HOP: std::cell::Cell<f32> = const { std::cell::Cell::new(0.0) };
 }
 
 /// Left alone 20 s, as the app leaves a pet: its animator picks the
 /// species' own gestures and blinks; resting, it sits down, as
 /// mesh_frames.rs does.
-fn life(id: &str) -> (f32, Script) {
+fn life(id: &str, smiling: bool) -> (f32, Script) {
     use chonkgene_core::anim::{Animator, Expression};
     use chonkgene_core::species::Species;
+    use chonkgene_render::skin::{Feel, Mood};
     let species = Species::from_id(id).expect("species");
-    let anim = Animator::new(5, 0.33, species.waddle())
+    let mut anim = Animator::new(5, 0.33, species.waddle())
         .with_habits(species.habits())
-        .with_slow_blinks(species.slow_blinks());
+        .with_joys(species.joys())
+        .with_slow_blinks(species.slow_blinks())
+        .with_pops(false);
+    let expression = if smiling {
+        Expression::Happy
+    } else {
+        Expression::Neutral
+    };
+    anim.expression = expression;
     // The animator, the gesture under way and since when, since when it
     // has rested, and the script's clock last call.
     let state = std::cell::RefCell::new((anim, None::<(Act, f32)>, None::<f32>, 0.0f32));
@@ -114,7 +127,12 @@ fn life(id: &str) -> (f32, Script) {
             let (anim, gesture, rest, last) = &mut *state.borrow_mut();
             anim.step((t - *last).max(1e-4));
             *last = t;
-            let p = anim.params();
+            let mut p = anim.params();
+            // `NOJOY=1`: smiling as before 2026-11-05, nothing to do but sit.
+            if smiling && std::env::var_os("NOJOY").is_some() {
+                p.act = Act::Rest;
+                p.bob = 0.0;
+            }
             if gesture.map(|g| g.0) != Some(p.act) {
                 *gesture = gesture_secs(p.act).map(|_| (p.act, p.clock));
             }
@@ -126,7 +144,16 @@ fn life(id: &str) -> (f32, Script) {
                 rest.get_or_insert(p.clock);
             }
             let rested = rest.is_some_and(|since| p.clock - since > 0.8);
-            w.sit(!standing && (rested || seated));
+            // Pleased, it sits facing you between its little things, as
+            // mesh_frames.rs has it.
+            w.sit(!standing && (rested || seated || smiling));
+            if smiling {
+                w.feel(Feel {
+                    mood: Mood::Content,
+                    ..Feel::default()
+                });
+            }
+            HOP.with(|h| h.set((-p.bob).max(0.0) / PPU));
             w.look(match p.act {
                 Act::LookLeft => 35.0,
                 Act::LookRight => -35.0,
@@ -142,11 +169,7 @@ fn life(id: &str) -> (f32, Script) {
                 })
             }));
             w.breathe(p.breath);
-            EYES.with(|e| {
-                e.set(Some(
-                    chonkgene_render::key_for(Expression::Neutral, &p).look,
-                ))
-            });
+            EYES.with(|e| e.set(Some(chonkgene_render::key_for(expression, &p).look)));
             (false, 1.0)
         }),
     )
@@ -183,7 +206,7 @@ fn gesture(act: Act) -> (f32, Script) {
     )
 }
 
-const GESTURES: [(&str, Act); 11] = [
+const GESTURES: [(&str, Act); 15] = [
     ("stretch", Act::Stretch),
     ("yawn", Act::Yawn),
     ("wave", Act::Wave),
@@ -195,13 +218,17 @@ const GESTURES: [(&str, Act); 11] = [
     ("preen", Act::Preen),
     ("peck", Act::Peck),
     ("flap", Act::Flap),
+    ("wiggle", Act::Wiggle),
+    ("bounce", Act::Bounce),
+    ("spin", Act::Spin),
+    ("knead", Act::Knead),
 ];
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let (Some(mode), Some(id), Some(out)) = (args.first(), args.get(1), args.get(2)) else {
         eprintln!(
-            "usage: mesh peek|walk|sit|lie|look|fidget|life|<gesture> <species> <out dir> [scale] [coat]"
+            "usage: mesh peek|walk|sit|lie|look|fidget|life|smile|<gesture> <species> <out dir> [scale] [coat]"
         );
         std::process::exit(2);
     };
@@ -219,7 +246,8 @@ fn main() {
         "lie" => lie(),
         "look" => look(),
         "fidget" => fidget(),
-        "life" => life(id),
+        "life" => life(id, false),
+        "smile" => life(id, true),
         g => match GESTURES.iter().find(|(name, _)| *name == g) {
             Some(&(_, act)) => gesture(act),
             None => panic!("no mode {mode:?}"),
@@ -298,6 +326,7 @@ fn run(
         {
             joints[0].rot.y += turn;
         }
+        joints[0].shift.y += HOP.with(|h| h.get());
         let bones = sk.pose(&joints);
         // The animator's eyes (`life`), and the tongue out, as the
         // renderer shows them.

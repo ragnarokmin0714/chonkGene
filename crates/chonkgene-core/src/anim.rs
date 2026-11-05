@@ -73,13 +73,25 @@ pub enum Act {
     Peck,
     /// A bird flapping its wings.
     Flap,
+    /// Pleased: the bottom wiggling side to side, the tail going (a bird:
+    /// a little dance from foot to foot).
+    Wiggle,
+    /// Pleased: two little hops on the spot.
+    Bounce,
+    /// A turn round on the spot (pleased, or asked to: 轉圈).
+    Spin,
+    /// A cat kneading: sitting, the front paws treading in turn.
+    Knead,
 }
 
 impl Act {
     /// Done sitting down, so a sitting pet stays sat (the rest of the
     /// gestures stand it up).
     pub fn seated(self) -> bool {
-        matches!(self, Act::Yawn | Act::Scratch | Act::Groom | Act::Preen)
+        matches!(
+            self,
+            Act::Yawn | Act::Scratch | Act::Groom | Act::Preen | Act::Knead
+        )
     }
 }
 
@@ -95,6 +107,15 @@ pub const PLAIN_HABITS: Habits = &[
     (Act::Yawn, 15),
     (Act::Wave, 10),
 ];
+
+/// What a pleased pet does, smiling at you, when nothing says otherwise: a
+/// wiggle, a hop, a wave (Roger: a smiling pet held still too long).
+pub const PLAIN_JOYS: Habits = &[(Act::Wiggle, 40), (Act::Bounce, 35), (Act::Wave, 25)];
+
+/// Pleased, the next little thing comes this soon after the last (seconds,
+/// and up to as many again more): sooner than at rest, so a smile is never
+/// a still picture.
+const JOY_GAP: (f32, f32) = (0.5, 0.8);
 
 /// How long a snack takes, and each bite of it.
 pub const EAT_SECS: f32 = 3.6;
@@ -116,6 +137,10 @@ pub fn gesture_secs(act: Act) -> Option<f32> {
         Act::Preen => Some(2.6),
         Act::Peck => Some(1.8),
         Act::Flap => Some(1.4),
+        Act::Wiggle => Some(1.6),
+        Act::Bounce => Some(1.3),
+        Act::Spin => Some(1.4),
+        Act::Knead => Some(2.4),
         _ => None,
     }
 }
@@ -256,8 +281,12 @@ pub struct Animator {
     /// The gesture under way, when it started and when it ends.
     gesture: Option<(Act, f32, f32)>,
     next_gesture: f32,
-    /// The gestures it picks from at rest.
+    /// The gestures it picks from at rest, and pleased (see
+    /// `Species::joys`).
     habits: Habits,
+    joys: Habits,
+    /// Pleased last update: turning pleased brings the next gesture close.
+    was_happy: bool,
     /// Walking last update: stopping brings the next gesture closer.
     was_walking: bool,
     /// The current or next burst of idle wagging.
@@ -281,6 +310,8 @@ impl Animator {
             next_giggle: 0.0,
             next_gesture: t + 1.5 + rng.f32() * 2.5,
             habits: PLAIN_HABITS,
+            joys: PLAIN_JOYS,
+            was_happy: false,
             was_walking: false,
             wag: (wag_at, wag_at + 1.5),
             next_huff: 0.0,
@@ -310,6 +341,14 @@ impl Animator {
     pub fn with_habits(mut self, habits: Habits) -> Self {
         if habits.iter().any(|&(_, w)| w > 0) {
             self.habits = habits;
+        }
+        self
+    }
+
+    /// The same animator, doing `joys` when pleased (see `Species::joys`).
+    pub fn with_joys(mut self, joys: Habits) -> Self {
+        if joys.iter().any(|&(_, w)| w > 0) {
+            self.joys = joys;
         }
         self
     }
@@ -447,6 +486,9 @@ impl Animator {
             },
         };
         self.gesture = Some((act, self.t, self.t + secs));
+        if act == Act::Bounce {
+            self.jump(170.0, 1);
+        }
         // A pop hides the cut to the new pose, where poses cut.
         if self.pops {
             self.body.kick(0.8);
@@ -459,9 +501,14 @@ impl Animator {
     }
 
     fn pick_gesture(&mut self) -> Act {
-        let total: u32 = self.habits.iter().map(|&(_, w)| w).sum();
+        let list = if self.expression == Expression::Happy {
+            self.joys
+        } else {
+            self.habits
+        };
+        let total: u32 = list.iter().map(|&(_, w)| w).sum();
         let mut roll = self.rng.u32(0..total.max(1));
-        for &(act, w) in self.habits {
+        for &(act, w) in list {
             if roll < w {
                 return act;
             }
@@ -580,22 +627,30 @@ impl Animator {
             self.next_gesture = self.next_gesture.min(self.t + 1.2 + self.rng.f32() * 1.3);
         }
         self.was_walking = self.walking;
+        // Turning pleased (a pat, a snack, making up), it soon shows it,
+        // once the cheer's hops have landed.
+        let happy = self.expression == Expression::Happy;
+        if happy && !self.was_happy {
+            self.next_gesture = self.next_gesture.min(self.t + 0.7 + self.rng.f32() * 0.4);
+        }
+        self.was_happy = happy;
         if let Some((act, _, until)) = self.gesture {
             if !self.free() || self.t >= until {
                 self.gesture = None;
                 self.body.target = if self.pressed { PRESS_SQUASH } else { 0.0 };
                 // Rests are filled with little things to do (Roger: idling
                 // went on too long), a short breath apart.
-                self.next_gesture = self.t + 1.5 + self.rng.f32() * 2.5;
+                self.next_gesture = if happy {
+                    self.t + JOY_GAP.0 + self.rng.f32() * JOY_GAP.1
+                } else {
+                    self.t + 1.5 + self.rng.f32() * 2.5
+                };
                 // A yawn ends with a little shake of the head.
                 if act == Act::Yawn {
                     self.sway = 6.0;
                 }
             }
-        } else if self.free()
-            && self.expression == Expression::Neutral
-            && self.t >= self.next_gesture
-        {
+        } else if self.free() && self.t >= self.next_gesture {
             let act = self.pick_gesture();
             self.start(act);
         }
@@ -822,6 +877,42 @@ mod tests {
                 );
             }
             assert!(seen.len() >= 5, "{species:?}: only {seen:?} in two minutes");
+        }
+    }
+
+    #[test]
+    fn a_pleased_pet_never_just_sits_smiling() {
+        use crate::species::Species;
+        for species in Species::ALL {
+            let mut a = Animator::new(7, 0.33, species.waddle())
+                .with_habits(species.habits())
+                .with_joys(species.joys());
+            run(&mut a, 10.0, |_| {});
+            a.gesture = None;
+            a.expression = Expression::Happy;
+            // Pleased, it shows it within a second or so, and keeps on with
+            // its own joys, never still for long.
+            let (mut t, mut first, mut idle, mut longest) = (0.0, None, 0.0f32, 0.0f32);
+            run(&mut a, 30.0, |a| {
+                t += 1.0 / 60.0;
+                match a.gesture {
+                    Some((act, ..)) => {
+                        first.get_or_insert(t);
+                        idle = 0.0;
+                        assert!(
+                            species.joys().iter().any(|&(j, _)| j == act),
+                            "{species:?} did {act:?} pleased, not one of its joys"
+                        );
+                    }
+                    None => idle += 1.0 / 60.0,
+                }
+                if first.is_some() {
+                    longest = longest.max(idle);
+                }
+            });
+            let first = first.expect("no joy at all");
+            assert!(first < 1.2, "{species:?}: first joy {first:.1} s in");
+            assert!(longest < 1.4, "{species:?}: sat {longest:.1} s smiling");
         }
     }
 

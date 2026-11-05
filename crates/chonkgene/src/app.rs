@@ -1244,6 +1244,7 @@ fn spawn(
         mind: Mind::new(species, save.personality(), save.affinity()),
         anim: Animator::new(seed, save.chonk, species.waddle())
             .with_habits(species.habits())
+            .with_joys(species.joys())
             .with_slow_blinks(species.slow_blinks())
             .with_pops(!renderer.is_gpu()),
         species,

@@ -786,6 +786,7 @@ fn idle_gestures_move_every_mesh_pet() {
         let acts = species
             .habits()
             .iter()
+            .chain(species.joys())
             .map(|&(act, _)| act)
             .filter(|&act| chonkgene_core::anim::gesture_secs(act).is_some())
             .chain([Act::Eat]);
@@ -974,6 +975,10 @@ fn no_mesh_pet_is_cut_off_by_the_edge_of_its_picture() {
         for &(g, _) in species.habits() {
             a.gesture(g);
             run(&mut r, &mut a, 3.2, "a gesture", Expression::Neutral);
+        }
+        for &(g, _) in species.joys() {
+            a.gesture(g);
+            run(&mut r, &mut a, 3.2, "a joy", Expression::Happy);
         }
         a.eat();
         run(&mut r, &mut a, 3.8, "eating", Expression::Neutral);
