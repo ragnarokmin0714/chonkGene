@@ -13,6 +13,10 @@ ignore = [
     { id = "RUSTSEC-2026-0370", reason = "zvariant merged into zbus 6; via Slint accessibility" },
     { id = "RUSTSEC-2026-0371", reason = "zbus_names merged into zbus 6; via Slint accessibility" },
     { id = "RUSTSEC-2026-0372", reason = "zvariant_derive merged into zbus 6; via Slint accessibility" },
+    # pin-utils was archived (unmaintained, not a vulnerability); it comes
+    # through Slint's spin_on, which has no release without it. Remove once
+    # Slint or spin_on drops it.
+    { id = "RUSTSEC-2026-0441", reason = "pin-utils archived; via Slint's spin_on, no release without it" },
 ]
 
 [licenses]
