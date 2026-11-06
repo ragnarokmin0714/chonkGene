@@ -15,8 +15,8 @@
 //! animator choosing the species' gestures and blinking; `smile`: the same,
 //! pleased (a pat), smiling at you; `scene`: 20 s in the species' own
 //! scene (lying chewing a bone, lying in the sun, swimming, perched,
-//! pecking at seeds, spinning in the fox-fire), lively as the app has it
-//! (`NOLIVE=1`: as before 2026-11-05, not lively). A gesture
+//! pecking at seeds, swishing its tails in the fox-fire), lively as the
+//! app has it (`NOLIVE=1`: as before 2026-11-05, not lively). A gesture
 //! (`eat`, `dig`, `scratch`, `groom`, `shake`, `preen`, `peck`, `flap`,
 //! `stretch`, `yawn`, `wave`) is played through once. It prints the bake
 //! time, the mesh size and what each frame cost.
@@ -230,7 +230,7 @@ fn scene(id: &str) -> (f32, Script) {
         Species::Munchkin | Species::Fold => (Posture::Lie, None),
         Species::Duck => (Posture::Swim, None),
         Species::Chick => (Posture::Free, Some(Act::Peck)),
-        Species::Fox => (Posture::Free, Some(Act::Spin)),
+        Species::Fox => (Posture::Free, Some(Act::Swish)),
         Species::Owl => (Posture::Free, None),
     };
     anim.posture = posture;

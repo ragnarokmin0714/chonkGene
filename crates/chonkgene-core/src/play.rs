@@ -85,10 +85,11 @@ impl Thing {
         matches!(self, Thing::Ball | Thing::Frisbee | Thing::Bone)
     }
 
-    /// Can you pick it up with the mouse and throw it (PLAN §8 "Roger's
-    /// tenth pass", item 1)? The rest let every click through.
+    /// Can you pick it up with the mouse (PLAN §8 "Roger's tenth pass",
+    /// item 1): toys to throw, catnip to move where the cats are (Roger's
+    /// thirteenth pass)? The rest let every click through.
     pub fn grabbed(self) -> bool {
-        matches!(self, Thing::Ball | Thing::Frisbee)
+        matches!(self, Thing::Ball | Thing::Frisbee | Thing::Catnip)
     }
 }
 

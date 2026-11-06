@@ -34,6 +34,12 @@ pub enum Icon {
     Back,
     /// An eye peeking round the edge of a wall: 躲貓貓.
     Peek,
+    /// A wand with a star on its tip: the fox's spells (施法…).
+    Wand,
+    /// A bubble with a shine on it: 定身術.
+    Bubble,
+    /// A flame licking up: 狐火.
+    Flame,
 }
 
 #[derive(Clone, Debug)]
@@ -527,6 +533,41 @@ fn icon(pm: &mut Pixmap, icon: Icon, ts: Transform, bg: [u8; 4]) {
             );
             stroke(pm, &[('M', &[11.5, 11.0]), ('L', &[11.5, 13.0])]);
         }
+        Icon::Wand => {
+            stroke(pm, &[('M', &[4.5, 19.5]), ('L', &[13.0, 11.0])]);
+            stroke(
+                pm,
+                &[
+                    ('M', &[17.0, 3.0]),
+                    ('L', &[18.2, 5.8]),
+                    ('L', &[21.0, 7.0]),
+                    ('L', &[18.2, 8.2]),
+                    ('L', &[17.0, 11.0]),
+                    ('L', &[15.8, 8.2]),
+                    ('L', &[13.0, 7.0]),
+                    ('L', &[15.8, 5.8]),
+                    ('Z', &[]),
+                ],
+            );
+        }
+        Icon::Bubble => {
+            ring(pm, 12.0, 12.0, 8.5);
+            stroke(
+                pm,
+                &[('M', &[7.5, 11.0]), ('C', &[7.5, 9.0, 9.0, 7.5, 11.0, 7.5])],
+            );
+        }
+        Icon::Flame => stroke(
+            pm,
+            &[
+                ('M', &[12.0, 21.0]),
+                ('C', &[7.5, 21.0, 5.5, 17.5, 6.5, 14.0]),
+                ('C', &[7.5, 10.5, 11.0, 9.0, 11.0, 3.5]),
+                ('C', &[14.5, 6.0, 17.5, 10.0, 17.5, 14.5]),
+                ('C', &[17.5, 18.5, 15.0, 21.0, 12.0, 21.0]),
+                ('Z', &[]),
+            ],
+        ),
         Icon::Back => {
             stroke(pm, &[('M', &[19.0, 12.0]), ('L', &[5.5, 12.0])]);
             stroke(

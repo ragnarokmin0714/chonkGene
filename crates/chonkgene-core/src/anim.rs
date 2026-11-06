@@ -295,6 +295,13 @@ pub struct PoseParams {
     /// Counts up each time it should lick its nose (a toy just put down):
     /// the renderer licks when it sees a new count.
     pub licks: u32,
+    /// Its window is on the move without walking (flying, falling, a leap,
+    /// held up by a spell): the picture has to keep up with it every frame
+    /// (Roger: the owl's flight up to its perch lagged). Set by the app.
+    pub travelling: bool,
+    /// The fox casting: its forehead and eyes glow and seal lines grow over
+    /// its face, 0 … 1 (Roger's thirteenth pass). Set by the app.
+    pub glow: f32,
 }
 
 impl Default for PoseParams {
@@ -319,6 +326,8 @@ impl Default for PoseParams {
             lively: false,
             puffed: false,
             licks: 0,
+            travelling: false,
+            glow: 0.0,
         }
     }
 }
@@ -526,6 +535,13 @@ impl Animator {
         if zone == Zone::Bottom {
             self.jump(220.0, 0);
         }
+    }
+
+    /// A fright: a start, as at a quick poke on the head, then a look at
+    /// `at` (picture pixels: where the fright came from).
+    pub fn startle(&mut self, at: (f32, f32)) {
+        self.last_touch = Some((Zone::Head, at, self.t));
+        self.body.kick(3.0);
     }
 
     /// Out of breath for `secs` (after a tussle).
@@ -957,6 +973,8 @@ impl Animator {
             },
             puffed: self.expression != Expression::Asleep && self.puffed(),
             licks: self.licks,
+            travelling: false,
+            glow: 0.0,
         }
     }
 }

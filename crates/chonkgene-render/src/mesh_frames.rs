@@ -152,6 +152,8 @@ pub struct MeshRenderer {
     licks: u32,
     /// Its shadow on the floor shows (not swimming or flying).
     floor_shadow: bool,
+    /// The fox's spell glowing on its face (`PoseParams::glow`).
+    glow: f32,
 }
 
 impl MeshRenderer {
@@ -211,6 +213,7 @@ impl MeshRenderer {
             fidget_began: None,
             licks: 0,
             floor_shadow: true,
+            glow: 0.0,
         })
     }
 
@@ -527,6 +530,7 @@ impl MeshRenderer {
         }
         // In the water or the air there is no floor under it to shade.
         self.floor_shadow = !matches!(params.posture, Posture::Swim | Posture::Fly);
+        self.glow = params.glow;
         // A poke jiggles the animator's belly: jolt the mesh's.
         if params.belly > 0.15 && self.belly <= 0.15 {
             self.walk.poke(2.0);
@@ -559,8 +563,8 @@ impl MeshRenderer {
         // every frame (slowing to a stop too): its frames skip the budget,
         // and if the last one is still on its way it is waited for rather
         // than skipped (a skipped frame shows the legs standing still while
-        // the window slides on).
-        let keep_up = walking || self.walk.speed() > 0.0;
+        // the window slides on). So must a flight, a fall or a leap.
+        let keep_up = walking || params.travelling || self.walk.speed() > 0.0;
         // Touched (held, rubbed, or let go just now): the answer must show
         // at once, so its frames go past the budget (the others wait).
         let touch = &params.touch;
@@ -595,6 +599,7 @@ impl MeshRenderer {
         let yaw = self.walk.yaw();
         live.canvas.press = self.press;
         live.canvas.floor_shadow = self.floor_shadow;
+        live.canvas.glow = self.glow;
         let sent = if force {
             live.canvas
                 .submit(self.gpu, &scene, &self.bones, yaw)

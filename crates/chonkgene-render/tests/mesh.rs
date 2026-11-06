@@ -625,6 +625,57 @@ fn the_app_draws_every_mesh_pet_walking_and_answers_clicks() {
     }
 }
 
+/// Casting, the fox's forehead and eyes glow and seal lines grow over its
+/// face (Roger's thirteenth pass); on a face with no forehead mark the
+/// glow changes nothing.
+#[test]
+fn the_fox_face_glows_while_it_casts_and_no_one_elses_does() {
+    use chonkgene_core::anim::{Expression, PoseParams};
+    for (id, glows) in [("fox", true), ("shiba", false)] {
+        let Some(mut r) = app_renderer(id) else {
+            eprintln!("skipped: no GPU");
+            return;
+        };
+        // Settled first: the first frames still move.
+        let mut shot = |glow: f32| {
+            let p = PoseParams {
+                glow,
+                ..Default::default()
+            };
+            for _ in 0..3 {
+                r.render(&p, Expression::Neutral);
+                r.finish();
+            }
+            r.pixmap().clone()
+        };
+        shot(0.0);
+        let differ = |a: &Pixmap, b: &Pixmap| {
+            a.data()
+                .as_chunks::<4>()
+                .0
+                .iter()
+                .zip(b.data().as_chunks::<4>().0)
+                .filter(|(a, b)| a.iter().zip(b.iter()).any(|(x, y)| x.abs_diff(*y) > 30))
+                .count()
+        };
+        let (plain, again, lit) = (shot(0.0), shot(0.0), shot(1.0));
+        // What two frames without it differ by anyway (it still breathes).
+        let noise = differ(&plain, &again);
+        let changed = differ(&again, &lit);
+        if glows {
+            assert!(
+                changed > noise + 400,
+                "{id}: only {changed} pixels lit up ({noise} anyway)"
+            );
+        } else {
+            assert!(
+                changed <= noise + 20,
+                "{id}: {changed} pixels changed ({noise} anyway)"
+            );
+        }
+    }
+}
+
 /// A mesh renderer of its own on a GPU of its own (so a budget set here
 /// touches no other test); none without a GPU.
 fn lone_renderer(id: &str, budget: f32) -> Option<chonkgene_render::MeshRenderer> {

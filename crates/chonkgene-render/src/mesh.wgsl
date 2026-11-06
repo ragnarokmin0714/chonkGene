@@ -8,6 +8,7 @@ struct Uniforms {
     cam: vec4<f32>,
     right: vec4<f32>,
     up: vec4<f32>,
+    // w: the fox's spell glowing on its face, 0 … 1 (paint.wgsl).
     fwd: vec4<f32>,
     anchor: vec4<f32>,
     bound: vec4<f32>,
@@ -156,7 +157,11 @@ fn fs_pet(i: Out) -> @location(0) vec4<f32> {
     col += mix(vec3<f32>(1.0, 0.96, 0.92), alb, 0.3) * (fres * 0.28 * (0.5 + 0.5 * ao));
     let hv = normalize(l + v);
     col += vec3<f32>(i.shade.y * 0.55 * pow(max(dot(n, hv), 0.0), 40.0));
-    return vec4<f32>(clamp(col, vec3<f32>(0.0), vec3<f32>(1.0)), 1.0);
+    col = clamp(col, vec3<f32>(0.0), vec3<f32>(1.0));
+    if i.eye.w > 0.5 {
+        col = spell_glow(i.eye.xyz, u.eye_r.xyz, col, px);
+    }
+    return vec4<f32>(col, 1.0);
 }
 
 struct ShadowOut {

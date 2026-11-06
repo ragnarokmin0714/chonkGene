@@ -578,6 +578,13 @@ const BLANKET_DROOP: f32 = 16.0;
 /// a little to the side.
 const CURL: f32 = 34.0;
 pub(crate) const CURL_YAW: f32 = 50.0;
+/// Curled up, a single tail tips down this far (degrees, times how upright
+/// it is held) and bends this far in all round toward the front.
+const CURL_TAIL_DOWN: f32 = 70.0;
+const CURL_TAIL_WRAP: f32 = 110.0;
+/// Asleep on its back, the belly swells and sinks this much more with each
+/// breath (world units along the belly bone).
+const BELLY_UP_BREATH: f32 = 0.11;
 /// Lying chin on paws, turned this far, so its length shows behind the head.
 pub(crate) const CHIN_YAW: f32 = 30.0;
 /// Rolled over (degrees about its length): on its back laughing or asleep,
@@ -1248,9 +1255,13 @@ impl Walk {
             }
         }
         if let Some(i) = b.belly {
-            // The belly rises and falls with each breath.
-            let y = self.belly.step(-0.05 * self.breath, -acc, 3.6, 0.16, dt);
-            j[i].shift = v3(0.0, y.clamp(-0.12, 0.12), 0.0);
+            // The belly rises and falls with each breath; asleep on its
+            // back, round and plain to see (Roger: like breathing).
+            let back = lie * chonkgene_rig::math::smoothstep(90.0, 150.0, self.roll.x);
+            let amp = 0.05 + BELLY_UP_BREATH * back;
+            let y = self.belly.step(-amp * self.breath, -acc, 3.6, 0.16, dt);
+            let most = 0.12 + BELLY_UP_BREATH * back;
+            j[i].shift = v3(0.0, y.clamp(-most, most), 0.0);
         }
         if let Some(i) = b.butt {
             // Plopping down into a sit squashes the bottom, and it bounces;
@@ -1337,9 +1348,20 @@ impl Walk {
             j[b.head].rot.x += 6.0 * curl;
             j[b.head].rot.z += c * 26.0 * curl;
             j[b.head].shift.y -= 0.14 * curl;
+            let one_tail = self.tails.len() == 1;
             for tail in &self.tails {
                 if let Some(&root) = tail.bones.first() {
                     j[root].rot.y += c * 40.0 * curl;
+                    // One tail lies down and wraps round toward the nose,
+                    // as a cat's does (Roger: the Munchkin's raised tail,
+                    // twisted with the hips, looked cut off).
+                    if one_tail {
+                        j[root].rot.x -= CURL_TAIL_DOWN * tail.swish_axes.0 * curl;
+                        let wrap = CURL_TAIL_WRAP / (tail.bones.len() - 1).max(1) as f32;
+                        for &bone in &tail.bones[1..] {
+                            j[bone].rot.y -= c * wrap * curl;
+                        }
+                    }
                 }
             }
             // On its side, legs out; on its back, paws folded in the air

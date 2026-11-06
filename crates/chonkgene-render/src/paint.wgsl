@@ -139,8 +139,87 @@ fn paint_eyes(q: vec3<f32>, r: vec3<f32>, base: vec3<f32>, px: f32) -> vec3<f32>
         let whole = ink(min(body, lick) * FLAME_R.x, aa);
         c = mix(c, mark, whole);
         c = mix(c, mix(mark, white, 0.55), ink(core * FLAME_R.x, aa) * whole);
+        // Casting, the stripes and seal lines in the mark's colour, deeper.
+        let g = u.fwd.w;
+        if g > 0.0 {
+            let m = spell_marks(uv, aa, g);
+            c = mix(c, mark * 0.78, m.x * min(2.0 * g, 1.0));
+        }
     }
     return c;
+}
+
+// The fox casting (u.fwd.w, 0 … 1; mesh.wgsl only): the stripes on its
+// cheeks and the flicks at its eyes drawn out longer toward the ears, a
+// ring round the flame with a bead either side on it, a dot under each eye
+// (咒印), growing as the spell builds. x: how much of `uv` they cover;
+// y: a soft halo round them.
+fn spell_marks(uv: vec2<f32>, aa: f32, g: f32) -> vec2<f32> {
+    var d = 1e3;
+    for (var k = 0; k < 2; k++) {
+        let side = select(-1.0, 1.0, k == 1);
+        for (var i = 0; i < 3; i++) {
+            let fi = f32(i);
+            let a = vec2<f32>(0.52 * side, -0.03 - 0.08 * fi);
+            let b = vec2<f32>((0.93 - 0.07 * fi) * side, 0.08 - 0.06 * fi);
+            d = min(d, tapered(uv, a, mix(a, b, g), 0.03, 0.008));
+        }
+        // The eyeliner's flick, on up toward the ear.
+        let la = vec2<f32>((u.eye.x + 0.85 * u.eye.z) * side, u.eye.y + 0.1 * u.eye.w);
+        let lb = vec2<f32>(0.72 * side, 0.46);
+        d = min(d, tapered(uv, la, mix(la, lb, g), 0.024, 0.006));
+        let bead = vec2<f32>(0.21 * side, 0.68);
+        d = min(d, length(uv - bead) - 0.034 * ss(0.4, 0.8, g));
+        d = min(d, length(uv - vec2<f32>(0.33 * side, -0.2)) - 0.024 * ss(0.5, 0.9, g));
+    }
+    if g > 0.55 {
+        d = min(d, arc(uv, FLAME_AT, 0.24, 0.012 * ss(0.55, 1.0, g)));
+    }
+    return vec2<f32>(ink(d, aa), ink(d - 0.04, aa * 6.0));
+}
+
+// Light the casting fox gives off, over the lit colour `lit`: the forehead
+// flame blazing with a halo, the irises lit up round dark pupils, the seal
+// lines shining.
+fn spell_glow(q: vec3<f32>, r: vec3<f32>, lit: vec3<f32>, px: f32) -> vec3<f32> {
+    let g = u.fwd.w;
+    let n = normalize(q / r);
+    if g <= 0.0 || n.z < 0.15 || u.spots.w < 0.0 {
+        return lit;
+    }
+    let uv = n.xy;
+    let aa = px / r.y;
+    let white = vec3<f32>(1.0);
+    let mark = u.palette[u32(u.spots.w)].rgb;
+    let hot = vec3<f32>(1.0, 0.42, 0.36);
+    var c = lit;
+    var eye_c = mix(hot, white, 0.35);
+    var pupil = 0.55;
+    if u.iris.x >= 0.0 {
+        eye_c = mix(u.palette[u32(u.iris.x)].rgb, white, 0.45);
+        pupil = u.iris.y;
+    }
+    for (var k = 0; k < 2; k++) {
+        let side = select(-1.0, 1.0, k == 1);
+        let ec = vec2<f32>(u.eye.x * side, u.eye.y);
+        let er = vec2<f32>(u.eye.z, u.eye.w);
+        let ring = ink(ell(uv, ec, er), aa) * (1.0 - ink(ell(uv, ec, er * pupil), aa));
+        let halo = ink(ell(uv, ec, er * vec2<f32>(1.6, 1.5)), aa * 10.0);
+        c = mix(c, eye_c, g * (0.2 * halo + 0.75 * ring));
+    }
+    let m = spell_marks(uv, aa, g);
+    c = mix(c, mix(hot, white, 0.4), g * (0.28 * m.y + 0.35 * m.x));
+    let p0 = (uv - FLAME_AT) / FLAME_R;
+    let t = clamp((p0.y + 0.3) / 1.3, 0.0, 1.0);
+    let p = vec2<f32>(p0.x - 0.35 * t * t, p0.y);
+    let body = tapered(p, vec2<f32>(0.0, -0.45), vec2<f32>(0.0, 0.95), 0.6, 0.03);
+    let lick = tapered(p, vec2<f32>(0.3, -0.2), vec2<f32>(0.72, 0.35), 0.22, 0.02);
+    let core = tapered(p, vec2<f32>(0.0, -0.6), vec2<f32>(0.0, -0.05), 0.2, 0.02);
+    let halo = ink(ell(uv, FLAME_AT, FLAME_R * 1.9), aa * 12.0);
+    c = mix(c, mix(hot, white, 0.5), g * 0.4 * halo);
+    c = mix(c, hot, g * 0.8 * ink(min(body, lick) * FLAME_R.x, aa));
+    c = mix(c, vec3<f32>(1.0, 0.95, 0.85), g * 0.9 * ink(core * FLAME_R.x, aa));
+    return clamp(c, vec3<f32>(0.0), vec3<f32>(1.0));
 }
 
 // A tongue from `a` down to `b`, `r` wide, as face.rs `tongue`.

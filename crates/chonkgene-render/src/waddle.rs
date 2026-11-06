@@ -29,6 +29,9 @@ use crate::skin::{drift, hold};
 const PACE: f32 = 1.034;
 /// The share of a step a foot is on the floor.
 const DUTY: f32 = 0.55;
+/// Touched, the share of a turn or tip toward the finger the head takes
+/// on its own; the body takes the rest.
+const TOUCH_NECK: f32 = 0.5;
 /// How far a sitting bird's legs fold forward (degrees) and how far it
 /// sinks, world units.
 const SIT_LEGS: f32 = 75.0;
@@ -821,7 +824,7 @@ impl Waddle {
             }
         }
         self.react(&mut j, &lv, dt, facing);
-        self.fidgets(&mut j, &f, sit, dt);
+        self.fidgets(&mut j, &f, sit, lv.attend, dt);
         self.busy = s > 0.0
             || self.gesture.is_some()
             || self.yaw.v.abs() > 1.0
@@ -838,7 +841,7 @@ impl Waddle {
     /// [`crate::fidget`]): the head bobs and tilts, feathers puff up and
     /// sleek, a wing shifts or both flutter, a foot scratches the head or
     /// the toes re-grip, the bill dabbles, the tail waggles.
-    fn fidgets(&mut self, j: &mut [Joint], f: &Out, sit: f32, dt: f32) {
+    fn fidgets(&mut self, j: &mut [Joint], f: &Out, sit: f32, attend: f32, dt: f32) {
         // The slow drift under it all; the wings breathe with it.
         let (dx, dy, dz, body) = drift(f.t);
         j[self.head].rot.x += f.calm * dx;
@@ -858,6 +861,11 @@ impl Waddle {
         };
         let (e, t, side) = (run.e(), run.t, run.side);
         let x = (t / run.len).clamp(0.0, 1.0);
+        // Touched, its own head tilts and bobs mostly wait: on top of
+        // turning to the finger they tipped the head far enough over to
+        // crease the body under it (Roger: the chick and the duckling went
+        // out of shape scratched).
+        let head = j[self.head];
         // Wing 0 is the left (+x): it opens about z the positive way.
         let wing = |side: f32| {
             let k = if side > 0.0 { 0 } else { 1 };
@@ -940,6 +948,9 @@ impl Waddle {
             }
             _ => {}
         }
+        let k = 1.0 - 0.8 * attend.clamp(0.0, 1.0);
+        j[self.head].rot = head.rot + (j[self.head].rot - head.rot) * k;
+        j[self.head].shift = head.shift + (j[self.head].shift - head.shift) * k;
     }
 
     /// Pleased or at play, a bird never stops (PLAN §8 "Roger's tenth
@@ -981,9 +992,19 @@ impl Waddle {
             j[head].rot.y += neck * deg;
             j[body].rot.y += (1.0 - neck) * deg;
         };
-        // Looking at the finger.
-        turn_head(j, lv.gaze.0, self.neck, self.head, self.body);
-        j[self.head].rot.x += lv.gaze.1;
+        // Looking at the finger. A bird is one round body with the head
+        // on top and no neck between: the head turning or tipping on its
+        // own creases it (Roger: the chick and the duckling went out of
+        // shape scratched), so the body takes a share.
+        turn_head(
+            j,
+            lv.gaze.0,
+            self.neck.min(TOUCH_NECK),
+            self.head,
+            self.body,
+        );
+        j[self.head].rot.x += TOUCH_NECK * lv.gaze.1;
+        j[self.body].rot.x += 0.5 * (1.0 - TOUCH_NECK) * lv.gaze.1;
         // Laughing: back on its bottom, feet kicking, wings flapping.
         let l = lv.laugh.min(1.0);
         if l > 0.0 {
@@ -1030,11 +1051,16 @@ impl Waddle {
             );
         }
         j[self.head].rot.z += 8.0 * lv.content * (TAU * 0.4 * t).sin();
-        // A hand on the head, a chin scratch, a cheek: as the others.
-        j[self.head].rot.x += 10.0 * lv.head - 24.0 * lv.chin + 14.0 * lv.flinch;
-        j[self.head].rot.z += 9.0 * lv.head * (TAU * 1.1 * t).sin()
+        // A hand on the head, a chin scratch, a cheek: as the others, the
+        // body taking its share of the tilt.
+        let nod = 10.0 * lv.head - 24.0 * lv.chin + 14.0 * lv.flinch;
+        let tilt = 9.0 * lv.head * (TAU * 1.1 * t).sin()
             + 5.0 * lv.chin * (TAU * 0.8 * t).sin()
             + 12.0 * lv.cheek;
+        j[self.head].rot.x += TOUCH_NECK * nod;
+        j[self.body].rot.x += 0.5 * (1.0 - TOUCH_NECK) * nod;
+        j[self.head].rot.z += TOUCH_NECK * tilt;
+        j[self.body].rot.z += (1.0 - TOUCH_NECK) * tilt;
         // A belly rub: leaning back, wings fluttering.
         let r = lv.rub.min(1.0);
         if r > 0.0 {

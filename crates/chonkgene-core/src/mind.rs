@@ -83,10 +83,16 @@ pub enum Line {
     SkitSorry,
     /// Forgiving, after turning the sorry down once.
     SkitForgive,
+    /// Put down by the fox's spell, frightened.
+    SkitScared,
+    /// The fox casting 祝福術 (hearts for everyone).
+    SpellBless,
+    /// The fox casting 招喚術 (everyone come here).
+    SpellCall,
 }
 
 impl Line {
-    pub const ALL: [Line; 41] = [
+    pub const ALL: [Line; 44] = [
         Line::Hello,
         Line::WelcomeBack,
         Line::PokeSmall,
@@ -128,6 +134,9 @@ impl Line {
         Line::HideLost,
         Line::SkitSorry,
         Line::SkitForgive,
+        Line::SkitScared,
+        Line::SpellBless,
+        Line::SpellCall,
     ];
 
     /// Key in the line tables.
@@ -174,6 +183,9 @@ impl Line {
             Line::HideLost => "hide_lost",
             Line::SkitSorry => "skit_sorry",
             Line::SkitForgive => "skit_forgive",
+            Line::SkitScared => "skit_scared",
+            Line::SpellBless => "spell_bless",
+            Line::SpellCall => "spell_call",
         }
     }
 }

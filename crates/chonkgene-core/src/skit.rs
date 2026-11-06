@@ -45,6 +45,14 @@ const CAST_SECS: f64 = 1.3;
 const FLOAT_SECS: f32 = 3.6;
 /// Of skits with the fox free to start one, this share are a spell.
 const SPELL_SHARE: f32 = 0.35;
+/// Called over by the fox (招喚術): they come running for this long, and
+/// line up this far apart either side of it.
+const CALL_SECS: f64 = 5.0;
+const CALL_GAP: f32 = 80.0;
+/// Approaching, two pets still this far apart when the time is up give it
+/// up: across the screens they glared and huffed at no one (Roger: they
+/// seemed to squabble with themselves).
+const TOO_FAR: f32 = 2.0 * MEET;
 
 /// A pet as the director sees it.
 #[derive(Clone, Copy, Debug)]
@@ -105,6 +113,29 @@ pub enum Cmd {
         id: u64,
         secs: f32,
     },
+    /// Just put down by the spell, frightened: it jumps back from the fox
+    /// (at `from`), starts, and sweats.
+    Scare {
+        id: u64,
+        from: f32,
+    },
+    /// Blessed by the fox (祝福術): hearts, a happy hop.
+    Bless {
+        id: u64,
+    },
+}
+
+/// The fox's spells (PLAN §8, Roger's eleventh and thirteenth passes): the
+/// director casts 定身術 now and then by itself; all of them can be asked
+/// for from the fox's menu (施法…).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Spell {
+    /// 定身術: every other pet held up in the air for a moment.
+    Freeze,
+    /// 祝福術: hearts for everyone.
+    Bless,
+    /// 招喚術: everyone comes running to the fox.
+    Call,
 }
 
 /// How each species plays at fighting (PLAN §8, Roger's fourth pass,
@@ -182,6 +213,8 @@ enum Phase {
     Cast,
     /// Pets held up by the spell.
     Float,
+    /// Pets running to the fox, called.
+    Called,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -191,6 +224,8 @@ struct Skit {
     b: u64,
     phase: Phase,
     until: f64,
+    /// Which spell, for [`Kind::Spell`].
+    spell: Spell,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -317,6 +352,13 @@ impl Director {
         match s.phase {
             Phase::Approach => {
                 let meet = if s.kind == Kind::Play { CONTACT } else { MEET };
+                if now >= s.until && (a.x - b.x).abs() > TOO_FAR {
+                    // Could not get to each other (a gap, an edge, other
+                    // screens): nothing comes of it.
+                    self.rested.insert(pair(s.a, s.b), now);
+                    self.skit = None;
+                    return Vec::new();
+                }
                 if (a.x - b.x).abs() <= meet || now >= s.until {
                     out.extend([
                         Cmd::Face { id: a.id, x: b.x },
@@ -411,10 +453,18 @@ impl Director {
                     // Run out of steam: back to back, sulking.
                     s.phase = Phase::Sulk;
                     s.until = now + SULK_SECS;
-                    out.extend([a, b].map(|p| Cmd::Express {
-                        id: p.id,
-                        expression: Expression::Sulk,
-                    }));
+                    for (p, q) in [(a, b), (b, a)] {
+                        out.extend([
+                            Cmd::Face {
+                                id: p.id,
+                                x: 2.0 * p.x - q.x,
+                            },
+                            Cmd::Express {
+                                id: p.id,
+                                expression: Expression::Sulk,
+                            },
+                        ]);
+                    }
                     self.skit = Some(s);
                     return out;
                 }
@@ -491,9 +541,46 @@ impl Director {
                 s.phase = Phase::Play(turn + 1);
                 s.until = now;
             }
+            Phase::Cast if now >= s.until && s.spell == Spell::Bless => {
+                self.rested.insert(pair(s.a, s.b), now);
+                self.skit = None;
+                let mut out = vec![Cmd::Express {
+                    id: a.id,
+                    expression: Expression::Happy,
+                }];
+                for p in actors.iter().filter(|p| p.available && p.id != a.id) {
+                    out.push(Cmd::Bless { id: p.id });
+                }
+                return out;
+            }
+            Phase::Cast if now >= s.until && s.spell == Spell::Call => {
+                s.phase = Phase::Called;
+                s.until = now + CALL_SECS;
+                out.extend(call(a, actors));
+            }
+            Phase::Called => {
+                if now >= s.until {
+                    // Here: everyone pleased, facing the fox.
+                    self.rested.insert(pair(s.a, s.b), now);
+                    self.skit = None;
+                    let mut out = vec![Cmd::Express {
+                        id: a.id,
+                        expression: Expression::Giggle,
+                    }];
+                    for p in actors.iter().filter(|p| p.available && p.id != a.id) {
+                        out.push(Cmd::Face { id: p.id, x: a.x });
+                        out.push(Cmd::Express {
+                            id: p.id,
+                            expression: Expression::Happy,
+                        });
+                    }
+                    return out;
+                }
+                out.extend(call(a, actors));
+            }
             Phase::Cast if now >= s.until => {
                 // The owl stares the spell back: the fox floats instead.
-                let bounced = b.species == Species::Owl;
+                let bounced = b.species == Species::Owl && b.id != a.id;
                 let secs = FLOAT_SECS;
                 if bounced {
                     out.push(Cmd::Freeze { id: a.id, secs });
@@ -505,26 +592,49 @@ impl Director {
                     for p in actors.iter().filter(|p| p.available && p.id != a.id) {
                         out.push(Cmd::Freeze { id: p.id, secs });
                     }
-                    out.push(Cmd::Say {
-                        id: b.id,
-                        line: Line::SkitFloated,
-                    });
+                    if b.id != a.id {
+                        out.push(Cmd::Say {
+                            id: b.id,
+                            line: Line::SkitFloated,
+                        });
+                    }
                 }
                 s.phase = Phase::Float;
                 s.until = now + f64::from(secs) + 0.6;
             }
             Phase::Float if now >= s.until => {
-                // Down again: the fox giggles, the rest are pleased.
+                // Down again: the fox giggles; the rest got a fright
+                // (Roger: they should look a bit scared), and the one it
+                // picked on says so. Bounced back by the owl, the fox is
+                // the one put out, and the owl pleased with itself.
                 self.rested.insert(pair(s.a, s.b), now);
                 self.skit = None;
+                if b.species == Species::Owl && b.id != a.id {
+                    return vec![
+                        Cmd::Express {
+                            id: a.id,
+                            expression: Expression::FedUp,
+                        },
+                        Cmd::Express {
+                            id: b.id,
+                            expression: Expression::Happy,
+                        },
+                    ];
+                }
                 let mut out = vec![Cmd::Express {
                     id: a.id,
                     expression: Expression::Giggle,
                 }];
                 for p in actors.iter().filter(|p| p.id != a.id && p.available) {
-                    out.push(Cmd::Express {
+                    out.push(Cmd::Scare {
                         id: p.id,
-                        expression: Expression::Happy,
+                        from: a.x,
+                    });
+                }
+                if b.id != a.id {
+                    out.push(Cmd::Say {
+                        id: b.id,
+                        line: Line::SkitScared,
                     });
                 }
                 return out;
@@ -644,6 +754,64 @@ impl Director {
         out
     }
 
+    /// The fox casts `spell` now, asked from its menu: nothing if it is
+    /// not free or another skit is on.
+    pub fn cast(&mut self, fox: u64, spell: Spell, now: f64, actors: &[Actor]) -> Vec<Cmd> {
+        let Some(f) = actors.iter().find(|p| p.id == fox).copied() else {
+            return Vec::new();
+        };
+        if self.skit.is_some() || !f.available {
+            return Vec::new();
+        }
+        // The nearest one free is the one it picks on; alone, it casts all
+        // the same.
+        let other = actors
+            .iter()
+            .filter(|p| p.id != fox && p.available)
+            .min_by(|p, q| (p.x - f.x).abs().total_cmp(&(q.x - f.x).abs()))
+            .copied()
+            .unwrap_or(f);
+        self.begin_spell(now, f, other, spell)
+    }
+
+    fn begin_spell(&mut self, now: f64, fox: Actor, other: Actor, spell: Spell) -> Vec<Cmd> {
+        self.skit = Some(Skit {
+            kind: Kind::Spell,
+            a: fox.id,
+            b: other.id,
+            phase: Phase::Cast,
+            until: now + CAST_SECS,
+            spell,
+        });
+        let line = match spell {
+            Spell::Freeze => Line::SkitSpell,
+            Spell::Bless => Line::SpellBless,
+            Spell::Call => Line::SpellCall,
+        };
+        let mut out = vec![
+            Cmd::Face {
+                id: fox.id,
+                x: other.x,
+            },
+            Cmd::Cast { id: fox.id },
+            Cmd::Say { id: fox.id, line },
+        ];
+        // The owl puffs up and stares.
+        if spell == Spell::Freeze && other.species == Species::Owl && other.id != fox.id {
+            out.extend([
+                Cmd::Act {
+                    id: other.id,
+                    act: Act::Flap,
+                },
+                Cmd::Express {
+                    id: other.id,
+                    expression: Expression::FedUp,
+                },
+            ]);
+        }
+        out
+    }
+
     fn start(&mut self, now: f64, actors: &[Actor], rng: &mut fastrand::Rng) -> Vec<Cmd> {
         let free: Vec<&Actor> = actors.iter().filter(|p| p.available).collect();
         let mut pairs = Vec::new();
@@ -680,38 +848,7 @@ impl Director {
         if let Some((fox, other)) = fox
             && spell
         {
-            self.skit = Some(Skit {
-                kind: Kind::Spell,
-                a: fox.id,
-                b: other.id,
-                phase: Phase::Cast,
-                until: now + CAST_SECS,
-            });
-            let mut out = vec![
-                Cmd::Face {
-                    id: fox.id,
-                    x: other.x,
-                },
-                Cmd::Cast { id: fox.id },
-                Cmd::Say {
-                    id: fox.id,
-                    line: Line::SkitSpell,
-                },
-            ];
-            // The owl puffs up and stares.
-            if other.species == Species::Owl {
-                out.extend([
-                    Cmd::Act {
-                        id: other.id,
-                        act: Act::Flap,
-                    },
-                    Cmd::Express {
-                        id: other.id,
-                        expression: Expression::FedUp,
-                    },
-                ]);
-            }
-            return out;
+            return self.begin_spell(now, *fox, *other, Spell::Freeze);
         }
         // A chick and a duckling present always get to talk past each other.
         let talk = pairs.iter().position(|(a, b)| {
@@ -736,6 +873,7 @@ impl Director {
             b: b.id,
             phase: Phase::Approach,
             until: now + APPROACH_SECS,
+            spell: Spell::Freeze,
         });
         let mid = (a.x + b.x) / 2.0;
         vec![
@@ -751,6 +889,35 @@ impl Director {
             },
         ]
     }
+}
+
+/// Called over by `fox` (招喚術): every other pet free runs to a place in a
+/// line either side of it, the nearest closest.
+fn call(fox: Actor, actors: &[Actor]) -> Vec<Cmd> {
+    let mut others: Vec<&Actor> = actors
+        .iter()
+        .filter(|p| p.available && p.id != fox.id)
+        .collect();
+    others.sort_by(|p, q| (p.x - fox.x).abs().total_cmp(&(q.x - fox.x).abs()));
+    let mut taken = [0u32; 2];
+    let mut out = Vec::new();
+    for p in others {
+        let side = if p.x >= fox.x { 1 } else { 0 };
+        let k = taken[side] as f32;
+        taken[side] += 1;
+        let sign = if side == 1 { 1.0 } else { -1.0 };
+        let x = fox.x + sign * (CONTACT + CALL_GAP * k);
+        if (p.x - x).abs() > 30.0 {
+            out.push(Cmd::Walk {
+                id: p.id,
+                x,
+                pace: 2.2,
+            });
+        } else {
+            out.push(Cmd::Face { id: p.id, x: fox.x });
+        }
+    }
+    out
 }
 
 /// One pet's turn at a play-fight against `other`: its own move, and how
@@ -1025,7 +1192,7 @@ mod tests {
     }
 
     #[test]
-    fn the_fox_spell_holds_everyone_else_up_and_ends_in_giggles() {
+    fn the_fox_spell_holds_everyone_else_up_and_gives_them_a_fright() {
         let mut cast = actors([Species::Fox, Species::Munchkin], [100.0, 900.0]);
         cast.push(Actor {
             id: 3,
@@ -1048,11 +1215,16 @@ mod tests {
             })
             .collect();
         assert_eq!(held, vec![2, 3]);
+        // Put down, they got a fright (Roger, 2026-11-06), the one picked
+        // on says so; the fox giggles.
+        for id in [2, 3] {
+            assert!(cmds.contains(&Cmd::Scare { id, from: 100.0 }), "{cmds:?}");
+        }
         assert_eq!(
             cmds.last(),
-            Some(&Cmd::Express {
-                id: 3,
-                expression: Expression::Happy
+            Some(&Cmd::Say {
+                id: 2,
+                line: Line::SkitScared
             })
         );
         assert!(cmds.contains(&Cmd::Express {
@@ -1080,6 +1252,102 @@ mod tests {
             id: 2,
             act: Act::Flap
         }));
+    }
+
+    /// Every command from ticking `dir` until the skit is over.
+    fn until_over(dir: &mut Director, cast: &mut [Actor], start: f64) -> Vec<Cmd> {
+        let mut rng = fastrand::Rng::with_seed(3);
+        let mut all = Vec::new();
+        let mut t = start;
+        while dir.skit.is_some() {
+            for cmd in dir.tick(t, true, 2, cast, &mut rng) {
+                if let Cmd::Walk { id, x, .. } = cmd {
+                    let p = cast.iter_mut().find(|p| p.id == id).unwrap();
+                    p.x += (x - p.x).clamp(-8.0, 8.0);
+                }
+                all.push(cmd);
+            }
+            t += 0.05;
+            assert!(t < start + 60.0, "never ended");
+        }
+        all
+    }
+
+    #[test]
+    fn the_fox_casts_what_its_menu_asks_for() {
+        let three = || {
+            let mut cast = actors([Species::Fox, Species::Shiba], [500.0, 900.0]);
+            cast.push(Actor {
+                id: 3,
+                species: Species::Chick,
+                x: 100.0,
+                available: true,
+            });
+            cast
+        };
+        // 祝福術: hearts for everyone else, at once after the cast.
+        let mut cast = three();
+        let mut dir = Director::default();
+        let first = dir.cast(1, Spell::Bless, 0.0, &cast);
+        assert!(first.contains(&Cmd::Say {
+            id: 1,
+            line: Line::SpellBless
+        }));
+        let cmds = until_over(&mut dir, &mut cast, 0.0);
+        assert!(cmds.contains(&Cmd::Bless { id: 2 }) && cmds.contains(&Cmd::Bless { id: 3 }));
+        // 招喚術: they come running and stand either side of the fox.
+        let mut cast = three();
+        let mut dir = Director::default();
+        dir.cast(1, Spell::Call, 0.0, &cast);
+        until_over(&mut dir, &mut cast, 0.0);
+        let (shiba, chick) = (cast[1].x, cast[2].x);
+        assert!(
+            (shiba - (500.0 + CONTACT)).abs() <= 30.0,
+            "Shiba at {shiba}"
+        );
+        assert!(
+            (chick - (500.0 - CONTACT)).abs() <= 30.0,
+            "chick at {chick}"
+        );
+        // Asked while another skit is on, or while busy: nothing.
+        let mut busy = three();
+        busy[0].available = false;
+        assert!(
+            Director::default()
+                .cast(1, Spell::Freeze, 0.0, &busy)
+                .is_empty()
+        );
+        // Alone, it casts all the same and nobody floats.
+        let mut alone = vec![three()[0]];
+        let mut dir = Director::default();
+        assert!(!dir.cast(1, Spell::Freeze, 0.0, &alone).is_empty());
+        let cmds = until_over(&mut dir, &mut alone, 0.0);
+        assert!(
+            !cmds
+                .iter()
+                .any(|c| matches!(c, Cmd::Freeze { .. } | Cmd::Say { .. }))
+        );
+    }
+
+    /// Roger saw pets squabble with themselves: two that cannot get to
+    /// each other in time give it up instead of glaring across the screens.
+    #[test]
+    fn pets_too_far_apart_give_a_squabble_up() {
+        let cast = actors([Species::Shiba, Species::Fold], [100.0, 1900.0]);
+        let (mut dir, t) = started_as(Kind::GlareChase, &cast);
+        // Stuck where they are (an edge, a gap): nobody walks.
+        let mut rng = fastrand::Rng::with_seed(3);
+        let mut said = Vec::new();
+        let mut now = t;
+        while dir.skit.is_some() && now < t + 30.0 {
+            said.extend(dir.tick(now, true, 2, &cast, &mut rng));
+            now += 0.05;
+        }
+        assert!(dir.skit.is_none());
+        assert!(
+            !said.iter().any(|c| matches!(c, Cmd::Say { .. })),
+            "{said:?}"
+        );
     }
 
     #[test]

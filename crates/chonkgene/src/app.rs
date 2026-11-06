@@ -11,9 +11,9 @@ use chonkgene_core::Zone;
 use chonkgene_core::anim::{Act, Animator, Expression, HOLD_SECS};
 use chonkgene_core::mind::{Line, Mind, Out, World, XP_PER_LEVEL};
 use chonkgene_core::motion::{Area, Body, Heading, Motion};
-use chonkgene_core::play::{Command as Ask, Thing};
+use chonkgene_core::play::{Command as Ask, Scene, Thing};
 use chonkgene_core::shake::ShakeDetector;
-use chonkgene_core::skit::{Actor, Cmd, Director};
+use chonkgene_core::skit::{Actor, Cmd, Director, Spell};
 use chonkgene_core::sound::{Class, Sound, TAKES};
 use chonkgene_core::species::{Grumpiness, Play, Species};
 use chonkgene_core::terrain::{Terrain, Win};
@@ -227,6 +227,8 @@ struct Pet {
     frozen: bool,
     /// Held up by the fox's spell.
     float: Option<Float>,
+    /// The fox's face glowing with a spell: since when, until when.
+    glow: Option<(f64, f64)>,
     /// Frames asked for since the log's last summary.
     draws: u32,
     /// A giggle not of the mind's making (the director's, a tickle that
@@ -234,6 +236,22 @@ struct Pet {
     giggle_until: Option<f64>,
     /// Toys, commands, scenes, effects (app/play.rs).
     fun: play::Fun,
+}
+
+/// What the fox's spells page offers (PLAN §8, Roger's thirteenth pass).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Magic {
+    Spell(Spell),
+    /// Its fox-fire scene.
+    Foxfire,
+}
+
+/// Which page of a pet's menu.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Page {
+    Main,
+    Commands,
+    Spells,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -253,6 +271,9 @@ enum Action {
     /// The page of things to ask it (叫牠…), and back from it.
     Commands,
     Back,
+    /// The fox's page of spells (施法…), and one of them.
+    Spells,
+    Magic(Magic),
     Command(Ask),
     /// Throw a ball or a frisbee; put down catnip (or take it away).
     Throw(Thing),
@@ -1034,14 +1055,15 @@ impl App {
     }
 
     /// The pet's right-click menu at the cursor (or with its top-left at
-    /// `at`: turning to the commands page and back keeps it in place);
-    /// `commands`: the page of things to ask it (叫牠…).
+    /// `at`: turning to another page and back keeps it in place), on
+    /// `page`: the first, the things to ask it (叫牠…) or the fox's spells
+    /// (施法…).
     fn open_menu(
         &mut self,
         el: &ActiveEventLoop,
         i: usize,
         world: &World,
-        commands: bool,
+        page: Page,
         at: Option<(i32, i32)>,
     ) {
         let p = &self.pets[i];
@@ -1053,7 +1075,23 @@ impl App {
             icon,
             separated,
         };
-        if commands {
+        if page == Page::Spells {
+            let spells = [
+                ("定身術", Icon::Bubble, Magic::Spell(Spell::Freeze)),
+                ("狐火", Icon::Flame, Magic::Foxfire),
+                ("祝福術", Icon::Heart, Magic::Spell(Spell::Bless)),
+                ("招喚術", Icon::Paw, Magic::Spell(Spell::Call)),
+            ];
+            let mut items: Vec<Item> = spells
+                .iter()
+                .map(|&(label, icon, _)| item(label, None, icon, false))
+                .collect();
+            let mut actions: Vec<Action> = spells.iter().map(|&(.., m)| Action::Magic(m)).collect();
+            items.push(item("返回", None, Icon::Back, true));
+            actions.push(Action::Back);
+            return self.show_menu(el, i, items, actions, at);
+        }
+        if page == Page::Commands {
             let mut items: Vec<Item> = ["坐下", "趴下", "過來", "轉圈", "握手"]
                 .iter()
                 .map(|label| item(label, None, Icon::Paw, false))
@@ -1102,6 +1140,11 @@ impl App {
         if !asleep {
             items.push(item("叫牠…", None, Icon::Paw, false));
             actions.push(Action::Commands);
+            // The fox casts spells when you ask (Roger, 2026-11-06).
+            if p.species == Species::Fox {
+                items.push(item("施法…", None, Icon::Wand, false));
+                actions.push(Action::Spells);
+            }
             items.push(item("玩躲貓貓", None, Icon::Peek, false));
             actions.push(Action::Hide);
         }
@@ -1228,10 +1271,91 @@ impl App {
         let now = Instant::now();
         let world = self.world(now);
         match action {
-            Action::Commands | Action::Back => {
+            Action::Commands | Action::Spells | Action::Back => {
+                let page = match action {
+                    Action::Commands => Page::Commands,
+                    Action::Spells => Page::Spells,
+                    _ => Page::Main,
+                };
                 if let Some(i) = self.pets.iter().position(|p| p.save.id == pet) {
-                    self.open_menu(el, i, &world, action == Action::Commands, at);
+                    self.open_menu(el, i, &world, page, at);
                 }
+                return;
+            }
+            Action::Magic(Magic::Foxfire) => {
+                let App {
+                    pets,
+                    play,
+                    shared,
+                    lines,
+                    bubble_face,
+                    sounds,
+                    settings,
+                    area,
+                    terrain,
+                    ui_scale,
+                    ..
+                } = self;
+                let (Some(shared), Some(p)) =
+                    (shared.as_ref(), pets.iter_mut().find(|p| p.save.id == pet))
+                else {
+                    return;
+                };
+                if p.fun.busy(world.now) || p.mind.asleep() || p.in_skit {
+                    return;
+                }
+                let mut ctx = Ctx {
+                    el,
+                    shared,
+                    lines,
+                    face: bubble_face,
+                    sounds,
+                    sound_on: settings.sound,
+                    volume: f32::from(settings.volume) / 100.0,
+                    area: *area,
+                    terrain,
+                    ui_scale: *ui_scale,
+                    world,
+                };
+                play::start_scene(play, p, &mut ctx, Scene::Foxfire);
+                p.next = now;
+                return;
+            }
+            Action::Magic(Magic::Spell(spell)) => {
+                let cast = actors(&self.pets, world.now);
+                let cmds = self.director.cast(pet, spell, world.now, &cast);
+                if cmds.is_empty() {
+                    return;
+                }
+                let App {
+                    pets,
+                    shared,
+                    lines,
+                    bubble_face,
+                    sounds,
+                    settings,
+                    area,
+                    terrain,
+                    ui_scale,
+                    ..
+                } = self;
+                let Some(shared) = shared.as_ref() else {
+                    return;
+                };
+                let mut ctx = Ctx {
+                    el,
+                    shared,
+                    lines,
+                    face: bubble_face,
+                    sounds,
+                    sound_on: settings.sound,
+                    volume: f32::from(settings.volume) / 100.0,
+                    area: *area,
+                    terrain,
+                    ui_scale: *ui_scale,
+                    world,
+                };
+                direct(pets, &mut ctx, cmds);
                 return;
             }
             Action::Throw(thing) => return self.throw(el, thing),
@@ -1459,7 +1583,9 @@ fn direct(pets: &mut [Pet], ctx: &mut Ctx, cmds: Vec<Cmd>) {
             | Cmd::Hop { id }
             | Cmd::Tussle { id, .. }
             | Cmd::Cast { id }
-            | Cmd::Freeze { id, .. } => id,
+            | Cmd::Freeze { id, .. }
+            | Cmd::Scare { id, .. }
+            | Cmd::Bless { id } => id,
         };
         let Some(p) = pets.iter_mut().find(|p| p.save.id == id) else {
             continue;
@@ -1467,7 +1593,11 @@ fn direct(pets: &mut [Pet], ctx: &mut Ctx, cmds: Vec<Cmd>) {
         p.next = Instant::now();
         if matches!(
             cmd,
-            Cmd::Tussle { .. } | Cmd::Cast { .. } | Cmd::Freeze { .. }
+            Cmd::Tussle { .. }
+                | Cmd::Cast { .. }
+                | Cmd::Freeze { .. }
+                | Cmd::Scare { .. }
+                | Cmd::Bless { .. }
         ) {
             diag!("{}: {cmd:?}", p.save.name);
         }
@@ -1550,6 +1680,9 @@ fn direct(pets: &mut [Pet], ctx: &mut Ctx, cmds: Vec<Cmd>) {
                 p.anim.walking = false;
                 p.anim.gesture(Act::Swish);
                 p.fun.effect(Fx::Spell, ctx.world.now);
+                // Its forehead and eyes glow, seal lines spreading over its
+                // face, until the spell is done.
+                p.glow = Some((ctx.world.now, ctx.world.now + SPELL_GLOW_SECS));
                 if ctx.sound_on {
                     ctx.sounds.play(
                         p.save.id,
@@ -1573,9 +1706,47 @@ fn direct(pets: &mut [Pet], ctx: &mut Ctx, cmds: Vec<Cmd>) {
                     p.fun.effect(Fx::Bubble, now);
                 }
             }
+            Cmd::Scare { from, .. } => {
+                // Jumps back from the fox, still facing it, with a start,
+                // shock lines and a drop of sweat.
+                let now = ctx.world.now;
+                let toward = if from >= p.center_x() { 1.0 } else { -1.0 };
+                if p.press.is_none() && matches!(p.body.motion, Motion::Idle | Motion::Walk) {
+                    let (w, s) = (p.body.size.0, p.fun.scale);
+                    p.body
+                        .spring(p.body.feet().0 - toward * SCARE_JUMP * w, 26.0 * s);
+                    p.body.facing = toward;
+                }
+                let (w, h) = p.renderer.size();
+                let head = p.renderer.anchor().1;
+                let side = if toward > 0.0 { 0.95 } else { 0.05 };
+                p.anim.startle((side * w as f32, head.min(0.4 * h as f32)));
+                p.anim.expression = Expression::Neutral;
+                p.fun.effect(Fx::Fright, now);
+                if ctx.sound_on {
+                    ctx.sounds
+                        .play(p.save.id, p.species, Sound::Land, now, ctx.volume, 1.0);
+                }
+            }
+            Cmd::Bless { .. } => {
+                let now = ctx.world.now;
+                p.fun.effect(Fx::Hearts, now);
+                p.fun.effect(Fx::Sparkles, now);
+                if p.anim.expression != Expression::Happy {
+                    p.anim.cheer();
+                }
+                p.anim.expression = Expression::Happy;
+                p.happy_until = now + HAPPY_SECS;
+            }
         }
     }
 }
+
+/// The fox's face glows this long from the start of a cast (through the
+/// others floating, for 定身術), seconds.
+const SPELL_GLOW_SECS: f64 = 5.2;
+/// Frightened by the spell, a pet jumps back this share of its width.
+const SCARE_JUMP: f32 = 0.12;
 
 /// Held up in the air by the fox's spell (定身術): since when, until when,
 /// and where the window stood when it began.
@@ -1586,8 +1757,9 @@ struct Float {
     base: (f32, f32),
 }
 
-/// How high the spell lifts a pet (pixels at 100%), and how far it bobs.
-const FLOAT_RISE: f32 = 34.0;
+/// How high the spell lifts a pet (pixels at 100%; Roger: higher), and
+/// how far it bobs.
+const FLOAT_RISE: f32 = 72.0;
 const FLOAT_BOB: f32 = 4.0;
 
 #[allow(clippy::too_many_arguments)]
@@ -1671,6 +1843,7 @@ fn spawn(
         shown_at: now,
         frozen: false,
         float: None,
+        glow: None,
         draws: 0,
         giggle_until: None,
         fun: play::Fun::new(scale),
@@ -2233,7 +2406,9 @@ impl Pet {
         // Sprites rendered in the background land here; the slowest pet
         // still draws at 5 fps, so a new one shows within 0.2 s.
         self.renderer.poll();
-        let params = self.anim.params();
+        let mut params = self.anim.params();
+        params.travelling = self.travelling();
+        params.glow = self.glow_at(t);
         if self.mind.asleep() {
             self.renderer
                 .render_asleep(&params, (t - self.asleep_since) as f32);
@@ -2261,14 +2436,44 @@ impl Pet {
 
     fn moving(&self) -> bool {
         self.press.as_ref().is_some_and(|p| p.moved)
-            || self.float.is_some()
-            || self.body.motion == Motion::Fall
+            || self.travelling()
             || self.act.is_some_and(|(k, _)| {
                 matches!(
                     k,
                     Grumpiness::Zoomies | Grumpiness::Dizzy | Grumpiness::Spin
                 )
             })
+    }
+
+    /// Bring its window above every other (things on the floor came out
+    /// over it), its bubble above that.
+    fn raise(&self, shared: &Shared) {
+        if let Err(e) = self.presenter.raise(shared) {
+            eprintln!("raise failed: {e}");
+        }
+        if let Some(b) = &self.bubble
+            && let Err(e) = b.presenter.raise(shared)
+        {
+            eprintln!("raise failed: {e}");
+        }
+    }
+
+    /// How brightly its face glows with a spell at `t`, 0 … 1: coming up
+    /// over half a second, flickering, dying away at the end.
+    fn glow_at(&self, t: f64) -> f32 {
+        let Some((since, until)) = self.glow else {
+            return 0.0;
+        };
+        let rise = ((t - since) / 0.5).clamp(0.0, 1.0);
+        let fall = ((until - t) / 0.6).clamp(0.0, 1.0);
+        let flicker = 0.92 + 0.08 * (std::f64::consts::TAU * 2.3 * t).sin();
+        (rise.min(fall) * flicker) as f32
+    }
+
+    /// Its window moves on its own, not walking: flying, falling (a hop, a
+    /// leap, thrown), held up by the spell.
+    fn travelling(&self) -> bool {
+        self.float.is_some() || matches!(self.body.motion, Motion::Fly | Motion::Fall)
     }
 }
 
@@ -2590,7 +2795,7 @@ impl ApplicationHandler<UserEvent> for App {
                         self.dirty = true;
                     }
                     (MouseButton::Right, ElementState::Pressed) => {
-                        self.open_menu(el, i, &world, false, None)
+                        self.open_menu(el, i, &world, Page::Main, None)
                     }
                     _ => {}
                 }

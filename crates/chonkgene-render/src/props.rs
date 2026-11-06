@@ -632,10 +632,13 @@ pub enum Fx {
     /// Two pets tussling: a cloud of dust with paws, a tail and stars
     /// poking out of it, rolling about; `at` is the middle of the pet.
     Brawl,
+    /// A fright (put down by the fox's spell): lines of shock over the
+    /// head and a drop of sweat sliding down; `at` is the top of the head.
+    Fright,
 }
 
 impl Fx {
-    pub const ALL: [Fx; 7] = [
+    pub const ALL: [Fx; 8] = [
         Fx::Hearts,
         Fx::Sparkles,
         Fx::Dust,
@@ -643,6 +646,7 @@ impl Fx {
         Fx::Bubble,
         Fx::Spell,
         Fx::Brawl,
+        Fx::Fright,
     ];
 
     /// How long it shows, seconds.
@@ -655,6 +659,7 @@ impl Fx {
             Fx::Bubble => 3.6,
             Fx::Spell => 1.4,
             Fx::Brawl => 2.6,
+            Fx::Fright => 1.8,
         }
     }
 }
@@ -717,6 +722,7 @@ pub fn effect(pm: &mut Pixmap, fx: Fx, at: (f32, f32), s: f32, t: f32) {
         Fx::Bubble => bubble(pm, at, s, t, (1.0 - ((u - 0.92) / 0.08).max(0.0)).min(1.0)),
         Fx::Spell => spell(pm, at, s, t, u, fade),
         Fx::Brawl => brawl(pm, at, s, t, 1.0 - ((u - 0.9) / 0.1).max(0.0)),
+        Fx::Fright => fright(pm, at, s, t, fade),
         Fx::Splash => {
             for k in 0..7 {
                 let a = PI * (0.15 + 0.7 * k as f32 / 6.0);
@@ -810,12 +816,14 @@ fn spell(pm: &mut Pixmap, at: (f32, f32), s: f32, t: f32, u: f32, fade: f32) {
         }
         stroke_path(pm, ring, with_alpha(*c, fade), 2.0 * s, id);
     }
-    // Fox-fire rising round it in a spiral.
+    // Fox-fire rising round it, each flame in its own place, swaying as it
+    // goes up (Roger: not spinning round).
     for k in 0..6 {
         let p = (u * 1.4 + k as f32 / 6.0).fract();
-        let a = TAU * (k as f32 / 6.0 + 1.2 * t);
+        let a = TAU * (k as f32 / 6.0 + 1.0 / 12.0);
+        let sway = 4.0 * s * (TAU * 1.6 * t + k as f32 * 1.9).sin();
         let (ox, oy) = (
-            x + a.cos() * rx * (1.0 - 0.4 * p),
+            x + a.cos() * rx * (1.0 - 0.4 * p) + sway * p,
             y - p * 110.0 * s + a.sin() * ry,
         );
         let c = if k % 2 == 0 {
@@ -831,6 +839,48 @@ fn spell(pm: &mut Pixmap, at: (f32, f32), s: f32, t: f32, u: f32, fade: f32) {
             with_alpha(c, fade * (1.0 - p)),
         );
     }
+}
+
+/// A fright (see [`Fx::Fright`]): three lines of shock popping out over
+/// the head, and a drop of sweat by it sliding down.
+fn fright(pm: &mut Pixmap, at: (f32, f32), s: f32, t: f32, fade: f32) {
+    let (x, y) = at;
+    let id = Transform::identity();
+    let pop = (t / 0.15).min(1.0);
+    let ink = with_alpha([0x4A, 0x36, 0x30, 230], fade);
+    for k in [-1.0f32, 0.0, 1.0] {
+        let a = -std::f32::consts::FRAC_PI_2 + 0.55 * k;
+        let (r0, r1) = (10.0 * s, (10.0 + 10.0 * pop) * s);
+        let mut line = PathBuilder::new();
+        line.move_to(x + a.cos() * r0, y - 4.0 * s + a.sin() * r0);
+        line.line_to(x + a.cos() * r1, y - 4.0 * s + a.sin() * r1);
+        stroke_path(pm, line, ink, 2.2 * s, id);
+    }
+    let (dx, dy) = (x + 24.0 * s, y + (8.0 + 10.0 * (t / 1.8).min(1.0)) * s);
+    let r = 4.5 * s * pop;
+    let mut drop = PathBuilder::new();
+    drop.move_to(dx, dy - 2.4 * r);
+    drop.quad_to(dx + r, dy - 0.6 * r, dx + r, dy);
+    drop.quad_to(dx + r, dy + r, dx, dy + r);
+    drop.quad_to(dx - r, dy + r, dx - r, dy);
+    drop.quad_to(dx - r, dy - 0.6 * r, dx, dy - 2.4 * r);
+    drop.close();
+    if let Some(path) = drop.finish() {
+        pm.fill_path(
+            &path,
+            &paint(with_alpha([0x9C, 0xD4, 0xF5, 235], fade)),
+            FillRule::Winding,
+            id,
+            None,
+        );
+    }
+    circle(
+        pm,
+        dx - 0.35 * r,
+        dy - 0.1 * r,
+        0.3 * r,
+        with_alpha([255, 255, 255, 230], fade),
+    );
 }
 
 /// A tussle's dust cloud (see [`Fx::Brawl`]): puffs rolling about, big
@@ -1166,8 +1216,9 @@ pub fn pond_front(pm: &mut Pixmap, pond: (f32, f32), x: f32, line: f32, s: f32, 
     }
 }
 
-/// The fox's fire: little orbs of blue and pink fox-fire circling the
-/// pet's middle `at`, bobbing, `t` seconds in.
+/// The fox's fire: little orbs of blue and pink fox-fire hanging round the
+/// pet's middle `at`, each in its own place, bobbing and drifting a little
+/// (Roger: not going round and round), `t` seconds in.
 pub fn foxfire(pm: &mut Pixmap, at: (f32, f32), reach: (f32, f32), s: f32, t: f32) {
     let colours = [
         [0x8F, 0xC8, 0xFF, 230],
@@ -1176,10 +1227,11 @@ pub fn foxfire(pm: &mut Pixmap, at: (f32, f32), reach: (f32, f32), s: f32, t: f3
         [0x8F, 0xE8, 0xF0, 230],
     ];
     for (k, c) in colours.iter().enumerate() {
-        let a = TAU * (0.22 * t + k as f32 / colours.len() as f32);
+        let kf = k as f32;
+        let a = TAU * ((kf + 0.5) / colours.len() as f32 + 0.02 * (TAU * 0.13 * t + kf).sin());
         let (ox, oy) = (
             at.0 + a.cos() * reach.0,
-            at.1 + a.sin() * reach.1 + 4.0 * s * (TAU * 0.8 * t + k as f32).sin(),
+            at.1 + a.sin() * reach.1 + 4.0 * s * (TAU * 0.8 * t + kf).sin(),
         );
         glow(pm, ox, oy, 15.0 * s, with_alpha(*c, 0.7));
         circle(pm, ox, oy, 4.2 * s, [255, 255, 255, 230]);
@@ -1187,7 +1239,7 @@ pub fn foxfire(pm: &mut Pixmap, at: (f32, f32), reach: (f32, f32), s: f32, t: f3
         let mut tip = PathBuilder::new();
         tip.move_to(ox - 3.4 * s, oy - 1.0 * s);
         tip.quad_to(
-            ox + 2.0 * s * (TAU * 2.0 * t + k as f32).sin(),
+            ox + 2.0 * s * (TAU * 2.0 * t + kf).sin(),
             oy - 13.0 * s,
             ox + 3.4 * s,
             oy - 1.0 * s,

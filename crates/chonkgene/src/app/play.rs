@@ -30,6 +30,8 @@ use super::{Ctx, Pet};
 /// seconds; catnip is used up over this long.
 const TOY_STAYS: f64 = 60.0;
 const CATNIP_SECS: f64 = 60.0;
+/// A cat that likes catnip goes back to it after this long, seconds.
+const NIP_AGAIN: f64 = 20.0;
 /// Pets go for a thing within this far either side, pixels.
 const REACH: f32 = 1100.0;
 /// How often the input timing is sampled.
@@ -453,6 +455,9 @@ pub(super) struct Fun {
     /// bottom here (screen pixels): the pond's front is drawn over the pet.
     pond: Option<(f32, f32)>,
     nip: Option<(Nip, f64, u8)>,
+    /// Not back to the catnip before this (it has just been; one that
+    /// does not care for it, not to this sprig again).
+    nip_again: f64,
     /// Effects under way, since when.
     pub fx: Vec<(Fx, f64)>,
     /// Lying about while you read, until then; little things to do there.
@@ -521,6 +526,10 @@ pub(super) struct Playground {
     pub perch: Option<(u32, f32, f32, f32)>,
     /// The terrain must be read again (a branch came or went).
     pub terrain_dirty: bool,
+    /// A thing on the floor just came out: its window went on top of the
+    /// pets', so the pets (and their bubbles) go back above it (Roger: the
+    /// pond was still drawn over the duckling on Windows).
+    restack: bool,
     rng: Option<fastrand::Rng>,
 }
 
@@ -555,6 +564,8 @@ impl Playground {
         let id = self.next_id;
         let w = PropWin::new(el, shared, id, prop, now, until)?;
         self.things.push(w);
+        // A butterfly flutters in front of everything.
+        self.restack |= prop.thing != Thing::Butterfly;
         Some(id)
     }
 
@@ -581,7 +592,10 @@ impl Playground {
     /// Show or hide every thing (the pets are put away, a full-screen app).
     pub fn set_visible(&mut self, shared: &Shared, now: f64, visible: bool) {
         for w in &mut self.things {
+            let was = w.shown;
             w.show(shared, now, visible);
+            // Shown again, it may have come up over the pets.
+            self.restack |= w.shown && !was && w.prop.thing != Thing::Butterfly;
         }
     }
 
@@ -686,10 +700,12 @@ impl Playground {
         });
         w.window.set_cursor(CursorIcon::Grabbing);
         w.claimed = None;
-        let id = w.id;
+        let (id, catnip) = (w.id, w.prop.thing == Thing::Catnip);
         for p in pets.iter_mut() {
-            if p.fun.chase.as_ref().is_some_and(|(c, _)| *c == id) {
+            let at_it = catnip && p.fun.nip.is_some();
+            if at_it || p.fun.chase.as_ref().is_some_and(|(c, _)| *c == id) {
                 p.fun.chase = None;
+                p.fun.nip = None;
                 p.stop();
             }
         }
@@ -706,6 +722,17 @@ impl Playground {
             return;
         };
         w.window.set_cursor(CursorIcon::Grab);
+        if w.prop.thing == Thing::Catnip {
+            // Moved where you like: it drops onto whatever is below, and
+            // the pets come over again.
+            w.prop.vel = (0.0, 1.0);
+            w.prop.resting = false;
+            println!("catnip moved to ({:.0}, {:.0})", w.prop.pos.0, w.prop.pos.1);
+            for p in pets.iter_mut() {
+                p.fun.nip_again = 0.0;
+            }
+            return;
+        }
         let s = w.prop.scale.max(0.5);
         if g.moved {
             let (vx, vy) = g.vel;
@@ -766,9 +793,7 @@ impl Playground {
         }
         println!("catnip put down at ({:.0}, {:.0})", at.0, at.1);
         for p in pets.iter_mut() {
-            if p.free_to_play(now) && p.fun.chase.is_none() {
-                p.fun.nip = Some((Nip::Going, now, 0));
-            }
+            p.fun.nip_again = 0.0;
         }
     }
 
@@ -934,7 +959,7 @@ impl Pet {
         });
         for &(fx, since) in &self.fun.fx {
             let at = match fx {
-                Fx::Hearts => head,
+                Fx::Hearts | Fx::Fright => head,
                 Fx::Sparkles => mouth,
                 Fx::Dust => (w / 2.0, floor),
                 Fx::Splash => (w / 2.0, floor - 0.13 * PPU * s),
@@ -978,6 +1003,11 @@ pub(super) fn tick(
         ground.activity = Some(ground.watcher.activity(now));
     }
     let cursor = ground.cursor;
+    if std::mem::take(&mut ground.restack) {
+        for p in pets.iter() {
+            p.raise(ctx.shared);
+        }
+    }
     // The things fall, bounce and roll; the used up go.
     let gone: Vec<u32> = ground
         .things
@@ -1067,6 +1097,7 @@ pub(super) fn tick(
         let p = &mut pets[i];
         tickled_loose(ground, p, ctx);
         order(p, ctx, cursor);
+        smell_nip(ground, p, now);
         nip(ground, p, ctx);
         if start_scene && maybe_scene(ground, p, ctx) {
             start_scene = false;
@@ -1466,6 +1497,9 @@ fn nip(ground: &mut Playground, p: &mut Pet, ctx: &mut Ctx) {
     let (w, h) = p.body.size;
     let likes = p.species.likes_catnip(p.save.id);
     let cat = matches!(p.species, Species::Munchkin | Species::Fold);
+    // Done with it for now: a cat that likes it comes back in a while,
+    // the rest leave this sprig be.
+    let again = now + if likes { NIP_AGAIN } else { CATNIP_SECS };
     match stage {
         Nip::Going => {
             let dx = sprig.pos.0 - fx;
@@ -1473,12 +1507,14 @@ fn nip(ground: &mut Playground, p: &mut Pet, ctx: &mut Ctx) {
             if dx.abs() > REACH || (fy - sprig.pos.1).abs() > 0.3 * h {
                 println!("{}: the catnip is out of reach", p.save.name);
                 p.fun.nip = None;
+                p.fun.nip_again = again;
                 return;
             }
             if p.species == Species::Owl {
                 p.body.facing = dx.signum();
                 p.say(ctx, Line::Catnip);
                 p.fun.nip = None;
+                p.fun.nip_again = again;
                 return;
             }
             // Beside it, so it shows.
@@ -1487,6 +1523,7 @@ fn nip(ground: &mut Playground, p: &mut Pet, ctx: &mut Ctx) {
             if heading == Heading::Blocked {
                 println!("{}: the catnip is out of reach", p.save.name);
                 p.fun.nip = None;
+                p.fun.nip_again = again;
                 return;
             }
             if heading == Heading::There {
@@ -1548,11 +1585,39 @@ fn nip(ground: &mut Playground, p: &mut Pet, ctx: &mut Ctx) {
         Nip::Leaving => {
             if p.anim.doing().is_none() || now - since > 4.0 {
                 p.fun.nip = None;
+                p.fun.nip_again = again;
                 if likes {
                     cheer(p, ctx);
                 }
             }
         }
+    }
+}
+
+/// Catnip lying on the floor within reach: a pet free to play goes over
+/// (not while it is still falling, nor straight back after a visit).
+fn smell_nip(ground: &Playground, p: &mut Pet, now: f64) {
+    if p.fun.nip.is_some()
+        || now < p.fun.nip_again
+        || p.fun.chase.is_some()
+        || p.mind.asleep()
+        || !p.free_to_play(now)
+    {
+        return;
+    }
+    let Some(sprig) = ground
+        .things
+        .iter()
+        .find(|w| w.prop.thing == Thing::Catnip && w.grab.is_none())
+        .map(|w| w.prop)
+    else {
+        return;
+    };
+    let landed = sprig.resting || sprig.vel.1 == 0.0;
+    let (fx, fy) = p.body.feet();
+    let h = p.body.size.1;
+    if landed && (sprig.pos.0 - fx).abs() <= REACH && (fy - sprig.pos.1).abs() <= 0.3 * h {
+        p.fun.nip = Some((Nip::Going, now, 0));
     }
 }
 
@@ -1717,16 +1782,19 @@ fn scene(ground: &mut Playground, p: &mut Pet, ctx: &mut Ctx) {
             }
         }
         (Scene::Foxfire, 0) => {
+            // Calling up its fire: its face glows all the while.
             run.phase = 1;
+            p.glow = Some((now, run.until));
         }
         (Scene::Foxfire, _) => {
-            // Chasing its own tails round in the fire.
+            // Swinging its tails in the fire, the bell ringing, now and
+            // then (Roger: no spinning round).
             if now >= run.until {
                 p.fun.scene = None;
                 cheer(p, ctx);
                 return;
             }
-            if p.anim.doing().is_none() && p.try_gesture(Act::Spin) {
+            if p.anim.doing().is_none() && ground.roll() < 0.02 && p.try_gesture(Act::Swish) {
                 p.bell(ctx);
             }
         }

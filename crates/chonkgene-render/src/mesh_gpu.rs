@@ -62,6 +62,9 @@ pub struct MeshCanvas {
     /// The soft shadow on the floor under the pet; off in the water or in
     /// the air, where there is no floor under it.
     pub floor_shadow: bool,
+    /// The fox's spell glowing on its face, 0 … 1 (paint.wgsl
+    /// `spell_glow`).
+    pub glow: f32,
 }
 
 impl MeshCanvas {
@@ -261,6 +264,7 @@ impl MeshCanvas {
             frames: 0,
             press: None,
             floor_shadow: true,
+            glow: 0.0,
         }
     }
 
@@ -341,6 +345,7 @@ impl MeshCanvas {
             ));
         }
         let mut u = uniforms(scene, &self.cam, &Frame::default(), true, 0);
+        u[3][3] = self.glow;
         u.push(v4(self.eye_r, yaw.to_radians()));
         u.push(v4(self.mouth_r, 0.0));
         u.push([ROOT_PIVOT.x, ROOT_PIVOT.z, self.shadow_r.0, self.shadow_r.1]);
