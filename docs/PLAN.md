@@ -1041,6 +1041,14 @@ Roger's notes on the twelfth pass build, each with what was found and done the s
 
 Checked with tests (new: `the_fox_casts_what_its_menu_asks_for`, `pets_too_far_apart_give_a_squabble_up`, `the_fox_face_glows_while_it_casts_and_no_one_elses_does`; the spell test now expects a fright), clippy on Linux and the Windows target (stub C compiler), llvmpipe renders, and an Xvfb run driving the fox's menu: 定身術 (four pets held up, then `Scare` each), 祝福術 (`Bless` each), 招喚術, 狐火, and catnip dragged by the mouse. Owed on Windows: the glow and seal lines, the pets now above the pond, the owl's flight.
 
+### Small things after the thirteenth pass (2026-11-06)
+
+Roger said do the small leftovers too:
+
+- **Asleep, held up by 定身術 in a dream bubble** (idea list of the eleventh pass): the director floats sleepers too (`Actor::asleep`: asleep, not held, not falling); its bubble is lilac with a crescent moon and stars drifting round (`Fx::Dream`), it sleeps on up there (breathing, its animation not stopped) and is put down without waking or a fright. Test `the_spell_floats_a_sleeper_and_lets_it_sleep_on`.
+- **Cats bat at the fox-fire** (idea list): while the fox calls up its fire, a cat free to play within 700 px on its level runs to its side, faces it and paws at the orbs, a pounce now and then, until the fire is gone, then is pleased (`app/play.rs` `swat`, `Fun::swat`, `SWAT_REACH`). Under Xvfb: `芋圓: bats at the fox-fire`.
+- **The Linux app-menu entry** (owed since the icon work, §1.9): `chonkgene --menu-entry` writes `chonkgene.desktop` to `$XDG_DATA_HOME/applications` and the 256 px icon to `icons/hicolor/256x256/apps` (never by itself: the program is portable); a moved folder is followed each start (`menu_entry::repair`, as the login entry is); `--no-menu-entry` and 「移除所有痕跡」 take it away. Windows has nothing to add (the exe carries its icon). Test `an_entry_is_added_repaired_and_removed`; tried here with a scratch `XDG_DATA_HOME`.
+
 ### Phase 1: Shiba prototype (feel) — `v0.1.0`
 
 - The art pipeline (§3.3) works end to end for one Shiba, with placeholder art.

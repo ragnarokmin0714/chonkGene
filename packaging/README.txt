@@ -3,6 +3,8 @@
 ■ 啟動
   Windows：雙擊 chonkGene.exe
   Linux：在終端機執行 ./chonkgene
+    想在應用程式選單裡找到牠，就執行一次 ./chonkgene --menu-entry
+    （之後搬動資料夾也沒關係；./chonkgene --no-menu-entry 可以拿掉）
   第一次啟動時，阿柴和芋圓會搬進你的桌面，設定視窗也會打開。
 
 ■ 怎麼玩
