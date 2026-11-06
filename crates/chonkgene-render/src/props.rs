@@ -171,7 +171,13 @@ pub fn carried(pm: &mut Pixmap, thing: Thing, mouth: (f32, f32), facing: f32, s:
             // the floor, so it stays inside the pet's picture).
             let s = CARRIED * s;
             let rx = 0.5 * w * s;
-            let centre = (mouth.0 + side * 0.35 * rx, mouth.1 + 0.62 * rx);
+            let mut centre = (mouth.0 + side * 0.35 * rx, mouth.1 + 0.62 * rx);
+            // Walking, the head reaches far forward: never past the edge of
+            // the pet's picture, where it would be cut off.
+            let room = pm.width() as f32 - rx - 1.0;
+            if room > rx + 1.0 {
+                centre.0 = centre.0.clamp(rx + 1.0, room);
+            }
             let look = Look {
                 turn: look.turn + side * 0.5,
                 ..look

@@ -239,18 +239,20 @@ impl Prop {
     }
 }
 
-/// How a species goes for a thrown toy.
+/// How a species goes for a thrown toy. A ball every one of them brings
+/// back: dogs and the fox nose it, cats bat it with a paw, the chick and
+/// the duckling peck it along, the owl flies it back in its beak.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Fetch {
     /// Runs for it and brings it back (dogs, the fox): a frisbee leapt for
-    /// and caught in the mouth, a ball nosed back along the floor.
+    /// and caught in the mouth.
     Retrieve,
-    /// Runs for it and bats it about a few times, then loses interest
-    /// (cats).
+    /// Runs for a frisbee and bats it about a few times, then loses
+    /// interest (cats).
     Bat,
-    /// Chases it a few steps and gives up (chick, duckling).
+    /// Chases a frisbee a few steps and gives up (chick, duckling).
     Chase,
-    /// Only watches it go (the owl).
+    /// Only watches a frisbee go (the owl).
     Watch,
 }
 
@@ -280,8 +282,8 @@ pub enum Order {
     Leap { x: f32, height: f32 },
     /// In the air after a leap: nothing to do but wait for it.
     Wait,
-    /// Bump it on with the nose toward `side`, at `speed` pixels a second
-    /// (a ball nosed back to you).
+    /// Push it on toward `side`, at `speed` pixels a second (a ball brought
+    /// back to you: with the nose, a paw, a beak, as the species does).
     Nose { side: f32, speed: f32 },
     /// Nosed all the way back to where it was thrown from.
     Brought,
@@ -322,6 +324,8 @@ pub struct Chase {
     leaps: u8,
     /// How far its feet can walk, left and right (screen x), if known.
     reach: Option<(f32, f32)>,
+    /// Still on the move (slowing to a stop): it cannot push the ball yet.
+    moving: bool,
 }
 
 /// The longest any pet keeps after a toy, seconds.
@@ -339,11 +343,14 @@ const MOUTH_UP: f32 = 0.55;
 const CATCH: (f32, f32) = (0.45, 0.4);
 
 impl Chase {
-    /// Set off after a toy thrown from `home` (screen x); `roll` (0 … 1)
-    /// varies how long a cat keeps at it and a bird keeps running.
-    pub fn new(how: Fetch, home: f32, now: f64, roll: f32) -> Self {
+    /// Set off after `thing` thrown from `home` (screen x); `roll` (0 … 1)
+    /// varies how long a cat keeps at a frisbee and a bird keeps running.
+    /// A ball every species brings back (Roger, 2026-11-06), so it keeps
+    /// at it as long as it takes.
+    pub fn new(how: Fetch, thing: Thing, home: f32, now: f64, roll: f32) -> Self {
         let until = now
             + match how {
+                _ if thing == Thing::Ball => CHASE_SECS,
                 Fetch::Retrieve | Fetch::Bat => CHASE_SECS,
                 Fetch::Chase => BIRD_CHASE * (1.0 + f64::from(roll)),
                 Fetch::Watch => WATCH_SECS,
@@ -360,6 +367,7 @@ impl Chase {
             aloft_until: 0.0,
             leaps: 0,
             reach: None,
+            moving: false,
         }
     }
 
@@ -372,6 +380,12 @@ impl Chase {
     /// [`Chase::tick`]).
     pub fn set_reach(&mut self, reach: (f32, f32)) {
         self.reach = Some(reach);
+    }
+
+    /// Whether the pet is still moving (set before each [`Chase::tick`]):
+    /// it pushes the ball only once it has stopped by it.
+    pub fn set_moving(&mut self, moving: bool) {
+        self.moving = moving;
     }
 
     /// What to do now, with the pet's feet at `feet`, its window `size`
@@ -412,17 +426,43 @@ impl Chase {
         // (unless it is only up in the air after a leap for it).
         let above = feet.1 - prop.pos.1;
         let aloft = now < self.aloft_until;
-        if !aloft && !prop.flying() && (above > 1.2 * h || above < -0.3 * h) {
+        // The owl fetches a ball on the wing: up or down is no matter.
+        let flier = self.how == Fetch::Watch && prop.thing == Thing::Ball;
+        if !aloft && !flier && !prop.flying() && (above > 1.2 * h || above < -0.3 * h) {
             return if now - self.since > 1.5 {
                 Order::Done
             } else {
                 Order::Watch
             };
         }
-        let near = dx.abs() < 0.3 * w;
+        // Near enough to pick it up, or as near as it can get (a toy
+        // against the edge of the screens).
+        let reachable = self
+            .reach
+            .map_or(prop.pos.0, |(lo, hi)| prop.pos.0.clamp(lo, hi));
+        let near = (reachable - feet.0).abs() < 0.3 * w;
         match self.how {
+            // The owl flies over, picks the ball up in its beak and flies
+            // it back.
+            Fetch::Watch if prop.thing == Thing::Ball => {
+                // It watches the ball come to rest, then swoops on it.
+                let rolling = prop.vel.0.abs() > 40.0 * prop.scale.max(0.5);
+                if self.phase == Phase::Going && (prop.flying() || rolling) {
+                    return Order::Watch;
+                }
+                if near && !prop.flying() {
+                    self.phase = Phase::Carrying;
+                    Order::Grab
+                } else {
+                    Order::Run {
+                        x: reachable,
+                        pace: 2.0,
+                    }
+                }
+            }
             Fetch::Watch => Order::Watch,
-            Fetch::Retrieve if prop.thing == Thing::Ball => self.nose(now, feet, size, prop),
+            // Everyone else pushes a ball home its own way: nose, paw, beak.
+            _ if prop.thing == Thing::Ball => self.nose(now, feet, size, prop),
             Fetch::Retrieve => {
                 let above = feet.1 - prop.pos.1;
                 // Up in the air after a leap: snapped up as it comes by
@@ -526,13 +566,22 @@ impl Chase {
         // Close enough: further than a walk's stopping distance, which a
         // pet stood still does not set off again for.
         if dx.abs() < 0.3 * w && !prop.flying() && !rolling {
-            if now < self.next {
+            // Stopping by it first (a push while still sliding along never
+            // happens, and it slid on past the ball).
+            if now < self.next || self.moving {
                 return Order::Watch;
             }
-            self.next = now + 0.9;
+            // A bird's beak pushes it on less far, and pecks more often.
+            let (strength, gap) = match self.how {
+                Fetch::Chase => (0.5, 0.7),
+                _ => (1.0, 0.9),
+            };
+            self.next = now + gap;
             // Rolls about speed / ROLL_DRAG before it stops: most of the
             // way home, never far past it.
-            let speed = (0.8 * ROLL_DRAG * to_home.abs()).clamp(160.0, 520.0) * prop.scale.max(0.5);
+            let speed = strength
+                * (0.8 * ROLL_DRAG * to_home.abs()).clamp(160.0, 520.0)
+                * prop.scale.max(0.5);
             return Order::Nose { side, speed };
         }
         Order::Run {
@@ -754,7 +803,7 @@ mod tests {
         let mut feet = (700.0, floor);
         // Up and down after a leap: (speed up, speed along).
         let mut air: Option<(f32, f32)> = None;
-        let mut c = Chase::new(Fetch::Retrieve, 500.0, 0.0, 0.5);
+        let mut c = Chase::new(Fetch::Retrieve, Thing::Frisbee, 500.0, 0.0, 0.5);
         let (mut leapt, mut caught_up, mut grabbed, mut dropped) = (false, false, false, false);
         let mut now = 0.0;
         let dt: f32 = 1.0 / 60.0;
@@ -807,7 +856,7 @@ mod tests {
         let mut ball = Prop::thrown(Thing::Ball, (500.0, 900.0), 1.0, 1.0);
         let size = (260.0, 190.0);
         let mut feet = (450.0, 1032.0);
-        let mut c = Chase::new(Fetch::Retrieve, 500.0, 0.0, 0.5);
+        let mut c = Chase::new(Fetch::Retrieve, Thing::Ball, 500.0, 0.0, 0.5);
         let (mut noses, mut brought, mut grabbed) = (0, false, false);
         let mut now = 0.0;
         let mut far = 0.0f32;
@@ -852,7 +901,7 @@ mod tests {
         ball.resting = true;
         let reach = (left + 0.5 * size.0 + 1.0, right - 0.5 * size.0 - 1.0);
         let mut feet = (right - 600.0, floor);
-        let mut c = Chase::new(Fetch::Retrieve, left + 400.0, 0.0, 0.5);
+        let mut c = Chase::new(Fetch::Retrieve, Thing::Ball, left + 400.0, 0.0, 0.5);
         let mut nosed = false;
         let mut now = 0.0;
         for _ in 0..(8 * 60) {
@@ -878,17 +927,17 @@ mod tests {
     }
 
     #[test]
-    fn a_cat_bats_it_a_few_times_then_loses_interest() {
-        let ball = Prop {
+    fn a_cat_bats_a_frisbee_a_few_times_then_loses_interest() {
+        let disc = Prop {
             resting: true,
-            ..Prop::put(Thing::Ball, (500.0, 1032.0), 1.0)
+            ..Prop::put(Thing::Frisbee, (500.0, 1032.0), 1.0)
         };
-        let mut c = Chase::new(Fetch::Bat, 0.0, 0.0, 0.0);
+        let mut c = Chase::new(Fetch::Bat, Thing::Frisbee, 0.0, 0.0, 0.0);
         let mut bats = 0;
         let mut now = 0.0;
         let order = loop {
             now += 0.1;
-            match c.tick(now, (510.0, 1032.0), (200.0, 180.0), &ball, false) {
+            match c.tick(now, (510.0, 1032.0), (200.0, 180.0), &disc, false) {
                 Order::Bat { side } => {
                     assert_eq!(side, -1.0, "batted it toward itself");
                     bats += 1;
@@ -904,28 +953,68 @@ mod tests {
     }
 
     #[test]
-    fn birds_give_up_soon_and_the_owl_only_watches() {
-        let ball = Prop::put(Thing::Ball, (1500.0, 1032.0), 1.0);
-        let mut chick = Chase::new(Fetch::Chase, 0.0, 0.0, 1.0);
+    fn birds_give_up_a_frisbee_soon_and_the_owl_only_watches_one() {
+        let disc = Prop::put(Thing::Frisbee, (1500.0, 1032.0), 1.0);
+        let mut chick = Chase::new(Fetch::Chase, Thing::Frisbee, 0.0, 0.0, 1.0);
         assert!(matches!(
-            chick.tick(1.0, (200.0, 1032.0), (180.0, 180.0), &ball, false),
+            chick.tick(1.0, (200.0, 1032.0), (180.0, 180.0), &disc, false),
             Order::Run { .. }
         ));
         assert_eq!(
-            chick.tick(4.1, (300.0, 1032.0), (180.0, 180.0), &ball, false),
+            chick.tick(4.1, (300.0, 1032.0), (180.0, 180.0), &disc, false),
             Order::Done
         );
-        let mut owl = Chase::new(Fetch::Watch, 0.0, 0.0, 0.0);
+        let mut owl = Chase::new(Fetch::Watch, Thing::Frisbee, 0.0, 0.0, 0.0);
         assert_eq!(
-            owl.tick(1.0, (200.0, 1032.0), (180.0, 180.0), &ball, false),
+            owl.tick(1.0, (200.0, 1032.0), (180.0, 180.0), &disc, false),
             Order::Watch
         );
+    }
+
+    /// Roger (2026-11-06): every species brings a ball back, its own way.
+    #[test]
+    fn every_species_brings_a_ball_back() {
+        let t = Terrain::flat(AREA);
+        for how in [Fetch::Retrieve, Fetch::Bat, Fetch::Chase, Fetch::Watch] {
+            let mut ball = Prop::thrown(Thing::Ball, (500.0, 900.0), 1.0, 1.0);
+            let size = (220.0, 180.0);
+            let mut feet = (450.0, 1032.0);
+            let mut c = Chase::new(how, Thing::Ball, 500.0, 0.0, 0.0);
+            let (mut carried, mut back) = (false, false);
+            let mut now = 0.0;
+            for _ in 0..(25 * 60) {
+                now += 1.0 / 60.0;
+                if !carried {
+                    ball.step(1.0 / 60.0, &t);
+                }
+                match c.tick(now, feet, size, &ball, false) {
+                    Order::Run { x, pace } => {
+                        feet.0 += (x - feet.0).signum() * 60.0 * pace / 60.0;
+                        if carried {
+                            ball.pos.0 = feet.0;
+                        }
+                    }
+                    Order::Nose { side, speed } => ball.bat((side * speed, -40.0)),
+                    Order::Grab => carried = true,
+                    Order::Drop | Order::Brought => {
+                        back = true;
+                        break;
+                    }
+                    Order::Done => break,
+                    _ => {}
+                }
+            }
+            assert!(back, "{how:?} never brought it back");
+            let at = if carried { feet.0 } else { ball.pos.0 };
+            assert!((at - 500.0).abs() < 0.4 * size.0, "{how:?} left it at {at}");
+            assert_eq!(carried, how == Fetch::Watch, "{how:?} carried {carried}");
+        }
     }
 
     #[test]
     fn whoever_gets_there_second_gives_up() {
         let ball = Prop::put(Thing::Ball, (500.0, 1032.0), 1.0);
-        let mut c = Chase::new(Fetch::Retrieve, 0.0, 0.0, 0.0);
+        let mut c = Chase::new(Fetch::Retrieve, Thing::Ball, 0.0, 0.0, 0.0);
         assert_eq!(
             c.tick(1.0, (400.0, 1032.0), (260.0, 190.0), &ball, true),
             Order::Done

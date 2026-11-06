@@ -243,7 +243,7 @@ pub const ATTEND_SECS: f32 = 2.5;
 pub const HOLD_SECS: f32 = 0.6;
 /// A finger rubbing about this far (picture pixels) makes a full scratch;
 /// a scratch fades by this rate a second once it stops.
-const SCRATCH_PX: f32 = 140.0;
+const SCRATCH_PX: f32 = 80.0;
 const SCRATCH_FADE: f32 = 1.2;
 /// How long anything shows a touch let go (the look back, a paw lifted).
 pub const TOUCH_SHOWS_SECS: f32 = 4.0;
@@ -662,7 +662,11 @@ impl Animator {
                 Act::Stretch | Act::Yawn | Act::LookLeft | Act::LookRight
             )
         });
+        // Touched (held, rubbed), its answer shows at full rate (PLAN §5:
+        // poked, 60).
         if moving
+            || self.pressed
+            || self.scratch > 0.0
             || self.is_wobbling()
             || self.expression == Expression::Giggle
             || self.turning()

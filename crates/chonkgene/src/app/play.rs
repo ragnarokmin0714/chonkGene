@@ -50,6 +50,9 @@ const WADE: f32 = 0.07;
 /// at 100%); let go slower than this, it just drops.
 const THROW_MOST: f32 = 2400.0;
 const THROW_LEAST: f32 = 80.0;
+/// Scratched this hard (see `Touch::scratch`), a pet lets go of what it
+/// holds in its mouth.
+const LET_GO: f32 = 0.6;
 /// A press on a toy that moves further than this (pixels) is a drag.
 const DRAG_START: f32 = 4.0;
 /// A click on a toy knocks it along this fast (pixels a second at 100%).
@@ -83,6 +86,8 @@ pub(super) struct PropWin {
     pub until: f64,
     /// In a pet's mouth (the pet draws it), so not shown here.
     pub carrier: Option<u64>,
+    /// Being pushed home by this pet: the others leave it to it.
+    claimed: Option<u64>,
     /// Branches grow out from the right edge unless flipped.
     flip: bool,
     born: f64,
@@ -128,6 +133,7 @@ impl PropWin {
             placed: pos,
             until,
             carrier: None,
+            claimed: None,
             flip: false,
             born: now,
             drawn: None,
@@ -394,8 +400,7 @@ impl Pet {
         if line == Line::HideFound {
             cheer(self, ctx);
         } else {
-            self.anim.expression = Expression::Giggle;
-            self.happy_until = now + super::HAPPY_SECS;
+            self.giggle(now);
         }
         println!("{}: {:?}", self.save.name, line);
     }
@@ -632,7 +637,7 @@ impl Playground {
             }
             println!("{}: goes for the {thing:?}", p.save.name);
             let roll = self.roll();
-            p.fun.chase = Some((id, Chase::new(p.species.fetch(), from, now, roll)));
+            p.fun.chase = Some((id, Chase::new(p.species.fetch(), thing, from, now, roll)));
             p.fun.lounge_until = 0.0;
             p.fun.hold_until = 0.0;
             p.anim.posture = Posture::Free;
@@ -680,6 +685,7 @@ impl Playground {
             vel: (0.0, 0.0),
         });
         w.window.set_cursor(CursorIcon::Grabbing);
+        w.claimed = None;
         let id = w.id;
         for p in pets.iter_mut() {
             if p.fun.chase.as_ref().is_some_and(|(c, _)| *c == id) {
@@ -1059,6 +1065,7 @@ pub(super) fn tick(
     for i in 0..pets.len() {
         chase(ground, pets, i, ctx);
         let p = &mut pets[i];
+        tickled_loose(ground, p, ctx);
         order(p, ctx, cursor);
         nip(ground, p, ctx);
         if start_scene && maybe_scene(ground, p, ctx) {
@@ -1147,9 +1154,21 @@ fn chase(ground: &mut Playground, pets: &mut [Pet], i: usize, ctx: &mut Ctx) {
         return;
     };
     let prop = w.prop;
-    let taken = w.carrier.is_some_and(|c| c != me);
+    let taken = w.carrier.or(w.claimed).is_some_and(|c| c != me);
     c.set_reach(p.body.reach(ctx.terrain));
+    c.set_moving(p.body.speed > 0.0 || p.body.motion != Motion::Idle);
     let mut order = c.tick(now, p.body.feet(), p.body.size, &prop, taken);
+    // The owl flies to the ball, and home with it.
+    let flies = p.species.fetch() == Fetch::Watch && prop.thing == Thing::Ball;
+    if flies && let Order::Run { x, .. } = order {
+        let (fx, fy) = p.body.feet();
+        let far = (x - fx).abs() > 0.3 * p.body.size.0;
+        if far && matches!(p.body.motion, Motion::Idle | Motion::Walk) {
+            let y = ctx.terrain.floor_under(x).map_or(fy, |l| l.y);
+            p.body.fly_to(x, y);
+        }
+        order = Order::Wait;
+    }
     // Out of reach (across a gap between monitors, past the edge of the
     // screens): put down where it got to, or given up on.
     if let Order::Run { x, pace } = order
@@ -1177,7 +1196,14 @@ fn chase(ground: &mut Playground, pets: &mut [Pet], i: usize, ctx: &mut Ctx) {
         }
         Order::Run { .. } => {}
         Order::Grab => {
-            println!("{}: got the {:?}", p.save.name, prop.thing);
+            let (pw, ph) = p.renderer.size();
+            crate::diag::diag!(
+                "{}: got the {:?}, its mouth at {:?} in a {pw}x{ph} picture, facing {}",
+                p.save.name,
+                prop.thing,
+                p.renderer.mouth(p.anim.facing),
+                p.anim.facing
+            );
             if prop.flying() && p.body.motion != Motion::Fall {
                 p.anim.pounce();
             }
@@ -1233,16 +1259,29 @@ fn chase(ground: &mut Playground, pets: &mut [Pet], i: usize, ctx: &mut Ctx) {
         Order::Wait => {}
         Order::Nose { side, speed } => {
             p.body.facing = side;
-            let nosed = p.try_gesture(Act::Nudge);
+            // A nose, a paw, a beak; the push lands partway in.
+            let (act, lands) = match p.species.fetch() {
+                Fetch::Bat => (Act::Wave, 0.35),
+                Fetch::Chase => (Act::Peck, 0.3),
+                _ => (Act::Nudge, 0.4),
+            };
+            let nosed = p.try_gesture(act);
             if nosed {
                 let s = prop.scale.max(0.5);
-                p.fun.nudge = Some((now + 0.4, (side * speed, -50.0 * s)));
+                p.fun.nudge = Some((now + lands, (side * speed, -50.0 * s)));
+                if let Some(w) = ground.get_mut(id) {
+                    w.claimed = Some(me);
+                }
             }
             println!(
-                "{}: noses the {:?} on ({})",
+                "{}: noses the {:?} on ({}; speed {:.2}, walking {}, doing {:?}, {:?})",
                 p.save.name,
                 prop.thing,
-                if nosed { "bump" } else { "not free" }
+                if nosed { "bump" } else { "not free" },
+                p.body.speed,
+                p.anim.walking,
+                p.anim.doing(),
+                p.anim.expression,
             );
         }
         Order::Brought => {
@@ -1277,7 +1316,51 @@ fn chase(ground: &mut Playground, pets: &mut [Pet], i: usize, ctx: &mut Ctx) {
     }
     if keep {
         p.fun.chase = Some((id, c));
+    } else if let Some(w) = ground.get_mut(id)
+        && w.claimed == Some(me)
+    {
+        w.claimed = None;
     }
+}
+
+/// Scratched hard enough with something in its mouth, it laughs and lets
+/// go: the toy (or the bone) drops at its feet (Roger, 2026-11-06).
+fn tickled_loose(ground: &mut Playground, p: &mut Pet, ctx: &mut Ctx) {
+    let Some(thing) = p.fun.carry else {
+        return;
+    };
+    if p.anim.params().touch.scratch < LET_GO {
+        return;
+    }
+    let now = ctx.world.now;
+    let me = p.save.id;
+    p.fun.carry = None;
+    let (fx, fy) = p.body.feet();
+    let at = (fx + p.body.facing * 0.25 * p.body.size.0, fy);
+    // Whatever it held: a toy it was bringing back, or its scene's bone.
+    let id = p
+        .fun
+        .chase
+        .take()
+        .map(|(id, _)| id)
+        .or_else(|| p.fun.scene.and_then(|r| r.prop));
+    if let Some(w) = id.and_then(|id| ground.get_mut(id))
+        && w.carrier == Some(me)
+    {
+        w.carrier = None;
+        w.claimed = None;
+        w.prop = Prop::put(thing, at, w.prop.scale);
+        w.until = w.until.max(now + TOY_STAYS.min(10.0));
+    }
+    // A scene ends here (its bone goes when the scene does).
+    if let Some(run) = &mut p.fun.scene {
+        run.until = now;
+        run.prop = None;
+    }
+    p.stop();
+    p.say(ctx, Line::Laugh);
+    p.giggle(now);
+    println!("{}: tickled into dropping the {thing:?}", p.save.name);
 }
 
 /// Pleased: a hop and hearts.
@@ -1577,8 +1660,10 @@ fn scene(ground: &mut Playground, p: &mut Pet, ctx: &mut Ctx) {
     let Some(mut run) = p.fun.scene else {
         return;
     };
-    // Picked up, or fallen asleep: it ends.
-    let interrupted = p.press.is_some() || p.mind.asleep() || p.in_skit;
+    // Picked up, or fallen asleep: it ends (a touch or a scratch does
+    // not; scratched hard enough, it laughs and drops its bone).
+    let lifted = p.press.as_ref().is_some_and(|press| press.moved);
+    let interrupted = lifted || p.mind.asleep() || p.in_skit;
     let prop = run.prop.and_then(|id| ground.get(id)).map(|w| w.prop);
     let end = |ground: &mut Playground, p: &mut Pet, run: &Run| {
         if let Some(id) = run.prop {

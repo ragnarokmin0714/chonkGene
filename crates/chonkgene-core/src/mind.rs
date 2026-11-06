@@ -79,10 +79,14 @@ pub enum Line {
     HideFound,
     /// Came out by itself, not found.
     HideLost,
+    /// Saying sorry after a squabble.
+    SkitSorry,
+    /// Forgiving, after turning the sorry down once.
+    SkitForgive,
 }
 
 impl Line {
-    pub const ALL: [Line; 39] = [
+    pub const ALL: [Line; 41] = [
         Line::Hello,
         Line::WelcomeBack,
         Line::PokeSmall,
@@ -122,6 +126,8 @@ impl Line {
         Line::HideStart,
         Line::HideFound,
         Line::HideLost,
+        Line::SkitSorry,
+        Line::SkitForgive,
     ];
 
     /// Key in the line tables.
@@ -166,6 +172,8 @@ impl Line {
             Line::HideStart => "hide_start",
             Line::HideFound => "hide_found",
             Line::HideLost => "hide_lost",
+            Line::SkitSorry => "skit_sorry",
+            Line::SkitForgive => "skit_forgive",
         }
     }
 }

@@ -53,6 +53,8 @@ const TERRAIN_BUSY_EVERY: Duration = Duration::from_millis(100);
 const LIFT_UP: f32 = 12.0;
 const LIFT_ANY: f32 = 36.0;
 const HAPPY_SECS: f64 = 3.0;
+/// A giggle the app or the director starts lasts this long.
+const GIGGLE_SECS: f64 = 3.0;
 /// The log notes the program held up for longer than this, and a pet's
 /// picture unchanged for longer than [`FROZEN`] while it should move.
 const STALL: Duration = Duration::from_millis(300);
@@ -227,6 +229,9 @@ struct Pet {
     float: Option<Float>,
     /// Frames asked for since the log's last summary.
     draws: u32,
+    /// A giggle not of the mind's making (the director's, a tickle that
+    /// shook a toy loose) ends then.
+    giggle_until: Option<f64>,
     /// Toys, commands, scenes, effects (app/play.rs).
     fun: play::Fun,
 }
@@ -1484,6 +1489,9 @@ fn direct(pets: &mut [Pet], ctx: &mut Ctx, cmds: Vec<Cmd>) {
                     p.anim.cheer();
                 }
                 p.anim.expression = expression;
+                if expression == Expression::Giggle {
+                    p.giggle(ctx.world.now);
+                }
                 if expression == Expression::Happy {
                     p.happy_until = ctx.world.now + HAPPY_SECS;
                 }
@@ -1492,6 +1500,10 @@ fn direct(pets: &mut [Pet], ctx: &mut Ctx, cmds: Vec<Cmd>) {
                 if p.body.motion == Motion::Walk {
                     p.body.motion = Motion::Idle;
                 }
+                // Stopped just now: the animator would still count it as
+                // walking until its next step and drop the gesture (the
+                // play-fights' moves came late or not at all).
+                p.anim.walking = false;
                 p.anim.gesture(act);
                 // The fox's bell rings as its tails swing.
                 if act == Act::Swish && ctx.sound_on {
@@ -1535,6 +1547,7 @@ fn direct(pets: &mut [Pet], ctx: &mut Ctx, cmds: Vec<Cmd>) {
                 if p.body.motion == Motion::Walk {
                     p.body.motion = Motion::Idle;
                 }
+                p.anim.walking = false;
                 p.anim.gesture(Act::Swish);
                 p.fun.effect(Fx::Spell, ctx.world.now);
                 if ctx.sound_on {
@@ -1659,6 +1672,7 @@ fn spawn(
         frozen: false,
         float: None,
         draws: 0,
+        giggle_until: None,
         fun: play::Fun::new(scale),
         save,
     })
@@ -1744,6 +1758,13 @@ impl Pet {
             }
         }
         true
+    }
+
+    /// Giggle for a moment (not the mind's tickle laugh, which it ends
+    /// itself).
+    fn giggle(&mut self, now: f64) {
+        self.anim.expression = Expression::Giggle;
+        self.giggle_until = Some(now + GIGGLE_SECS);
     }
 
     /// Stop walking where it is (the director's commands).
@@ -2165,8 +2186,11 @@ impl Pet {
             self.anim.expression = Expression::Asleep;
         } else if self.anim.expression == Expression::Asleep
             || (self.anim.expression == Expression::Happy && t >= self.happy_until)
+            || (self.anim.expression == Expression::Giggle
+                && self.giggle_until.is_some_and(|u| t >= u))
         {
             self.anim.expression = Expression::Neutral;
+            self.giggle_until = None;
         }
         self.anim.walking = self.body.motion == Motion::Walk;
         self.anim.pace = self.body.pace;
@@ -2386,9 +2410,11 @@ impl ApplicationHandler<UserEvent> for App {
             WindowEvent::CursorMoved { position, .. } => {
                 let p = &mut self.pets[i];
                 p.cursor = (position.x as f32, position.y as f32);
-                // Rubbing about under a held finger (not yet a lift).
+                // Rubbing about under a held finger (not yet a lift): shown
+                // at once, not at the next frame due.
                 if p.press.as_ref().is_some_and(|p| !p.moved) {
                     p.anim.knead(p.cursor);
+                    p.next = p.next.min(Instant::now());
                 }
             }
             WindowEvent::MouseInput { state, button, .. } => {

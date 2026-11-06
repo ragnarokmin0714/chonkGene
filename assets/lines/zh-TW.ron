@@ -46,6 +46,8 @@
         "hide_start": ["我去躲好囉！來找我～"],
         "hide_found": ["被{you}找到了！", "汪！{you}好厲害～"],
         "hide_lost": ["找不到我吧～汪！"],
+        "skit_sorry": ["對不起嘛……汪……", "我錯了啦……"],
+        "skit_forgive": ["好啦，原諒你！汪！"],
     },
     "munchkin": {
         "hello": ["{you}，早安呀"],
@@ -87,6 +89,8 @@
         "hide_start": ["我、我去躲了喔……"],
         "hide_found": ["被找到了……好開心！"],
         "hide_lost": ["我躲得很好吧？"],
+        "skit_sorry": ["對、對不起……"],
+        "skit_forgive": ["嗯……那、和好吧。"],
     },
     "fold": {
         "hello": ["……來了啊。"],
@@ -128,6 +132,8 @@
         "hide_start": ["……不准偷看。"],
         "hide_found": ["……哼，算你厲害。"],
         "hide_lost": ["……太慢了。"],
+        "skit_sorry": ["……抱歉。"],
+        "skit_forgive": ["……這次就算了。"],
     },
     "owl": {
         "hello": ["咕咕，{you}好。"],
@@ -169,6 +175,8 @@
         "hide_start": ["咕，躲好了。"],
         "hide_found": ["咕咕！被看到了！"],
         "hide_lost": ["咕，找不到吧。"],
+        "skit_sorry": ["咕……對不起。"],
+        "skit_forgive": ["咕，原諒你。"],
     },
     "chick": {
         "hello": ["啾！{you}早！"],
@@ -210,6 +218,8 @@
         "hide_start": ["啾！我去躲囉！"],
         "hide_found": ["啾啾！被找到了！"],
         "hide_lost": ["啾～我在這裡！"],
+        "skit_sorry": ["啾……對不起……"],
+        "skit_forgive": ["啾！和好！"],
     },
     "duck": {
         "hello": ["……{you}，呱。"],
@@ -251,6 +261,8 @@
         "hide_start": ["……去躲了。呱。"],
         "hide_found": ["呱！被找到了。"],
         "hide_lost": ["……沒人找我。呱。"],
+        "skit_sorry": ["……對不起。呱。"],
+        "skit_forgive": ["……好吧。呱。"],
     },
     "fox": {
         "hello": ["{you}，小九來囉～", "嘻嘻，又見面了"],
@@ -292,5 +304,7 @@
         "hide_start": ["小九去躲囉～看你找不找得到！"],
         "hide_found": ["哎呀，被發現了～"],
         "hide_lost": ["嘻嘻，小九藏得好吧？"],
+        "skit_sorry": ["小九錯了嘛～"],
+        "skit_forgive": ["哼哼，原諒你啦～"],
     },
 }

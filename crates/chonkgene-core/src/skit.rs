@@ -17,6 +17,15 @@ const TALK_EVERY: f64 = 1.3;
 const TALK_ROUNDS: u32 = 4;
 const SHRUG_SECS: f64 = 1.8;
 const MAKE_UP_SECS: f64 = 3.0;
+/// A squabble has its ups and downs (Roger, 2026-11-06: making up at once
+/// made no sense): rounds of huffing before the chase, sulking back to
+/// back after it, then one comes over to say sorry, is turned down once,
+/// and is forgiven.
+const ARGUE_ROUNDS: u32 = 3;
+const ARGUE_EVERY: f64 = 1.3;
+const SULK_SECS: f64 = 5.0;
+const SORRY_SECS: f64 = 3.0;
+const TURNED_DOWN_SECS: f64 = 2.0;
 /// Playing, pets come this close (pixels between centres): their bodies
 /// touch, the windows overlapping.
 const CONTACT: f32 = 95.0;
@@ -153,6 +162,13 @@ enum Phase {
     Glare,
     Chase,
     Talk(u32),
+    /// Huffing at each other in turn, round `n`.
+    Argue(u32),
+    /// Back to back, sulking.
+    Sulk,
+    /// One comes over to say sorry; at step 1 it was turned down once and
+    /// offers a paw.
+    Sorry(u32),
     Shrug,
     MakeUp,
     /// Turn `n` of a play-fight.
@@ -287,8 +303,13 @@ impl Director {
             self.skit = None;
             return Vec::new();
         };
-        // Held up by a spell, a pet is not free, but the skit goes on.
-        if !matches!(s.phase, Phase::MakeUp | Phase::Float) && (!a.available || !b.available) {
+        // Held up by a spell, or sulking in the skit, a pet is not free,
+        // but the skit goes on.
+        let own_mood = matches!(s.phase, Phase::Argue(_) | Phase::Sulk | Phase::Sorry(_));
+        if !own_mood
+            && !matches!(s.phase, Phase::MakeUp | Phase::Float)
+            && (!a.available || !b.available)
+        {
             return self.make_up(now, actors);
         }
 
@@ -346,23 +367,56 @@ impl Director {
                 }
             }
             Phase::Glare if now >= s.until => {
-                s.phase = Phase::Chase;
-                s.until = now + CHASE_SECS;
-                out.extend([
-                    Cmd::Say {
-                        id: b.id,
-                        line: Line::SkitHuff,
-                    },
-                    Cmd::Say {
-                        id: a.id,
-                        line: Line::SkitChase,
-                    },
-                ]);
+                s.phase = Phase::Argue(0);
+                s.until = now;
+            }
+            Phase::Argue(round) if now >= s.until => {
+                if round >= ARGUE_ROUNDS {
+                    s.phase = Phase::Chase;
+                    s.until = now + CHASE_SECS;
+                    out.extend([
+                        Cmd::Say {
+                            id: b.id,
+                            line: Line::SkitHuff,
+                        },
+                        Cmd::Say {
+                            id: a.id,
+                            line: Line::SkitChase,
+                        },
+                    ]);
+                } else {
+                    // Turn and turn about, each huffier: a stamp of a hop.
+                    let (me, other) = if round % 2 == 0 { (b, a) } else { (a, b) };
+                    out.extend([
+                        Cmd::Face {
+                            id: me.id,
+                            x: other.x,
+                        },
+                        Cmd::Say {
+                            id: me.id,
+                            line: Line::SkitHuff,
+                        },
+                        Cmd::Hop { id: me.id },
+                        Cmd::Express {
+                            id: me.id,
+                            expression: Expression::FedUp,
+                        },
+                    ]);
+                    s.phase = Phase::Argue(round + 1);
+                    s.until = now + ARGUE_EVERY;
+                }
             }
             Phase::Chase => {
                 if now >= s.until {
+                    // Run out of steam: back to back, sulking.
+                    s.phase = Phase::Sulk;
+                    s.until = now + SULK_SECS;
+                    out.extend([a, b].map(|p| Cmd::Express {
+                        id: p.id,
+                        expression: Expression::Sulk,
+                    }));
                     self.skit = Some(s);
-                    return self.make_up(now, actors);
+                    return out;
                 }
                 // b runs away from a; a follows a little slower.
                 let away = if b.x >= a.x { b.x + 400.0 } else { b.x - 400.0 };
@@ -512,6 +566,68 @@ impl Director {
                         });
                     }
                 }
+            }
+            Phase::Sulk if now >= s.until => {
+                // The one that chased comes over, sorry.
+                s.phase = Phase::Sorry(0);
+                s.until = now + SORRY_SECS;
+                out.extend([
+                    Cmd::Express {
+                        id: a.id,
+                        expression: Expression::Neutral,
+                    },
+                    Cmd::Say {
+                        id: a.id,
+                        line: Line::SkitSorry,
+                    },
+                ]);
+            }
+            Phase::Sorry(0) if now >= s.until => {
+                // Turned down once: a huff over the shoulder. It offers a
+                // paw.
+                s.phase = Phase::Sorry(1);
+                s.until = now + TURNED_DOWN_SECS;
+                out.extend([
+                    Cmd::Say {
+                        id: b.id,
+                        line: Line::SkitHuff,
+                    },
+                    Cmd::Face { id: a.id, x: b.x },
+                    Cmd::Act {
+                        id: a.id,
+                        act: Act::Paw,
+                    },
+                ]);
+            }
+            Phase::Sorry(0) => {
+                if (a.x - b.x).abs() > MEET {
+                    out.push(Cmd::Walk {
+                        id: a.id,
+                        x: b.x,
+                        pace: 0.7,
+                    });
+                }
+            }
+            Phase::Sorry(_) if now >= s.until => {
+                // Forgiven: face to face, a happy hop each.
+                s.phase = Phase::MakeUp;
+                s.until = now + MAKE_UP_SECS;
+                out.extend([
+                    Cmd::Face { id: a.id, x: b.x },
+                    Cmd::Face { id: b.id, x: a.x },
+                    Cmd::Say {
+                        id: b.id,
+                        line: Line::SkitForgive,
+                    },
+                    Cmd::Express {
+                        id: a.id,
+                        expression: Expression::Happy,
+                    },
+                    Cmd::Express {
+                        id: b.id,
+                        expression: Expression::Happy,
+                    },
+                ]);
             }
             Phase::Shrug if now >= s.until => {
                 self.skit = Some(s);
@@ -794,8 +910,20 @@ mod tests {
         let (mut dir, t) = started_as(Kind::GlareChase, &cast);
         let lines = play(&mut dir, cast, t);
         assert_eq!(lines.first(), Some(&Line::SkitGlare));
-        assert_eq!(lines.last(), Some(&Line::SkitMakeUp));
+        assert_eq!(lines.last(), Some(&Line::SkitForgive));
         assert!(!dir.involves(1) && !dir.involves(2));
+        // Ups and downs (Roger: making up at once made no sense): huffing,
+        // the chase, sorry, turned down once, then forgiven.
+        let at = |l: Line| lines.iter().position(|&x| x == l).unwrap_or(usize::MAX);
+        let huffs = lines.iter().filter(|&&l| l == Line::SkitHuff).count();
+        assert!(huffs >= ARGUE_ROUNDS as usize + 2, "{lines:?}");
+        assert!(at(Line::SkitChase) < at(Line::SkitSorry), "{lines:?}");
+        assert!(at(Line::SkitSorry) < at(Line::SkitForgive), "{lines:?}");
+        let last_huff = lines.iter().rposition(|&l| l == Line::SkitHuff).unwrap();
+        assert!(
+            last_huff > at(Line::SkitSorry),
+            "never turned down: {lines:?}"
+        );
     }
 
     #[test]

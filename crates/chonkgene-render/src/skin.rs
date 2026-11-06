@@ -407,7 +407,7 @@ impl Moods {
         };
         let scratch = self
             .scratch
-            .step(feel.scratch, 0.0, 2.0, 0.9, dt)
+            .step(feel.scratch, 0.0, 3.5, 0.9, dt)
             .clamp(0.0, 1.0);
         // A good scratch under the chin or on the belly, or a finger rubbing
         // about anywhere, sets a hind leg going.
