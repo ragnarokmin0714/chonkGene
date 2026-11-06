@@ -30,12 +30,14 @@ use winit::application::ApplicationHandler;
 use winit::dpi::PhysicalPosition;
 use winit::event::{ElementState, MouseButton, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop, EventLoopProxy};
-use winit::window::{Window, WindowId};
+use winit::window::{CursorIcon, Window, WindowId};
 
 use crate::brand;
+use crate::diag::diag;
 use crate::ipc::{self, Claim, Msg};
 use crate::lines::Lines;
 use crate::store::{self, DataDir, PetSave, Pets, Settings};
+use chonkgene_render::props::Fx;
 
 mod play;
 
@@ -46,9 +48,15 @@ const POLL_EVERY: Duration = Duration::from_secs(1);
 /// a window or in the air.
 const TERRAIN_EVERY: Duration = Duration::from_millis(400);
 const TERRAIN_BUSY_EVERY: Duration = Duration::from_millis(100);
-/// A press that moves further than this (pixels) is a lift, not a poke.
-const DRAG_START: f32 = 4.0;
+/// A press pulled up further than this, or moved this far any way (pixels
+/// at 100%), is a lift; rubbing about inside that is a scratch.
+const LIFT_UP: f32 = 12.0;
+const LIFT_ANY: f32 = 36.0;
 const HAPPY_SECS: f64 = 3.0;
+/// The log notes the program held up for longer than this, and a pet's
+/// picture unchanged for longer than [`FROZEN`] while it should move.
+const STALL: Duration = Duration::from_millis(300);
+const FROZEN: Duration = Duration::from_millis(1500);
 const ACT_SECS: f64 = 3.2;
 
 pub struct Options {
@@ -64,6 +72,21 @@ pub enum UserEvent {
 
 pub fn run(opts: Options) -> Result<(), String> {
     let data = DataDir::locate(opts.data).map_err(|e| format!("cannot find a data folder: {e}"))?;
+    crate::diag::open(&data.path);
+    diag!(
+        "chonkGene {} on {}",
+        env!("CARGO_PKG_VERSION"),
+        std::env::consts::OS
+    );
+    match chonkgene_render::shared_gpu() {
+        Some(gpu) => diag!(
+            "GPU: {}, budget {:.0}%, frames timed {}",
+            gpu.name(),
+            100.0 * gpu.budget(),
+            gpu.times_frames()
+        ),
+        None => diag!("no GPU in use: drawing from sprites"),
+    }
     let listener = match ipc::claim().map_err(|e| format!("cannot start: {e}"))? {
         Claim::AlreadyRunning => {
             println!("肉肉賴桌 is already running; asked it to bring the pets back.");
@@ -192,6 +215,14 @@ struct Pet {
     playing: bool,
     play_at: f64,
     pounce_at: Option<f64>,
+    /// Scratched: when a cat may purr (or a dog pant) again.
+    purr_at: f64,
+    /// When its picture last changed, and whether the log has noted it
+    /// standing still since (see [`FROZEN`]).
+    shown_at: Instant,
+    frozen: bool,
+    /// Held up by the fox's spell.
+    float: Option<Float>,
     /// Toys, commands, scenes, effects (app/play.rs).
     fun: play::Fun,
 }
@@ -217,6 +248,8 @@ enum Action {
     /// Throw a ball or a frisbee; put down catnip (or take it away).
     Throw(Thing),
     Catnip,
+    /// 躲貓貓: it goes and hides.
+    Hide,
 }
 
 struct Menu {
@@ -394,6 +427,9 @@ struct App {
     /// it spent handing them to the window system.
     drawing: Duration,
     presenting: Duration,
+    /// When the event loop was told to wake next (for the log: woken late
+    /// means the whole program was held up).
+    wake: Option<Instant>,
 }
 
 impl App {
@@ -477,7 +513,16 @@ impl App {
             frames: 0,
             drawing: Duration::ZERO,
             presenting: Duration::ZERO,
+            wake: None,
         };
+        // Trying the skits out: the next one soon, of the kind named.
+        if let Ok(kind) = std::env::var("CHONKGENE_SKIT") {
+            let known = app.director.rush(&kind);
+            diag!(
+                "CHONKGENE_SKIT={kind}: the next skit soon ({})",
+                if known { "that kind" } else { "any kind" }
+            );
+        }
         app.first_run();
         Ok(app)
     }
@@ -1045,6 +1090,8 @@ impl App {
         if !asleep {
             items.push(item("叫牠…", None, Icon::Paw, false));
             actions.push(Action::Commands);
+            items.push(item("玩躲貓貓", None, Icon::Peek, false));
+            actions.push(Action::Hide);
         }
         items.push(item("丟球給牠們", None, Icon::Ball, false));
         actions.push(Action::Throw(Thing::Ball));
@@ -1177,6 +1224,45 @@ impl App {
             }
             Action::Throw(thing) => return self.throw(el, thing),
             Action::Catnip => return self.catnip(el),
+            Action::Hide => {
+                let cursor = self.shared.as_ref().and_then(|s| s.cursor());
+                let App {
+                    pets,
+                    shared,
+                    lines,
+                    bubble_face,
+                    sounds,
+                    settings,
+                    area,
+                    terrain,
+                    ui_scale,
+                    ..
+                } = self;
+                let (Some(shared), Some(p)) =
+                    (shared.as_ref(), pets.iter_mut().find(|p| p.save.id == pet))
+                else {
+                    return;
+                };
+                if p.fun.busy(world.now) || p.mind.asleep() {
+                    return;
+                }
+                let mut ctx = Ctx {
+                    el,
+                    shared,
+                    lines,
+                    face: bubble_face,
+                    sounds,
+                    sound_on: settings.sound,
+                    volume: f32::from(settings.volume) / 100.0,
+                    area: *area,
+                    terrain,
+                    ui_scale: *ui_scale,
+                    world,
+                };
+                p.start_hiding(&mut ctx, cursor);
+                p.next = now;
+                return;
+            }
             Action::Command(command) => {
                 if let Some(p) = self.pets.iter_mut().find(|p| p.save.id == pet) {
                     let moody = p.mind.grumpy()
@@ -1322,12 +1408,21 @@ fn direct(pets: &mut [Pet], ctx: &mut Ctx, cmds: Vec<Cmd>) {
             | Cmd::Say { id, .. }
             | Cmd::Express { id, .. }
             | Cmd::Act { id, .. }
-            | Cmd::Hop { id } => id,
+            | Cmd::Hop { id }
+            | Cmd::Tussle { id, .. }
+            | Cmd::Cast { id }
+            | Cmd::Freeze { id, .. } => id,
         };
         let Some(p) = pets.iter_mut().find(|p| p.save.id == id) else {
             continue;
         };
         p.next = Instant::now();
+        if matches!(
+            cmd,
+            Cmd::Tussle { .. } | Cmd::Cast { .. } | Cmd::Freeze { .. }
+        ) {
+            diag!("{}: {cmd:?}", p.save.name);
+        }
         match cmd {
             Cmd::Walk { x, pace, .. } => {
                 // Stopping short of the spot, never turned back and forth
@@ -1368,9 +1463,76 @@ fn direct(pets: &mut [Pet], ctx: &mut Ctx, cmds: Vec<Cmd>) {
                 }
             }
             Cmd::Hop { .. } => p.anim.pounce(),
+            Cmd::Tussle { with, secs, .. } => {
+                // One cloud for both: drawn over this one, the other gone
+                // into it; both come out panting.
+                let now = ctx.world.now;
+                let x = p.center_x();
+                let species = p.species;
+                p.stop_here();
+                p.fun.effect(Fx::Brawl, now);
+                p.anim.puff(secs + 3.0);
+                if ctx.sound_on {
+                    ctx.sounds
+                        .play(id, species, Sound::Land, now, ctx.volume, 1.0);
+                }
+                if let Some(q) = pets.iter_mut().find(|q| q.save.id == with) {
+                    q.stop_here();
+                    q.fun.vanish_until = now + f64::from(secs);
+                    q.anim.puff(secs + 3.0);
+                    q.next = Instant::now();
+                    // Out of the cloud a little to the side it went in.
+                    let side = if q.center_x() < x { -1.0 } else { 1.0 };
+                    q.body.facing = -side;
+                }
+            }
+            Cmd::Cast { .. } => {
+                // Up on its hind legs, tails swung, the bell ringing, a
+                // ring of fox-fire round its feet.
+                if p.body.motion == Motion::Walk {
+                    p.body.motion = Motion::Idle;
+                }
+                p.anim.gesture(Act::Swish);
+                p.fun.effect(Fx::Spell, ctx.world.now);
+                if ctx.sound_on {
+                    ctx.sounds.play(
+                        p.save.id,
+                        p.species,
+                        Sound::Bell,
+                        ctx.world.now,
+                        ctx.volume,
+                        1.0,
+                    );
+                }
+            }
+            Cmd::Freeze { secs, .. } => {
+                if p.press.is_none() && !matches!(p.body.motion, Motion::Held | Motion::Fly) {
+                    let now = ctx.world.now;
+                    p.stop_here();
+                    p.float = Some(Float {
+                        since: now,
+                        until: now + f64::from(secs),
+                        base: p.body.pos,
+                    });
+                    p.fun.effect(Fx::Bubble, now);
+                }
+            }
         }
     }
 }
+
+/// Held up in the air by the fox's spell (定身術): since when, until when,
+/// and where the window stood when it began.
+#[derive(Clone, Copy, Debug)]
+struct Float {
+    since: f64,
+    until: f64,
+    base: (f32, f32),
+}
+
+/// How high the spell lifts a pet (pixels at 100%), and how far it bobs.
+const FLOAT_RISE: f32 = 34.0;
+const FLOAT_BOB: f32 = 4.0;
 
 #[allow(clippy::too_many_arguments)]
 fn spawn(
@@ -1414,6 +1576,9 @@ fn spawn(
         .create_window(chonkgene_platform::pet_window(size, pos, &save.name))
         .map_err(|e| e.to_string())?;
     let presenter = Presenter::new(shared, &window)?;
+    // A hand over the pet (the window takes the mouse only where it is
+    // drawn): something to pat.
+    window.set_cursor(CursorIcon::Pointer);
     let seed = save.id.wrapping_mul(0x9E37_79B9_7F4A_7C15) ^ (t * 1000.0) as u64;
     Ok(Pet {
         mind: Mind::new(species, save.personality(), save.affinity()),
@@ -1446,6 +1611,10 @@ fn spawn(
         playing: false,
         play_at: 0.0,
         pounce_at: None,
+        purr_at: 0.0,
+        shown_at: now,
+        frozen: false,
+        float: None,
         fun: play::Fun::new(scale),
         save,
     })
@@ -1533,6 +1702,64 @@ impl Pet {
         true
     }
 
+    /// Stop walking where it is (the director's commands).
+    fn stop_here(&mut self) {
+        if self.body.motion == Motion::Walk {
+            self.body.motion = Motion::Idle;
+        }
+        self.body.pace = 1.0;
+    }
+
+    /// Held up by the spell: rise, hang there bobbing, frozen mid-pose;
+    /// at the end (or popped early by a click) the bubble bursts and it
+    /// drops onto its feet. True while it floats.
+    fn float(&mut self, t: f64, dt: f32) -> bool {
+        let Some(f) = self.float else {
+            return false;
+        };
+        if t >= f.until {
+            self.float = None;
+            self.fun.fx.retain(|(fx, _)| *fx != Fx::Bubble);
+            self.fun.effect(Fx::Sparkles, t);
+            self.body.release();
+            return false;
+        }
+        let s = self.fun.scale;
+        let age = (t - f.since) as f32;
+        let rise = FLOAT_RISE * s * chonkgene_rig::math::smoothstep(0.0, 0.6, age);
+        let bob = FLOAT_BOB * s * (std::f32::consts::TAU * 0.5 * age).sin();
+        self.body.hold_at((f.base.0, f.base.1 - rise - bob), dt);
+        true
+    }
+
+    /// For the log: a pet that should be moving (pleased, lively, in a
+    /// gesture) whose picture has not changed for [`FROZEN`], with what it
+    /// is up to.
+    fn note_frozen(&mut self, now: Instant) {
+        if self.renderer.changed() {
+            self.shown_at = now;
+            self.frozen = false;
+            return;
+        }
+        let params = self.anim.params();
+        let should_move = params.lively || self.anim.doing().is_some() || self.anim.walking;
+        if self.frozen || !should_move || now - self.shown_at < FROZEN {
+            return;
+        }
+        self.frozen = true;
+        diag!(
+            "{}: picture unchanged for {} ms ({:?}, {:?}, {:?}, motion {:?}, frame waiting {}, press {})",
+            self.save.name,
+            (now - self.shown_at).as_millis(),
+            self.anim.expression,
+            self.anim.doing(),
+            params.posture,
+            self.body.motion,
+            self.renderer.waiting(),
+            self.press.is_some(),
+        );
+    }
+
     /// How high this pet's voice is (see [`voice_pitch`]).
     fn pitch(&self) -> f32 {
         voice_pitch(self.save.size, self.save.chonk)
@@ -1542,6 +1769,28 @@ impl Pet {
     /// bell, a bird's wings.
     fn fidget_sound(&mut self, ctx: &mut Ctx) {
         use chonkgene_render::fidget::Kind;
+        // A good scratch: a cat purrs, a dog pants, every few seconds.
+        let t = ctx.world.now;
+        if self.anim.params().touch.scratch > 0.5 && t >= self.purr_at {
+            self.purr_at = t + 2.6;
+            let sound = match self.species {
+                Species::Munchkin | Species::Fold => Some(Sound::Purr),
+                Species::Shiba | Species::Fox => Some(Sound::Pant),
+                _ => None,
+            };
+            if let Some(sound) = sound
+                && ctx.sound_on
+            {
+                ctx.sounds.play(
+                    self.save.id,
+                    self.species,
+                    sound,
+                    t,
+                    ctx.volume,
+                    self.pitch(),
+                );
+            }
+        }
         let Some(kind) = self.renderer.take_fidget_start() else {
             return;
         };
@@ -1569,6 +1818,10 @@ impl Pet {
     }
 
     fn say(&mut self, ctx: &mut Ctx, line: Line) {
+        // Hiding, a bubble would give it away.
+        if self.in_hiding_place() {
+            return;
+        }
         let Some(text) = ctx.lines.pick(
             self.species,
             line,
@@ -1585,7 +1838,7 @@ impl Pet {
         let anchor = self
             .bubble
             .as_ref()
-            .map_or_else(|| self.renderer.anchor(), |b| b.anchor);
+            .map_or_else(|| self.renderer.bubble_at(), |b| b.anchor);
         let pos = self.bubble_pos(ctx, size, anchor);
         let until = ctx.world.now + 2.4 + 0.12 * text.chars().count() as f64;
         let reuse = self
@@ -1616,6 +1869,10 @@ impl Pet {
         };
         if let Err(e) = b.presenter.present(ctx.shared, &b.pixmap) {
             eprintln!("present failed: {e}");
+        }
+        // Over its own pet (a click may have raised the pet since).
+        if let Err(e) = b.presenter.raise(ctx.shared) {
+            eprintln!("raise failed: {e}");
         }
         self.bubble = Some(b);
         if ctx.sound_on {
@@ -1714,13 +1971,21 @@ impl Pet {
             }
         }
 
-        if let Some(press) = self.press.as_mut() {
+        let floating = self.float(t, dt);
+        if floating {
+            // Held up by the spell: nothing else moves it.
+        } else if self.hiding() {
+            // 躲貓貓: sitting just past the edge, peeking now and then.
+            self.hide_step(ctx);
+        } else if let Some(press) = self.press.as_mut() {
             if let Some((cx, cy)) = cursor {
                 let target = (cx as f32 - press.grab.0, cy as f32 - press.grab.1);
-                let dist = (target.0 - self.body.pos.0).hypot(target.1 - self.body.pos.1);
-                if !press.moved && dist > DRAG_START {
+                let (dx, dy) = (target.0 - self.body.pos.0, target.1 - self.body.pos.1);
+                let s = self.fun.scale;
+                if !press.moved && (-dy > LIFT_UP * s || dx.hypot(dy) > LIFT_ANY * s) {
                     press.moved = true;
                     self.anim.lift();
+                    self.window.set_cursor(CursorIcon::Grabbing);
                 }
                 if press.moved {
                     let held_dt = (now - press.last).as_secs_f32();
@@ -1862,7 +2127,10 @@ impl Pet {
         self.anim.walking = self.body.motion == Motion::Walk;
         self.anim.pace = self.body.pace;
         self.anim.facing = self.body.facing;
-        self.anim.step(dt);
+        // Frozen by the spell, its animation stands still.
+        if !floating {
+            self.anim.step(dt);
+        }
 
         let placed = (
             self.body.pos.0.round() as i32,
@@ -1878,7 +2146,7 @@ impl Pet {
                 self.bubble = None;
             } else {
                 let size = (b.pixmap.width(), b.pixmap.height());
-                let anchor = ease_bubble(b.anchor, self.renderer.anchor(), dt);
+                let anchor = ease_bubble(b.anchor, self.renderer.bubble_at(), dt);
                 let pos = self.bubble_pos(ctx, size, anchor);
                 if let Some(b) = &mut self.bubble {
                     b.anchor = anchor;
@@ -1925,6 +2193,7 @@ impl Pet {
 
     fn moving(&self) -> bool {
         self.press.as_ref().is_some_and(|p| p.moved)
+            || self.float.is_some()
             || self.body.motion == Motion::Fall
             || self.act.is_some_and(|(k, _)| {
                 matches!(
@@ -2085,6 +2354,19 @@ impl ApplicationHandler<UserEvent> for App {
                     (MouseButton::Left, ElementState::Pressed) => {
                         self.menu = None;
                         let p = &mut self.pets[i];
+                        // 躲貓貓: a click on what shows of it finds it.
+                        if p.find() {
+                            diag!("{}: found", p.save.name);
+                            p.next = now;
+                            return;
+                        }
+                        // Held up by the spell: a click pops its bubble.
+                        if let Some(f) = &mut p.float {
+                            diag!("{}: bubble popped", p.save.name);
+                            f.until = world.now;
+                            p.next = now;
+                            return;
+                        }
                         p.press = Some(Press {
                             grab: p.cursor,
                             moved: false,
@@ -2099,18 +2381,38 @@ impl ApplicationHandler<UserEvent> for App {
                             .and_then(Zone::from_name)
                             .unwrap_or(Zone::Belly);
                         p.anim.press(zone, p.cursor);
+                        diag!(
+                            "{}: pressed on {zone:?} at ({:.0}, {:.0}): {:?}, {:?}, motion {:?}, skit {}, asleep {}, frame waiting {}",
+                            p.save.name,
+                            p.cursor.0,
+                            p.cursor.1,
+                            p.anim.expression,
+                            p.anim.doing(),
+                            p.body.motion,
+                            p.in_skit,
+                            p.mind.asleep(),
+                            p.renderer.waiting(),
+                        );
                         p.next = now;
                     }
                     (MouseButton::Left, ElementState::Released) => {
                         let id = self.pets[i].save.id;
                         let clicked = self.pets[i].press.as_ref().is_some_and(|p| !p.moved);
                         let cmds = if clicked && self.director.involves(id) {
-                            // 勸架: a click on a squabbling pet makes both make up.
+                            // 勸架: a click on a squabbling pet makes both make up
+                            // (a click on the fox breaks its spell).
                             let cast = actors(&self.pets, world.now);
                             self.director.interrupt(id, world.now, &cast)
                         } else {
                             Vec::new()
                         };
+                        if !cmds.is_empty() {
+                            for q in &mut self.pets {
+                                if let Some(f) = &mut q.float {
+                                    f.until = world.now;
+                                }
+                            }
+                        }
                         let App {
                             pets,
                             shared,
@@ -2149,7 +2451,9 @@ impl ApplicationHandler<UserEvent> for App {
                             return;
                         };
                         if press.moved {
+                            diag!("{}: put down", p.save.name);
                             p.body.release();
+                            p.window.set_cursor(CursorIcon::Pointer);
                         } else {
                             let zone = p
                                 .anim
@@ -2165,6 +2469,22 @@ impl ApplicationHandler<UserEvent> for App {
                                     zone,
                                     Zone::Head | Zone::Chin | Zone::Belly | Zone::Cheek
                                 );
+                            // A quick poke: a start, hopping back from
+                            // the finger (still facing the same way).
+                            let quick =
+                                p.anim.held_secs() < 0.3 && p.anim.params().touch.scratch < 0.2;
+                            if quick
+                                && !rub
+                                && !p.mind.asleep()
+                                && matches!(p.body.motion, Motion::Idle | Motion::Walk)
+                            {
+                                let (w, s) = (p.body.size.0, p.fun.scale);
+                                let away = if p.cursor.0 < 0.5 * w { 1.0 } else { -1.0 };
+                                let facing = p.body.facing;
+                                p.body.spring(p.body.feet().0 + away * 0.06 * w, 14.0 * s);
+                                p.body.facing = facing;
+                            }
+                            let held = p.anim.held_secs();
                             p.anim.poke(zone);
                             let out = if rub {
                                 p.mind.pat(&world)
@@ -2174,6 +2494,13 @@ impl ApplicationHandler<UserEvent> for App {
                                 p.rng = rng;
                                 out
                             };
+                            diag!(
+                                "{}: let go after {held:.2} s, {}: {:?} {:?}",
+                                p.save.name,
+                                if rub { "a pat" } else { "a poke" },
+                                out.line,
+                                out.expression,
+                            );
                             let mut ctx = Ctx {
                                 el,
                                 shared,
@@ -2214,6 +2541,11 @@ impl ApplicationHandler<UserEvent> for App {
         let now = Instant::now();
         if self.shared.is_none() {
             return;
+        }
+        if let Some(late) = self.wake.take().and_then(|w| now.checked_duration_since(w))
+            && late > STALL
+        {
+            diag!("held up: woke {} ms late", late.as_millis());
         }
 
         if now >= self.poll_at {
@@ -2336,6 +2668,7 @@ impl ApplicationHandler<UserEvent> for App {
             *presenting += p.draw(ctx.shared, world.now);
             *drawing += started.elapsed();
             *frames += 1;
+            p.note_frozen(now);
             // A pet blending between poses on the GPU, or with a frame on
             // its way, needs frames to show it, even when its animation is
             // otherwise at rest; so does one slowing to a stop.
@@ -2383,7 +2716,13 @@ impl ApplicationHandler<UserEvent> for App {
             // Always ahead of now: it is moved on whenever it is reached.
             visible.then_some(self.terrain_at),
         ];
-        el.set_control_flow(ControlFlow::WaitUntil(wake_at(due)));
+        let busy = now.elapsed();
+        if busy > STALL {
+            diag!("held up: one turn of the loop took {} ms", busy.as_millis());
+        }
+        let wake = wake_at(due);
+        self.wake = Some(wake);
+        el.set_control_flow(ControlFlow::WaitUntil(wake));
     }
 
     fn exiting(&mut self, _el: &ActiveEventLoop) {

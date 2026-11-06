@@ -94,6 +94,13 @@ impl Mover {
         }
     }
 
+    /// A lick of the nose now (four-legged pets).
+    pub fn lick(&mut self) {
+        if let Self::Quad(w) = self {
+            w.lick();
+        }
+    }
+
     /// No fidgets: poses can be compared (tests, looks of one pose).
     pub fn still(&mut self) {
         match self {

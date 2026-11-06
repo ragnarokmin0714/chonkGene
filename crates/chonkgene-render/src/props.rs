@@ -14,7 +14,7 @@ use std::f32::consts::{PI, TAU};
 use chonkgene_core::play::Thing;
 use tiny_skia::{
     BlendMode, Color, FillRule, GradientStop, LineCap, Mask, Paint, Path, PathBuilder, Pixmap,
-    Point, RadialGradient, Rect, SpreadMode, Stroke, Transform,
+    PixmapPaint, Point, RadialGradient, Rect, SpreadMode, Stroke, Transform,
 };
 
 /// Room around a thing in its own window, pixels at 100%: for its shadow,
@@ -149,6 +149,42 @@ pub struct Look {
     /// Held in a mouth, turned with the head this far, radians (+ is
     /// clockwise on the screen).
     pub turn: f32,
+    /// Held by its rim in a mouth: a frisbee shows more of its face.
+    pub held: bool,
+}
+
+/// A frisbee in a mouth is drawn this much smaller than on the floor.
+const CARRIED: f32 = 0.85;
+
+/// Draw `thing` held in a mouth at `mouth` (pixels of `pm`), the pet facing
+/// `facing` (−1 left, 1 right): a bone across the jaws; a frisbee or a
+/// ball gripped at its edge between the front teeth, sticking out in front
+/// of the muzzle on the side it faces, so the face stays in sight.
+pub fn carried(pm: &mut Pixmap, thing: Thing, mouth: (f32, f32), facing: f32, s: f32, look: Look) {
+    let (w, h) = thing.size();
+    let side = if facing < 0.0 { -1.0 } else { 1.0 };
+    let look = Look { held: true, ..look };
+    match thing {
+        Thing::Frisbee => {
+            // The rim in the teeth, the disc hanging down in front of the
+            // chin, tipped out the way it faces (a little smaller than on
+            // the floor, so it stays inside the pet's picture).
+            let s = CARRIED * s;
+            let rx = 0.5 * w * s;
+            let centre = (mouth.0 + side * 0.35 * rx, mouth.1 + 0.62 * rx);
+            let look = Look {
+                turn: look.turn + side * 0.5,
+                ..look
+            };
+            draw(pm, thing, (centre.0, centre.1 + 0.55 * h * s), s, look);
+        }
+        Thing::Ball => {
+            let r = 0.5 * h * s;
+            let centre = (mouth.0 + side * 0.6 * r, mouth.1 + 0.35 * r);
+            draw(pm, thing, (centre.0, centre.1 + r), s, look);
+        }
+        _ => draw(pm, thing, (mouth.0, mouth.1 + 0.4 * h * s), 0.8 * s, look),
+    }
 }
 
 /// Draw `thing` with the middle of its bottom at `at` (pixels of `pm`).
@@ -179,7 +215,8 @@ pub fn draw(pm: &mut Pixmap, thing: Thing, at: (f32, f32), s: f32, look: Look) {
             );
         }
         Thing::Frisbee => {
-            let (rx, ry) = (0.5 * w * s, 0.32 * h * s);
+            let rx = 0.5 * w * s;
+            let ry = if look.held { 0.55 * rx } else { 0.32 * h * s };
             if look.grounded {
                 shadow(pm, x, y, 1.9 * rx, s);
             }
@@ -365,38 +402,64 @@ pub fn draw(pm: &mut Pixmap, thing: Thing, at: (f32, f32), s: f32, look: Look) {
         }
         Thing::Pond => {
             let (cx, cy, rx, ry) = pond_oval(at, s);
+            let id = Transform::identity();
+            // The bank round it, a little wider at the front, grass at the
+            // ends.
             oval(
                 pm,
                 cx,
-                cy + 2.0 * s,
-                rx + 3.0 * s,
-                ry + 3.0 * s,
-                [0x9C, 0x8B, 0x74, 200],
-                Transform::identity(),
+                cy + 2.5 * s,
+                rx + 5.0 * s,
+                ry + 4.5 * s,
+                [0xA8, 0x94, 0x78, 230],
+                id,
             );
-            oval(pm, cx, cy, rx, ry, POND_WATER, Transform::identity());
+            for (k, end) in [-1.0f32, 1.0].iter().enumerate() {
+                for blade in 0..3 {
+                    let bx = cx + end * (rx + (1.0 - blade as f32) * 4.0 * s);
+                    let by = cy + (0.1 + 0.25 * blade as f32) * ry;
+                    let sway = 1.5 * s * (TAU * 0.4 * look.t + (k * 3 + blade) as f32).sin();
+                    let mut pb = PathBuilder::new();
+                    pb.move_to(bx, by);
+                    pb.quad_to(
+                        bx + end * 2.0 * s,
+                        by - 6.0 * s,
+                        bx + end * 3.0 * s + sway,
+                        by - 11.0 * s,
+                    );
+                    stroke_path(pm, pb, [0x6E, 0xA8, 0x5C, 255], 2.0 * s, id);
+                }
+            }
+            // The water, deep at the back under the far bank, shallower
+            // toward you.
+            if let Some(water) = oval_path(cx, cy, rx, ry) {
+                pm.fill_path(&water, &paint(POND_BANK), FillRule::Winding, id, None);
+                if let (Some(shallow), Some(mut inside)) = (
+                    oval_path(cx, cy + 0.3 * ry, 0.98 * rx, 0.8 * ry),
+                    Mask::new(pm.width(), pm.height()),
+                ) {
+                    inside.fill_path(&water, FillRule::Winding, true, id);
+                    pm.fill_path(
+                        &shallow,
+                        &water_paint(cy, ry),
+                        FillRule::Winding,
+                        id,
+                        Some(&inside),
+                    );
+                }
+            }
             let (hx, hy, hrx, hry) = pond_light(cx, cy, rx, ry);
-            oval(pm, hx, hy, hrx, hry, POND_LIGHT, Transform::identity());
+            oval(pm, hx, hy, hrx, hry, POND_LIGHT, id);
+            // A light rim along the near edge.
+            let mut rim = PathBuilder::new();
+            rim.move_to(cx - 0.92 * rx, cy + 0.35 * ry);
+            rim.quad_to(cx, cy + 1.32 * ry, cx + 0.92 * rx, cy + 0.35 * ry);
+            stroke_path(pm, rim, [0xE4, 0xF4, 0xFA, 200], 2.0 * s, id);
             // Rings spreading on the water.
             for k in 0..3 {
                 let p = (look.t * 0.35 + k as f32 / 3.0).fract();
-                let (ox, oy) = (cx + (k as f32 - 1.0) * 0.35 * rx, cy + 0.1 * ry);
-                let mut ring = PathBuilder::new();
-                if let Some(r) = Rect::from_xywh(
-                    ox - p * 0.35 * rx,
-                    oy - p * 0.3 * ry,
-                    p * 0.7 * rx + 0.1,
-                    p * 0.6 * ry + 0.1,
-                ) {
-                    ring.push_oval(r);
-                }
-                stroke_path(
-                    pm,
-                    ring,
-                    with_alpha([255, 255, 255, 170], 1.0 - p),
-                    1.2 * s,
-                    Transform::identity(),
-                );
+                let (ox, oy) = (cx + (k as f32 - 1.0) * 0.4 * rx, cy + 0.15 * ry);
+                ripple(pm, (ox, oy), (0.32 * rx, 0.45 * ry), p, s);
             }
             // A lily pad with a notch, and a flower.
             let (lx, ly) = (cx + 0.6 * rx, cy + 0.2 * ry);
@@ -554,9 +617,28 @@ pub enum Fx {
     Dust,
     /// Drops flying from the water (into the pond, a shake).
     Splash,
+    /// A bubble of light round a pet held up by the fox's spell (定身術),
+    /// shimmering; `at` is the middle of the pet.
+    Bubble,
+    /// The fox casting: a glowing ring on the floor round its feet and
+    /// fox-fire spiralling up; `at` is its feet.
+    Spell,
+    /// Two pets tussling: a cloud of dust with paws, a tail and stars
+    /// poking out of it, rolling about; `at` is the middle of the pet.
+    Brawl,
 }
 
 impl Fx {
+    pub const ALL: [Fx; 7] = [
+        Fx::Hearts,
+        Fx::Sparkles,
+        Fx::Dust,
+        Fx::Splash,
+        Fx::Bubble,
+        Fx::Spell,
+        Fx::Brawl,
+    ];
+
     /// How long it shows, seconds.
     pub fn secs(self) -> f32 {
         match self {
@@ -564,6 +646,9 @@ impl Fx {
             Fx::Sparkles => 0.9,
             Fx::Dust => 0.7,
             Fx::Splash => 0.8,
+            Fx::Bubble => 3.6,
+            Fx::Spell => 1.4,
+            Fx::Brawl => 2.6,
         }
     }
 }
@@ -623,6 +708,9 @@ pub fn effect(pm: &mut Pixmap, fx: Fx, at: (f32, f32), s: f32, t: f32) {
                 }
             }
         }
+        Fx::Bubble => bubble(pm, at, s, t, (1.0 - ((u - 0.92) / 0.08).max(0.0)).min(1.0)),
+        Fx::Spell => spell(pm, at, s, t, u, fade),
+        Fx::Brawl => brawl(pm, at, s, t, 1.0 - ((u - 0.9) / 0.1).max(0.0)),
         Fx::Splash => {
             for k in 0..7 {
                 let a = PI * (0.15 + 0.7 * k as f32 / 6.0);
@@ -639,6 +727,189 @@ pub fn effect(pm: &mut Pixmap, fx: Fx, at: (f32, f32), s: f32, t: f32) {
             }
         }
     }
+}
+
+/// The spell's bubble round a pet (see [`Fx::Bubble`]): see-through, a
+/// bright rim, a highlight and a twinkle going round it.
+fn bubble(pm: &mut Pixmap, at: (f32, f32), s: f32, t: f32, fade: f32) {
+    let (x, y) = at;
+    // Swelling up as it forms, wobbling a little after.
+    let grow = (t / 0.35).min(1.0);
+    let wob = 1.0 + 0.03 * (TAU * 1.3 * t).sin();
+    let (rx, ry) = (74.0 * s * grow * wob, 70.0 * s * grow / wob);
+    let id = Transform::identity();
+    oval(
+        pm,
+        x,
+        y,
+        rx,
+        ry,
+        with_alpha([0xBF, 0xE6, 0xFF, 60], fade),
+        id,
+    );
+    let mut rim = PathBuilder::new();
+    if let Some(r) = Rect::from_xywh(x - rx, y - ry, 2.0 * rx, 2.0 * ry) {
+        rim.push_oval(r);
+    }
+    stroke_path(
+        pm,
+        rim,
+        with_alpha([0xF4, 0xFB, 0xFF, 200], fade),
+        2.4 * s,
+        id,
+    );
+    let mut shine = PathBuilder::new();
+    shine.move_to(x - 0.75 * rx, y - 0.2 * ry);
+    shine.quad_to(x - 0.7 * rx, y - 0.75 * ry, x - 0.15 * rx, y - 0.85 * ry);
+    stroke_path(
+        pm,
+        shine,
+        with_alpha([255, 255, 255, 220], fade),
+        3.2 * s,
+        id,
+    );
+    let a = 0.9 * TAU * t;
+    star(
+        pm,
+        x + a.cos() * 0.92 * rx,
+        y + a.sin() * 0.92 * ry,
+        (3.0 + 1.5 * (TAU * 2.0 * t).sin().abs()) * s,
+        with_alpha([0xFF, 0xF2, 0xB0, 255], fade),
+    );
+}
+
+/// The fox's casting ring (see [`Fx::Spell`]).
+fn spell(pm: &mut Pixmap, at: (f32, f32), s: f32, t: f32, u: f32, fade: f32) {
+    let (x, y) = at;
+    let id = Transform::identity();
+    let grow = (u / 0.25).min(1.0);
+    let (rx, ry) = (70.0 * s * grow, 16.0 * s * grow);
+    oval(
+        pm,
+        x,
+        y,
+        rx,
+        ry,
+        with_alpha([0xA8, 0xD8, 0xFF, 70], fade),
+        id,
+    );
+    for (k, c) in [[0x9E, 0xD4, 0xFF, 230], [0xFF, 0xB3, 0xD1, 200]]
+        .iter()
+        .enumerate()
+    {
+        let f = 1.0 - 0.18 * k as f32;
+        let mut ring = PathBuilder::new();
+        if let Some(r) = Rect::from_xywh(x - f * rx, y - f * ry, 2.0 * f * rx, 2.0 * f * ry) {
+            ring.push_oval(r);
+        }
+        stroke_path(pm, ring, with_alpha(*c, fade), 2.0 * s, id);
+    }
+    // Fox-fire rising round it in a spiral.
+    for k in 0..6 {
+        let p = (u * 1.4 + k as f32 / 6.0).fract();
+        let a = TAU * (k as f32 / 6.0 + 1.2 * t);
+        let (ox, oy) = (
+            x + a.cos() * rx * (1.0 - 0.4 * p),
+            y - p * 110.0 * s + a.sin() * ry,
+        );
+        let c = if k % 2 == 0 {
+            [0x8F, 0xCF, 0xFF, 255]
+        } else {
+            [0xFF, 0xA8, 0xCC, 255]
+        };
+        glow(
+            pm,
+            ox,
+            oy,
+            (5.0 - 2.0 * p) * s,
+            with_alpha(c, fade * (1.0 - p)),
+        );
+    }
+}
+
+/// A tussle's dust cloud (see [`Fx::Brawl`]): puffs rolling about, big
+/// enough to hide the pet behind it, paws, a tail and stars poking out.
+fn brawl(pm: &mut Pixmap, at: (f32, f32), s: f32, t: f32, fade: f32) {
+    let (x, y) = at;
+    let id = Transform::identity();
+    let grow = (t / 0.2).min(1.0);
+    let spin = TAU * 0.8 * t;
+    // Paws and a tail first, so the cloud's puffs overlap their roots.
+    for k in 0..4 {
+        let a = spin * if k % 2 == 0 { 1.0 } else { -1.3 } + k as f32 * 1.7;
+        let (px, py) = (x + a.cos() * 110.0 * s, y + a.sin() * 74.0 * s);
+        let fur = if k % 2 == 0 {
+            [0xE8, 0x9A, 0x58, 255]
+        } else {
+            [0xC9, 0xC6, 0xD6, 255]
+        };
+        if k == 3 {
+            let mut tail = PathBuilder::new();
+            tail.move_to(x + a.cos() * 60.0 * s, y + a.sin() * 40.0 * s);
+            tail.quad_to(px + 14.0 * s, py - 18.0 * s, px, py - 4.0 * s);
+            stroke_path(pm, tail, with_alpha(fur, fade), 9.0 * s, id);
+        } else {
+            circle(pm, px, py, 9.0 * s * grow, with_alpha(fur, fade));
+            for toe in [-1.0f32, 0.0, 1.0] {
+                circle(
+                    pm,
+                    px + toe * 4.5 * s + a.cos() * 6.0 * s,
+                    py + a.sin() * 5.0 * s,
+                    2.6 * s,
+                    with_alpha([0xFF, 0xD6, 0xD6, 255], fade),
+                );
+            }
+        }
+    }
+    // The cloud: a ring of puffs round a full middle, all rolling.
+    oval(
+        pm,
+        x,
+        y,
+        78.0 * s * grow,
+        56.0 * s * grow,
+        with_alpha([0xEE, 0xE7, 0xDC, 255], fade),
+        id,
+    );
+    for k in 0..11 {
+        let a = TAU * k as f32 / 11.0 + 0.6 * spin;
+        let r = (24.0 + 6.0 * (TAU * 2.0 * t + k as f32).sin()) * s * grow;
+        let (cx, cy) = (x + a.cos() * 74.0 * s * grow, y + a.sin() * 50.0 * s * grow);
+        circle(
+            pm,
+            cx,
+            cy + 3.0 * s,
+            r,
+            with_alpha([0xD6, 0xCC, 0xBE, 255], fade),
+        );
+        circle(pm, cx, cy, r, with_alpha([0xF4, 0xEF, 0xE7, 255], fade));
+    }
+    // Stars and a swirl of action over it.
+    for k in 0..3 {
+        let a = -spin * 1.4 + k as f32 * TAU / 3.0;
+        star(
+            pm,
+            x + a.cos() * 50.0 * s,
+            y - 30.0 * s + a.sin() * 18.0 * s,
+            (5.0 + 2.0 * (TAU * 3.0 * t + k as f32).sin().abs()) * s,
+            with_alpha([0xFF, 0xD5, 0x5C, 255], fade),
+        );
+    }
+    let mut swish = PathBuilder::new();
+    swish.move_to(x - 30.0 * s, y + 6.0 * s);
+    swish.quad_to(
+        x,
+        y - 22.0 * s + 8.0 * s * spin.sin(),
+        x + 32.0 * s,
+        y + 4.0 * s,
+    );
+    stroke_path(
+        pm,
+        swish,
+        with_alpha([0xB8, 0xAE, 0xA2, 255], fade),
+        2.5 * s,
+        id,
+    );
 }
 
 fn heart(pm: &mut Pixmap, x: f32, y: f32, r: f32, c: [u8; 4]) {
@@ -691,13 +962,95 @@ fn star(pm: &mut Pixmap, x: f32, y: f32, r: f32, c: [u8; 4]) {
 
 /// The pond's water and its lighter middle.
 const POND_WATER: [u8; 4] = [0x6F, 0xB8, 0xE0, 235];
-const POND_LIGHT: [u8; 4] = [0x93, 0xCF, 0xEE, 200];
+const POND_DEEP: [u8; 4] = [0x3C, 0x84, 0xB8, 240];
+const POND_BANK: [u8; 4] = [0x2E, 0x62, 0x8A, 245];
+const POND_LIGHT: [u8; 4] = [0x9C, 0xD6, 0xF2, 150];
+
+/// The pond's water: deep blue at the back (`cy - ry`) to light at the
+/// front.
+fn water_paint(cy: f32, ry: f32) -> Paint<'static> {
+    let c = |c: [u8; 4]| Color::from_rgba8(c[0], c[1], c[2], c[3]);
+    let stops = vec![
+        GradientStop::new(0.0, c(POND_DEEP)),
+        GradientStop::new(1.0, c(POND_WATER)),
+    ];
+    match tiny_skia::LinearGradient::new(
+        Point::from_xy(0.0, cy - ry),
+        Point::from_xy(0.0, cy + ry),
+        stops,
+        SpreadMode::Pad,
+        Transform::identity(),
+    ) {
+        Some(shader) => Paint {
+            shader,
+            anti_alias: true,
+            ..Paint::default()
+        },
+        None => paint(POND_WATER),
+    }
+}
+
+/// A ring spreading on water from `at`, `p` (0 … 1) of the way out to
+/// `reach` (radii), fading as it goes.
+fn ripple(pm: &mut Pixmap, at: (f32, f32), reach: (f32, f32), p: f32, s: f32) {
+    let mut ring = PathBuilder::new();
+    if let Some(r) = Rect::from_xywh(
+        at.0 - p * reach.0,
+        at.1 - p * reach.1,
+        2.0 * p * reach.0 + 0.1,
+        2.0 * p * reach.1 + 0.1,
+    ) {
+        ring.push_oval(r);
+    }
+    let fade = (1.0 - p) * (p / 0.15).min(1.0);
+    stroke_path(
+        pm,
+        ring,
+        with_alpha([255, 255, 255, 235], fade),
+        (2.2 - 0.8 * p) * s,
+        Transform::identity(),
+    );
+}
+
+/// Rings spreading on the pond from each spot in `xs` (screen x of
+/// something in the water: a pet wading or swimming), drawn over the
+/// pond's own picture, `pond` the middle of its bottom on `pm`.
+pub fn pond_stirs(pm: &mut Pixmap, pond: (f32, f32), xs: &[f32], s: f32, t: f32) {
+    let (cx, cy, rx, ry) = pond_oval(pond, s);
+    let Some(water) = oval_path(cx, cy, rx, ry) else {
+        return;
+    };
+    let Some(mut inside) = Mask::new(pm.width(), pm.height()) else {
+        return;
+    };
+    inside.fill_path(&water, FillRule::Winding, true, Transform::identity());
+    let mut rings = Pixmap::new(pm.width(), pm.height());
+    for (i, &x) in xs.iter().enumerate() {
+        let Some(rings) = rings.as_mut() else {
+            return;
+        };
+        for k in 0..2 {
+            let p = (t * 0.8 + 0.5 * k as f32 + 0.37 * i as f32).fract();
+            ripple(rings, (x, cy + 0.25 * ry), (0.45 * rx, 0.7 * ry), p, s);
+        }
+    }
+    if let Some(rings) = rings {
+        pm.draw_pixmap(
+            0,
+            0,
+            rings.as_ref(),
+            &PixmapPaint::default(),
+            Transform::identity(),
+            Some(&inside),
+        );
+    }
+}
 
 /// The pond's water, an oval: middle and radii, for the pond with the
 /// middle of its bottom at `at`.
 pub fn pond_oval(at: (f32, f32), s: f32) -> (f32, f32, f32, f32) {
     let (w, h) = Thing::Pond.size();
-    (at.0, at.1 - 0.35 * h * s, 0.5 * w * s, 0.3 * h * s)
+    (at.0, at.1 - 0.45 * h * s, 0.47 * w * s, 0.38 * h * s)
 }
 
 /// The lighter middle of the pond's water (middle and radii).
@@ -717,7 +1070,7 @@ fn oval_path(cx: f32, cy: f32, rx: f32, ry: f32) -> Option<Path> {
 /// blues clipped to the pond's oval, so the body under the water shows
 /// faintly through the same colours as the pond behind it; whatever of
 /// the picture hangs below the pond's near edge is wiped out (it would
-/// show under the pond). `pond` is where the middle of the pond's bottom
+/// show under the pond). A pet wading has `line` low, over its legs. `pond` is where the middle of the pond's bottom
 /// lies on `pm` (its own window is behind), `x` the middle of the body,
 /// for the rings spreading from it.
 pub fn pond_front(pm: &mut Pixmap, pond: (f32, f32), x: f32, line: f32, s: f32, t: f32) {
@@ -747,9 +1100,13 @@ pub fn pond_front(pm: &mut Pixmap, pond: (f32, f32), x: f32, line: f32, s: f32, 
         return;
     };
     let id = Transform::identity();
-    // Below the pond's near edge, nothing of the body shows.
+    // Below the pond's near edge, nothing of the body shows (on the bank
+    // either side of the pond, the legs do).
     let mut outside = inside.clone();
     outside.invert();
+    if let Some(strip) = Rect::from_xywh(cx - rx, 0.0, 2.0 * rx, h as f32) {
+        outside.intersect_path(&PathBuilder::from_rect(strip), FillRule::Winding, false, id);
+    }
     let clear = Paint {
         blend_mode: BlendMode::Clear,
         ..Paint::default()
@@ -760,7 +1117,7 @@ pub fn pond_front(pm: &mut Pixmap, pond: (f32, f32), x: f32, line: f32, s: f32, 
     wet.intersect_path(&under, FillRule::Winding, true, id);
     pm.fill_path(
         &under,
-        &paint(with_alpha(POND_WATER, 0.92)),
+        &water_paint(cy, ry),
         FillRule::Winding,
         id,
         Some(&wet),
@@ -931,7 +1288,7 @@ mod tests {
 
     #[test]
     fn effects_fade_out_by_their_end() {
-        for fx in [Fx::Hearts, Fx::Sparkles, Fx::Dust, Fx::Splash] {
+        for fx in Fx::ALL {
             let mut pm = Pixmap::new(160, 160).unwrap();
             effect(&mut pm, fx, (80.0, 90.0), 1.0, 0.3 * fx.secs());
             let early = pm
@@ -952,6 +1309,18 @@ mod tests {
                 .filter(|p| p[3] > 8)
                 .count();
             assert_eq!(end, 0, "{fx:?} still shows at its end");
+        }
+    }
+
+    /// A tussle's cloud hides the two pets behind it: solid over the whole
+    /// middle of a pet's picture.
+    #[test]
+    fn a_tussle_cloud_hides_the_pet_behind_it() {
+        let mut pm = Pixmap::new(260, 190).unwrap();
+        effect(&mut pm, Fx::Brawl, (130.0, 110.0), 1.0, 1.0);
+        for (x, y) in [(130, 110), (70, 110), (190, 110), (130, 70), (130, 150)] {
+            let a = pm.pixel(x, y).map_or(0, |p| p.alpha());
+            assert_eq!(a, 255, "the pet shows through at ({x}, {y})");
         }
     }
 }

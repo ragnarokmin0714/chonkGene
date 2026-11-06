@@ -29,9 +29,10 @@ use windows_sys::Win32::UI::Shell::{
 use windows_sys::Win32::UI::WindowsAndMessaging::{
     AllowSetForegroundWindow, BringWindowToTop, EnumWindows, GWL_EXSTYLE, GetClassNameW,
     GetCursorPos, GetWindowLongPtrW, GetWindowRect, GetWindowTextLengthW, GetWindowThreadProcessId,
-    ICON_BIG, ICON_SMALL, IMAGE_ICON, IsIconic, IsWindowVisible, LR_SHARED, LoadImageW, SM_CXICON,
-    SM_CXSMICON, SPI_GETWORKAREA, SW_RESTORE, SendMessageW, SetForegroundWindow, SetWindowLongPtrW,
-    ShowWindow, SystemParametersInfoW, ULW_ALPHA, UpdateLayeredWindow, WM_SETICON, WS_EX_LAYERED,
+    HWND_TOPMOST, ICON_BIG, ICON_SMALL, IMAGE_ICON, IsIconic, IsWindowVisible, LR_SHARED,
+    LoadImageW, SM_CXICON, SM_CXSMICON, SPI_GETWORKAREA, SW_RESTORE, SWP_NOACTIVATE, SWP_NOMOVE,
+    SWP_NOSIZE, SendMessageW, SetForegroundWindow, SetWindowLongPtrW, SetWindowPos, ShowWindow,
+    SystemParametersInfoW, ULW_ALPHA, UpdateLayeredWindow, WM_SETICON, WS_EX_LAYERED,
     WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TRANSPARENT,
 };
 use winit::raw_window_handle::{HasWindowHandle, RawWindowHandle};
@@ -385,6 +386,30 @@ impl Presenter {
 
     pub fn describe(&self) -> String {
         "layered window, premultiplied BGRA".into()
+    }
+
+    /// Put the window above every other topmost one (a speech bubble over
+    /// its pet), without activating it.
+    pub fn raise(&self, _shared: &Shared) -> Result<(), String> {
+        // SAFETY: `hwnd` lives as long as the presenter.
+        let ok = unsafe {
+            SetWindowPos(
+                self.hwnd,
+                HWND_TOPMOST,
+                0,
+                0,
+                0,
+                0,
+                SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE,
+            )
+        };
+        if ok == 0 {
+            // SAFETY: reads the calling thread's last-error value.
+            return Err(format!("SetWindowPos failed (error {})", unsafe {
+                GetLastError()
+            }));
+        }
+        Ok(())
     }
 
     /// Only meaningful on X11; Windows tells full-screen apps apart itself.

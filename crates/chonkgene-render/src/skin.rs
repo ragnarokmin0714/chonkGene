@@ -255,6 +255,8 @@ pub struct Feel {
     pub held: Option<(Zone, Option<usize>, f32)>,
     /// The last touch let go: zone, bone, seconds ago.
     pub poked: Option<(Zone, Option<usize>, f32)>,
+    /// Being scratched, 0 … 1 (see [`chonkgene_core::anim::Touch::scratch`]).
+    pub scratch: f32,
 }
 
 impl Feel {
@@ -270,7 +272,7 @@ impl Feel {
 pub(crate) const ATTEND_YAW: f32 = 6.0;
 /// Laughing (and rolled over for a belly rub, or asleep on its back) it
 /// lies side-on to you, so you see it roll; sulking it turns its back.
-pub(crate) const UP_YAW: f32 = 55.0;
+pub(crate) const UP_YAW: f32 = 85.0;
 pub(crate) const SULK_YAW: f32 = 150.0;
 /// Sulking, how far back it moves (world units), so its bottom stays in
 /// the picture.
@@ -308,6 +310,10 @@ pub(crate) struct Levels {
     pub flick: bool,
     /// A dog's hind leg kicking with a good scratch, 0 … 1.
     pub kick: f32,
+    /// Being scratched (eased), 0 … 1: leaning into it, a cat kneading.
+    pub scratch: f32,
+    /// Startled by a poke just now, 0 … 1, fading.
+    pub startle: f32,
     /// Seconds on the walk's own clock.
     pub t: f32,
 }
@@ -315,6 +321,7 @@ pub(crate) struct Levels {
 /// The springs behind [`Levels`].
 #[derive(Clone, Debug, Default)]
 pub(crate) struct Moods {
+    scratch: Spring,
     attend: Spring,
     gaze: (Spring, Spring),
     laugh: Spring,
@@ -398,9 +405,19 @@ impl Moods {
             (None, Some((Zone::Paw, bone, _))) => bone.map(|b| (b, short(Zone::Paw))),
             _ => None,
         };
-        // A good scratch under the chin or on the belly sets a hind leg going.
-        let kick = held(Zone::Chin).max(held(Zone::Belly))
+        let scratch = self
+            .scratch
+            .step(feel.scratch, 0.0, 2.0, 0.9, dt)
+            .clamp(0.0, 1.0);
+        // A good scratch under the chin or on the belly, or a finger rubbing
+        // about anywhere, sets a hind leg going.
+        let kick = held(Zone::Chin).max(held(Zone::Belly)).max(scratch)
             * (0.5 + 0.5 * (TAU * 0.5 * self.t).sin().abs());
+        // A quick poke anywhere: a start, over in about half a second.
+        let startle = feel
+            .poked
+            .filter(|&(.., ago)| ago < 0.8)
+            .map_or(0.0, |(.., ago)| (1.0 - ago / 0.8).powi(2));
         Levels {
             attend,
             laugh: laugh.clamp(0.0, 1.2),
@@ -417,6 +434,8 @@ impl Moods {
             paw,
             flick,
             kick,
+            scratch,
+            startle,
             t: self.t,
         }
     }
@@ -564,6 +583,8 @@ pub(crate) const CHIN_YAW: f32 = 30.0;
 /// Rolled over (degrees about its length): on its back laughing or asleep,
 /// for a belly rub nearly so, asleep on its side a quarter turn less.
 const UP_ROLL: f32 = 160.0;
+const ROLL_TUCK: f32 = 72.0;
+const ROLL_LIFT: f32 = 0.3;
 const RUB_ROLL: f32 = 145.0;
 const SIDE_ROLL: f32 = 85.0;
 /// Eating, the pet crouches over the snack: it sinks this share of its
@@ -703,6 +724,8 @@ pub struct Walk {
     roll: Spring,
     /// A dog: a good scratch sets a hind leg kicking.
     kicks: bool,
+    /// A cat: scratched, its front paws knead.
+    kneads: bool,
     /// Floor to the middle of the body, world units: what it rolls about.
     body_h: f32,
     /// Out: how far the renderer should settle the pet onto the floor
@@ -829,6 +852,7 @@ impl Walk {
             ],
             roll: Spring::default(),
             kicks: false,
+            kneads: false,
             body_h: sk.bone("body").map_or(0.8, |b| sk.pivots[b].y - FLOOR),
             ground: 0.0,
             flatten: 0.0,
@@ -847,6 +871,7 @@ impl Walk {
     /// own fidgets.
     pub fn set_species(&mut self, id: &str) {
         self.kicks = matches!(id, "shiba" | "fox");
+        self.kneads = matches!(id, "fold" | "munchkin");
         self.fidgets = Fidgets::new(id, 1);
         self.ear_k = if id == "fold" { 0.45 } else { 1.0 };
         self.tail_style = match id {
@@ -867,6 +892,11 @@ impl Walk {
     pub fn set_fidgets(&mut self, species: &str, energy: f32, seed: u32) {
         self.fidgets = Fidgets::new(species, seed);
         self.fidgets.set_energy(energy);
+    }
+
+    /// A lick of the nose now.
+    pub fn lick(&mut self) {
+        self.fidgets.now(Kind::Lick);
     }
 
     /// Where it is in its breath, −1 … 1 (set every frame).
@@ -1530,6 +1560,23 @@ impl Walk {
                         }
                     }
                 }
+                // Nose down to the ball, then a quick bump up and forward
+                // that sends it rolling.
+                Act::Nudge => {
+                    let u = (g.t / 0.8).clamp(0.0, 1.0);
+                    let down = (u / 0.45).min(1.0);
+                    let bump = ((u - 0.45) / 0.2).clamp(0.0, 1.0)
+                        * (1.0 - ((u - 0.65) / 0.35).clamp(0.0, 1.0));
+                    j[b.body].rot.x += e * (12.0 * down - 8.0 * bump);
+                    j[b.head].rot.x += e * (30.0 * down - 34.0 * bump);
+                    let push = M3::rot_y(yaw.to_radians()).apply(v3(0.0, 0.0, 0.12 * e * bump));
+                    j[0].shift = j[0].shift + push;
+                    for &(leg, _, front) in &self.legs {
+                        if front {
+                            j[leg].rot.x -= 8.0 * e * down;
+                        }
+                    }
+                }
                 // A cheek rubbed along the floor: head down and turned
                 // over, pushed one way and the other.
                 Act::Rub => {
@@ -1923,7 +1970,8 @@ impl Walk {
             // to you (undoing the turn it keeps at rest).
             let over = awake.max(up * lie);
             j[b.head].rot.y += (facing * 65.0 + 0.45 * yaw) * over;
-            j[b.head].rot.x -= 18.0 * awake;
+            j[b.head].rot.x += ROLL_TUCK * over;
+            j[b.head].shift.y -= ROLL_LIFT * over;
             j[b.head].rot.z += facing * 45.0 * awake;
             self.ground = (roll / 80.0).min(1.0);
         }
@@ -1988,6 +2036,34 @@ impl Walk {
             if let Some(leg) = leg {
                 j[leg].rot.x -= up * (55.0 + 8.0 * (TAU * 2.0 * t).sin());
                 j[leg].shift.y += 0.06 * up;
+            }
+        }
+        // Scratched: it leans into the finger, the head tipped against it
+        // and the chin up; a cat treads with its front paws.
+        if lv.scratch > 0.0 {
+            let toward = if lv.gaze.0 < 0.0 { -1.0 } else { 1.0 };
+            let sway = (TAU * 0.7 * t).sin();
+            j[b.body].rot.z -= toward * lv.scratch * (7.0 + 2.0 * sway);
+            j[b.head].rot.z -= toward * lv.scratch * (16.0 + 4.0 * sway);
+            j[b.head].rot.x -= 10.0 * lv.scratch;
+            if self.kneads {
+                let mut k = 0.0;
+                for &(leg, _, front) in &self.legs {
+                    if front {
+                        let tread = (TAU * 1.5 * t + std::f32::consts::PI * k).sin().max(0.0);
+                        j[leg].rot.x -= lv.scratch * 24.0 * tread;
+                        j[leg].shift.y += lv.scratch * 0.05 * tread;
+                        k += 1.0;
+                    }
+                }
+            }
+        }
+        // Poked: a start, the head and body jerking back from it, ears up.
+        if lv.startle > 0.0 {
+            j[b.body].rot.x -= 8.0 * lv.startle;
+            j[b.head].rot.x -= 14.0 * lv.startle;
+            for ear in b.ears.into_iter().flatten() {
+                j[ear].rot.x -= 18.0 * lv.startle * self.ear_k;
             }
         }
         // A dog scratched just right: a hind leg kicks away.

@@ -15,6 +15,7 @@
 
 use std::sync::Arc;
 use std::sync::mpsc::{Receiver, TryRecvError, channel};
+use std::time::{Duration, Instant};
 
 use chonkgene_core::Zone;
 use chonkgene_core::anim::{
@@ -40,6 +41,10 @@ const UNITS: (f32, f32) = (4.5, 3.3);
 /// The longest step the walk takes at once, seconds: its springs stay
 /// steady however slowly frames come.
 const MAX_STEP: f32 = 1.0 / 60.0;
+/// A frame held back by the GPU budget this long goes anyway (PLAN §8,
+/// Roger's eleventh pass, item 5: pets stood frozen for seconds while
+/// others took the budget).
+const STARVED: Duration = Duration::from_millis(250);
 /// Standing still doing nothing this long (seconds), a pet sits down.
 const IDLE_SIT: f32 = 0.8;
 /// Asleep, a pet may change how it lies after this many seconds (and up
@@ -92,6 +97,8 @@ pub struct MeshRenderer {
     /// The wanted frame has not gone to the GPU yet (it was busy, or over
     /// its budget).
     unsent: bool,
+    /// Held back by the budget since then (see [`STARVED`]).
+    unsent_since: Option<Instant>,
     /// The animator's clock at the last frame, and its belly jiggle then.
     clock: Option<f32>,
     belly: f32,
@@ -116,6 +123,8 @@ pub struct MeshRenderer {
     /// app last asked.
     fidget_was: Option<Kind>,
     fidget_began: Option<Kind>,
+    /// The last [`PoseParams::licks`] seen.
+    licks: u32,
     /// Its shadow on the floor shows (not swimming or flying).
     floor_shadow: bool,
 }
@@ -157,6 +166,7 @@ impl MeshRenderer {
             bones,
             look: Look::Open,
             unsent: false,
+            unsent_since: None,
             clock: None,
             belly: 0.0,
             gesture: None,
@@ -171,6 +181,7 @@ impl MeshRenderer {
             sleep_in: None,
             fidget_was: None,
             fidget_began: None,
+            licks: 0,
             floor_shadow: true,
         })
     }
@@ -255,6 +266,18 @@ impl MeshRenderer {
         self.changed
     }
 
+    /// Why the next picture has not come yet, for the log: held back by
+    /// the GPU budget, still being drawn, or neither.
+    pub fn waiting(&self) -> &'static str {
+        if self.unsent {
+            "budget"
+        } else if self.live.as_ref().is_some_and(|l| l.canvas.pending()) {
+            "gpu"
+        } else {
+            "no"
+        }
+    }
+
     /// Frames a second this pet needs however still its animation is:
     /// tails sway, bellies settle and fidgets go on all the time, slowly at
     /// rest; turning, sitting down, getting up, gestures and the quick
@@ -295,8 +318,13 @@ impl MeshRenderer {
 
     pub fn render(&mut self, params: &PoseParams, expression: Expression) -> &Pixmap {
         let mut look = key_for(expression, params).look;
+        let dog = matches!(self.model.species.as_str(), "shiba" | "fox");
+        // A dog laughing rolled over, its tongue lolling out.
+        if expression == Expression::Giggle && dog && look == Look::Laugh {
+            look = Look::Pant;
+        }
         if matches!(expression, Expression::Neutral | Expression::Happy) {
-            look = touched_look(&params.touch).unwrap_or(look);
+            look = touched_look(&params.touch, dog).unwrap_or(look);
             // The tongue out (a blep, a lick, panting), unless it blinks
             // or has its mouth full (eating, gnawing a bone).
             let full = matches!(params.act, Act::Eat | Act::Chew);
@@ -453,6 +481,10 @@ impl MeshRenderer {
         self.walk.set_pace(params.pace);
         self.walk.breathe(params.breath);
         self.walk.set_mood(params.lively, params.puffed);
+        if params.licks != self.licks {
+            self.licks = params.licks;
+            self.walk.lick();
+        }
         // In the water or the air there is no floor under it to shade.
         self.floor_shadow = !matches!(params.posture, Posture::Swim | Posture::Fly);
         // A poke jiggles the animator's belly: jolt the mesh's.
@@ -522,16 +554,25 @@ impl MeshRenderer {
                 .submit(self.gpu, &scene, &self.bones, yaw)
                 .map(|()| true)
         } else {
-            live.canvas.try_submit(self.gpu, &scene, &self.bones, yaw)
+            // Held back too long (others took the budget, or it is far too
+            // small): this one goes anyway, so no pet ever stands still on
+            // the screen for long.
+            let starved = self.unsent_since.is_some_and(|t| t.elapsed() >= STARVED);
+            live.canvas
+                .try_submit(self.gpu, &scene, &self.bones, yaw, starved)
         };
         match sent {
             Ok(true) => {
                 self.sent_bones.clone_from(&self.bones);
                 self.unsent = false;
+                self.unsent_since = None;
             }
             // Over the budget: try again on a later call, with a newer
             // pose (the frame rate drops instead of the GPU share rising).
-            Ok(false) => self.unsent = true,
+            Ok(false) => {
+                self.unsent = true;
+                self.unsent_since.get_or_insert_with(Instant::now);
+            }
             Err(e) => eprintln!("drawing the mesh failed: {e}"),
         }
     }
@@ -666,6 +707,7 @@ impl MeshRenderer {
             gaze,
             held: touch.held.map(|(z, _, secs)| (z, bone, secs)),
             poked: touch.last.map(|(z, _, ago)| (z, bone, ago)),
+            scratch: touch.scratch,
         }
     }
 
@@ -867,8 +909,12 @@ fn dent_for(zone: Zone) -> (f32, f32) {
 }
 
 /// The face a touch puts on: content ^ ^ for a hand held on its head, chin
-/// or cheek (or a long belly rub), a squint for a poke on the head.
-fn touched_look(touch: &Touch) -> Option<Look> {
+/// or cheek (or a long belly rub), eyes shut in bliss for a scratch (a dog
+/// with its tongue out), a squint for a poke on the head.
+fn touched_look(touch: &Touch, dog: bool) -> Option<Look> {
+    if touch.scratch > 0.35 {
+        return Some(if dog { Look::Pant } else { Look::Happy });
+    }
     if let Some((zone, _, secs)) = touch.held {
         let nice = match zone {
             Zone::Head | Zone::Chin | Zone::Cheek => secs > 0.25,

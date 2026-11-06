@@ -22,7 +22,7 @@ use chonkgene_render::raymarch::FLOOR_PX;
 use tiny_skia::{Pixmap, PixmapPaint, Transform};
 use winit::dpi::PhysicalPosition;
 use winit::event_loop::ActiveEventLoop;
-use winit::window::Window;
+use winit::window::{CursorIcon, Window};
 
 use super::{Ctx, Pet};
 
@@ -42,11 +42,16 @@ const ALIVE_FPS: f64 = 15.0;
 /// Swimming, the duckling paddles this share of the pond's width either
 /// side of its middle, so its body stays inside the water.
 const POND_PADDLE: f32 = 0.16;
+/// Wading in a pond, the water comes this share of the picture's height
+/// up its legs.
+const WADE: f32 = 0.07;
 
 /// Thrown with the mouse, a toy goes at most this fast (pixels a second
 /// at 100%); let go slower than this, it just drops.
 const THROW_MOST: f32 = 2400.0;
 const THROW_LEAST: f32 = 80.0;
+/// A press on a toy that moves further than this (pixels) is a drag.
+const DRAG_START: f32 = 4.0;
 /// A click on a toy knocks it along this fast (pixels a second at 100%).
 const KNOCK: (f32, f32) = (380.0, -260.0);
 
@@ -86,6 +91,8 @@ pub(super) struct PropWin {
     /// Where the cursor is on its window, and the mouse holding it.
     cursor: (f32, f32),
     grab: Option<Grab>,
+    /// A pond: the screen x of each pet in it, for the rings they stir.
+    stirs: Vec<f32>,
 }
 
 impl PropWin {
@@ -103,7 +110,9 @@ impl PropWin {
             .create_window(chonkgene_platform::pet_window(size, pos, "肉肉賴桌"))
             .ok()?;
         let mut presenter = Presenter::new(shared, &window).ok()?;
-        if !prop.thing.grabbed() {
+        if prop.thing.grabbed() {
+            window.set_cursor(CursorIcon::Grab);
+        } else {
             if let Err(e) = presenter.set_ghost(shared) {
                 eprintln!("a thing on the desktop: {e}");
             }
@@ -125,6 +134,7 @@ impl PropWin {
             shown: true,
             cursor: (0.0, 0.0),
             grab: None,
+            stirs: Vec::new(),
         })
     }
 
@@ -189,7 +199,7 @@ impl PropWin {
             used: self.used(now),
             grounded,
             flip: self.flip,
-            turn: 0.0,
+            ..props::Look::default()
         };
         props::draw(
             &mut self.pixmap,
@@ -198,6 +208,14 @@ impl PropWin {
             self.prop.scale,
             look,
         );
+        if !self.stirs.is_empty() {
+            let xs: Vec<f32> = self
+                .stirs
+                .iter()
+                .map(|x| x - self.placed.0 as f32)
+                .collect();
+            props::pond_stirs(&mut self.pixmap, self.foot, &xs, self.prop.scale, look.t);
+        }
         if let Err(e) = self.presenter.present(shared, &self.pixmap) {
             eprintln!("present failed: {e}");
         }
@@ -230,11 +248,191 @@ enum Nip {
     Leaving,
 }
 
+/// 躲貓貓 (PLAN §8, Roger's tenth pass, item 5): the pet hides just past
+/// the edge of the screens and peeks round it now and then; a click on
+/// whatever shows of it finds it.
+#[derive(Clone, Copy, Debug)]
+pub(super) struct Hide {
+    /// The edge it hides past (screen x), and which way past it: −1 the
+    /// left edge, 1 the right.
+    edge: f32,
+    side: f32,
+    /// Off to hide (gone in a puff) until then; it gives up and comes out
+    /// by itself at `until`.
+    since: f64,
+    until: f64,
+    /// Its window's left edge with its front just out of sight.
+    base: Option<f32>,
+    /// When it next leans out to look.
+    peek_at: f64,
+    /// Clicked on: found.
+    found: bool,
+}
+
+/// Gone this long before it shows at its hiding place, seconds; it comes
+/// out by itself after [`HIDE_SECS`].
+const HIDE_GO: f64 = 1.2;
+const HIDE_SECS: f64 = 40.0;
+/// Hidden, this share of the window's width sticks out round the edge (an
+/// ear, the nose); peeking, this much, for [`PEEK_SECS`].
+const HINT: f32 = 0.1;
+const PEEK: f32 = 0.42;
+const PEEK_SECS: f64 = 1.6;
+/// A sitting pet's front from the middle of its window, as a share of the
+/// window's width.
+const FRONT: f32 = 0.36;
+
+impl Hide {
+    /// How far round the edge it leans now (shares of its width).
+    fn lean(&self, now: f64) -> f32 {
+        let into = (now - self.peek_at) / PEEK_SECS;
+        if !(0.0..1.0).contains(&into) {
+            return HINT;
+        }
+        // Out quickly, a look, back in.
+        let u = into as f32;
+        let out = (u / 0.25).min(1.0).min((1.0 - u) / 0.25);
+        HINT + (PEEK - HINT) * out * out * (3.0 - 2.0 * out)
+    }
+}
+
+impl Pet {
+    /// Off to hide for 躲貓貓: a puff and it is gone, to show again just
+    /// past the edge of the screens on the side away from the cursor.
+    pub(super) fn start_hiding(&mut self, ctx: &mut Ctx, cursor: Option<(i32, i32)>) {
+        let now = ctx.world.now;
+        self.stop();
+        self.say(ctx, Line::HideStart);
+        self.fun.effect(Fx::Dust, now);
+        let (left, right) = ctx.terrain.bounds();
+        let from = cursor.map_or(self.body.feet().0, |c| c.0 as f32);
+        let side = if from - left > right - from {
+            -1.0
+        } else {
+            1.0
+        };
+        self.fun.hide = Some(Hide {
+            edge: if side < 0.0 { left } else { right },
+            side,
+            since: now,
+            until: now + HIDE_SECS,
+            base: None,
+            peek_at: now + HIDE_GO + 2.5,
+            found: false,
+        });
+        println!(
+            "{}: hides past the {} edge",
+            self.save.name,
+            if side < 0.0 { "left" } else { "right" }
+        );
+    }
+
+    /// Hiding: where its window goes this frame (it never walks or falls
+    /// there). False once it is not hiding.
+    pub(super) fn hide_step(&mut self, ctx: &mut Ctx) -> bool {
+        let now = ctx.world.now;
+        let Some(mut h) = self.fun.hide else {
+            return false;
+        };
+        if h.found {
+            // Found: as pleased as with a pat.
+            self.come_out(ctx, Line::HideFound);
+            let mut out = self.mind.pat(&ctx.world);
+            out.line = None;
+            self.apply(ctx, out);
+            return false;
+        }
+        if self.mind.asleep() || now >= h.until {
+            self.come_out(ctx, Line::HideLost);
+            return false;
+        }
+        let (w, h_px) = self.body.size;
+        let front = -h.side;
+        if h.base.is_none() && now >= h.since + HIDE_GO {
+            // Sitting just past the edge, facing in, on the floor there.
+            let x = h.edge - 0.5 * w - front * FRONT * w;
+            let floor = ctx
+                .terrain
+                .floor_under(h.edge - h.side * 20.0)
+                .map_or(self.body.pos.1, |l| l.y - h_px + self.body.foot);
+            self.body.pos.1 = floor;
+            h.base = Some(x);
+            // Its last words would hang there and give it away.
+            self.bubble = None;
+        }
+        if let Some(base) = h.base {
+            self.body.facing = front;
+            self.body.motion = Motion::Idle;
+            self.body.speed = 0.0;
+            self.body.pos.0 = base + front * h.lean(now) * w;
+            self.anim.posture = Posture::Sit;
+            if now >= h.peek_at + PEEK_SECS {
+                h.peek_at = now + 2.0 + 1.5 * f64::from(self.rng.f32());
+            }
+        }
+        self.fun.hide = Some(h);
+        true
+    }
+
+    /// Found (a click on it), or giving up: out it hops into sight, with a
+    /// line.
+    pub(super) fn come_out(&mut self, ctx: &mut Ctx, line: Line) {
+        let Some(h) = self.fun.hide.take() else {
+            return;
+        };
+        let w = self.body.size.0;
+        let now = ctx.world.now;
+        if h.base.is_none() {
+            // Not there yet: back where it was.
+            self.say(ctx, line);
+            return;
+        }
+        self.body.facing = -h.side;
+        self.body
+            .spring(h.edge - h.side * 0.62 * w, 30.0 * self.fun.scale);
+        self.say(ctx, line);
+        if line == Line::HideFound {
+            cheer(self, ctx);
+        } else {
+            self.anim.expression = Expression::Giggle;
+            self.happy_until = now + super::HAPPY_SECS;
+        }
+        println!("{}: {:?}", self.save.name, line);
+    }
+
+    /// Is it hiding (in a puff, or past the edge)?
+    pub(super) fn hiding(&self) -> bool {
+        self.fun.hide.is_some()
+    }
+
+    /// Sitting in its hiding place (not on its way there).
+    pub(super) fn in_hiding_place(&self) -> bool {
+        self.fun.hide.is_some_and(|h| h.base.is_some())
+    }
+
+    /// A click on it while it hides: found (true), if it is in its place.
+    pub(super) fn find(&mut self) -> bool {
+        match &mut self.fun.hide {
+            Some(h) if h.base.is_some() => {
+                h.found = true;
+                true
+            }
+            _ => false,
+        }
+    }
+}
+
 /// What a pet is up to besides its ordinary life.
 #[derive(Default)]
 pub(super) struct Fun {
     pub scale: f32,
     chase: Option<(u32, Chase)>,
+    /// A nose bump under way: when it lands on the ball, and how hard.
+    nudge: Option<(f64, (f32, f32))>,
+    /// Gone into another pet's tussle cloud until then: not drawn.
+    pub vanish_until: f64,
+    /// Hiding for 躲貓貓.
+    pub hide: Option<Hide>,
     /// In its mouth.
     pub carry: Option<Thing>,
     /// Asked to do something: what, when it gets round to it, and whether
@@ -246,8 +444,8 @@ pub(super) struct Fun {
     hold_until: f64,
     pub scene: Option<Run>,
     next_scene: f64,
-    /// Swimming in the pond, with the middle of its bottom here (screen
-    /// pixels): the pond's front is drawn over the pet.
+    /// In a pond (swimming, or wading), with the middle of the pond's
+    /// bottom here (screen pixels): the pond's front is drawn over the pet.
     pond: Option<(f32, f32)>,
     nip: Option<(Nip, f64, u8)>,
     /// Effects under way, since when.
@@ -283,6 +481,7 @@ impl Fun {
             || self.scene.is_some()
             || self.nip.is_some()
             || self.carry.is_some()
+            || self.hide.is_some()
             || now < self.hold_until
             || now < self.lounge_until
     }
@@ -321,6 +520,20 @@ pub(super) struct Playground {
 }
 
 impl Playground {
+    /// The pond whose water a pet with its feet at `feet` (screen pixels)
+    /// stands in, if any: where the middle of its bottom is.
+    fn pond_under(&self, feet: (f32, f32)) -> Option<(f32, f32)> {
+        self.things.iter().find_map(|w| {
+            let pond = w.prop;
+            if pond.thing != Thing::Pond {
+                return None;
+            }
+            let (cx, _, rx, _) = props::pond_oval(pond.pos, pond.scale);
+            let level = (feet.1 - pond.pos.1).abs() < 8.0 * pond.scale;
+            (level && (feet.0 - cx).abs() < 0.85 * rx).then_some(pond.pos)
+        })
+    }
+
     fn roll(&mut self) -> f32 {
         self.rng.get_or_insert_with(fastrand::Rng::new).f32()
     }
@@ -466,6 +679,7 @@ impl Playground {
             down,
             vel: (0.0, 0.0),
         });
+        w.window.set_cursor(CursorIcon::Grabbing);
         let id = w.id;
         for p in pets.iter_mut() {
             if p.fun.chase.as_ref().is_some_and(|(c, _)| *c == id) {
@@ -485,6 +699,7 @@ impl Playground {
         let Some(g) = w.grab.take() else {
             return;
         };
+        w.window.set_cursor(CursorIcon::Grab);
         let s = w.prop.scale.max(0.5);
         if g.moved {
             let (vx, vy) = g.vel;
@@ -622,11 +837,19 @@ impl Pet {
             .fx
             .retain(|(fx, since)| t - since < f64::from(fx.secs()));
         let swimming = self.anim.posture == Posture::Swim;
+        let in_pond = self.fun.pond.is_some();
         let fire = self
             .fun
             .scene
             .is_some_and(|r| r.scene == Scene::Foxfire && r.phase == 1);
-        let any = !self.fun.fx.is_empty() || self.fun.carry.is_some() || swimming || fire;
+        let hide = self.fun.hide;
+        let vanished = t < self.fun.vanish_until || hide.is_some_and(|h| h.base.is_none());
+        let any = !self.fun.fx.is_empty()
+            || self.fun.carry.is_some()
+            || in_pond
+            || fire
+            || vanished
+            || hide.is_some();
         if !any {
             return false;
         }
@@ -645,6 +868,9 @@ impl Pet {
         let (w, h) = (base.width() as f32, base.height() as f32);
         let floor = h - FLOOR_PX * s;
         canvas.fill(tiny_skia::Color::TRANSPARENT);
+        if vanished {
+            return true;
+        }
         if fire {
             // Behind it, then the pet, then the ones in front: drawn twice
             // over is near enough, the orbs being small.
@@ -664,17 +890,21 @@ impl Pet {
             Transform::identity(),
             None,
         );
-        if swimming && let Some(pond) = self.fun.pond {
+        if let Some(pond) = self.fun.pond {
             // The pond's front over the lower body, matching the pond's
-            // own window behind it, the waterline a little in front of the
-            // pond's middle.
+            // own window behind it: swimming, the waterline a little in
+            // front of the pond's middle; wading, over the lower legs.
             let at = (pond.0 - self.placed.0 as f32, pond.1 - self.placed.1 as f32);
             let (_, cy, _, ry) = props::pond_oval(at, s);
-            props::pond_front(canvas, at, w / 2.0, cy + 0.2 * ry, s, t as f32);
+            let line = if swimming {
+                cy + 0.2 * ry
+            } else {
+                floor - WADE * h
+            };
+            props::pond_front(canvas, at, w / 2.0, line, s, t as f32);
         }
         if let Some(thing) = self.fun.carry {
             let at = self.renderer.mouth(self.anim.facing);
-            let (_, th) = thing.size();
             // Turned with the head as it gnaws or trots along.
             let look = props::Look {
                 spin: if thing == Thing::Bone { 0.0 } else { 0.4 },
@@ -682,19 +912,39 @@ impl Pet {
                 turn: self.renderer.head_roll(),
                 ..props::Look::default()
             };
-            // Held across the mouth, a little smaller than on the floor.
-            props::draw(canvas, thing, (at.0, at.1 + 0.4 * th * s), 0.8 * s, look);
+            props::carried(canvas, thing, at, self.anim.facing, s, look);
         }
         let head = self.renderer.anchor();
         let mouth = self.renderer.mouth(self.anim.facing);
+        let hidden_part = hide.map(|h| {
+            // Nothing of it past the edge of the screens shows (across a
+            // monitor's edge it would).
+            let edge = h.edge - self.placed.0 as f32;
+            if h.side < 0.0 {
+                (0.0, edge.clamp(0.0, w))
+            } else {
+                (edge.clamp(0.0, w), w)
+            }
+        });
         for &(fx, since) in &self.fun.fx {
             let at = match fx {
                 Fx::Hearts => head,
                 Fx::Sparkles => mouth,
                 Fx::Dust => (w / 2.0, floor),
                 Fx::Splash => (w / 2.0, floor - 0.13 * PPU * s),
+                Fx::Spell => (w / 2.0, floor),
+                Fx::Bubble | Fx::Brawl => (w / 2.0, floor - 0.95 * PPU * s),
             };
             props::effect(canvas, fx, at, s, (t - since) as f32);
+        }
+        if let Some((x0, x1)) = hidden_part
+            && let Some(r) = tiny_skia::Rect::from_ltrb(x0, 0.0, x1, h)
+        {
+            let clear = tiny_skia::Paint {
+                blend_mode: tiny_skia::BlendMode::Clear,
+                ..tiny_skia::Paint::default()
+            };
+            canvas.fill_rect(r, &clear, Transform::identity(), None);
         }
         true
     }
@@ -754,7 +1004,7 @@ pub(super) fn tick(
         for w in &mut ground.things {
             if let Some(g) = &mut w.grab {
                 let (cx, cy) = (cx as f32, cy as f32);
-                if !g.moved && (cx - g.down.0).hypot(cy - g.down.1) > super::DRAG_START {
+                if !g.moved && (cx - g.down.0).hypot(cy - g.down.1) > DRAG_START {
                     g.moved = true;
                 }
                 if g.moved {
@@ -825,20 +1075,34 @@ pub(super) fn tick(
             || p.fun.nip.is_some()
             || p.playing
             || p.play_fight;
+        // In a pond: the duckling swims as soon as its feet are over the
+        // water, anyone else wades; a splash going in.
+        let on_floor = matches!(p.body.motion, Motion::Idle | Motion::Walk);
+        let pond = ground.pond_under(p.body.feet()).filter(|_| on_floor);
+        if pond.is_some() && p.fun.pond.is_none() {
+            p.fun.effect(Fx::Splash, now);
+        }
+        p.fun.pond = pond;
         // How the body is held this frame.
         p.anim.posture = if p.body.motion == Motion::Fly {
             Posture::Fly
-        } else if p
-            .fun
-            .scene
-            .is_some_and(|r| r.scene == Scene::Pond && r.phase == 1)
-        {
+        } else if pond.is_some() && p.species == Species::Duck {
             Posture::Swim
         } else if now < p.fun.hold_until || now < p.fun.lounge_until {
             p.anim.posture.max_hold()
         } else {
             Posture::Free
         };
+    }
+    // Rings on each pond from whoever is in it.
+    for w in &mut ground.things {
+        if w.prop.thing == Thing::Pond {
+            w.stirs = pets
+                .iter()
+                .filter(|p| p.fun.pond == Some(w.prop.pos))
+                .map(|p| p.body.feet().0)
+                .collect();
+        }
     }
     ground.set_visible(ctx.shared, now, true);
 }
@@ -864,14 +1128,27 @@ fn chase(ground: &mut Playground, pets: &mut [Pet], i: usize, ctx: &mut Ctx) {
         return;
     };
     let me = pets[i].save.id;
-    let Some(w) = ground.get(id) else {
+    if ground.get(id).is_none() {
         pets[i].fun.carry = None;
         pets[i].stop();
+        return;
+    }
+    let p = &mut pets[i];
+    // The nose reaches the ball partway into the bump.
+    if let Some((when, vel)) = p.fun.nudge
+        && now >= when
+    {
+        p.fun.nudge = None;
+        if let Some(w) = ground.get_mut(id) {
+            w.prop.bat(vel);
+        }
+    }
+    let Some(w) = ground.get(id) else {
         return;
     };
     let prop = w.prop;
     let taken = w.carrier.is_some_and(|c| c != me);
-    let p = &mut pets[i];
+    c.set_reach(p.body.reach(ctx.terrain));
     let mut order = c.tick(now, p.body.feet(), p.body.size, &prop, taken);
     // Out of reach (across a gap between monitors, past the edge of the
     // screens): put down where it got to, or given up on.
@@ -901,7 +1178,7 @@ fn chase(ground: &mut Playground, pets: &mut [Pet], i: usize, ctx: &mut Ctx) {
         Order::Run { .. } => {}
         Order::Grab => {
             println!("{}: got the {:?}", p.save.name, prop.thing);
-            if prop.flying() {
+            if prop.flying() && p.body.motion != Motion::Fall {
                 p.anim.pounce();
             }
             p.stop();
@@ -929,8 +1206,10 @@ fn chase(ground: &mut Playground, pets: &mut [Pet], i: usize, ctx: &mut Ctx) {
                 };
                 w.until = now + TOY_STAYS;
             }
-            // Back where you threw it, wagging: throw it again!
+            // Back where you threw it, wagging, a lick of the nose: throw
+            // it again!
             p.body.facing = -p.body.facing;
+            p.anim.lick();
             p.say(ctx, Line::Fetch);
             cheer(p, ctx);
             keep = false;
@@ -945,6 +1224,36 @@ fn chase(ground: &mut Playground, pets: &mut [Pet], i: usize, ctx: &mut Ctx) {
         }
         Order::Peck => {
             p.try_gesture(Act::Peck);
+        }
+        Order::Leap { x, height } => {
+            println!("{}: leaps for the {:?}", p.save.name, prop.thing);
+            p.stop();
+            p.body.spring(x, height);
+        }
+        Order::Wait => {}
+        Order::Nose { side, speed } => {
+            p.body.facing = side;
+            let nosed = p.try_gesture(Act::Nudge);
+            if nosed {
+                let s = prop.scale.max(0.5);
+                p.fun.nudge = Some((now + 0.4, (side * speed, -50.0 * s)));
+            }
+            println!(
+                "{}: noses the {:?} on ({})",
+                p.save.name,
+                prop.thing,
+                if nosed { "bump" } else { "not free" }
+            );
+        }
+        Order::Brought => {
+            println!("{}: brought the {:?} back", p.save.name, prop.thing);
+            // Nosed all the way back to you, wagging: throw it again!
+            p.stop();
+            p.body.facing = -p.body.facing;
+            p.anim.lick();
+            p.say(ctx, Line::Fetch);
+            cheer(p, ctx);
+            keep = false;
         }
         Order::Done => {
             p.stop();
@@ -1277,7 +1586,6 @@ fn scene(ground: &mut Playground, p: &mut Pet, ctx: &mut Ctx) {
         }
         p.fun.carry = None;
         p.fun.scene = None;
-        p.fun.pond = None;
         p.fun.hold_until = 0.0;
         p.stop();
     };
@@ -1393,7 +1701,6 @@ fn scene(ground: &mut Playground, p: &mut Pet, ctx: &mut Ctx) {
                         p.anim.posture = Posture::Lie;
                     }
                     Scene::Sunbeam => p.anim.posture = Posture::Lie,
-                    Scene::Pond => p.fun.effect(Fx::Splash, now),
                     _ => {}
                 }
             }
@@ -1401,10 +1708,6 @@ fn scene(ground: &mut Playground, p: &mut Pet, ctx: &mut Ctx) {
         (_, 1) => {
             if now >= run.until {
                 run.phase = 2;
-                if run.scene == Scene::Pond {
-                    p.fun.effect(Fx::Splash, now);
-                    p.fun.pond = None;
-                }
                 p.fun.carry = None;
                 p.fun.scene = Some(run);
                 return;
@@ -1430,7 +1733,6 @@ fn scene(ground: &mut Playground, p: &mut Pet, ctx: &mut Ctx) {
                     // Paddling slowly to and fro, well inside the water:
                     // over to one side, a stop, round, and back.
                     p.fun.hold_until = 0.0;
-                    p.fun.pond = prop.map(|pond| pond.pos);
                     if let Some(pond) = prop {
                         let half = POND_PADDLE * pond.px().0;
                         let x = pond.pos.0 + p.body.facing * half;
@@ -1544,6 +1846,37 @@ fn react_to(
                 p.fun.curled = false;
                 p.fun.dozed = false;
             }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// 躲貓貓: mostly only a hint shows round the edge; a peek leans out
+    /// smoothly to most of the head and back, and never further.
+    #[test]
+    fn a_hiding_pet_shows_a_hint_and_peeks_out_now_and_then() {
+        let h = Hide {
+            edge: 0.0,
+            side: -1.0,
+            since: 0.0,
+            until: HIDE_SECS,
+            base: Some(-200.0),
+            peek_at: 5.0,
+            found: false,
+        };
+        assert_eq!(h.lean(4.9), HINT);
+        assert_eq!(h.lean(5.0 + PEEK_SECS + 0.1), HINT);
+        let middle = h.lean(5.0 + 0.5 * PEEK_SECS);
+        assert!((middle - PEEK).abs() < 1e-4, "{middle}");
+        let mut last = HINT;
+        for k in 0..=40 {
+            let lean = h.lean(5.0 + PEEK_SECS * f64::from(k) / 40.0);
+            assert!((HINT..=PEEK).contains(&lean));
+            assert!((lean - last).abs() < 0.08, "a jump to {lean}");
+            last = lean;
         }
     }
 }

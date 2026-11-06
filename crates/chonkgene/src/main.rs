@@ -8,6 +8,7 @@
 
 mod app;
 mod brand;
+mod diag;
 mod ipc;
 mod lines;
 mod settings;

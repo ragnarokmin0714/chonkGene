@@ -145,6 +145,15 @@ impl Budget {
         self.saved -= cost;
         true
     }
+
+    /// Pay for a frame whatever is saved (a pet starved of frames),
+    /// running into debt the others then wait out, at most a burst deep.
+    fn spend(&mut self, cost: f32) {
+        let now = Instant::now();
+        let secs = (now - self.at).as_secs_f32();
+        self.at = now;
+        self.saved = ((self.saved + secs * self.share).min(BURST) - cost).max(-BURST);
+    }
 }
 
 /// The device and the two pipelines, shared by every pet.
@@ -480,6 +489,13 @@ impl Gpu {
     /// Pay `cost` GPU seconds out of the pets' share, if it has them now.
     pub(crate) fn try_spend(&self, cost: f32) -> bool {
         self.budget.lock().map_or(true, |mut b| b.try_spend(cost))
+    }
+
+    /// Pay for a frame now, budget or not (see [`Budget::spend`]).
+    pub(crate) fn spend(&self, cost: f32) {
+        if let Ok(mut b) = self.budget.lock() {
+            b.spend(cost);
+        }
     }
 
     /// A frame charged `charged` GPU seconds really took `secs`: give back

@@ -297,15 +297,20 @@ impl MeshCanvas {
     }
 
     /// [`MeshCanvas::submit`] if the GPU budget can pay for the frame now;
-    /// false (and nothing sent) if it has to wait.
+    /// false (and nothing sent) if it has to wait. A `starved` frame (one
+    /// that has waited too long already) goes anyway, the budget running
+    /// into debt for it.
     pub fn try_submit(
         &mut self,
         gpu: &Gpu,
         scene: &Scene,
         bones: &[Affine],
         yaw: f32,
+        starved: bool,
     ) -> Result<bool, String> {
-        if !gpu.try_spend(self.cost) {
+        if starved {
+            gpu.spend(self.cost);
+        } else if !gpu.try_spend(self.cost) {
             return Ok(false);
         }
         self.charged = self.cost;

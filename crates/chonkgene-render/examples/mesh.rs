@@ -308,7 +308,7 @@ fn gesture(act: Act) -> (f32, Script) {
     )
 }
 
-const GESTURES: [(&str, Act); 22] = [
+const GESTURES: [(&str, Act); 23] = [
     ("stretch", Act::Stretch),
     ("yawn", Act::Yawn),
     ("wave", Act::Wave),
@@ -331,6 +331,7 @@ const GESTURES: [(&str, Act); 22] = [
     ("rub", Act::Rub),
     ("chew", Act::Chew),
     ("swish", Act::Swish),
+    ("nudge", Act::Nudge),
 ];
 
 fn main() {

@@ -200,6 +200,14 @@ impl Renderer {
 
     /// Did the last `render` change the picture? When it did not, there is
     /// nothing to show again (PLAN §5: no upload when the pose is unchanged).
+    /// Why the next picture has not come yet, for the log (mesh pets).
+    pub fn waiting(&self) -> &'static str {
+        match self {
+            Self::Mesh(r) => r.waiting(),
+            _ => "no",
+        }
+    }
+
     pub fn changed(&self) -> bool {
         match self {
             Self::Sprites(r) => r.changed(),
@@ -286,13 +294,22 @@ impl Renderer {
         }
     }
 
-    /// Where a speech bubble points, in pixmap pixels: the top of the head.
+    /// The top of the head, in pixmap pixels.
     pub fn anchor(&self) -> (f32, f32) {
         match self {
             Self::Sprites(r) => r.anchor(),
             Self::Gpu(r) => r.anchor(),
             Self::Mesh(r) => r.anchor(),
         }
+    }
+
+    /// Where a speech bubble points, in pixmap pixels: over the top of the
+    /// head, or over the top of the whole picture where that is higher
+    /// (rolled over or lying, the head is low down and the bubble would
+    /// cover the pet).
+    pub fn bubble_at(&self) -> (f32, f32) {
+        let (x, y) = self.anchor();
+        (x, y.min(top_row(self.pixmap())))
     }
 }
 
@@ -328,7 +345,7 @@ pub fn key_for(expression: Expression, params: &PoseParams) -> Key {
         Act::Knead | Act::Tap | Act::Chew => (PoseId::Sit, Look::Happy),
         Act::Paw => (PoseId::Wave, eyes),
         Act::Tilt => (PoseId::LookLeft, eyes),
-        Act::Sniff | Act::Rub => (PoseId::Stretch, eyes),
+        Act::Sniff | Act::Rub | Act::Nudge => (PoseId::Stretch, eyes),
         Act::Bliss => (PoseId::BellyUp, Look::Happy),
         Act::Swish => (PoseId::LookLeft, Look::Happy),
     };
@@ -484,4 +501,14 @@ fn sleep_overlay(pm: &mut Pixmap, nose: (f32, f32), ts: Transform, s: f32, phase
         };
         pm.stroke_path(&path, &ink, &stroke, Transform::identity(), None);
     }
+}
+
+/// The first row from the top with anything drawn on it (the height if
+/// none).
+fn top_row(pm: &Pixmap) -> f32 {
+    let w = pm.width() as usize;
+    pm.pixels()
+        .chunks(w.max(1))
+        .position(|row| row.iter().any(|p| p.alpha() > 0))
+        .unwrap_or(pm.height() as usize) as f32
 }

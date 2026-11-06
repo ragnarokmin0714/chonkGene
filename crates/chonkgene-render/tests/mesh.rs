@@ -657,29 +657,43 @@ fn the_mesh_bakes_on_its_own_thread_and_shows_when_it_lands() {
 }
 
 #[test]
-fn mesh_frames_wait_for_the_gpu_budget_instead_of_overspending_it() {
+fn mesh_frames_wait_for_the_gpu_budget_but_never_starve() {
     use chonkgene_core::anim::{Expression, PoseParams};
     // A share of nothing: only what the budget starts with (a burst of
     // 50 ms of GPU time) can pay for frames, and frames are guessed to
-    // cost at least 4 ms each, so a dozen at most, however many are asked.
+    // cost at least 4 ms each, so a dozen at most from the budget; after
+    // that a frame held back a quarter second goes anyway (Roger: pets
+    // stood frozen for seconds), so new pictures never stop for long.
     let Some(mut r) = lone_renderer("shiba", 0.0) else {
         eprintln!("skipped: no GPU");
         return;
     };
     r.finish();
     assert!(r.ready());
-    let mut drawn = 0;
+    let mut arrived = Vec::new();
+    let start = std::time::Instant::now();
     for f in 1..=60 {
         let params = PoseParams {
             clock: f as f32 / 30.0,
             ..Default::default()
         };
         r.render(&params, Expression::Neutral);
-        drawn += usize::from(r.changed());
+        if r.changed() {
+            arrived.push(start.elapsed().as_secs_f32());
+        }
         // Time for a frame on its way to land.
         std::thread::sleep(std::time::Duration::from_millis(30));
     }
-    assert!(drawn <= 13, "{drawn} frames came out of a 50 ms burst");
+    let secs = start.elapsed().as_secs_f32();
+    let most = 13 + (secs / 0.25).ceil() as usize;
+    assert!(
+        arrived.len() <= most,
+        "{} frames in {secs:.1} s out of a 50 ms burst",
+        arrived.len()
+    );
+    let gaps = arrived.windows(2).map(|w| w[1] - w[0]);
+    let longest = gaps.fold(arrived.first().copied().unwrap_or(secs), f32::max);
+    assert!(longest < 0.6, "no new picture for {longest:.2} s");
 }
 
 /// Screen x (pixels at 100%) of a bird's left foot over a steady waddle,

@@ -4,7 +4,8 @@
 //! `cargo run --release -p chonkgene-render --example touch -- <species> <out dir> [scene]`
 //! writes `<scene>-<frame>.png` at 15 fps. Scenes: `poke` (a quick poke in
 //! the belly), `rub` (a long belly rub), `chin`, `head`, `cheek`, `tail`,
-//! `paw`, `bottom` (each held, then let go), `laugh`, `fedup`, `sulk`, and
+//! `paw`, `bottom` (each held, then let go), `scratch` (held on the head
+//! and rubbed about), `laugh`, `fedup`, `sulk`, and
 //! `sleep-chin`, `sleep-curl`, `sleep-side`, `sleep-up`.
 
 use std::sync::Arc;
@@ -69,6 +70,7 @@ fn scenes() -> Vec<Scene> {
         touch("tail", Zone::Tail, 0.3, 1.8, 3.2),
         touch("paw", Zone::Paw, 0.3, 2.3, 3.2),
         touch("bottom", Zone::Bottom, 0.3, 0.5, 2.6),
+        touch("scratch", Zone::Head, 0.3, 3.0, 4.0),
         feel("laugh", Expression::Giggle, 3.0),
         feel("fedup", Expression::FedUp, 3.0),
         feel("sulk", Expression::Sulk, 4.5),
@@ -144,9 +146,16 @@ fn main() {
                         break;
                     };
                     a.press(h.zone, at);
-                    pressed = Some(h.zone);
+                    pressed = Some((h.zone, at));
                 }
-                if let Some(zone) = pressed
+                // A scratch: the finger rubbing to and fro.
+                if scene.name == "scratch"
+                    && let Some((_, at)) = pressed
+                {
+                    let wiggle = 10.0 * (std::f32::consts::TAU * 3.0 * t).sin();
+                    a.knead((at.0 + wiggle, at.1));
+                }
+                if let Some((zone, _)) = pressed
                     && t >= h.to
                 {
                     // A long rub on a nice spot pleases it (the app's pat).

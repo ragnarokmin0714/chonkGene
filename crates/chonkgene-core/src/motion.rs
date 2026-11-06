@@ -191,6 +191,20 @@ impl Body {
         self.on = None;
     }
 
+    /// Spring straight up `height` pixels and come down where it stands,
+    /// the feet at screen x `x` (a leap for a frisbee).
+    pub fn spring(&mut self, x: f32, height: f32) {
+        let up = (2.0 * GRAVITY * height.max(1.0)).sqrt();
+        let secs = 2.0 * up / GRAVITY;
+        self.vel = ((x - self.feet().0) / secs, -up);
+        if self.vel.0.abs() > 1.0 {
+            self.facing = self.vel.0.signum();
+        }
+        self.motion = Motion::Fall;
+        self.speed = 0.0;
+        self.on = None;
+    }
+
     /// Fly so the feet come down at `(x, y)` (a perch, or the floor),
     /// arcing up over the way there.
     pub fn fly_to(&mut self, x: f32, y: f32) {

@@ -13,7 +13,8 @@ use x11rb::protocol::randr::ConnectionExt as _;
 use x11rb::protocol::screensaver::{self, ConnectionExt as _};
 use x11rb::protocol::shape::{self, ConnectionExt as _, SK, SO};
 use x11rb::protocol::xproto::{
-    AtomEnum, ClipOrdering, ConnectionExt as _, CreateGCAux, KeyButMask, MapState, Rectangle,
+    AtomEnum, ClipOrdering, ConfigureWindowAux, ConnectionExt as _, CreateGCAux, KeyButMask,
+    MapState, Rectangle, StackMode,
 };
 use x11rb::rust_connection::RustConnection;
 
@@ -395,6 +396,16 @@ impl Presenter {
             shared.conn.flush().map_err(err)?;
         }
         Ok(())
+    }
+
+    /// Put the window above every other (a speech bubble over its pet).
+    pub fn raise(&self, shared: &Shared) -> Result<(), String> {
+        let above = ConfigureWindowAux::new().stack_mode(StackMode::ABOVE);
+        shared
+            .conn
+            .configure_window(self.win, &above)
+            .map_err(err)?;
+        shared.conn.flush().map_err(err)
     }
 
     /// The X11 window id, for telling our windows apart from others.

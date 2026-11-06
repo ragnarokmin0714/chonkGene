@@ -58,13 +58,13 @@ impl Thing {
     /// middle of its bottom edge on the floor.
     pub fn size(self) -> (f32, f32) {
         match self {
-            Thing::Ball => (26.0, 26.0),
-            Thing::Frisbee => (44.0, 16.0),
+            Thing::Ball => (39.0, 39.0),
+            Thing::Frisbee => (66.0, 24.0),
             Thing::Catnip => (40.0, 34.0),
             Thing::Bone => (46.0, 24.0),
             Thing::Seeds => (70.0, 14.0),
             Thing::Branch => (260.0, 60.0),
-            Thing::Pond => (230.0, 50.0),
+            Thing::Pond => (250.0, 70.0),
             Thing::Sunbeam => (200.0, 300.0),
             Thing::Butterfly => (28.0, 24.0),
         }
@@ -242,7 +242,8 @@ impl Prop {
 /// How a species goes for a thrown toy.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Fetch {
-    /// Runs for it, leaps to catch it, carries it back (dogs, the fox).
+    /// Runs for it and brings it back (dogs, the fox): a frisbee leapt for
+    /// and caught in the mouth, a ball nosed back along the floor.
     Retrieve,
     /// Runs for it and bats it about a few times, then loses interest
     /// (cats).
@@ -274,6 +275,16 @@ pub enum Order {
     /// Jump for it and catch it, or pick it up off the floor: it is now in
     /// the pet's mouth.
     Grab,
+    /// Leap up `height` pixels to catch it in the air, coming down with
+    /// the feet at screen x `x`.
+    Leap { x: f32, height: f32 },
+    /// In the air after a leap: nothing to do but wait for it.
+    Wait,
+    /// Bump it on with the nose toward `side`, at `speed` pixels a second
+    /// (a ball nosed back to you).
+    Nose { side: f32, speed: f32 },
+    /// Nosed all the way back to where it was thrown from.
+    Brought,
     /// Put it down (it is back where it was thrown from).
     Drop,
     /// Knock it on with a paw toward `side`.
@@ -303,8 +314,14 @@ pub struct Chase {
     /// How many times a cat has batted it, and how many it will.
     bats: u8,
     most_bats: u8,
-    /// When it may bat or peck again.
+    /// When it may bat, peck or nose it again.
     next: f64,
+    /// Up in the air after a leap for it until then, and how many times
+    /// it has leapt.
+    aloft_until: f64,
+    leaps: u8,
+    /// How far its feet can walk, left and right (screen x), if known.
+    reach: Option<(f32, f32)>,
 }
 
 /// The longest any pet keeps after a toy, seconds.
@@ -313,6 +330,13 @@ const CHASE_SECS: f64 = 25.0;
 const BIRD_CHASE: f64 = 2.0;
 /// The owl watches this long.
 const WATCH_SECS: f64 = 3.5;
+/// A retriever leaps at most this many times for one throw.
+const MOST_LEAPS: u8 = 3;
+/// Where a pet's mouth is, as a share of its window's height above its
+/// feet, and how near (shares of the window) a frisbee must come to it to
+/// be caught.
+const MOUTH_UP: f32 = 0.55;
+const CATCH: (f32, f32) = (0.45, 0.4);
 
 impl Chase {
     /// Set off after a toy thrown from `home` (screen x); `roll` (0 … 1)
@@ -333,11 +357,21 @@ impl Chase {
             bats: 0,
             most_bats: 2 + (roll * 3.0) as u8,
             next: now,
+            aloft_until: 0.0,
+            leaps: 0,
+            reach: None,
         }
     }
 
     pub fn carrying(&self) -> bool {
         self.phase == Phase::Carrying
+    }
+
+    /// How far the pet's feet can walk, left and right (screen x), so it
+    /// never sets off for a spot it cannot reach (set before each
+    /// [`Chase::tick`]).
+    pub fn set_reach(&mut self, reach: (f32, f32)) {
+        self.reach = Some(reach);
     }
 
     /// What to do now, with the pet's feet at `feet`, its window `size`
@@ -356,6 +390,10 @@ impl Chase {
             return Order::Done;
         }
         if self.phase == Phase::Carrying {
+            // Caught in the air: down on its feet first.
+            if now < self.aloft_until {
+                return Order::Wait;
+            }
             let dx = self.home - feet.0;
             return if dx.abs() < 0.25 * w {
                 Order::Drop
@@ -370,9 +408,11 @@ impl Chase {
             return Order::Done;
         }
         let dx = prop.pos.0 - feet.0;
-        // Up on a window out of reach, or gone far below: not worth it.
+        // Up on a window out of reach, or gone far below: not worth it
+        // (unless it is only up in the air after a leap for it).
         let above = feet.1 - prop.pos.1;
-        if !prop.flying() && (above > 1.2 * h || above < -0.3 * h) {
+        let aloft = now < self.aloft_until;
+        if !aloft && !prop.flying() && (above > 1.2 * h || above < -0.3 * h) {
             return if now - self.since > 1.5 {
                 Order::Done
             } else {
@@ -382,11 +422,43 @@ impl Chase {
         let near = dx.abs() < 0.3 * w;
         match self.how {
             Fetch::Watch => Order::Watch,
+            Fetch::Retrieve if prop.thing == Thing::Ball => self.nose(now, feet, size, prop),
             Fetch::Retrieve => {
-                // Caught in the air once it is low enough to reach with a
-                // jump, or picked up off the floor.
-                let reach = prop.pos.1 > feet.1 - 1.4 * h;
-                if near && (reach || !prop.flying()) {
+                let above = feet.1 - prop.pos.1;
+                // Up in the air after a leap: snapped up as it comes by
+                // the mouth.
+                if aloft {
+                    let caught = dx.abs() < CATCH.0 * w
+                        && (above - MOUTH_UP * h).abs() < CATCH.1 * h
+                        && prop.flying();
+                    return if caught {
+                        self.phase = Phase::Carrying;
+                        Order::Grab
+                    } else {
+                        Order::Wait
+                    };
+                }
+                // Gliding by within a leap: up after it, the top of the
+                // leap where it will be by then (so it comes down twice as
+                // far on).
+                if prop.flying()
+                    && self.leaps < MOST_LEAPS
+                    && dx.abs() < 1.1 * w
+                    && (0.75 * h..2.2 * h).contains(&above)
+                {
+                    self.leaps += 1;
+                    let rise = (above - MOUTH_UP * h).clamp(0.25 * h, 1.5 * h);
+                    let secs = (2.0 * rise / GRAVITY).sqrt();
+                    self.aloft_until = now + 2.0 * f64::from(secs);
+                    let meet = prop.pos.0 + prop.vel.0 * secs;
+                    let mut x = feet.0 + 2.0 * (meet - feet.0).clamp(-0.6 * w, 0.6 * w);
+                    if let Some((lo, hi)) = self.reach {
+                        x = x.clamp(lo, hi);
+                    }
+                    return Order::Leap { x, height: rise };
+                }
+                // Low enough to snap up from the floor, or lying there.
+                if near && (above < 1.0 * h || !prop.flying()) {
                     self.phase = Phase::Carrying;
                     Order::Grab
                 } else {
@@ -428,6 +500,44 @@ impl Chase {
                     }
                 }
             }
+        }
+    }
+}
+
+impl Chase {
+    /// A ball nosed back home: run round behind it (the side away from
+    /// home), then bump it on toward home with the nose, again and again,
+    /// until it is back.
+    fn nose(&mut self, now: f64, feet: (f32, f32), size: (f32, f32), prop: &Prop) -> Order {
+        let w = size.0;
+        let to_home = self.home - prop.pos.0;
+        if to_home.abs() < 0.4 * w && !prop.flying() {
+            return Order::Brought;
+        }
+        let side = if to_home < 0.0 { -1.0 } else { 1.0 };
+        // Its feet just behind the ball, the nose at it (or as near as it
+        // can get, the ball against the edge of the screens).
+        let mut behind = prop.pos.0 - side * 0.3 * w;
+        if let Some((lo, hi)) = self.reach {
+            behind = behind.clamp(lo, hi);
+        }
+        let dx = behind - feet.0;
+        let rolling = prop.vel.0.abs() > 160.0 * prop.scale.max(0.5);
+        // Close enough: further than a walk's stopping distance, which a
+        // pet stood still does not set off again for.
+        if dx.abs() < 0.3 * w && !prop.flying() && !rolling {
+            if now < self.next {
+                return Order::Watch;
+            }
+            self.next = now + 0.9;
+            // Rolls about speed / ROLL_DRAG before it stops: most of the
+            // way home, never far past it.
+            let speed = (0.8 * ROLL_DRAG * to_home.abs()).clamp(160.0, 520.0) * prop.scale.max(0.5);
+            return Order::Nose { side, speed };
+        }
+        Order::Run {
+            x: behind,
+            pace: 2.0,
         }
     }
 }
@@ -636,22 +746,44 @@ mod tests {
     }
 
     #[test]
-    fn a_retriever_runs_catches_and_brings_it_back() {
+    fn a_retriever_leaps_for_a_frisbee_catches_it_in_the_air_and_brings_it_back() {
         let t = Terrain::flat(AREA);
-        let mut ball = Prop::thrown(Thing::Ball, (500.0, 900.0), 1.0, 1.0);
+        let floor = 1032.0;
+        let mut disc = Prop::thrown(Thing::Frisbee, (500.0, 880.0), 1.0, 1.0);
         let size = (260.0, 190.0);
-        let mut feet = (450.0, 1032.0);
+        let mut feet = (700.0, floor);
+        // Up and down after a leap: (speed up, speed along).
+        let mut air: Option<(f32, f32)> = None;
         let mut c = Chase::new(Fetch::Retrieve, 500.0, 0.0, 0.5);
-        let (mut grabbed, mut dropped) = (false, false);
+        let (mut leapt, mut caught_up, mut grabbed, mut dropped) = (false, false, false, false);
         let mut now = 0.0;
+        let dt: f32 = 1.0 / 60.0;
         for _ in 0..(20 * 60) {
-            now += 1.0 / 60.0;
+            now += f64::from(dt);
             if !grabbed {
-                ball.step(1.0 / 60.0, &t);
+                disc.step(dt, &t);
             }
-            match c.tick(now, feet, size, &ball, false) {
-                Order::Run { x, pace } => feet.0 += (x - feet.0).signum() * 60.0 * pace / 60.0,
-                Order::Grab => grabbed = true,
+            if let Some((vy, vx)) = &mut air {
+                *vy += GRAVITY * dt;
+                feet.0 += *vx * dt;
+                feet.1 = (feet.1 + *vy * dt).min(floor);
+                if feet.1 >= floor {
+                    air = None;
+                }
+            }
+            match c.tick(now, feet, size, &disc, false) {
+                Order::Run { x, pace } if air.is_none() => {
+                    feet.0 += (x - feet.0).signum() * 60.0 * pace * dt
+                }
+                Order::Leap { x, height } => {
+                    leapt = true;
+                    let up = (2.0 * GRAVITY * height).sqrt();
+                    air = Some((-up, (x - feet.0) / (2.0 * up / GRAVITY)));
+                }
+                Order::Grab => {
+                    grabbed = true;
+                    caught_up = feet.1 < floor - 10.0;
+                }
                 Order::Drop => {
                     dropped = true;
                     break;
@@ -660,8 +792,89 @@ mod tests {
                 _ => {}
             }
         }
-        assert!(grabbed && dropped, "grabbed {grabbed}, dropped {dropped}");
+        assert!(leapt, "never leapt for it");
+        assert!(
+            grabbed && caught_up,
+            "grabbed {grabbed}, in the air {caught_up}"
+        );
+        assert!(dropped);
         assert!((feet.0 - 500.0).abs() < 0.25 * size.0);
+    }
+
+    #[test]
+    fn a_retriever_noses_a_ball_back_home_without_picking_it_up() {
+        let t = Terrain::flat(AREA);
+        let mut ball = Prop::thrown(Thing::Ball, (500.0, 900.0), 1.0, 1.0);
+        let size = (260.0, 190.0);
+        let mut feet = (450.0, 1032.0);
+        let mut c = Chase::new(Fetch::Retrieve, 500.0, 0.0, 0.5);
+        let (mut noses, mut brought, mut grabbed) = (0, false, false);
+        let mut now = 0.0;
+        let mut far = 0.0f32;
+        for _ in 0..(25 * 60) {
+            now += 1.0 / 60.0;
+            ball.step(1.0 / 60.0, &t);
+            far = far.max(ball.pos.0 - 500.0);
+            match c.tick(now, feet, size, &ball, false) {
+                Order::Run { x, pace } => feet.0 += (x - feet.0).signum() * 60.0 * pace / 60.0,
+                Order::Nose { side, speed } => {
+                    noses += 1;
+                    assert_eq!(side, -1.0, "nosed away from home");
+                    ball.bat((side * speed, -40.0));
+                }
+                Order::Grab => grabbed = true,
+                Order::Brought => {
+                    brought = true;
+                    break;
+                }
+                Order::Done => break,
+                _ => {}
+            }
+        }
+        assert!(far > 200.0, "the ball only went {far} px");
+        assert!(!grabbed, "a ball is nosed, not carried");
+        assert!(
+            brought && noses >= 1,
+            "brought {brought} after {noses} noses"
+        );
+        assert!((ball.pos.0 - 500.0).abs() < 0.4 * size.0);
+    }
+
+    #[test]
+    fn a_ball_against_the_edge_of_the_screens_is_still_nosed_back() {
+        let t = Terrain::flat(AREA);
+        let (left, right) = t.bounds();
+        let size = (260.0, 190.0);
+        let floor = 1032.0;
+        // Hard against the right edge, home far to the left: it cannot get
+        // round behind the ball.
+        let mut ball = Prop::put(Thing::Ball, (right - 20.0, floor), 1.0);
+        ball.resting = true;
+        let reach = (left + 0.5 * size.0 + 1.0, right - 0.5 * size.0 - 1.0);
+        let mut feet = (right - 600.0, floor);
+        let mut c = Chase::new(Fetch::Retrieve, left + 400.0, 0.0, 0.5);
+        let mut nosed = false;
+        let mut now = 0.0;
+        for _ in 0..(8 * 60) {
+            now += 1.0 / 60.0;
+            ball.step(1.0 / 60.0, &t);
+            c.set_reach(reach);
+            match c.tick(now, feet, size, &ball, false) {
+                Order::Run { x, pace } => {
+                    assert!(x <= reach.1, "sent past the edge to {x}");
+                    feet.0 += (x - feet.0).signum() * 60.0 * pace / 60.0;
+                }
+                Order::Nose { side, speed } => {
+                    nosed = true;
+                    ball.bat((side * speed, -40.0));
+                    break;
+                }
+                Order::Done => break,
+                _ => {}
+            }
+        }
+        assert!(nosed, "never got to nose it");
+        assert!(ball.vel.0 < 0.0);
     }
 
     #[test]

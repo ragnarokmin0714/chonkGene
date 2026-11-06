@@ -99,6 +99,8 @@ pub enum Act {
     Chew,
     /// The fox's tails swung round hard at someone (a play-fight).
     Swish,
+    /// Nose down to a ball and a bump that sends it rolling.
+    Nudge,
 }
 
 /// How the whole body is held for a while, under any gesture: as it likes,
@@ -198,6 +200,7 @@ pub fn gesture_secs(act: Act) -> Option<f32> {
         Act::Bliss => Some(4.0),
         Act::Chew => Some(6.0),
         Act::Swish => Some(1.2),
+        Act::Nudge => Some(0.8),
         _ => None,
     }
 }
@@ -214,6 +217,9 @@ pub struct Touch {
     pub last: Option<(Zone, (f32, f32), f32)>,
     /// Something it is watching (a toy on the cursor), picture pixels.
     pub watch: Option<(f32, f32)>,
+    /// How hard it is being scratched, 0 … 1: the finger rubbing about
+    /// while held, fading once it stops.
+    pub scratch: f32,
 }
 
 impl Touch {
@@ -235,6 +241,10 @@ pub const ATTEND_SECS: f32 = 2.5;
 /// Held this long without moving away, a press is a rub or a scratch
 /// rather than a poke.
 pub const HOLD_SECS: f32 = 0.6;
+/// A finger rubbing about this far (picture pixels) makes a full scratch;
+/// a scratch fades by this rate a second once it stops.
+const SCRATCH_PX: f32 = 140.0;
+const SCRATCH_FADE: f32 = 1.2;
 /// How long anything shows a touch let go (the look back, a paw lifted).
 pub const TOUCH_SHOWS_SECS: f32 = 4.0;
 
@@ -282,6 +292,9 @@ pub struct PoseParams {
     /// Out of breath from a run (a fetch, zoomies, a chase), or still
     /// running: a dog pants with its tongue out.
     pub puffed: bool,
+    /// Counts up each time it should lick its nose (a toy just put down):
+    /// the renderer licks when it sees a new count.
+    pub licks: u32,
 }
 
 impl Default for PoseParams {
@@ -305,6 +318,7 @@ impl Default for PoseParams {
             posture: Posture::Free,
             lively: false,
             puffed: false,
+            licks: 0,
         }
     }
 }
@@ -355,6 +369,10 @@ pub struct Animator {
     held: Option<(Zone, (f32, f32), f32)>,
     last_touch: Option<(Zone, (f32, f32), f32)>,
     watch: Option<(f32, f32)>,
+    /// See [`Touch::scratch`].
+    scratch: f32,
+    /// See [`PoseParams::licks`].
+    licks: u32,
     /// The gesture under way, when it started and when it ends.
     gesture: Option<(Act, f32, f32)>,
     next_gesture: f32,
@@ -412,6 +430,8 @@ impl Animator {
             pressed: false,
             held: None,
             last_touch: None,
+            scratch: 0.0,
+            licks: 0,
             watch: None,
             gesture: None,
         }
@@ -467,7 +487,9 @@ impl Animator {
     /// The finger moved while held (kneading, a scratch): where it is now.
     pub fn knead(&mut self, at: (f32, f32)) {
         if let Some(h) = &mut self.held {
+            let moved = (at.0 - h.1.0).hypot(at.1 - h.1.1);
             h.1 = at;
+            self.scratch = (self.scratch + moved / SCRATCH_PX).min(1.0);
         }
     }
 
@@ -504,6 +526,16 @@ impl Animator {
         if zone == Zone::Bottom {
             self.jump(220.0, 0);
         }
+    }
+
+    /// Out of breath for `secs` (after a tussle).
+    pub fn puff(&mut self, secs: f32) {
+        self.puffed_until = self.puffed_until.max(self.t + secs);
+    }
+
+    /// A lick of the nose (a toy just put down).
+    pub fn lick(&mut self) {
+        self.licks = self.licks.wrapping_add(1);
     }
 
     /// A happy double hop (a pat, a snack).
@@ -652,6 +684,16 @@ impl Animator {
         self.t += dt;
         self.body.step(dt);
         self.belly.step(dt);
+        // A scratch fades once the finger stops, quicker once it lets go.
+        let fade = if self.held.is_some() {
+            SCRATCH_FADE
+        } else {
+            3.0 * SCRATCH_FADE
+        };
+        self.scratch *= (-fade * dt).exp();
+        if self.scratch < 0.01 {
+            self.scratch = 0.0;
+        }
         self.sway *= (1.0 - 6.0 * dt).max(0.0);
         // Settle exactly, so a resting pose stops changing (the renderer caches on it).
         if self.sway.abs() < 0.01 {
@@ -901,6 +943,7 @@ impl Animator {
                     .map(|(z, at, at_t)| (z, at, self.t - at_t))
                     .filter(|&(.., ago)| ago < TOUCH_SHOWS_SECS),
                 watch: self.watch,
+                scratch: self.scratch,
             },
             posture: self.posture,
             lively: match self.expression {
@@ -909,6 +952,7 @@ impl Animator {
                 _ => false,
             },
             puffed: self.expression != Expression::Asleep && self.puffed(),
+            licks: self.licks,
         }
     }
 }

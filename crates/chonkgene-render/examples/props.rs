@@ -49,6 +49,7 @@ fn main() {
                 grounded: true,
                 flip: false,
                 turn: 0.0,
+                held: false,
             },
         );
         let (cx, cy) = ((i as u32 % 3) * cell, (i as u32 / 3) * row);
@@ -64,11 +65,8 @@ fn main() {
     // Effects, on a cell each.
     let y = (THINGS.len() as u32 / 3) * row;
     let mut fxpm = Pixmap::new(cell * 3, row).expect("fx");
-    for (k, fx) in [Fx::Hearts, Fx::Sparkles, Fx::Dust, Fx::Splash]
-        .iter()
-        .enumerate()
-    {
-        let x = (k as f32 + 0.5) * cell as f32 * 0.75;
+    for (k, fx) in Fx::ALL.iter().enumerate() {
+        let x = (k as f32 + 0.5) * cell as f32 * 3.0 / Fx::ALL.len() as f32;
         props::effect(
             &mut fxpm,
             *fx,

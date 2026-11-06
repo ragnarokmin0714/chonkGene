@@ -69,10 +69,20 @@ pub enum Line {
     SkitPlay,
     /// Starting its own little scene.
     Scene,
+    /// The fox casting its spell (定身術).
+    SkitSpell,
+    /// Held up in the air by the spell.
+    SkitFloated,
+    /// Off to hide for 躲貓貓.
+    HideStart,
+    /// Found where it hid.
+    HideFound,
+    /// Came out by itself, not found.
+    HideLost,
 }
 
 impl Line {
-    pub const ALL: [Line; 34] = [
+    pub const ALL: [Line; 39] = [
         Line::Hello,
         Line::WelcomeBack,
         Line::PokeSmall,
@@ -107,6 +117,11 @@ impl Line {
         Line::CatnipMeh,
         Line::SkitPlay,
         Line::Scene,
+        Line::SkitSpell,
+        Line::SkitFloated,
+        Line::HideStart,
+        Line::HideFound,
+        Line::HideLost,
     ];
 
     /// Key in the line tables.
@@ -146,6 +161,11 @@ impl Line {
             Line::CatnipMeh => "catnip_meh",
             Line::SkitPlay => "skit_play",
             Line::Scene => "scene",
+            Line::SkitSpell => "skit_spell",
+            Line::SkitFloated => "skit_floated",
+            Line::HideStart => "hide_start",
+            Line::HideFound => "hide_found",
+            Line::HideLost => "hide_lost",
         }
     }
 }

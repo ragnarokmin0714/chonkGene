@@ -32,6 +32,8 @@ pub enum Icon {
     Leaf,
     /// An arrow back to the first page of the menu.
     Back,
+    /// An eye peeking round the edge of a wall: 躲貓貓.
+    Peek,
 }
 
 #[derive(Clone, Debug)]
@@ -511,6 +513,19 @@ fn icon(pm: &mut Pixmap, icon: Icon, ts: Transform, bg: [u8; 4]) {
                     ],
                 );
             }
+        }
+        Icon::Peek => {
+            // The wall's edge, and an eye peeking round it.
+            stroke(pm, &[('M', &[15.5, 4.0]), ('L', &[15.5, 20.0])]);
+            stroke(
+                pm,
+                &[
+                    ('M', &[15.5, 8.0]),
+                    ('C', &[9.5, 8.0, 7.0, 10.5, 7.0, 12.0]),
+                    ('C', &[7.0, 13.5, 9.5, 16.0, 15.5, 16.0]),
+                ],
+            );
+            stroke(pm, &[('M', &[11.5, 11.0]), ('L', &[11.5, 13.0])]);
         }
         Icon::Back => {
             stroke(pm, &[('M', &[19.0, 12.0]), ('L', &[5.5, 12.0])]);

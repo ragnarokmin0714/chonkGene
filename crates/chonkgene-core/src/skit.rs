@@ -24,7 +24,18 @@ const CONTACT: f32 = 95.0;
 const PLAY_TURN: f64 = 1.9;
 const PLAY_TURNS: u32 = 6;
 /// The same pair rests at least this long between skits.
-const PAIR_COOLDOWN: f64 = 600.0;
+const PAIR_COOLDOWN: f64 = 180.0;
+/// Partway through a play-fight (before this turn) they tussle: a cloud of
+/// dust rolling about for this long.
+const TUSSLE_TURN: u32 = 3;
+const TUSSLE_SECS: f32 = 2.6;
+/// They run at each other for a tussle at most this long.
+const GATHER_SECS: f64 = 3.0;
+/// The fox's spell (定身術): casting, then the others held up in the air.
+const CAST_SECS: f64 = 1.3;
+const FLOAT_SECS: f32 = 3.6;
+/// Of skits with the fox free to start one, this share are a spell.
+const SPELL_SHARE: f32 = 0.35;
 
 /// A pet as the director sees it.
 #[derive(Clone, Copy, Debug)]
@@ -66,6 +77,24 @@ pub enum Cmd {
     /// A pounce: one big hop.
     Hop {
         id: u64,
+    },
+    /// Tussle with `with` for `secs`: the two vanish into one cloud of dust
+    /// at `id`, paws and stars poking out, and come out of it panting.
+    Tussle {
+        id: u64,
+        with: u64,
+        secs: f32,
+    },
+    /// The fox casts a spell: up on its hind legs, tails fanned, the bell
+    /// ringing, a ring of fox-fire round its feet.
+    Cast {
+        id: u64,
+    },
+    /// Held up in the air by the spell, frozen mid-pose in a bubble of
+    /// light, for `secs`; then it drops softly onto its feet.
+    Freeze {
+        id: u64,
+        secs: f32,
     },
 }
 
@@ -110,8 +139,12 @@ enum Kind {
     GlareChase,
     /// 雞同鴨講: chick and duckling talk past each other.
     TalkPast,
-    /// A play-fight: up close, in turns, each its own way.
+    /// A play-fight: up close, in turns, each its own way, with a tussle
+    /// in the middle.
     Play,
+    /// The fox's 定身術: every other pet held up in the air for a moment
+    /// (the owl stares it back: the fox floats instead).
+    Spell,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -124,6 +157,15 @@ enum Phase {
     MakeUp,
     /// Turn `n` of a play-fight.
     Play(u32),
+    /// Running into each other for a tussle, before turn `n` of a
+    /// play-fight.
+    Gather(u32),
+    /// Tussling, before turn `n` of a play-fight.
+    Tussle(u32),
+    /// The fox casting.
+    Cast,
+    /// Pets held up by the spell.
+    Float,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -140,14 +182,17 @@ pub struct Director {
     next_at: Option<f64>,
     skit: Option<Skit>,
     rested: HashMap<(u64, u64), f64>,
+    /// The next skit is of this kind (see [`Director::rush`]).
+    forced: Option<Kind>,
 }
 
-/// Mean seconds between skits for 偶爾 / 常常 / 超常.
+/// Mean seconds between skits for 偶爾 / 常常 / 超常 (Roger: they hardly
+/// ever played; more often since 2026-11-06).
 fn mean_gap(frequency: u8) -> f64 {
     match frequency {
-        0 => 900.0,
-        1 => 360.0,
-        _ => 120.0,
+        0 => 600.0,
+        1 => 180.0,
+        _ => 60.0,
     }
 }
 
@@ -156,6 +201,20 @@ fn pair(a: u64, b: u64) -> (u64, u64) {
 }
 
 impl Director {
+    /// For trying skits out (`CHONKGENE_SKIT`): the next one starts within
+    /// seconds, and is a `spell`, a `play`-fight or a `squabble` as named
+    /// (anything else: as it comes). True if the name was known.
+    pub fn rush(&mut self, kind: &str) -> bool {
+        self.next_at = Some(3.0);
+        self.forced = match kind {
+            "spell" => Some(Kind::Spell),
+            "play" => Some(Kind::Play),
+            "squabble" => Some(Kind::GlareChase),
+            _ => None,
+        };
+        self.forced.is_some()
+    }
+
     /// Is this pet in a skit right now? The app leaves its walking to us.
     pub fn involves(&self, id: u64) -> bool {
         self.skit.is_some_and(|s| s.a == id || s.b == id)
@@ -228,7 +287,8 @@ impl Director {
             self.skit = None;
             return Vec::new();
         };
-        if s.phase != Phase::MakeUp && (!a.available || !b.available) {
+        // Held up by a spell, a pet is not free, but the skit goes on.
+        if !matches!(s.phase, Phase::MakeUp | Phase::Float) && (!a.available || !b.available) {
             return self.make_up(now, actors);
         }
 
@@ -266,6 +326,8 @@ impl Director {
                                 line: Line::SkitPlay,
                             });
                         }
+                        // A spell starts casting at once, never approaching.
+                        Kind::Spell => {}
                     }
                 } else {
                     let mid = (a.x + b.x) / 2.0;
@@ -341,6 +403,78 @@ impl Director {
                     s.until = now + TALK_EVERY;
                 }
             }
+            Phase::Play(turn) if now >= s.until && turn == TUSSLE_TURN => {
+                s.phase = Phase::Gather(turn);
+                s.until = now + GATHER_SECS;
+            }
+            Phase::Gather(turn) => {
+                if (a.x - b.x).abs() <= CONTACT || now >= s.until {
+                    // Into a tussle, the two rolling about in one cloud.
+                    out.push(Cmd::Tussle {
+                        id: a.id,
+                        with: b.id,
+                        secs: TUSSLE_SECS,
+                    });
+                    s.phase = Phase::Tussle(turn);
+                    s.until = now + f64::from(TUSSLE_SECS) + 0.4;
+                } else {
+                    // At each other, full tilt.
+                    out.extend([
+                        Cmd::Walk {
+                            id: a.id,
+                            x: b.x,
+                            pace: 2.6,
+                        },
+                        Cmd::Walk {
+                            id: b.id,
+                            x: a.x,
+                            pace: 2.6,
+                        },
+                    ]);
+                }
+            }
+            Phase::Tussle(turn) if now >= s.until => {
+                s.phase = Phase::Play(turn + 1);
+                s.until = now;
+            }
+            Phase::Cast if now >= s.until => {
+                // The owl stares the spell back: the fox floats instead.
+                let bounced = b.species == Species::Owl;
+                let secs = FLOAT_SECS;
+                if bounced {
+                    out.push(Cmd::Freeze { id: a.id, secs });
+                    out.push(Cmd::Say {
+                        id: a.id,
+                        line: Line::SkitFloated,
+                    });
+                } else {
+                    for p in actors.iter().filter(|p| p.available && p.id != a.id) {
+                        out.push(Cmd::Freeze { id: p.id, secs });
+                    }
+                    out.push(Cmd::Say {
+                        id: b.id,
+                        line: Line::SkitFloated,
+                    });
+                }
+                s.phase = Phase::Float;
+                s.until = now + f64::from(secs) + 0.6;
+            }
+            Phase::Float if now >= s.until => {
+                // Down again: the fox giggles, the rest are pleased.
+                self.rested.insert(pair(s.a, s.b), now);
+                self.skit = None;
+                let mut out = vec![Cmd::Express {
+                    id: a.id,
+                    expression: Expression::Giggle,
+                }];
+                for p in actors.iter().filter(|p| p.id != a.id && p.available) {
+                    out.push(Cmd::Express {
+                        id: p.id,
+                        expression: Expression::Happy,
+                    });
+                }
+                return out;
+            }
             Phase::Play(turn) if now >= s.until => {
                 if turn >= PLAY_TURNS {
                     // Played out: both pleased, no making up needed.
@@ -411,6 +545,58 @@ impl Director {
         if pairs.is_empty() {
             return Vec::new();
         }
+        // The fox, now and then, casts a spell on the rest instead.
+        let fox = pairs.iter().find_map(|&(a, b)| {
+            [(a, b), (b, a)]
+                .into_iter()
+                .find(|(f, _)| f.species == Species::Fox)
+        });
+        // Asked for a spell with no fox free yet: wait for one.
+        if self.forced == Some(Kind::Spell) && fox.is_none() {
+            self.next_at = Some(now + 1.0);
+            return Vec::new();
+        }
+        let forced = self.forced.take();
+        let spell = match forced {
+            Some(kind) => kind == Kind::Spell,
+            None => rng.f32() < SPELL_SHARE,
+        };
+        if let Some((fox, other)) = fox
+            && spell
+        {
+            self.skit = Some(Skit {
+                kind: Kind::Spell,
+                a: fox.id,
+                b: other.id,
+                phase: Phase::Cast,
+                until: now + CAST_SECS,
+            });
+            let mut out = vec![
+                Cmd::Face {
+                    id: fox.id,
+                    x: other.x,
+                },
+                Cmd::Cast { id: fox.id },
+                Cmd::Say {
+                    id: fox.id,
+                    line: Line::SkitSpell,
+                },
+            ];
+            // The owl puffs up and stares.
+            if other.species == Species::Owl {
+                out.extend([
+                    Cmd::Act {
+                        id: other.id,
+                        act: Act::Flap,
+                    },
+                    Cmd::Express {
+                        id: other.id,
+                        expression: Expression::FedUp,
+                    },
+                ]);
+            }
+            return out;
+        }
         // A chick and a duckling present always get to talk past each other.
         let talk = pairs.iter().position(|(a, b)| {
             matches!(
@@ -419,6 +605,10 @@ impl Director {
             )
         });
         let (kind, (a, b)) = match talk {
+            _ if matches!(forced, Some(Kind::Play | Kind::GlareChase)) => (
+                forced.unwrap_or(Kind::Play),
+                pairs[rng.usize(..pairs.len())],
+            ),
             Some(i) if rng.bool() => (Kind::TalkPast, pairs[i]),
             // Half the time they play instead of squabbling.
             _ if rng.bool() => (Kind::Play, pairs[rng.usize(..pairs.len())]),
@@ -576,16 +766,23 @@ mod tests {
     /// A director that has just started a skit of `kind` between pets 1
     /// and 2 (trying seeds until one does), and when.
     fn started_as(kind: Kind, cast: &[Actor]) -> (Director, f64) {
+        let (dir, t, _) = started_with(kind, cast);
+        (dir, t)
+    }
+
+    /// [`started_as`], with the commands it started with.
+    fn started_with(kind: Kind, cast: &[Actor]) -> (Director, f64, Vec<Cmd>) {
         for seed in 0..50 {
             let mut rng = fastrand::Rng::with_seed(seed);
             let mut dir = Director::default();
             let mut t = 0.0;
+            let mut first = Vec::new();
             while !dir.involves(1) {
-                dir.tick(t, true, 2, cast, &mut rng);
+                first = dir.tick(t, true, 2, cast, &mut rng);
                 t += 1.0;
             }
             if dir.skit.is_some_and(|s| s.kind == kind) {
-                return (dir, t);
+                return (dir, t, first);
             }
         }
         panic!("never started a {kind:?}");
@@ -644,6 +841,119 @@ mod tests {
         assert_eq!(happy, 2);
     }
 
+    /// Every command of a skit to its end, the walkers moved 4 px a tick.
+    fn run(dir: &mut Director, cast: &mut [Actor], start: f64) -> Vec<Cmd> {
+        let mut rng = fastrand::Rng::with_seed(3);
+        let mut all = Vec::new();
+        let mut now = start;
+        for _ in 0..4000 {
+            for cmd in dir.tick(now, true, 2, cast, &mut rng) {
+                if let Cmd::Walk { id, x, .. } = cmd {
+                    let p = cast.iter_mut().find(|p| p.id == id).unwrap();
+                    p.x += (x - p.x).clamp(-4.0, 4.0);
+                }
+                all.push(cmd);
+            }
+            if !dir.involves(1) {
+                break;
+            }
+            now += 0.05;
+        }
+        assert!(!dir.involves(1), "never ended");
+        all
+    }
+
+    #[test]
+    fn a_play_fight_has_one_tussle_in_the_middle_up_close() {
+        let mut cast = actors([Species::Shiba, Species::Fold], [100.0, 900.0]);
+        let (mut dir, t) = started_as(Kind::Play, &cast);
+        let mut rng = fastrand::Rng::with_seed(3);
+        let (mut tussles, mut turns_before, mut apart) = (0, 0, f32::NAN);
+        let mut now = t;
+        for _ in 0..4000 {
+            for cmd in dir.tick(now, true, 2, &cast, &mut rng) {
+                match cmd {
+                    Cmd::Walk { id, x, .. } => {
+                        let p = cast.iter_mut().find(|p| p.id == id).unwrap();
+                        p.x += (x - p.x).clamp(-4.0, 4.0);
+                    }
+                    Cmd::Act { .. } if tussles == 0 => turns_before += 1,
+                    Cmd::Tussle { id: 1, with: 2, .. } => {
+                        tussles += 1;
+                        apart = (cast[0].x - cast[1].x).abs();
+                    }
+                    _ => {}
+                }
+            }
+            if !dir.involves(1) {
+                break;
+            }
+            now += 0.05;
+        }
+        assert_eq!(tussles, 1);
+        assert!(turns_before >= 1, "the tussle came before any turn");
+        // The Shiba's zoomies take it far off; they run back together.
+        assert!(apart <= CONTACT, "tussled {apart} px apart");
+    }
+
+    #[test]
+    fn the_fox_spell_holds_everyone_else_up_and_ends_in_giggles() {
+        let mut cast = actors([Species::Fox, Species::Munchkin], [100.0, 900.0]);
+        cast.push(Actor {
+            id: 3,
+            species: Species::Shiba,
+            x: 500.0,
+            available: true,
+        });
+        let (mut dir, t, mut cmds) = started_with(Kind::Spell, &cast);
+        cmds.extend(run(&mut dir, &mut cast, t));
+        assert!(cmds.contains(&Cmd::Cast { id: 1 }));
+        assert!(cmds.contains(&Cmd::Say {
+            id: 1,
+            line: Line::SkitSpell
+        }));
+        let held: Vec<u64> = cmds
+            .iter()
+            .filter_map(|c| match c {
+                Cmd::Freeze { id, .. } => Some(*id),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(held, vec![2, 3]);
+        assert_eq!(
+            cmds.last(),
+            Some(&Cmd::Express {
+                id: 3,
+                expression: Expression::Happy
+            })
+        );
+        assert!(cmds.contains(&Cmd::Express {
+            id: 1,
+            expression: Expression::Giggle
+        }));
+        // Nobody walks: a spell is cast from where the fox stands.
+        assert!(!cmds.iter().any(|c| matches!(c, Cmd::Walk { .. })));
+    }
+
+    #[test]
+    fn the_owl_stares_the_spell_back_and_the_fox_floats() {
+        let mut cast = actors([Species::Fox, Species::Owl], [100.0, 900.0]);
+        let (mut dir, t, mut cmds) = started_with(Kind::Spell, &cast);
+        cmds.extend(run(&mut dir, &mut cast, t));
+        let held: Vec<u64> = cmds
+            .iter()
+            .filter_map(|c| match c {
+                Cmd::Freeze { id, .. } => Some(*id),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(held, vec![1]);
+        assert!(cmds.contains(&Cmd::Act {
+            id: 2,
+            act: Act::Flap
+        }));
+    }
+
     #[test]
     fn breaking_it_up_makes_them_make_up_at_once() {
         let cast = actors([Species::Shiba, Species::Owl], [100.0, 900.0]);
@@ -697,7 +1007,7 @@ mod tests {
         play(&mut dir, cast.clone(), t);
         let mut rng = fastrand::Rng::with_seed(5);
         let end = t + 60.0;
-        for dt in 0..300 {
+        for dt in 0..(PAIR_COOLDOWN as u32 - 61) {
             dir.tick(end + f64::from(dt), true, 2, &cast, &mut rng);
             assert!(!dir.involves(1), "started again too soon");
         }
