@@ -32,6 +32,9 @@ const TOY_STAYS: f64 = 60.0;
 const CATNIP_SECS: f64 = 60.0;
 /// A cat that likes catnip goes back to it after this long, seconds.
 const NIP_AGAIN: f64 = 20.0;
+/// Cats this far from the fox (pixels, centre to centre) come to bat at
+/// its fire.
+const SWAT_REACH: f32 = 700.0;
 /// Pets go for a thing within this far either side, pixels.
 const REACH: f32 = 1100.0;
 /// How often the input timing is sampled.
@@ -458,6 +461,8 @@ pub(super) struct Fun {
     /// Not back to the catnip before this (it has just been; one that
     /// does not care for it, not to this sprig again).
     nip_again: f64,
+    /// A cat batting at the fox's fire: this fox's.
+    swat: Option<u64>,
     /// Effects under way, since when.
     pub fx: Vec<(Fx, f64)>,
     /// Lying about while you read, until then; little things to do there.
@@ -490,6 +495,7 @@ impl Fun {
             || self.goto.is_some()
             || self.scene.is_some()
             || self.nip.is_some()
+            || self.swat.is_some()
             || self.carry.is_some()
             || self.hide.is_some()
             || now < self.hold_until
@@ -964,7 +970,7 @@ impl Pet {
                 Fx::Dust => (w / 2.0, floor),
                 Fx::Splash => (w / 2.0, floor - 0.13 * PPU * s),
                 Fx::Spell => (w / 2.0, floor),
-                Fx::Bubble | Fx::Brawl => (w / 2.0, floor - 0.95 * PPU * s),
+                Fx::Bubble | Fx::Dream | Fx::Brawl => (w / 2.0, floor - 0.95 * PPU * s),
             };
             props::effect(canvas, fx, at, s, (t - since) as f32);
         }
@@ -1091,6 +1097,18 @@ pub(super) fn tick(
     };
     let typing_for = ground.watcher.typing_for(now);
     let scene_on = pets.iter().any(|p| p.fun.scene.is_some());
+    // The fox calling up its fire: where, for the cats to bat at it.
+    let fire = pets.iter().find_map(|p| {
+        p.fun
+            .scene
+            .filter(|r| r.scene == Scene::Foxfire && r.phase == 1)
+            .map(|_| Fire {
+                fox: p.save.id,
+                x: p.center_x(),
+                feet: p.body.feet().1,
+                half: 0.5 * p.body.size.0,
+            })
+    });
     let mut start_scene = !scene_on;
     for i in 0..pets.len() {
         chase(ground, pets, i, ctx);
@@ -1099,6 +1117,7 @@ pub(super) fn tick(
         order(p, ctx, cursor);
         smell_nip(ground, p, now);
         nip(ground, p, ctx);
+        swat(p, fire, ctx);
         if start_scene && maybe_scene(ground, p, ctx) {
             start_scene = false;
         }
@@ -1111,6 +1130,7 @@ pub(super) fn tick(
         p.anim.lively = p.fun.scene.is_some()
             || p.fun.chase.is_some()
             || p.fun.nip.is_some()
+            || p.fun.swat.is_some()
             || p.playing
             || p.play_fight;
         // In a pond: the duckling swims as soon as its feet are over the
@@ -1589,6 +1609,58 @@ fn nip(ground: &mut Playground, p: &mut Pet, ctx: &mut Ctx) {
                 if likes {
                     cheer(p, ctx);
                 }
+            }
+        }
+    }
+}
+
+/// The fox's fire, as the cats see it (see [`swat`]).
+#[derive(Clone, Copy, Debug)]
+struct Fire {
+    fox: u64,
+    x: f32,
+    feet: f32,
+    half: f32,
+}
+
+/// A cat near the fox calling up its fire runs over and bats at the orbs
+/// hanging round it, now and then with a pounce, until the fire is gone.
+fn swat(p: &mut Pet, fire: Option<Fire>, ctx: &mut Ctx) {
+    let now = ctx.world.now;
+    let cat = matches!(p.species, Species::Munchkin | Species::Fold);
+    let Some(f) = fire else {
+        if p.fun.swat.take().is_some() {
+            cheer(p, ctx);
+        }
+        return;
+    };
+    if !cat || p.save.id == f.fox {
+        return;
+    }
+    if p.fun.swat.is_none() {
+        let near = (p.center_x() - f.x).abs() < SWAT_REACH;
+        let level = (p.body.feet().1 - f.feet).abs() < 0.3 * p.body.size.1;
+        if !near || !level || p.fun.busy(now) || !p.free_to_play(now) {
+            return;
+        }
+        println!("{}: bats at the fox-fire", p.save.name);
+        p.fun.swat = Some(f.fox);
+    }
+    if p.press.is_some() || p.mind.asleep() {
+        p.fun.swat = None;
+        return;
+    }
+    // Beside the fox, on its own side, where the orbs hang.
+    let side = if p.center_x() < f.x { -1.0 } else { 1.0 };
+    let spot = f.x + side * (f.half + 0.25 * p.body.size.0);
+    let to_feet = p.body.feet().0 - p.center_x();
+    if p.walk_to(spot + to_feet, 1.6, ctx.terrain) != Heading::Going {
+        p.body.facing = -side;
+        if p.anim.doing().is_none() && !p.anim.hopping() {
+            if p.rng.f32() < 0.25 {
+                p.anim.pounce();
+            } else {
+                p.try_gesture(Act::Paw);
             }
         }
     }

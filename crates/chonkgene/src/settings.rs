@@ -608,7 +608,7 @@ fn setup(
         st.send(Msg::RemoveTraces);
         ui.set_notice(
             format!(
-                "已移除開機自動啟動。要完全移除，請結束肉肉賴桌，再刪除這個資料夾：{}",
+                "已移除開機自動啟動和應用程式選單的捷徑。要完全移除，請結束肉肉賴桌，再刪除這個資料夾：{}",
                 st.data.path.display()
             )
             .into(),

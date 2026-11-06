@@ -635,10 +635,13 @@ pub enum Fx {
     /// A fright (put down by the fox's spell): lines of shock over the
     /// head and a drop of sweat sliding down; `at` is the top of the head.
     Fright,
+    /// The spell's bubble round a pet asleep: lilac, a crescent moon and
+    /// stars drifting round its rim; `at` is the middle of the pet.
+    Dream,
 }
 
 impl Fx {
-    pub const ALL: [Fx; 8] = [
+    pub const ALL: [Fx; 9] = [
         Fx::Hearts,
         Fx::Sparkles,
         Fx::Dust,
@@ -647,6 +650,7 @@ impl Fx {
         Fx::Spell,
         Fx::Brawl,
         Fx::Fright,
+        Fx::Dream,
     ];
 
     /// How long it shows, seconds.
@@ -656,7 +660,7 @@ impl Fx {
             Fx::Sparkles => 0.9,
             Fx::Dust => 0.7,
             Fx::Splash => 0.8,
-            Fx::Bubble => 3.6,
+            Fx::Bubble | Fx::Dream => 3.6,
             Fx::Spell => 1.4,
             Fx::Brawl => 2.6,
             Fx::Fright => 1.8,
@@ -719,7 +723,10 @@ pub fn effect(pm: &mut Pixmap, fx: Fx, at: (f32, f32), s: f32, t: f32) {
                 }
             }
         }
-        Fx::Bubble => bubble(pm, at, s, t, (1.0 - ((u - 0.92) / 0.08).max(0.0)).min(1.0)),
+        Fx::Bubble | Fx::Dream => {
+            let fade = (1.0 - ((u - 0.92) / 0.08).max(0.0)).min(1.0);
+            bubble(pm, at, s, t, fade, fx == Fx::Dream);
+        }
         Fx::Spell => spell(pm, at, s, t, u, fade),
         Fx::Brawl => brawl(pm, at, s, t, 1.0 - ((u - 0.9) / 0.1).max(0.0)),
         Fx::Fright => fright(pm, at, s, t, fade),
@@ -742,8 +749,9 @@ pub fn effect(pm: &mut Pixmap, fx: Fx, at: (f32, f32), s: f32, t: f32) {
 }
 
 /// The spell's bubble round a pet (see [`Fx::Bubble`]): see-through, a
-/// bright rim, a highlight and a twinkle going round it.
-fn bubble(pm: &mut Pixmap, at: (f32, f32), s: f32, t: f32, fade: f32) {
+/// bright rim, a highlight and a twinkle going round it; `dream`: lilac,
+/// with a crescent moon and stars (see [`Fx::Dream`]).
+fn bubble(pm: &mut Pixmap, at: (f32, f32), s: f32, t: f32, fade: f32, dream: bool) {
     let (x, y) = at;
     // Swelling up as it forms, wobbling a little after.
     let grow = (t / 0.35).min(1.0);
@@ -756,9 +764,39 @@ fn bubble(pm: &mut Pixmap, at: (f32, f32), s: f32, t: f32, fade: f32) {
         y,
         rx,
         ry,
-        with_alpha([0xBF, 0xE6, 0xFF, 60], fade),
+        with_alpha(
+            if dream {
+                [0xD8, 0xC8, 0xFF, 70]
+            } else {
+                [0xBF, 0xE6, 0xFF, 60]
+            },
+            fade,
+        ),
         id,
     );
+    if dream {
+        // A crescent moon up by the rim, and stars drifting round.
+        let (mx, my, mr) = (x + 0.45 * rx, y - 0.55 * ry, 9.0 * s * grow);
+        circle(pm, mx, my, mr, with_alpha([0xFF, 0xE9, 0x9A, 240], fade));
+        circle(
+            pm,
+            mx + 0.45 * mr,
+            my - 0.3 * mr,
+            0.85 * mr,
+            with_alpha([0xD8, 0xC8, 0xFF, 255], fade),
+        );
+        for k in 0..3 {
+            let a = TAU * (0.12 * t + k as f32 / 3.0) + 2.0;
+            let tw = (TAU * (0.8 * t + 0.3 * k as f32)).sin().abs();
+            star(
+                pm,
+                x + a.cos() * 0.72 * rx,
+                y + a.sin() * 0.72 * ry,
+                (2.0 + 2.0 * tw) * s,
+                with_alpha([0xFF, 0xF6, 0xD0, 255], fade),
+            );
+        }
+    }
     let mut rim = PathBuilder::new();
     if let Some(r) = Rect::from_xywh(x - rx, y - ry, 2.0 * rx, 2.0 * ry) {
         rim.push_oval(r);

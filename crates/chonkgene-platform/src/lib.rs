@@ -8,6 +8,7 @@
 pub mod audio;
 pub mod autostart;
 pub mod hotkey;
+pub mod menu_entry;
 pub mod tray;
 
 #[cfg(target_os = "linux")]

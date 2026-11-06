@@ -576,7 +576,8 @@ impl Animator {
         }
     }
 
-    fn hopping(&self) -> bool {
+    /// In the air in a hop (a cheer, a pounce).
+    pub fn hopping(&self) -> bool {
         self.hop < 0.0 || self.hop_vel != 0.0
     }
 

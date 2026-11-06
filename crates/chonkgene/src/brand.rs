@@ -13,6 +13,11 @@ macro_rules! baked {
 /// Every baked size, smallest first. 16–32 are drawn on their own pixel grid.
 const PNGS: [(u32, &[u8]); 9] = baked!(16, 20, 24, 32, 40, 48, 64, 128, 256);
 
+/// The largest baked size as PNG (the Linux app-menu entry's icon).
+pub fn png_256() -> &'static [u8] {
+    PNGS[PNGS.len() - 1].1
+}
+
 /// The icon at `px` pixels square, as straight-alpha RGBA: the baked size
 /// itself when there is one, else the next larger one scaled down.
 pub fn rgba(px: u32) -> Vec<u8> {

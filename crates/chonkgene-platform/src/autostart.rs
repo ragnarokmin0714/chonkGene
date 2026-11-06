@@ -19,7 +19,7 @@ pub fn sync(enabled: bool, exe: &Path) -> Result<(), String> {
 }
 
 #[cfg(target_os = "linux")]
-mod imp {
+pub(crate) mod imp {
     use std::fs;
     use std::path::{Path, PathBuf};
 
@@ -32,7 +32,7 @@ mod imp {
     }
 
     /// Quote a path for a desktop entry's Exec key.
-    fn quote(path: &Path) -> String {
+    pub(crate) fn quote(path: &Path) -> String {
         let s = path.to_string_lossy();
         let escaped: String = s
             .chars()
@@ -45,7 +45,11 @@ mod imp {
     }
 
     pub fn current() -> Option<PathBuf> {
-        let text = fs::read_to_string(entry()?).ok()?;
+        exec_in(&fs::read_to_string(entry()?).ok()?)
+    }
+
+    /// The program a desktop entry's Exec key starts (as `quote` wrote it).
+    pub(crate) fn exec_in(text: &str) -> Option<PathBuf> {
         let exec = text.lines().find_map(|l| l.strip_prefix("Exec="))?;
         let inner = exec.trim().strip_prefix('"')?.strip_suffix('"')?;
         let mut out = String::new();

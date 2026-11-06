@@ -19,11 +19,15 @@ use std::process::ExitCode;
 
 const USAGE: &str = "\
 usage: chonkgene [--data DIR] [--stats] [--gpu-check]
+                 [--menu-entry | --no-menu-entry]
 
   --data DIR    keep settings and pets in DIR instead of the usual place
   --stats       print CPU and memory every 5 seconds
   --gpu-check   measure the GPU renderer and write a report next to the
-                program (chonkGene-gpu-check), then open that folder";
+                program (chonkGene-gpu-check), then open that folder
+  --menu-entry  Linux: put 肉肉賴桌 with its icon in the desktop's app
+                menu (moving the folder later is fine: it follows)
+  --no-menu-entry  take it out of the app menu again";
 
 fn main() -> ExitCode {
     let mut data: Option<PathBuf> = None;
@@ -31,6 +35,7 @@ fn main() -> ExitCode {
     let mut settings = false;
     let mut pet: Option<u64> = None;
     let mut gpu_check = false;
+    let mut menu: Option<bool> = None;
     let args: Vec<String> = std::env::args().skip(1).collect();
     let mut it = args.iter();
     while let Some(arg) = it.next() {
@@ -42,6 +47,8 @@ fn main() -> ExitCode {
             "--stats" => stats = true,
             "--settings" => settings = true,
             "--gpu-check" => gpu_check = true,
+            "--menu-entry" => menu = Some(true),
+            "--no-menu-entry" => menu = Some(false),
             "--pet" => match it.next().and_then(|v| v.parse().ok()) {
                 Some(id) => pet = Some(id),
                 None => return usage("--pet needs a pet id"),
@@ -53,7 +60,9 @@ fn main() -> ExitCode {
             other => return usage(&format!("unknown argument {other}")),
         }
     }
-    let result = if gpu_check {
+    let result = if let Some(add) = menu {
+        menu_entry(add)
+    } else if gpu_check {
         check_gpu()
     } else if settings {
         settings::run(data, pet)
@@ -86,4 +95,18 @@ fn check_gpu() -> Result<(), String> {
 fn usage(msg: &str) -> ExitCode {
     eprintln!("{msg}\n\n{USAGE}");
     ExitCode::from(2)
+}
+
+/// `--menu-entry`, `--no-menu-entry`: the Linux app-menu entry.
+fn menu_entry(add: bool) -> Result<(), String> {
+    use chonkgene_platform::menu_entry;
+    if add {
+        let exe = std::env::current_exe().map_err(|e| e.to_string())?;
+        menu_entry::add(&exe, brand::png_256())?;
+        println!("肉肉賴桌 is in the app menu now.");
+    } else {
+        menu_entry::remove()?;
+        println!("肉肉賴桌 is out of the app menu.");
+    }
+    Ok(())
 }

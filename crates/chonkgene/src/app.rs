@@ -779,6 +779,10 @@ impl App {
         if let Err(e) = autostart::sync(self.settings.start_at_login, &exe) {
             eprintln!("start at login: {e}");
         }
+        // The app-menu entry, if asked for once, follows a moved folder too.
+        if let Err(e) = chonkgene_platform::menu_entry::repair(&exe, crate::brand::png_256()) {
+            eprintln!("app-menu entry: {e}");
+        }
     }
 
     fn command(&mut self, el: &ActiveEventLoop, command: TrayCommand) {
@@ -1046,6 +1050,9 @@ impl App {
             Msg::RemoveTraces => {
                 self.settings.start_at_login = false;
                 self.sync_autostart();
+                if let Err(e) = chonkgene_platform::menu_entry::remove() {
+                    eprintln!("app-menu entry: {e}");
+                }
             }
             Msg::Quit => el.exit(),
         }
@@ -1568,6 +1575,7 @@ fn actors(pets: &[Pet], now: f64) -> Vec<Actor> {
                 && p.anim.expression != Expression::Sulk
                 // Busy with a toy, a scene, catnip or something asked.
                 && !p.fun.busy(now),
+            asleep: p.mind.asleep() && p.press.is_none() && p.body.motion == Motion::Idle,
         })
         .collect()
 }
@@ -1703,7 +1711,13 @@ fn direct(pets: &mut [Pet], ctx: &mut Ctx, cmds: Vec<Cmd>) {
                         until: now + f64::from(secs),
                         base: p.body.pos,
                     });
-                    p.fun.effect(Fx::Bubble, now);
+                    // Asleep, it floats up still asleep, in a dream bubble.
+                    let fx = if p.mind.asleep() {
+                        Fx::Dream
+                    } else {
+                        Fx::Bubble
+                    };
+                    p.fun.effect(fx, now);
                 }
             }
             Cmd::Scare { from, .. } => {
@@ -1957,7 +1971,9 @@ impl Pet {
         };
         if t >= f.until {
             self.float = None;
-            self.fun.fx.retain(|(fx, _)| *fx != Fx::Bubble);
+            self.fun
+                .fx
+                .retain(|(fx, _)| !matches!(fx, Fx::Bubble | Fx::Dream));
             self.fun.effect(Fx::Sparkles, t);
             self.body.release();
             return false;
@@ -2368,8 +2384,9 @@ impl Pet {
         self.anim.walking = self.body.motion == Motion::Walk;
         self.anim.pace = self.body.pace;
         self.anim.facing = self.body.facing;
-        // Frozen by the spell, its animation stands still.
-        if !floating {
+        // Frozen by the spell, its animation stands still; asleep, it
+        // sleeps on (breathing, dreaming).
+        if !floating || self.mind.asleep() {
             self.anim.step(dt);
         }
 

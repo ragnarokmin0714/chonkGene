@@ -63,6 +63,9 @@ pub struct Actor {
     pub x: f32,
     /// Awake, not held, not grumpy, not busy: free to squabble.
     pub available: bool,
+    /// Asleep where it lies (not held, not falling): the fox's 定身術
+    /// floats it up in a dream bubble without waking it.
+    pub asleep: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -589,7 +592,10 @@ impl Director {
                         line: Line::SkitFloated,
                     });
                 } else {
-                    for p in actors.iter().filter(|p| p.available && p.id != a.id) {
+                    for p in actors
+                        .iter()
+                        .filter(|p| (p.available || p.asleep) && p.id != a.id)
+                    {
                         out.push(Cmd::Freeze { id: p.id, secs });
                     }
                     if b.id != a.id {
@@ -1007,6 +1013,7 @@ mod tests {
                 species: species[i],
                 x: xs[i],
                 available: true,
+                asleep: false,
             })
             .collect()
     }
@@ -1199,6 +1206,7 @@ mod tests {
             species: Species::Shiba,
             x: 500.0,
             available: true,
+            asleep: false,
         });
         let (mut dir, t, mut cmds) = started_with(Kind::Spell, &cast);
         cmds.extend(run(&mut dir, &mut cast, t));
@@ -1233,6 +1241,29 @@ mod tests {
         }));
         // Nobody walks: a spell is cast from where the fox stands.
         assert!(!cmds.iter().any(|c| matches!(c, Cmd::Walk { .. })));
+    }
+
+    /// A pet asleep floats up too, in a dream bubble, and is put back down
+    /// without waking: no fright for it.
+    #[test]
+    fn the_spell_floats_a_sleeper_and_lets_it_sleep_on() {
+        let mut cast = actors([Species::Fox, Species::Shiba], [100.0, 900.0]);
+        cast.push(Actor {
+            id: 3,
+            species: Species::Fold,
+            x: 500.0,
+            available: false,
+            asleep: true,
+        });
+        let mut dir = Director::default();
+        dir.cast(1, Spell::Freeze, 0.0, &cast);
+        let cmds = until_over(&mut dir, &mut cast, 0.0);
+        assert!(cmds.contains(&Cmd::Freeze {
+            id: 3,
+            secs: FLOAT_SECS
+        }));
+        assert!(!cmds.iter().any(|c| matches!(c, Cmd::Scare { id: 3, .. })));
+        assert!(cmds.iter().any(|c| matches!(c, Cmd::Scare { id: 2, .. })));
     }
 
     #[test]
@@ -1282,6 +1313,7 @@ mod tests {
                 species: Species::Chick,
                 x: 100.0,
                 available: true,
+                asleep: false,
             });
             cast
         };
