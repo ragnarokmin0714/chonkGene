@@ -1049,6 +1049,10 @@ Roger said do the small leftovers too:
 - **Cats bat at the fox-fire** (idea list): while the fox calls up its fire, a cat free to play within 700 px on its level runs to its side, faces it and paws at the orbs, a pounce now and then, until the fire is gone, then is pleased (`app/play.rs` `swat`, `Fun::swat`, `SWAT_REACH`). Under Xvfb: `芋圓: bats at the fox-fire`.
 - **The Linux app-menu entry** (owed since the icon work, §1.9): `chonkgene --menu-entry` writes `chonkgene.desktop` to `$XDG_DATA_HOME/applications` and the 256 px icon to `icons/hicolor/256x256/apps` (never by itself: the program is portable); a moved folder is followed each start (`menu_entry::repair`, as the login entry is); `--no-menu-entry` and 「移除所有痕跡」 take it away. Windows has nothing to add (the exe carries its icon). Test `an_entry_is_added_repaired_and_removed`; tried here with a scratch `XDG_DATA_HOME`.
 
+### A cuter hand (2026-11-06)
+
+Roger asked for a cuter hand over the pets and picked, of three styles (a cat's paw, a chubby little hand, a mitten), the chubby hand. Drawn by the program (`chonkgene-render` `cursor.rs`, no pictures shipped): a plush peach hand with short round fingers, a dark brown outline that shows on light and dark alike, a blush on its back and a pink cuff; open over a pet or a toy, the index finger out while pressing or scratching, a fist while carrying a pet or a toy. 36 px at 100%, scaled by the screen; made once into the system's cursors (`make_hands`, winit `CustomCursor`); if the system refuses one, its own hand is used as before. Test `every_hand_is_drawn_round_its_hot_spot`; under Xvfb the cursor over a pet and while scratching is the 36 px drawn hand. Owed: the look on Windows.
+
 ### Phase 1: Shiba prototype (feel) — `v0.1.0`
 
 - The art pipeline (§3.3) works end to end for one Shiba, with placeholder art.
