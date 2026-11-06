@@ -8,6 +8,7 @@
 //! [`Renderer`] picks one.
 
 pub mod bubble;
+pub mod cursor;
 pub mod fidget;
 pub mod gpu;
 pub mod gpu_check;

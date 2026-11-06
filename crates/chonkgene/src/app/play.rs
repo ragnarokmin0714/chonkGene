@@ -22,7 +22,9 @@ use chonkgene_render::raymarch::FLOOR_PX;
 use tiny_skia::{Pixmap, PixmapPaint, Transform};
 use winit::dpi::PhysicalPosition;
 use winit::event_loop::ActiveEventLoop;
-use winit::window::{CursorIcon, Window};
+use winit::window::Window;
+
+use chonkgene_render::cursor::Hand;
 
 use super::{Ctx, Pet};
 
@@ -121,7 +123,7 @@ impl PropWin {
             .ok()?;
         let mut presenter = Presenter::new(shared, &window).ok()?;
         if prop.thing.grabbed() {
-            window.set_cursor(CursorIcon::Grab);
+            window.set_cursor(super::hand(Hand::Open));
         } else {
             if let Err(e) = presenter.set_ghost(shared) {
                 eprintln!("a thing on the desktop: {e}");
@@ -704,7 +706,7 @@ impl Playground {
             down,
             vel: (0.0, 0.0),
         });
-        w.window.set_cursor(CursorIcon::Grabbing);
+        w.window.set_cursor(super::hand(Hand::Grab));
         w.claimed = None;
         let (id, catnip) = (w.id, w.prop.thing == Thing::Catnip);
         for p in pets.iter_mut() {
@@ -727,7 +729,7 @@ impl Playground {
         let Some(g) = w.grab.take() else {
             return;
         };
-        w.window.set_cursor(CursorIcon::Grab);
+        w.window.set_cursor(super::hand(Hand::Open));
         if w.prop.thing == Thing::Catnip {
             // Moved where you like: it drops onto whatever is below, and
             // the pets come over again.

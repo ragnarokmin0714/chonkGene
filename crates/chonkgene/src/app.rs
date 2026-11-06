@@ -19,6 +19,7 @@ use chonkgene_core::species::{Grumpiness, Play, Species};
 use chonkgene_core::terrain::{Terrain, Win};
 use chonkgene_platform::tray::{Tray, TrayCommand};
 use chonkgene_platform::{Presenter, Shared, autostart, hotkey};
+use chonkgene_render::cursor::{self, Hand};
 use chonkgene_render::menu::{self, Icon, Item};
 use chonkgene_render::text::Face;
 use chonkgene_render::toy::{self as grass, Stalk};
@@ -30,7 +31,7 @@ use winit::application::ApplicationHandler;
 use winit::dpi::PhysicalPosition;
 use winit::event::{ElementState, MouseButton, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop, EventLoopProxy};
-use winit::window::{CursorIcon, Window, WindowId};
+use winit::window::{Cursor, CursorIcon, CustomCursor, Window, WindowId};
 
 use crate::brand;
 use crate::diag::diag;
@@ -1756,6 +1757,49 @@ fn direct(pets: &mut [Pet], ctx: &mut Ctx, cmds: Vec<Cmd>) {
     }
 }
 
+thread_local! {
+    /// The hands over pets and toys (`chonkgene_render::cursor`), made
+    /// once the event loop runs.
+    static HANDS: std::cell::RefCell<Vec<(Hand, CustomCursor)>> =
+        const { std::cell::RefCell::new(Vec::new()) };
+}
+
+/// Make the hands at the screen's scale (Roger: cuter than the system's).
+fn make_hands(el: &ActiveEventLoop, scale: f32) {
+    let px = (cursor::SIZE * scale).round() as u32;
+    let made: Vec<_> = Hand::ALL
+        .into_iter()
+        .filter_map(|h| {
+            let (rgba, (x, y)) = cursor::draw(h, px);
+            let side = px.clamp(16, 256) as u16;
+            match CustomCursor::from_rgba(rgba, side, side, x, y) {
+                Ok(source) => Some((h, el.create_custom_cursor(source))),
+                Err(e) => {
+                    eprintln!("the hand cursor: {e}");
+                    None
+                }
+            }
+        })
+        .collect();
+    HANDS.with(|hands| *hands.borrow_mut() = made);
+}
+
+/// The hand `h`, or the system's nearest one if ours could not be made.
+pub(crate) fn hand(h: Hand) -> Cursor {
+    HANDS
+        .with(|hands| {
+            hands
+                .borrow()
+                .iter()
+                .find(|(k, _)| *k == h)
+                .map(|(_, c)| Cursor::Custom(c.clone()))
+        })
+        .unwrap_or(Cursor::Icon(match h {
+            Hand::Open | Hand::Poke => CursorIcon::Pointer,
+            Hand::Grab => CursorIcon::Grabbing,
+        }))
+}
+
 /// The fox's face glows this long from the start of a cast (through the
 /// others floating, for 定身術), seconds.
 const SPELL_GLOW_SECS: f64 = 5.2;
@@ -1820,7 +1864,7 @@ fn spawn(
     let presenter = Presenter::new(shared, &window)?;
     // A hand over the pet (the window takes the mouse only where it is
     // drawn): something to pat.
-    window.set_cursor(CursorIcon::Pointer);
+    window.set_cursor(hand(Hand::Open));
     let seed = save.id.wrapping_mul(0x9E37_79B9_7F4A_7C15) ^ (t * 1000.0) as u64;
     Ok(Pet {
         mind: Mind::new(species, save.personality(), save.affinity()),
@@ -2239,7 +2283,7 @@ impl Pet {
                 if !press.moved && (-dy > LIFT_UP * s || dx.hypot(dy) > LIFT_ANY * s) {
                     press.moved = true;
                     self.anim.lift();
-                    self.window.set_cursor(CursorIcon::Grabbing);
+                    self.window.set_cursor(hand(Hand::Grab));
                 }
                 if press.moved {
                     let held_dt = (now - press.last).as_secs_f32();
@@ -2509,6 +2553,7 @@ impl ApplicationHandler<UserEvent> for App {
         };
         let monitor = el.primary_monitor();
         self.ui_scale = monitor.as_ref().map_or(1.0, |m| m.scale_factor() as f32);
+        make_hands(el, self.ui_scale);
         let (x, y, w, h) = shared
             .work_area()
             .or_else(|| {
@@ -2659,6 +2704,7 @@ impl ApplicationHandler<UserEvent> for App {
                             p.next = now;
                             return;
                         }
+                        p.window.set_cursor(hand(Hand::Poke));
                         p.press = Some(Press {
                             grab: p.cursor,
                             moved: false,
@@ -2722,6 +2768,7 @@ impl ApplicationHandler<UserEvent> for App {
                         };
                         if !cmds.is_empty() {
                             pets[i].press = None;
+                            pets[i].window.set_cursor(hand(Hand::Open));
                             let mut ctx = Ctx {
                                 el,
                                 shared,
@@ -2742,10 +2789,10 @@ impl ApplicationHandler<UserEvent> for App {
                         let Some(press) = p.press.take() else {
                             return;
                         };
+                        p.window.set_cursor(hand(Hand::Open));
                         if press.moved {
                             diag!("{}: put down", p.save.name);
                             p.body.release();
-                            p.window.set_cursor(CursorIcon::Pointer);
                         } else {
                             let zone = p
                                 .anim
