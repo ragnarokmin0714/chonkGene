@@ -57,6 +57,8 @@ const HAPPY_SECS: f64 = 3.0;
 /// picture unchanged for longer than [`FROZEN`] while it should move.
 const STALL: Duration = Duration::from_millis(300);
 const FROZEN: Duration = Duration::from_millis(1500);
+/// How often the log sums up each pet's frames and the GPU time.
+const PERF_EVERY: Duration = Duration::from_secs(10);
 const ACT_SECS: f64 = 3.2;
 
 pub struct Options {
@@ -223,6 +225,8 @@ struct Pet {
     frozen: bool,
     /// Held up by the fox's spell.
     float: Option<Float>,
+    /// Frames asked for since the log's last summary.
+    draws: u32,
     /// Toys, commands, scenes, effects (app/play.rs).
     fun: play::Fun,
 }
@@ -430,6 +434,8 @@ struct App {
     /// When the event loop was told to wake next (for the log: woken late
     /// means the whole program was held up).
     wake: Option<Instant>,
+    /// When the log next sums up how the frames went.
+    perf_at: Instant,
 }
 
 impl App {
@@ -514,6 +520,7 @@ impl App {
             drawing: Duration::ZERO,
             presenting: Duration::ZERO,
             wake: None,
+            perf_at: now + PERF_EVERY,
         };
         // Trying the skits out: the next one soon, of the kind named.
         if let Ok(kind) = std::env::var("CHONKGENE_SKIT") {
@@ -1343,6 +1350,42 @@ impl App {
         *dirty = true;
     }
 
+    /// For the log: each pet's frames over the last [`PERF_EVERY`] (new
+    /// pictures a second against the frames asked for, frames pushed past
+    /// the budget, the times it held one back, GPU time a frame) and the
+    /// share of GPU time all of them took against the budget: enough to
+    /// tell a budget too tight from a GPU too slow.
+    fn log_frames(&mut self, now: Instant) {
+        let secs = (now - (self.perf_at - PERF_EVERY)).as_secs_f64().max(1.0);
+        self.perf_at = now + PERF_EVERY;
+        let mut gpu = 0.0;
+        for p in &mut self.pets {
+            let draws = std::mem::take(&mut p.draws);
+            let Some(f) = p.renderer.take_stats() else {
+                continue;
+            };
+            gpu += f.gpu_secs;
+            let ms = 1000.0 * f.gpu_secs / f64::from(f.gpu_frames.max(1));
+            diag!(
+                "frames: {} {:.1}/s shown of {:.1}/s asked; sent {} ({} past the budget, {} walking), held back {}; GPU {ms:.1} ms a frame",
+                p.save.name,
+                f64::from(f.shown) / secs,
+                f64::from(draws) / secs,
+                f.sent,
+                f.pushed,
+                f.forced,
+                f.held_back,
+            );
+        }
+        if let Some(g) = chonkgene_render::shared_gpu() {
+            diag!(
+                "frames: GPU time {:.1}% of the last {secs:.0} s (budget {:.0}%)",
+                100.0 * gpu / secs,
+                100.0 * g.budget()
+            );
+        }
+    }
+
     fn report(&mut self, now: Instant) {
         let wall = STATS_EVERY.as_secs_f64();
         let cpu = self.stats_cpu.elapsed().as_secs_f64() / wall * 100.0;
@@ -1615,6 +1658,7 @@ fn spawn(
         shown_at: now,
         frozen: false,
         float: None,
+        draws: 0,
         fun: play::Fun::new(scale),
         save,
     })
@@ -2668,6 +2712,7 @@ impl ApplicationHandler<UserEvent> for App {
             *presenting += p.draw(ctx.shared, world.now);
             *drawing += started.elapsed();
             *frames += 1;
+            p.draws += 1;
             p.note_frozen(now);
             // A pet blending between poses on the GPU, or with a frame on
             // its way, needs frames to show it, even when its animation is
@@ -2695,6 +2740,9 @@ impl ApplicationHandler<UserEvent> for App {
         }
         if self.stats && now >= self.stats_at {
             self.report(now);
+        }
+        if visible && now >= self.perf_at {
+            self.log_frames(now);
         }
 
         let due = [

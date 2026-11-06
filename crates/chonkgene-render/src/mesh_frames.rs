@@ -45,6 +45,25 @@ const MAX_STEP: f32 = 1.0 / 60.0;
 /// Roger's eleventh pass, item 5: pets stood frozen for seconds while
 /// others took the budget).
 const STARVED: Duration = Duration::from_millis(250);
+/// After a touch lets go, its frames skip the budget this long, so the
+/// answer to a click shows at once.
+const URGENT_SECS: f32 = 1.0;
+
+/// How a pet's frames went over a stretch of time, for the log: new
+/// pictures shown, frames sent to the GPU (`pushed`: past the budget,
+/// touched or held back too long; `forced`: walking, never counted against
+/// it), times the budget held one back, and the GPU time the drawn ones
+/// took.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct FrameStats {
+    pub shown: u32,
+    pub sent: u32,
+    pub pushed: u32,
+    pub forced: u32,
+    pub held_back: u32,
+    pub gpu_secs: f64,
+    pub gpu_frames: u32,
+}
 /// Standing still doing nothing this long (seconds), a pet sits down.
 const IDLE_SIT: f32 = 0.8;
 /// Asleep, a pet may change how it lies after this many seconds (and up
@@ -99,6 +118,12 @@ pub struct MeshRenderer {
     unsent: bool,
     /// Held back by the budget since then (see [`STARVED`]).
     unsent_since: Option<Instant>,
+    /// Touched just now: its frames do not wait for the budget.
+    urgent: bool,
+    /// Counted since the app last asked (see [`FrameStats`]).
+    stats: FrameStats,
+    /// The canvas's GPU seconds and frames when the app last asked.
+    gpu_seen: (f64, u32),
     /// The animator's clock at the last frame, and its belly jiggle then.
     clock: Option<f32>,
     belly: f32,
@@ -167,6 +192,9 @@ impl MeshRenderer {
             look: Look::Open,
             unsent: false,
             unsent_since: None,
+            urgent: false,
+            stats: FrameStats::default(),
+            gpu_seen: (0.0, 0),
             clock: None,
             belly: 0.0,
             gesture: None,
@@ -264,6 +292,18 @@ impl MeshRenderer {
 
     pub fn changed(&self) -> bool {
         self.changed
+    }
+
+    /// How its frames went since this was last asked (see [`FrameStats`]).
+    pub fn take_stats(&mut self) -> FrameStats {
+        let mut stats = std::mem::take(&mut self.stats);
+        if let Some(live) = &self.live {
+            let now = (live.canvas.measured, live.canvas.frames);
+            stats.gpu_secs = now.0 - self.gpu_seen.0;
+            stats.gpu_frames = now.1.saturating_sub(self.gpu_seen.1);
+            self.gpu_seen = now;
+        }
+        stats
     }
 
     /// Why the next picture has not come yet, for the log: held back by
@@ -521,6 +561,12 @@ impl MeshRenderer {
         // than skipped (a skipped frame shows the legs standing still while
         // the window slides on).
         let keep_up = walking || self.walk.speed() > 0.0;
+        // Touched (held, rubbed, or let go just now): the answer must show
+        // at once, so its frames go past the budget (the others wait).
+        let touch = &params.touch;
+        self.urgent = touch.held.is_some()
+            || touch.scratch > 0.0
+            || touch.last.is_some_and(|(.., ago)| ago < URGENT_SECS);
         let mut arrived = self.collect(false);
         let pending = |r: &Self| r.live.as_ref().is_some_and(|l| l.canvas.pending());
         if keep_up && pending(self) {
@@ -557,7 +603,8 @@ impl MeshRenderer {
             // Held back too long (others took the budget, or it is far too
             // small): this one goes anyway, so no pet ever stands still on
             // the screen for long.
-            let starved = self.unsent_since.is_some_and(|t| t.elapsed() >= STARVED);
+            let starved = self.urgent || self.unsent_since.is_some_and(|t| t.elapsed() >= STARVED);
+            self.stats.pushed += u32::from(starved);
             live.canvas
                 .try_submit(self.gpu, &scene, &self.bones, yaw, starved)
         };
@@ -566,12 +613,15 @@ impl MeshRenderer {
                 self.sent_bones.clone_from(&self.bones);
                 self.unsent = false;
                 self.unsent_since = None;
+                self.stats.sent += 1;
+                self.stats.forced += u32::from(force);
             }
             // Over the budget: try again on a later call, with a newer
             // pose (the frame rate drops instead of the GPU share rising).
             Ok(false) => {
                 self.unsent = true;
                 self.unsent_since.get_or_insert_with(Instant::now);
+                self.stats.held_back += 1;
             }
             Err(e) => eprintln!("drawing the mesh failed: {e}"),
         }
@@ -587,6 +637,7 @@ impl MeshRenderer {
             Ok(true) => {
                 self.shown_bones.clone_from(&self.sent_bones);
                 self.changed = true;
+                self.stats.shown += 1;
                 true
             }
             Ok(false) => false,

@@ -115,8 +115,13 @@ pub(crate) const MAPPED: u8 = 1;
 pub(crate) const MAP_FAILED: u8 = 2;
 
 /// The share of GPU time pets may use unless `CHONKGENE_GPU_BUDGET` (a
-/// percentage) says otherwise.
-const DEFAULT_BUDGET: f32 = 0.10;
+/// percentage) says otherwise. 10% was set for the ray-marched pets, whose
+/// cached frames cost about 1% each at rest; a mesh pet draws every frame,
+/// one walking at 30 fps on a UHD 770 (about 4 ms a frame) alone takes 12%,
+/// and the others then stuttered at the 4 fps the starvation rule allows
+/// (Roger, 2026-11-06). 25% keeps two pets moving smoothly and the rest at
+/// their idle rate, and still stops a runaway.
+const DEFAULT_BUDGET: f32 = 0.25;
 /// GPU seconds the budget may save up for a burst (a few frames at once).
 const BURST: f32 = 0.05;
 /// A frame's GPU time before it has been measured, at 100% (Roger's UHD

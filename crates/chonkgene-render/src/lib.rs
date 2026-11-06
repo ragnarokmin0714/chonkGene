@@ -33,7 +33,7 @@ use tiny_skia::{FillRule, LineCap, LineJoin, Paint, Pixmap, Stroke, Transform};
 
 use crate::gpu::Gpu;
 pub use crate::gpu_frames::GpuRenderer;
-pub use crate::mesh_frames::{MeshRenderer, pixel_size as mesh_pixel_size};
+pub use crate::mesh_frames::{FrameStats, MeshRenderer, pixel_size as mesh_pixel_size};
 pub use crate::sprite_frames::{SpriteRenderer, frame_transform};
 pub use crate::sprites::{KEYS, Key, Variant};
 
@@ -200,6 +200,14 @@ impl Renderer {
 
     /// Did the last `render` change the picture? When it did not, there is
     /// nothing to show again (PLAN §5: no upload when the pose is unchanged).
+    /// How its frames went since this was last asked (mesh pets).
+    pub fn take_stats(&mut self) -> Option<FrameStats> {
+        match self {
+            Self::Mesh(r) => Some(r.take_stats()),
+            _ => None,
+        }
+    }
+
     /// Why the next picture has not come yet, for the log (mesh pets).
     pub fn waiting(&self) -> &'static str {
         match self {
