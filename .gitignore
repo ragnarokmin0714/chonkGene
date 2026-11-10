@@ -2,3 +2,6 @@ target/
 
 # Icon drafts kept beside the docs, not for the repo.
 docs/icon-drafts/
+
+# Clips and logs Roger hands over for review (never committed).
+/inbox/
