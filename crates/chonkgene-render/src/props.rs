@@ -661,7 +661,7 @@ impl Fx {
             Fx::Dust => 0.7,
             Fx::Splash => 0.8,
             Fx::Bubble | Fx::Dream => 3.6,
-            Fx::Spell => 1.4,
+            Fx::Spell => 1.8,
             Fx::Brawl => 2.6,
             Fx::Fright => 1.8,
         }
@@ -832,8 +832,13 @@ fn bubble(pm: &mut Pixmap, at: (f32, f32), s: f32, t: f32, fade: f32, dream: boo
 fn spell(pm: &mut Pixmap, at: (f32, f32), s: f32, t: f32, u: f32, fade: f32) {
     let (x, y) = at;
     let id = Transform::identity();
-    let grow = (u / 0.25).min(1.0);
-    let (rx, ry) = (70.0 * s * grow, 16.0 * s * grow);
+    // Wide, and the fire tall, so it reads as a spell from across the
+    // desk (Roger's fourteenth pass: bigger).
+    let grow = (u / 0.2).min(1.0);
+    let (rx, ry) = (100.0 * s * grow, 14.0 * s * grow);
+    // Raised a little off the feet, so the window's bottom edge does not
+    // cut its near side off.
+    let y = y - 6.0 * s;
     oval(
         pm,
         x,
@@ -852,29 +857,74 @@ fn spell(pm: &mut Pixmap, at: (f32, f32), s: f32, t: f32, u: f32, fade: f32) {
         if let Some(r) = Rect::from_xywh(x - f * rx, y - f * ry, 2.0 * f * rx, 2.0 * f * ry) {
             ring.push_oval(r);
         }
-        stroke_path(pm, ring, with_alpha(*c, fade), 2.0 * s, id);
+        stroke_path(pm, ring, with_alpha(*c, fade), 2.6 * s, id);
+    }
+    // A flash going out as it is cast.
+    if u < 0.3 {
+        let v = u / 0.3;
+        let mut flash = PathBuilder::new();
+        let (fx, fy) = (rx * (0.4 + 0.8 * v), ry * (0.4 + 0.8 * v));
+        if let Some(r) = Rect::from_xywh(x - fx, y - fy, 2.0 * fx, 2.0 * fy) {
+            flash.push_oval(r);
+        }
+        stroke_path(
+            pm,
+            flash,
+            with_alpha([255, 255, 255, 230], 1.0 - v),
+            (4.0 - 2.5 * v) * s,
+            id,
+        );
     }
     // Fox-fire rising round it, each flame in its own place, swaying as it
-    // goes up (Roger: not spinning round).
-    for k in 0..6 {
-        let p = (u * 1.4 + k as f32 / 6.0).fract();
-        let a = TAU * (k as f32 / 6.0 + 1.0 / 12.0);
-        let sway = 4.0 * s * (TAU * 1.6 * t + k as f32 * 1.9).sin();
+    // goes up (Roger: not spinning round), a bright heart in each.
+    const FLAMES: usize = 10;
+    for k in 0..FLAMES {
+        let kf = k as f32 / FLAMES as f32;
+        let p = (u * 1.5 + kf).fract();
+        let a = TAU * (kf + 0.5 / FLAMES as f32);
+        let sway = 5.0 * s * (TAU * 1.6 * t + k as f32 * 1.9).sin();
         let (ox, oy) = (
             x + a.cos() * rx * (1.0 - 0.4 * p) + sway * p,
-            y - p * 110.0 * s + a.sin() * ry,
+            y - p * 150.0 * s + a.sin() * ry,
         );
         let c = if k % 2 == 0 {
             [0x8F, 0xCF, 0xFF, 255]
         } else {
             [0xFF, 0xA8, 0xCC, 255]
         };
-        glow(
-            pm,
-            ox,
-            oy,
-            (5.0 - 2.0 * p) * s,
-            with_alpha(c, fade * (1.0 - p)),
+        let alpha = fade * (1.0 - p * p);
+        flame(pm, (ox, oy), (1.4 - 0.7 * p) * s, c, t + k as f32, alpha);
+    }
+}
+
+/// One flame of fox-fire at `at`, `size` 1 for the fox-fire scene's: a
+/// glow, a white heart and a tip flickering up off it, `t` its own clock.
+fn flame(pm: &mut Pixmap, at: (f32, f32), size: f32, c: [u8; 4], t: f32, alpha: f32) {
+    let (ox, oy) = at;
+    glow(pm, ox, oy, 20.0 * size, with_alpha(c, 0.85 * alpha));
+    circle(
+        pm,
+        ox,
+        oy,
+        5.6 * size,
+        with_alpha([255, 255, 255, 240], alpha),
+    );
+    let mut tip = PathBuilder::new();
+    tip.move_to(ox - 4.5 * size, oy - 1.3 * size);
+    tip.quad_to(
+        ox + 2.6 * size * (TAU * 2.0 * t).sin(),
+        oy - 18.0 * size,
+        ox + 4.5 * size,
+        oy - 1.3 * size,
+    );
+    tip.close();
+    if let Some(p) = tip.finish() {
+        pm.fill_path(
+            &p,
+            &paint(with_alpha(c, alpha)),
+            FillRule::Winding,
+            Transform::identity(),
+            None,
         );
     }
 }
@@ -1271,27 +1321,8 @@ pub fn foxfire(pm: &mut Pixmap, at: (f32, f32), reach: (f32, f32), s: f32, t: f3
             at.0 + a.cos() * reach.0,
             at.1 + a.sin() * reach.1 + 4.0 * s * (TAU * 0.8 * t + kf).sin(),
         );
-        glow(pm, ox, oy, 15.0 * s, with_alpha(*c, 0.7));
-        circle(pm, ox, oy, 4.2 * s, [255, 255, 255, 230]);
-        // A flame's tip flickering up off it.
-        let mut tip = PathBuilder::new();
-        tip.move_to(ox - 3.4 * s, oy - 1.0 * s);
-        tip.quad_to(
-            ox + 2.0 * s * (TAU * 2.0 * t + kf).sin(),
-            oy - 13.0 * s,
-            ox + 3.4 * s,
-            oy - 1.0 * s,
-        );
-        tip.close();
-        if let Some(p) = tip.finish() {
-            pm.fill_path(
-                &p,
-                &paint(*c),
-                FillRule::Winding,
-                Transform::identity(),
-                None,
-            );
-        }
+        // Larger and brighter than at first (Roger's fourteenth pass).
+        flame(pm, (ox, oy), 1.3 * s, *c, t + kf / TAU, 1.0);
     }
 }
 

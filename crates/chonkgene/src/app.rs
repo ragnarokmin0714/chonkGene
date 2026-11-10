@@ -13,7 +13,7 @@ use chonkgene_core::mind::{Line, Mind, Out, World, XP_PER_LEVEL};
 use chonkgene_core::motion::{Area, Body, Heading, Motion};
 use chonkgene_core::play::{Command as Ask, Scene, Thing};
 use chonkgene_core::shake::ShakeDetector;
-use chonkgene_core::skit::{Actor, Cmd, Director, Spell};
+use chonkgene_core::skit::{Actor, Awe, Cmd, Director, Spell};
 use chonkgene_core::sound::{Class, Sound, TAKES};
 use chonkgene_core::species::{Grumpiness, Play, Species};
 use chonkgene_core::terrain::{Terrain, Win};
@@ -1577,6 +1577,7 @@ fn actors(pets: &[Pet], now: f64) -> Vec<Actor> {
                 // Busy with a toy, a scene, catnip or something asked.
                 && !p.fun.busy(now),
             asleep: p.mind.asleep() && p.press.is_none() && p.body.motion == Motion::Idle,
+            energy: p.mind.personality.energy,
         })
         .collect()
 }
@@ -1594,6 +1595,7 @@ fn direct(pets: &mut [Pet], ctx: &mut Ctx, cmds: Vec<Cmd>) {
             | Cmd::Cast { id }
             | Cmd::Freeze { id, .. }
             | Cmd::Scare { id, .. }
+            | Cmd::Awe { id, .. }
             | Cmd::Bless { id } => id,
         };
         let Some(p) = pets.iter_mut().find(|p| p.save.id == id) else {
@@ -1606,6 +1608,7 @@ fn direct(pets: &mut [Pet], ctx: &mut Ctx, cmds: Vec<Cmd>) {
                 | Cmd::Cast { .. }
                 | Cmd::Freeze { .. }
                 | Cmd::Scare { .. }
+                | Cmd::Awe { .. }
                 | Cmd::Bless { .. }
         ) {
             diag!("{}: {cmd:?}", p.save.name);
@@ -1741,6 +1744,43 @@ fn direct(pets: &mut [Pet], ctx: &mut Ctx, cmds: Vec<Cmd>) {
                 if ctx.sound_on {
                     ctx.sounds
                         .play(p.save.id, p.species, Sound::Land, now, ctx.volume, 1.0);
+                }
+            }
+            Cmd::Awe { from, how, .. } => {
+                // The fox's fire going up near by: turned to look, then
+                // frightened, thrilled or stalking it, as it is made.
+                let now = ctx.world.now;
+                let toward = if from >= p.center_x() { 1.0 } else { -1.0 };
+                let free =
+                    p.press.is_none() && matches!(p.body.motion, Motion::Idle | Motion::Walk);
+                if free {
+                    p.body.motion = Motion::Idle;
+                    p.anim.walking = false;
+                    p.body.facing = toward;
+                }
+                match how {
+                    Awe::Shrink => {
+                        // Startled where it stands, no hop back: in the
+                        // air it would not be free, and the director calls
+                        // the spell off if the one it picked on is not.
+                        let (w, h) = p.renderer.size();
+                        let head = p.renderer.anchor().1;
+                        let side = if toward > 0.0 { 0.95 } else { 0.05 };
+                        p.anim.startle((side * w as f32, head.min(0.4 * h as f32)));
+                        p.anim.expression = Expression::Neutral;
+                        p.fun.effect(Fx::Fright, now);
+                        p.fun.cower(now);
+                    }
+                    Awe::Bounce => {
+                        p.anim.cheer();
+                        p.anim.expression = Expression::Happy;
+                        p.happy_until = now + HAPPY_SECS;
+                        p.fun.effect(Fx::Sparkles, now);
+                    }
+                    Awe::Crouch => {
+                        p.anim.gesture(Act::Wiggle);
+                        p.fun.stalk(now);
+                    }
                 }
             }
             Cmd::Bless { .. } => {

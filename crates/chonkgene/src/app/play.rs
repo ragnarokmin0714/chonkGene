@@ -434,6 +434,70 @@ impl Pet {
     }
 }
 
+/// Frightened by the fox's spell, it keeps low this long, seconds.
+const AWE_HOLD: f64 = 2.5;
+/// A cat crouched at the fox's flames pounces this long after, seconds
+/// (its bottom wiggling first).
+const STALK_SECS: f64 = 0.9;
+
+/// Into a pond with the feet within this share of its half-width...
+const POND_IN: f32 = 0.85;
+/// ...and out again only past this one, so a pet at the edge does not
+/// flip in and out with every step (Roger: the pond flickered as a pet
+/// walked in).
+const POND_OUT: f32 = 0.95;
+/// Out of the water this long before it counts as gone (a hop, a step's
+/// bob), seconds.
+const POND_HOLD: f64 = 0.4;
+/// No second splash into a pond so soon after leaving one, seconds.
+const SPLASH_AGAIN: f64 = 2.0;
+
+/// Whether feet at `feet` (screen pixels) are in the water of the pond at
+/// `pos`: in at [`POND_IN`] of its half-width and within 8 px of its level,
+/// or, already `inside`, out to [`POND_OUT`] and 14 px.
+fn in_water(pos: (f32, f32), scale: f32, feet: (f32, f32), inside: bool) -> bool {
+    let (cx, _, rx, _) = props::pond_oval(pos, scale);
+    let (reach, rise) = if inside {
+        (POND_OUT, 14.0)
+    } else {
+        (POND_IN, 8.0)
+    };
+    (feet.1 - pos.1).abs() < rise * scale && (feet.0 - cx).abs() < reach * rx
+}
+
+/// A pet's time in a pond, steadied: in at once, out only after
+/// [`POND_HOLD`] out of the water, and one splash a visit.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+struct Wade {
+    /// The pond it is in, by the middle of its bottom (screen pixels).
+    now: Option<(f32, f32)>,
+    /// Out of the water since then, still counted in.
+    out_since: Option<f64>,
+    /// Left a pond then.
+    left_at: Option<f64>,
+}
+
+impl Wade {
+    /// The pond the feet are over this frame, if any: whether it splashes.
+    fn step(&mut self, under: Option<(f32, f32)>, now: f64) -> bool {
+        if let Some(pond) = under {
+            let fresh = self.now.is_none();
+            self.now = Some(pond);
+            self.out_since = None;
+            return fresh && self.left_at.is_none_or(|t| now - t >= SPLASH_AGAIN);
+        }
+        if self.now.is_some() {
+            let since = *self.out_since.get_or_insert(now);
+            if now - since >= POND_HOLD {
+                self.now = None;
+                self.out_since = None;
+                self.left_at = Some(now);
+            }
+        }
+        false
+    }
+}
+
 /// What a pet is up to besides its ordinary life.
 #[derive(Default)]
 pub(super) struct Fun {
@@ -456,15 +520,21 @@ pub(super) struct Fun {
     hold_until: f64,
     pub scene: Option<Run>,
     next_scene: f64,
-    /// In a pond (swimming, or wading), with the middle of the pond's
-    /// bottom here (screen pixels): the pond's front is drawn over the pet.
-    pond: Option<(f32, f32)>,
+    /// In a pond (swimming, or wading): the pond's front is drawn over the
+    /// pet.
+    pond: Wade,
     nip: Option<(Nip, f64, u8)>,
     /// Not back to the catnip before this (it has just been; one that
     /// does not care for it, not to this sprig again).
     nip_again: f64,
     /// A cat batting at the fox's fire: this fox's.
     swat: Option<u64>,
+    /// Crouched at the fox's spell, bottom wiggling: it pounces then.
+    pounce_at: Option<f64>,
+    /// Frightened by the fox's spell, keeping low until then. Not busy:
+    /// the spell must still be able to take it (as `hold_until` it was
+    /// left out, and the spell called off when it was the one picked on).
+    cower_until: f64,
     /// Effects under way, since when.
     pub fx: Vec<(Fx, f64)>,
     /// Lying about while you read, until then; little things to do there.
@@ -488,6 +558,16 @@ impl Fun {
             scale,
             ..Self::default()
         }
+    }
+
+    /// Frightened by the fox's spell: low to the floor a while.
+    pub fn cower(&mut self, now: f64) {
+        self.cower_until = now + AWE_HOLD;
+    }
+
+    /// Crouched for the fox's flames: a pounce at them shortly.
+    pub fn stalk(&mut self, now: f64) {
+        self.pounce_at = Some(now + STALK_SECS);
     }
 
     /// Up to something that the pet's own wandering must leave alone.
@@ -543,17 +623,19 @@ pub(super) struct Playground {
 
 impl Playground {
     /// The pond whose water a pet with its feet at `feet` (screen pixels)
-    /// stands in, if any: where the middle of its bottom is.
-    fn pond_under(&self, feet: (f32, f32)) -> Option<(f32, f32)> {
-        self.things.iter().find_map(|w| {
-            let pond = w.prop;
-            if pond.thing != Thing::Pond {
-                return None;
-            }
-            let (cx, _, rx, _) = props::pond_oval(pond.pos, pond.scale);
-            let level = (feet.1 - pond.pos.1).abs() < 8.0 * pond.scale;
-            (level && (feet.0 - cx).abs() < 0.85 * rx).then_some(pond.pos)
-        })
+    /// stands in, if any: where the middle of its bottom is. The pond it is
+    /// already `in` keeps it out to a wider edge (see [`in_water`]).
+    fn pond_under(&self, feet: (f32, f32), now_in: Option<(f32, f32)>) -> Option<(f32, f32)> {
+        let ponds = || {
+            self.things
+                .iter()
+                .map(|w| w.prop)
+                .filter(|p| p.thing == Thing::Pond)
+        };
+        ponds()
+            .find(|p| Some(p.pos) == now_in && in_water(p.pos, p.scale, feet, true))
+            .or_else(|| ponds().find(|p| in_water(p.pos, p.scale, feet, false)))
+            .map(|p| p.pos)
     }
 
     fn roll(&mut self) -> f32 {
@@ -876,7 +958,7 @@ impl Pet {
             .fx
             .retain(|(fx, since)| t - since < f64::from(fx.secs()));
         let swimming = self.anim.posture == Posture::Swim;
-        let in_pond = self.fun.pond.is_some();
+        let in_pond = self.fun.pond.now.is_some();
         let fire = self
             .fun
             .scene
@@ -929,7 +1011,7 @@ impl Pet {
             Transform::identity(),
             None,
         );
-        if let Some(pond) = self.fun.pond {
+        if let Some(pond) = self.fun.pond.now {
             // The pond's front over the lower body, matching the pond's
             // own window behind it: swimming, the waterline a little in
             // front of the pond's middle; wading, over the lower legs.
@@ -1120,6 +1202,13 @@ pub(super) fn tick(
         smell_nip(ground, p, now);
         nip(ground, p, ctx);
         swat(p, fire, ctx);
+        if p.fun.pounce_at.is_some_and(|at| now >= at) {
+            p.fun.pounce_at = None;
+            let free = p.press.is_none() && matches!(p.body.motion, Motion::Idle | Motion::Walk);
+            if free && !p.mind.asleep() {
+                p.anim.pounce();
+            }
+        }
         if start_scene && maybe_scene(ground, p, ctx) {
             start_scene = false;
         }
@@ -1137,18 +1226,25 @@ pub(super) fn tick(
             || p.play_fight;
         // In a pond: the duckling swims as soon as its feet are over the
         // water, anyone else wades; a splash going in.
-        let on_floor = matches!(p.body.motion, Motion::Idle | Motion::Walk);
-        let pond = ground.pond_under(p.body.feet()).filter(|_| on_floor);
-        if pond.is_some() && p.fun.pond.is_none() {
+        let under = match p.body.motion {
+            Motion::Idle | Motion::Walk => ground.pond_under(p.body.feet(), p.fun.pond.now),
+            // A hop or a flutter keeps it in for the hold; picked up, out.
+            Motion::Fall | Motion::Fly => None,
+            Motion::Held => {
+                p.fun.pond.now = None;
+                None
+            }
+        };
+        if p.fun.pond.step(under, now) {
             p.fun.effect(Fx::Splash, now);
         }
-        p.fun.pond = pond;
+        let pond = p.fun.pond.now;
         // How the body is held this frame.
         p.anim.posture = if p.body.motion == Motion::Fly {
             Posture::Fly
         } else if pond.is_some() && p.species == Species::Duck {
             Posture::Swim
-        } else if now < p.fun.hold_until || now < p.fun.lounge_until {
+        } else if now < p.fun.hold_until || now < p.fun.lounge_until || now < p.fun.cower_until {
             p.anim.posture.max_hold()
         } else {
             Posture::Free
@@ -1159,7 +1255,7 @@ pub(super) fn tick(
         if w.prop.thing == Thing::Pond {
             w.stirs = pets
                 .iter()
-                .filter(|p| p.fun.pond == Some(w.prop.pos))
+                .filter(|p| p.fun.pond.now == Some(w.prop.pos))
                 .map(|p| p.body.feet().0)
                 .collect();
         }
@@ -2080,6 +2176,40 @@ fn react_to(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A pet stepping about at a pond's edge stays in, splashes once, and
+    /// is out only after the hold (Roger: the pond flickered).
+    #[test]
+    fn a_pet_at_the_ponds_edge_stays_in_and_splashes_once() {
+        let pos = (500.0, 400.0);
+        let (cx, _, rx, _) = props::pond_oval(pos, 1.0);
+        // Between the in and out edges: not in yet, but kept in.
+        let edge = (cx + 0.9 * rx, pos.1);
+        assert!(!in_water(pos, 1.0, edge, false));
+        assert!(in_water(pos, 1.0, edge, true));
+        assert!(!in_water(pos, 1.0, (cx + 0.97 * rx, pos.1), true));
+
+        let mut w = Wade::default();
+        let mut splashes = 0;
+        let mut t = 0.0;
+        // In and out every other frame at 60 fps for two seconds.
+        for k in 0..120 {
+            let under = (k % 4 < 2).then_some(pos);
+            splashes += u32::from(w.step(under, t));
+            assert_eq!(w.now, Some(pos), "out at frame {k}");
+            t += 1.0 / 60.0;
+        }
+        assert_eq!(splashes, 1);
+        // Gone for good: out after the hold, and no splash straight back.
+        while w.now.is_some() {
+            w.step(None, t);
+            t += 1.0 / 60.0;
+        }
+        assert!(t < 2.0 + POND_HOLD + 0.1);
+        assert!(!w.step(Some(pos), t));
+        w.now = None;
+        assert!(w.step(Some(pos), t + SPLASH_AGAIN));
+    }
 
     /// 躲貓貓: mostly only a hint shows round the edge; a peek leans out
     /// smoothly to most of the head and back, and never further.

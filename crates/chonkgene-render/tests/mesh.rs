@@ -1331,8 +1331,15 @@ fn a_touched_pet_turns_to_you_and_looks_at_the_finger() {
         let head = sk.bone("head").unwrap();
         let body = sk.bone("body").unwrap();
         let turn = joints[head].rot.y + joints[body].rot.y;
+        // The birds look round less, and more slowly (Roger's fourteenth
+        // pass: their heads seemed about to snap off).
+        let least = if BIPED_SPECIES.contains(id) {
+            6.0
+        } else {
+            12.0
+        };
         assert!(
-            turn > 12.0,
+            turn > least,
             "{id}: head turned only {turn:.0}° to the finger"
         );
     }
@@ -1805,4 +1812,173 @@ fn a_dog_pants_after_a_run_and_a_pet_licks_its_nose_after_a_snack() {
         );
         assert_eq!(walk.fidget().tongue(), Some(Tongue::Blep), "{id}");
     }
+}
+
+/// Roger's fourteenth pass: the chick and the duckling, turning to look
+/// at a finger scratching them and back when it left, looked as if their
+/// heads might snap off. Scratched by a finger rubbing to one side, then
+/// let go, the head never swings round on its own (the body turns with
+/// it), and the whole look never jumps from one frame to the next.
+#[test]
+fn a_scratched_bird_turns_with_its_body_and_settles_softly() {
+    use chonkgene_core::Zone;
+    for id in ["chick", "duck"] {
+        let (model, sk) = mesh_model(id).unwrap();
+        let mut walk = Mover::new(&sk, 1.0, &model).unwrap();
+        walk.still();
+        settle(&mut walk, 2.0);
+        let head = sk.bone("head").unwrap();
+        let body = sk.bone("body").unwrap();
+        // The most the head turns on its own, and the look as a whole, from
+        // one frame to the next (degrees).
+        let (mut alone, mut jump, mut last) = (0.0_f32, 0.0_f32, None::<(f32, f32)>);
+        for k in 0..180 {
+            // A finger off to one side rubs back and forth for a second
+            // and a half, then lets go.
+            let touched = k < 90;
+            let rub = 12.0 * (std::f32::consts::TAU * 3.0 * k as f32 / 60.0).sin();
+            walk.feel(chonkgene_render::skin::Feel {
+                gaze: touched.then_some((25.0 + rub, 10.0)),
+                held: touched.then_some((Zone::Head, None, k as f32 / 60.0)),
+                scratch: if touched { 1.0 } else { 0.0 },
+                ..Default::default()
+            });
+            let j = walk.step(1.0 / 60.0, false, 1.0);
+            let now = (j[head].rot.y, j[head].rot.y + j[body].rot.y + walk.yaw());
+            if let Some(was) = last {
+                alone = alone.max((now.0 - was.0).abs());
+                jump = jump.max((now.1 - was.1).abs());
+            }
+            last = Some(now);
+        }
+        // Before: 3.05° and 5.08° in the frame after the finger left.
+        assert!(
+            alone < 1.2,
+            "{id}: the head turned {alone:.2}° alone in a frame"
+        );
+        assert!(jump < 1.2, "{id}: the look turned {jump:.2}° in a frame");
+    }
+}
+
+/// Roger's fourteenth pass: some pets' motion suddenly went sluggish. Every
+/// species through every action, asking for frames as the app does (the
+/// animator's rate, or the renderer's own if higher): no part of the body
+/// moves so far between two frames that it jerks. The pose alone is worked
+/// out here (the mesh never lands, so nothing is drawn on the GPU); what
+/// the GPU budget does to the rate is in the app's `frames:` log lines.
+#[test]
+fn every_action_asks_for_frames_enough_to_move_smoothly() {
+    use chonkgene_core::anim::{Act, Animator, Expression};
+    const ACTS: [Act; 21] = [
+        Act::Stretch,
+        Act::Yawn,
+        Act::Wave,
+        Act::Eat,
+        Act::Dig,
+        Act::Scratch,
+        Act::Groom,
+        Act::Shake,
+        Act::Preen,
+        Act::Peck,
+        Act::Flap,
+        Act::Wiggle,
+        Act::Bounce,
+        Act::Spin,
+        Act::Knead,
+        Act::Paw,
+        Act::Tap,
+        Act::Tilt,
+        Act::Sniff,
+        Act::Rub,
+        Act::Bliss,
+    ];
+    #[derive(Clone, Copy, Debug)]
+    enum Doing {
+        Rest,
+        Walk,
+        Gesture(Act),
+        Face(Expression),
+        Lively,
+        Cheer,
+        Pounce,
+    }
+    let mut all: Vec<Doing> = vec![
+        Doing::Rest,
+        Doing::Walk,
+        Doing::Lively,
+        Doing::Cheer,
+        Doing::Pounce,
+    ];
+    all.extend(ACTS.map(Doing::Gesture));
+    all.extend(
+        [
+            Expression::Happy,
+            Expression::Giggle,
+            Expression::FedUp,
+            Expression::Sulk,
+            Expression::Asleep,
+        ]
+        .map(Doing::Face),
+    );
+    // Frames asked for too slowly for how far the body moved: more than
+    // `JERK` pixels at well under 60 a second, while it was already moving
+    // the frame before (the first frame of a sudden move, a peck from
+    // standing still, was booked before anything moved: nothing to go by).
+    const JERK: f32 = 10.0;
+    let mut slow = Vec::new();
+    for id in QUAD_SPECIES.iter().chain(&BIPED_SPECIES) {
+        // One renderer for the species (each new one bakes its mesh on a
+        // thread of its own, which would load the machine for the timed
+        // tests running alongside), at rest a while between actions.
+        let Some(mut r) = app_renderer(id) else {
+            eprintln!("skipped: no GPU");
+            return;
+        };
+        r.still();
+        let mut clock = 0.0_f32;
+        for doing in &all {
+            let mut anim = Animator::new(7, 0.33, 0.0);
+            let mut t = -1.5_f32;
+            let mut fps = 30;
+            let mut jerks = Vec::new();
+            let mut was = 0.0_f32;
+            while t < 4.0 {
+                if (0.0..0.05).contains(&t) {
+                    match *doing {
+                        Doing::Rest => {}
+                        Doing::Walk => anim.walking = true,
+                        Doing::Gesture(act) => anim.gesture(act),
+                        Doing::Face(e) => anim.expression = e,
+                        Doing::Lively => anim.lively = true,
+                        Doing::Cheer => anim.cheer(),
+                        Doing::Pounce => anim.pounce(),
+                    }
+                }
+                let dt = 1.0 / fps as f32;
+                anim.step(dt);
+                t += dt;
+                clock += dt;
+                // The renderer's clock runs on across the actions.
+                let params = chonkgene_core::anim::PoseParams {
+                    clock,
+                    ..anim.params()
+                };
+                if anim.expression == Expression::Asleep {
+                    r.render_asleep(&params, t);
+                } else {
+                    r.render(&params, anim.expression);
+                }
+                let step = r.pose_step();
+                if t > 0.0 && step > JERK && was > 0.5 * JERK && fps < 50 {
+                    jerks.push(format!("{step:.1} px at {fps} fps, {t:.2} s"));
+                }
+                was = step;
+                fps = anim.fps(false).max(r.min_fps());
+            }
+            if !jerks.is_empty() {
+                slow.push(format!("{id} {doing:?}: {}", jerks.join("; ")));
+            }
+        }
+    }
+    assert!(slow.is_empty(), "jerky:\n{}", slow.join("\n"));
 }

@@ -66,6 +66,9 @@ pub struct Actor {
     /// Asleep where it lies (not held, not falling): the fox's 定身術
     /// floats it up in a dream bubble without waking it.
     pub asleep: bool,
+    /// Its own energy (see [`crate::Personality`]): bold or timid when the
+    /// fox casts.
+    pub energy: f32,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -126,7 +129,49 @@ pub enum Cmd {
     Bless {
         id: u64,
     },
+    /// Near the fox as it casts, it sees the fire go up (at `from`) and
+    /// shows how it takes it.
+    Awe {
+        id: u64,
+        from: f32,
+        how: Awe,
+    },
 }
+
+/// How a pet near the fox takes its spell's fire going up (Roger's
+/// fourteenth pass: some frightened, some excited).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Awe {
+    /// Timid: shrinks back, ears flat, a drop of sweat.
+    Shrink,
+    /// Bold or playful: hops and bounces, thrilled.
+    Bounce,
+    /// A cat: crouches, bottom wiggling, and pounces at the flames.
+    Crouch,
+}
+
+impl Awe {
+    /// How `species` with `energy` takes it: a cat with any go in it
+    /// stalks the flames; otherwise the lively are thrilled, the rest
+    /// frightened.
+    pub fn of(species: Species, energy: f32) -> Self {
+        let cat = matches!(species, Species::Munchkin | Species::Fold);
+        if cat && energy >= AWE_CAT {
+            Awe::Crouch
+        } else if energy >= AWE_BOLD {
+            Awe::Bounce
+        } else {
+            Awe::Shrink
+        }
+    }
+}
+
+/// A cat with this much energy or more stalks the fox's flames...
+const AWE_CAT: f32 = 0.35;
+/// ...and anyone this lively is thrilled by them; the rest shrink back.
+const AWE_BOLD: f32 = 0.6;
+/// Pets this near the fox (pixels between middles) see its spell go up.
+const AWE_REACH: f32 = 700.0;
 
 /// The fox's spells (PLAN §8, Roger's eleventh and thirteenth passes): the
 /// director casts 定身術 now and then by itself; all of them can be asked
@@ -777,10 +822,17 @@ impl Director {
             .min_by(|p, q| (p.x - f.x).abs().total_cmp(&(q.x - f.x).abs()))
             .copied()
             .unwrap_or(f);
-        self.begin_spell(now, f, other, spell)
+        self.begin_spell(now, actors, f, other, spell)
     }
 
-    fn begin_spell(&mut self, now: f64, fox: Actor, other: Actor, spell: Spell) -> Vec<Cmd> {
+    fn begin_spell(
+        &mut self,
+        now: f64,
+        actors: &[Actor],
+        fox: Actor,
+        other: Actor,
+        spell: Spell,
+    ) -> Vec<Cmd> {
         self.skit = Some(Skit {
             kind: Kind::Spell,
             a: fox.id,
@@ -802,8 +854,22 @@ impl Director {
             Cmd::Cast { id: fox.id },
             Cmd::Say { id: fox.id, line },
         ];
+        // The others near it see the fire go up, each in its own way; the
+        // owl it picks on stares it out instead (below).
+        let stares = spell == Spell::Freeze && other.species == Species::Owl;
+        out.extend(
+            actors
+                .iter()
+                .filter(|p| p.id != fox.id && p.available && (p.x - fox.x).abs() <= AWE_REACH)
+                .filter(|p| !(stares && p.id == other.id))
+                .map(|p| Cmd::Awe {
+                    id: p.id,
+                    from: fox.x,
+                    how: Awe::of(p.species, p.energy),
+                }),
+        );
         // The owl puffs up and stares.
-        if spell == Spell::Freeze && other.species == Species::Owl && other.id != fox.id {
+        if stares && other.id != fox.id {
             out.extend([
                 Cmd::Act {
                     id: other.id,
@@ -854,7 +920,7 @@ impl Director {
         if let Some((fox, other)) = fox
             && spell
         {
-            return self.begin_spell(now, *fox, *other, Spell::Freeze);
+            return self.begin_spell(now, actors, *fox, *other, Spell::Freeze);
         }
         // A chick and a duckling present always get to talk past each other.
         let talk = pairs.iter().position(|(a, b)| {
@@ -1014,6 +1080,7 @@ mod tests {
                 x: xs[i],
                 available: true,
                 asleep: false,
+                energy: 0.5,
             })
             .collect()
     }
@@ -1207,6 +1274,7 @@ mod tests {
             x: 500.0,
             available: true,
             asleep: false,
+            energy: 0.5,
         });
         let (mut dir, t, mut cmds) = started_with(Kind::Spell, &cast);
         cmds.extend(run(&mut dir, &mut cast, t));
@@ -1243,6 +1311,52 @@ mod tests {
         assert!(!cmds.iter().any(|c| matches!(c, Cmd::Walk { .. })));
     }
 
+    /// Roger's fourteenth pass: as the fox casts, the pets near it react
+    /// by personality: the timid shrink back, the lively are thrilled, a
+    /// cat stalks the flames; one far off does not see it.
+    #[test]
+    fn pets_near_the_fox_take_its_spell_each_in_their_own_way() {
+        let pet = |id, species: Species, x, energy| Actor {
+            id,
+            species,
+            x,
+            available: true,
+            asleep: false,
+            energy,
+        };
+        let cast = vec![
+            pet(1, Species::Fox, 500.0, 0.7),
+            pet(2, Species::Fold, 300.0, 0.2),
+            pet(3, Species::Munchkin, 700.0, 0.5),
+            pet(4, Species::Shiba, 900.0, 0.8),
+            pet(5, Species::Duck, 1400.0, 0.3),
+        ];
+        let cmds = Director::default().cast(1, Spell::Bless, 0.0, &cast);
+        let awe = |id| {
+            cmds.iter().find_map(|c| match *c {
+                Cmd::Awe { id: i, from, how } if i == id => Some((from, how)),
+                _ => None,
+            })
+        };
+        assert_eq!(awe(2), Some((500.0, Awe::Shrink)));
+        assert_eq!(awe(3), Some((500.0, Awe::Crouch)));
+        assert_eq!(awe(4), Some((500.0, Awe::Bounce)));
+        assert_eq!(awe(5), None, "too far off to see it");
+        assert_eq!(awe(1), None, "the fox itself");
+        // A sluggish cat is frightened, not stalking.
+        assert_eq!(Awe::of(Species::Fold, 0.2), Awe::Shrink);
+        // The owl it picks on stares the spell back instead.
+        let owl = vec![
+            pet(1, Species::Fox, 500.0, 0.7),
+            pet(2, Species::Owl, 600.0, 0.5),
+        ];
+        let cmds = Director::default().cast(1, Spell::Freeze, 0.0, &owl);
+        assert!(
+            !cmds.iter().any(|c| matches!(c, Cmd::Awe { .. })),
+            "{cmds:?}"
+        );
+    }
+
     /// A pet asleep floats up too, in a dream bubble, and is put back down
     /// without waking: no fright for it.
     #[test]
@@ -1254,6 +1368,7 @@ mod tests {
             x: 500.0,
             available: false,
             asleep: true,
+            energy: 0.5,
         });
         let mut dir = Director::default();
         dir.cast(1, Spell::Freeze, 0.0, &cast);
@@ -1314,6 +1429,7 @@ mod tests {
                 x: 100.0,
                 available: true,
                 asleep: false,
+                energy: 0.5,
             });
             cast
         };

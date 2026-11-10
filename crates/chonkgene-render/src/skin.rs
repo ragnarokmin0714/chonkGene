@@ -333,12 +333,24 @@ pub(crate) struct Moods {
     head: Spring,
     chin: Spring,
     cheek: Spring,
+    /// The look follows the finger slowly and settles back gently, never
+    /// past (the round birds: a quick look snapped their heads round,
+    /// Roger's fourteenth pass).
+    soft_gaze: bool,
     /// The last poke seen, seconds ago (to tell a new one).
     seen: f32,
     t: f32,
 }
 
 impl Moods {
+    /// Moods whose look at a finger is soft (see `soft_gaze`).
+    pub fn soft() -> Self {
+        Self {
+            soft_gaze: true,
+            ..Self::default()
+        }
+    }
+
     /// Seconds the moods have run (a clock for beats that need one).
     pub fn clock(&self) -> f32 {
         self.t
@@ -367,14 +379,26 @@ impl Moods {
                 .poked
                 .is_some_and(|(z, ..)| matches!(z, Zone::Tail | Zone::Bottom));
         let mood = |m: Mood| if feel.mood == m { 1.0 } else { 0.0 };
+        let attend_hz = if self.soft_gaze && feel.gaze.is_none() {
+            1.0
+        } else {
+            2.5
+        };
         let attend = self
             .attend
-            .step(feel.gaze.map_or(0.0, |_| 1.0), 0.0, 2.5, 1.0, dt)
+            .step(feel.gaze.map_or(0.0, |_| 1.0), 0.0, attend_hz, 1.0, dt)
             .clamp(0.0, 1.0);
         let (gy, gx) = feel.gaze.unwrap_or((0.0, 0.0));
+        // Soft: slower after a finger, slower still back once it has gone,
+        // and damped so it never swings past.
+        let (hz, damping) = match (self.soft_gaze, feel.gaze.is_some()) {
+            (false, _) => (2.6, 0.9),
+            (true, true) => (1.5, 1.0),
+            (true, false) => (0.9, 1.0),
+        };
         let gaze = (
-            self.gaze.0.step(gy, 0.0, 2.6, 0.9, dt),
-            self.gaze.1.step(gx, 0.0, 2.6, 0.9, dt),
+            self.gaze.0.step(gy, 0.0, hz, damping, dt),
+            self.gaze.1.step(gx, 0.0, hz, damping, dt),
         );
         let laugh = self.laugh.step(mood(Mood::Laugh), 0.0, 1.5, 0.75, dt);
         let melt = self.melt.step(mood(Mood::FedUp), 0.0, 1.1, 0.9, dt);

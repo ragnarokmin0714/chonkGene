@@ -18,9 +18,9 @@ use chonkgene_core::Zone;
 
 use crate::fidget::{Fidgets, Kind, Out};
 use crate::skin::{
-    ATTEND_HZ, ATTEND_YAW, Feel, Gesture, Joint, Levels, MAX_SWING, Mood, Moods, REST_YAW, SIT_YAW,
-    SPEED_UP, STILL_GOING, SULK_BACK, SULK_YAW, Skeleton, SleepPose, Spring, TURN_HZ, WALK_YAW,
-    Walk, bite, peck, tempo_split,
+    ATTEND_YAW, Feel, Gesture, Joint, Levels, MAX_SWING, Mood, Moods, REST_YAW, SIT_YAW, SPEED_UP,
+    STILL_GOING, SULK_BACK, SULK_YAW, Skeleton, SleepPose, Spring, TURN_HZ, WALK_YAW, Walk, bite,
+    peck, tempo_split,
 };
 use crate::skin::{drift, hold};
 
@@ -30,8 +30,19 @@ const PACE: f32 = 1.034;
 /// The share of a step a foot is on the floor.
 const DUTY: f32 = 0.55;
 /// Touched, the share of a turn or tip toward the finger the head takes
-/// on its own; the body takes the rest.
-const TOUCH_NECK: f32 = 0.5;
+/// on its own; the body takes the rest. Half still looked as if the head
+/// might come off after a scratch (Roger's fourteenth pass): the round
+/// body turns nearly all of it.
+const TOUCH_NECK: f32 = 0.2;
+/// A bird looks round at a finger this much of the way a mammal does.
+const TOUCH_GAZE: f32 = 0.6;
+/// Turning to face a finger (spring hertz), slower than a mammal's
+/// `ATTEND_HZ`: the round head counter-turns as the body comes round.
+const BIRD_ATTEND_HZ: f32 = 2.2;
+/// For this long after a touch (seconds) a bird turns back to where it
+/// stood at this gentler pace (hertz), not snapping round.
+const SETTLE_SECS: f32 = 2.5;
+const SETTLE_HZ: f32 = 0.7;
 /// How far a sitting bird's legs fold forward (degrees) and how far it
 /// sinks, world units.
 const SIT_LEGS: f32 = 75.0;
@@ -270,6 +281,8 @@ pub struct Waddle {
     swim: Spring,
     gesture: Option<Gesture>,
     tempo: f32,
+    /// Seconds since a finger last had its attention.
+    untouched: f32,
     look: Spring,
     look_goal: f32,
     belly: Spring,
@@ -342,6 +355,7 @@ impl Waddle {
             swim: Spring::default(),
             gesture: None,
             tempo: 1.0,
+            untouched: SETTLE_SECS,
             look: Spring::default(),
             look_goal: 0.0,
             belly: Spring::default(),
@@ -368,7 +382,7 @@ impl Waddle {
             n: sk.names.len(),
             busy: false,
             feel: Feel::default(),
-            moods: Moods::default(),
+            moods: Moods::soft(),
             flick: Spring::default(),
             ground: 0.0,
             flatten: 0.0,
@@ -456,6 +470,7 @@ impl Waddle {
         // Touched, it turns to face you; a tail or a bottom touched, it only
         // looks back over its shoulder (turning round would hide them).
         let touched = self.feel.gaze.is_some() && !self.feel.behind();
+        self.untouched = if touched { 0.0 } else { self.untouched + dt };
         let yaw = self.yaw.step(
             facing
                 * if going || self.flying {
@@ -473,7 +488,9 @@ impl Waddle {
             if going {
                 TURN_HZ.1
             } else if touched {
-                ATTEND_HZ
+                BIRD_ATTEND_HZ
+            } else if self.untouched < SETTLE_SECS {
+                SETTLE_HZ
             } else {
                 TURN_HZ.0
             },
@@ -998,13 +1015,13 @@ impl Waddle {
         // shape scratched), so the body takes a share.
         turn_head(
             j,
-            lv.gaze.0,
+            TOUCH_GAZE * lv.gaze.0,
             self.neck.min(TOUCH_NECK),
             self.head,
             self.body,
         );
-        j[self.head].rot.x += TOUCH_NECK * lv.gaze.1;
-        j[self.body].rot.x += 0.5 * (1.0 - TOUCH_NECK) * lv.gaze.1;
+        j[self.head].rot.x += TOUCH_NECK * TOUCH_GAZE * lv.gaze.1;
+        j[self.body].rot.x += 0.5 * (1.0 - TOUCH_NECK) * TOUCH_GAZE * lv.gaze.1;
         // Laughing: back on its bottom, feet kicking, wings flapping.
         let l = lv.laugh.min(1.0);
         if l > 0.0 {

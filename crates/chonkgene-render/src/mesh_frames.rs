@@ -48,6 +48,16 @@ const STARVED: Duration = Duration::from_millis(250);
 /// After a touch lets go, its frames skip the budget this long, so the
 /// answer to a click shows at once.
 const URGENT_SECS: f32 = 1.0;
+/// A gesture eases in and out over this long at each end, seconds.
+const GESTURE_EASE: f32 = 0.35;
+/// Frames are asked for often enough that no part of the body moves
+/// further than this between two of them, pixels (up to 60 a second):
+/// a tail still swinging back after a gesture ended was shown at 15 fps,
+/// 22 px a frame.
+const SMOOTH_PX: f32 = 4.0;
+/// How fast that rate falls once the motion slows, frames a second each
+/// second (from 60 to 15 in about half a second).
+const SMOOTH_FALL: f32 = 90.0;
 
 /// How a pet's frames went over a stretch of time, for the log: new
 /// pictures shown, frames sent to the GPU (`pushed`: past the budget,
@@ -73,6 +83,17 @@ const SLEEP_SHIFT: f32 = 45.0;
 /// finger is beside the head, of tilt per unit below it, and the most.
 const GAZE_TURN: (f32, f32) = (28.0, 40.0);
 const GAZE_TILT: (f32, f32) = (22.0, 28.0);
+
+/// How far into its pose a gesture `secs` long is, `t` seconds in (0 … 1):
+/// eased in and out over [`GESTURE_EASE`] at each end, held between. It
+/// was `sqrt(sin)`, steepest at the very ends: the last frame of a yawn
+/// dropped a fifth of the pose at once, an ear jumping 18 px (Roger's
+/// fourteenth pass: motion that suddenly looked wrong).
+fn envelope(t: f32, secs: f32) -> f32 {
+    use chonkgene_rig::math::smoothstep;
+    let ease = GESTURE_EASE.min(0.3 * secs);
+    smoothstep(0.0, ease, t) * (1.0 - smoothstep(secs - ease, secs, t))
+}
 
 /// Pixel size of `model`'s picture at `scale` (1.0 = 100%).
 pub fn pixel_size(model: &Model, scale: f32) -> (u32, u32) {
@@ -112,6 +133,12 @@ pub struct MeshRenderer {
     bones: Vec<Affine>,
     sent_bones: Vec<Affine>,
     shown_bones: Vec<Affine>,
+    /// How far the pose moved at the last render call, pixels (see
+    /// [`MeshRenderer::pose_step`]).
+    step_px: f32,
+    /// Frames a second wanted for how fast it moves (see [`SMOOTH_PX`]),
+    /// falling slowly after a burst.
+    smooth_fps: f32,
     look: Look,
     /// The wanted frame has not gone to the GPU yet (it was busy, or over
     /// its budget).
@@ -191,6 +218,8 @@ impl MeshRenderer {
             sent_bones: bones.clone(),
             shown_bones: bones.clone(),
             bones,
+            step_px: 0.0,
+            smooth_fps: 0.0,
             look: Look::Open,
             unsent: false,
             unsent_since: None,
@@ -293,6 +322,14 @@ impl MeshRenderer {
         }
     }
 
+    /// The farthest any part of the body moved across the picture at the
+    /// last render call, pixels: shown at the rate the app asks for, more
+    /// than a few pixels a frame looks jerky (Roger's fourteenth pass:
+    /// motion that suddenly went sluggish).
+    pub fn pose_step(&self) -> f32 {
+        self.step_px
+    }
+
     pub fn changed(&self) -> bool {
         self.changed
     }
@@ -324,13 +361,16 @@ impl MeshRenderer {
     /// Frames a second this pet needs however still its animation is:
     /// tails sway, bellies settle and fidgets go on all the time, slowly at
     /// rest; turning, sitting down, getting up, gestures and the quick
-    /// fidgets (an ear flick, a sniff) move fast and need smooth frames.
+    /// fidgets (an ear flick, a sniff) move fast and need smooth frames;
+    /// anything moving faster still, up to 60 (see [`SMOOTH_PX`]).
     pub fn min_fps(&self) -> u32 {
-        if self.walk.busy() || self.dent.x.abs() > 0.002 || self.walk.fidget().quick() {
+        let base = if self.walk.busy() || self.dent.x.abs() > 0.002 || self.walk.fidget().quick() {
             30
         } else {
             15
-        }
+        };
+        // However it is moving: fast enough that it does not jerk.
+        base.max(self.smooth_fps.ceil() as u32)
     }
 
     /// Wait for the bake and for the frame on its way (tests, screenshots),
@@ -518,8 +558,11 @@ impl MeshRenderer {
         self.walk.gesture(self.gesture.and_then(|(act, since)| {
             let secs = gesture_secs(act)?;
             let t = (params.clock - since).max(0.0);
-            let e = (std::f32::consts::PI * (t / secs).min(1.0)).sin().sqrt();
-            Some(Gesture { act, e, t })
+            Some(Gesture {
+                act,
+                e: envelope(t, secs),
+                t,
+            })
         }));
         self.walk.set_pace(params.pace);
         self.walk.breathe(params.breath);
@@ -536,6 +579,7 @@ impl MeshRenderer {
             self.walk.poke(2.0);
         }
         self.belly = params.belly;
+        let first = self.clock.is_none();
         let dt = self
             .clock
             .map_or(MAX_STEP, |c| (params.clock - c).clamp(0.0, 0.25));
@@ -554,7 +598,24 @@ impl MeshRenderer {
             self.fidget_began = now;
         }
         self.fidget_was = now;
-        self.bones = self.sk.pose(&joints);
+        let bones = self.sk.pose(&joints);
+        self.step_px = self.model.parts.iter().fold(0.0_f32, |most, part| {
+            let (Some(a), Some(b)) = (self.bones.get(part.bone), bones.get(part.bone)) else {
+                return most;
+            };
+            let d = b.apply(part.at) - a.apply(part.at);
+            most.max((d.x * d.x + d.y * d.y).sqrt())
+        }) * PPU
+            * self.scale;
+        // Not on the first frame: its pose came from nowhere.
+        if first {
+            self.step_px = 0.0;
+        }
+        // Held up for a while: a wing flapping or a tail swishing hardly
+        // moves as it turns back, and the next frame would come too late.
+        let wanted = self.step_px / dt.max(MAX_STEP) / SMOOTH_PX;
+        self.smooth_fps = wanted.max(self.smooth_fps - SMOOTH_FALL * dt).min(60.0);
+        self.bones = bones;
         self.settle(params);
         self.dent(params, dt);
         self.look = look;
