@@ -1112,6 +1112,18 @@ Roger's notes on the fourteenth pass build (f9e72b4, pushed and built by CI the 
 - **招喚術** cannot be judged from the log (the call's walks and the end are not logged): log `Phase::Called`'s walks and its end, then try again.
 - **The log file starts with 31 KB of NUL bytes** after its first line: the file is truncated (rotated?) while still open at an offset. Look at `diag.rs`.
 
+**Gemini's review of the sounds (item 5 (a) and (b), 2026-11-10).** Every sound rendered with `examples/voices.rs` and strung together per species (Shiba, fox, Fold, owl, chick, duckling: the three takes of each call, one of the rest, 0.8 s apart, with a timetable); the clip's sound track sent with who speaks when (told from the frames and from each burst's main frequency). Answered by Gemini 3.6/3.5 Flash only: 3.8/3.7 were busy or out of free quota, and `gemini-4-argon` and the Pro models need billing on the key's project (not Roger's AI Pro app subscription, which these calls do not touch). Flash contradicts itself at times (the Shiba's pant "a maraca" in the clip, "realistic, 5/5" alone), so only what it says again and again, and what the code bears out, is kept:
+
+- In the clip: the owl's sleep-talk (`Snore`, 1.9, 31.1, 42.7 s) "a two-stroke lawnmower"; the Shiba's pant (6.0 s) "a spray can shaken"; its laugh while tickled (24–31 s) "a sped-up gremlin"; the duckling's 呱 (12.3 s) "a party horn"; a bird ruffling (`Flutter`, about every 7–8 s) "a static tap". The burst at 35.3 s is the fox's bell (2350 Hz), not a snore.
+- **`Grumpy` is a human "uh"** in every species (the same formants 650/1300/2600 Hz for all, on a 160–300 Hz growl; the chick's 1800 Hz pitch through those formants comes out a buzzer, "a fart"): rated 1–2 everywhere. The worst sound.
+- **`Snore` is the same 75 Hz growl for every species**, birds too: an engine, not a sleepy breath; a chick or a duckling cannot sound that low.
+- **`Laugh` is five equal bursts at an even rate**: "a machine gun", "a modem"; no breaths between, no change of rhythm.
+- **Calls are a clean buzz with smooth, slow glides**: the bark "a squeak" (a real one is 0.1–0.25 s, a noisy onset, the pitch spiking and dropping fast; ours 0.2–0.6 s, a slow rise); the chick's 啾 should be nearly a pure tone, 2.5–4.5 kHz, 40–150 ms, a quick up-down sweep; the duckling's 呱 too buzzy (Q 9, buzz 1.0). Wanted throughout: a breath or noise onset, pitch jitter, quicker decays.
+- **Takes hardly differ** (only the pitch ×1.0/1.05/0.95 and the number of repeats): "virtually identical" for the cats.
+- **`Poke` reads as a UI boop**; `Land`, `Eat`, `Sigh`, `Flutter`, `Bell` pass (3–5).
+- Not a problem: `Purr` for the dog and the birds is never played (only the cats purr, `line_sound`, `fidget_sound`).
+- Unconfirmed: clicks at the start and end of the noise bursts (pant, flutter) in the clip; the synthesised envelopes are eased, so look at playback (`audio.rs`) if it is heard again.
+
 ### Phase 1: Shiba prototype (feel) — `v0.1.0`
 
 - The art pipeline (§3.3) works end to end for one Shiba, with placeholder art.
