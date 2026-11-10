@@ -325,6 +325,43 @@ impl Buf {
         }
     }
 
+    /// Mix in a recorded clip at `at` seconds, `up` times higher (and
+    /// shorter) besides the take's own pitch, only the first `keep` of it
+    /// (0 … 1, the cut eased out), at `gain`. Returns how long it lasts.
+    fn clip(&mut self, at: f32, clip: Clip, up: f32, keep: f32, gain: f32) -> f32 {
+        let src = clip.samples();
+        let step = up * self.pitch;
+        let used = (src.len() as f32 * keep.clamp(0.05, 1.0)) as usize;
+        let n = (used as f32 / step) as usize;
+        let start = (at * RATE as f32) as usize;
+        // A cut short of the end fades over its last 15 ms.
+        let fade = if keep < 1.0 { 0.015 * RATE as f32 } else { 0.0 };
+        for i in 0..n {
+            let Some(out) = self.s.get_mut(start + i) else {
+                break;
+            };
+            let x = i as f32 * step;
+            let k = x as usize;
+            let f = x - k as f32;
+            let a = src.get(k).copied().unwrap_or(0.0);
+            let b = src.get(k + 1).copied().unwrap_or(0.0);
+            let tail = if fade > 0.0 {
+                ease((n - i) as f32 / fade)
+            } else {
+                1.0
+            };
+            *out += (a + (b - a) * f) * gain * tail;
+        }
+        n as f32 / RATE as f32
+    }
+
+    /// Cut 30 ms after `end` seconds, then [`Buf::finish`].
+    fn end(mut self, end: f32, class: Class) -> Vec<i16> {
+        let n = ((end + 0.03) * RATE as f32) as usize;
+        self.s.truncate(n.min(self.s.len()));
+        self.finish(class)
+    }
+
     /// Normalise to `class`'s loudness, then soft-limit the peaks to
     /// [`PEAK`].
     fn finish(self, class: Class) -> Vec<i16> {
@@ -383,6 +420,168 @@ pub fn loudness(samples: &[f32]) -> f32 {
     power.retain(|p| *p > top * 0.01);
     let mean = power.iter().sum::<f32>() / power.len().max(1) as f32;
     10.0 * mean.max(1e-12).log10()
+}
+
+/// A recorded clip (fifteenth pass, item 5): real animals, all CC0, picked
+/// by Roger by ear and cut by `tools/soundbake` from its list
+/// `sounds.json`; where each comes from is in `licenses/sounds.md`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Clip {
+    ShibaBark,
+    ShibaWhimper,
+    ShibaGrowl,
+    FoxYip,
+    FoldMeow,
+    MunchkinMeow,
+    CatPurr,
+    CatTrill,
+    CatGrumble,
+    OwlHoot,
+    ChickPeep,
+    DucklingPeeps,
+    Snore,
+}
+
+impl Clip {
+    fn wav(self) -> &'static [u8] {
+        match self {
+            Clip::ShibaBark => include_bytes!("../../../assets/sounds/shiba-bark.wav"),
+            Clip::ShibaWhimper => include_bytes!("../../../assets/sounds/shiba-whimper.wav"),
+            Clip::ShibaGrowl => include_bytes!("../../../assets/sounds/shiba-growl.wav"),
+            Clip::FoxYip => include_bytes!("../../../assets/sounds/fox-yip.wav"),
+            Clip::FoldMeow => include_bytes!("../../../assets/sounds/fold-meow.wav"),
+            Clip::MunchkinMeow => include_bytes!("../../../assets/sounds/munchkin-meow.wav"),
+            Clip::CatPurr => include_bytes!("../../../assets/sounds/cat-purr.wav"),
+            Clip::CatTrill => include_bytes!("../../../assets/sounds/cat-trill.wav"),
+            Clip::CatGrumble => include_bytes!("../../../assets/sounds/cat-grumble.wav"),
+            Clip::OwlHoot => include_bytes!("../../../assets/sounds/owl-hoot.wav"),
+            Clip::ChickPeep => include_bytes!("../../../assets/sounds/chick-peep.wav"),
+            Clip::DucklingPeeps => include_bytes!("../../../assets/sounds/duckling-peeps.wav"),
+            Clip::Snore => include_bytes!("../../../assets/sounds/snore.wav"),
+        }
+    }
+
+    /// The clip's samples, −1 … 1 (mono 16-bit WAV at [`RATE`]).
+    fn samples(self) -> Vec<f32> {
+        let wav = self.wav();
+        let at = wav
+            .windows(4)
+            .position(|w| w == b"data")
+            .map_or(wav.len(), |p| p + 8);
+        wav[at..]
+            .as_chunks::<2>()
+            .0
+            .iter()
+            .map(|b| f32::from(i16::from_le_bytes(*b)) / 32767.0)
+            .collect()
+    }
+}
+
+/// `sound` in `species`' voice from the recorded clips, take `take`, or
+/// `None` where the sound is still synthesised (pokes, landings, eating,
+/// panting, the bell, wings; the birds' and cats' sighs). Returns how long
+/// it lasts.
+fn recorded(b: &mut Buf, species: Species, sound: Sound, take: u32) -> Option<f32> {
+    use Species::*;
+    // The species' own call, and how many of it make one "voice".
+    let call = match species {
+        Shiba => Clip::ShibaBark,
+        Fox => Clip::FoxYip,
+        Fold => Clip::FoldMeow,
+        Munchkin => Clip::MunchkinMeow,
+        Owl => Clip::OwlHoot,
+        Chick => Clip::ChickPeep,
+        Duck => Clip::DucklingPeeps,
+    };
+    let cat = matches!(species, Fold | Munchkin);
+    // The Munchkin's trill a little higher than the Fold's.
+    let small = if species == Munchkin { 1.08 } else { 1.0 };
+    // Calls in a row, with uneven gaps (an even rate sounds like a
+    // machine), each `up` and `keep` its own.
+    let row = |b: &mut Buf, clip: Clip, calls: &[(f32, f32, f32)], gaps: &[f32]| {
+        let mut at = 0.0;
+        for (k, &(up, keep, gain)) in calls.iter().enumerate() {
+            at += b.clip(at, clip, up, keep, gain);
+            if k + 1 < calls.len() {
+                at += gaps[k % gaps.len()];
+            }
+        }
+        at
+    };
+    Some(match sound {
+        Sound::Voice => match species {
+            // One bark or two, a few yips or peeps, as the synthesis did.
+            Shiba if take == 1 => row(b, call, &[(1.0, 1.0, 1.0), (0.97, 0.8, 0.85)], &[0.07]),
+            Fox => {
+                let n = 2 + take as usize % 2;
+                row(
+                    b,
+                    call,
+                    &[(1.0, 1.0, 1.0), (1.04, 1.0, 0.9), (0.97, 1.0, 0.85)][..n],
+                    &[0.05, 0.07],
+                )
+            }
+            Chick => {
+                let n = 2 + take as usize % 2;
+                row(
+                    b,
+                    call,
+                    &[(1.0, 1.0, 1.0), (1.06, 1.0, 0.9), (0.98, 1.0, 0.85)][..n],
+                    &[0.04, 0.06],
+                )
+            }
+            _ => b.clip(0.0, call, 1.0, 1.0, 1.0),
+        },
+        Sound::Greet => match species {
+            // The Shiba coaxes; cats trill; the rest call twice, going up.
+            Shiba => b.clip(0.0, Clip::ShibaWhimper, 1.06, 1.0, 1.0),
+            _ if cat => b.clip(0.0, Clip::CatTrill, small, 1.0, 1.0),
+            Owl => b.clip(0.0, call, 1.12, 1.0, 1.0),
+            Duck => b.clip(0.0, call, 1.1, 1.0, 1.0),
+            _ => row(b, call, &[(1.0, 0.8, 0.85), (1.15, 1.0, 1.0)], &[0.06]),
+        },
+        Sound::Laugh => {
+            // Quick, each a little lower and softer; long calls cut short.
+            let (clip, keep, base) = match species {
+                Shiba => (call, 0.6, 1.08),
+                _ if cat => (Clip::CatTrill, 0.7, small),
+                Owl => (call, 0.3, 1.1),
+                Duck => (call, 0.55, 1.12),
+                _ => (call, 1.0, 1.1),
+            };
+            let n = if species == Duck {
+                3
+            } else {
+                4 + take as usize % 2
+            };
+            let calls: Vec<_> = (0..n)
+                .map(|k| (base - 0.05 * k as f32, keep, 1.0 - 0.1 * k as f32))
+                .collect();
+            row(b, clip, &calls, &[0.05, 0.09, 0.04, 0.11])
+        }
+        Sound::Grumpy => match species {
+            Shiba => b.clip(0.0, Clip::ShibaGrowl, 1.0, 1.0, 1.0),
+            Fox => b.clip(0.0, Clip::ShibaGrowl, 1.3, 1.0, 1.0),
+            _ if cat => b.clip(0.0, Clip::CatGrumble, small, 1.0, 1.0),
+            // Birds: their own call, lower, short and sharp, twice or thrice.
+            Owl => row(b, call, &[(0.85, 0.3, 1.0), (0.8, 0.3, 0.9)], &[0.08]),
+            Duck => row(b, call, &[(0.9, 0.4, 1.0), (0.86, 0.4, 0.9)], &[0.06]),
+            _ => row(
+                b,
+                call,
+                &[(0.88, 1.0, 1.0), (0.86, 1.0, 0.95), (0.84, 1.0, 0.9)],
+                &[0.03],
+            ),
+        },
+        Sound::Sigh => match species {
+            Shiba => b.clip(0.0, Clip::ShibaWhimper, 0.92, 1.0, 1.0),
+            Fox => b.clip(0.0, Clip::ShibaWhimper, 1.15, 1.0, 1.0),
+            _ => return None,
+        },
+        Sound::Snore => b.clip(0.0, Clip::Snore, 1.0, 1.0, 1.0),
+        Sound::Purr if cat => b.clip(0.0, Clip::CatPurr, 1.0, 1.0, 1.0),
+        _ => return None,
+    })
 }
 
 /// The voice each species calls with (see [`call`]).
@@ -569,13 +768,22 @@ fn repeats(kind: Kind, take: u32) -> (u32, f32) {
     }
 }
 
+/// The longest a sound lasts, seconds: the snore, a whole breath.
+pub const LONGEST: f32 = 2.6;
+
 /// Mono 16-bit samples at [`RATE`] for `sound` in `species`' voice, take
-/// `take` (any number; they repeat every [`TAKES`]).
+/// `take` (any number; they repeat every [`TAKES`]): a recorded clip where
+/// there is one (see [`Clip`]), else synthesised.
 pub fn synth(species: Species, sound: Sound, take: u32) -> Vec<i16> {
     let take = take % TAKES;
-    let (kind, own) = kind_of(species);
     // Each take a little higher or lower.
-    let pitch = own * [1.0, 1.05, 0.95][take as usize];
+    let wobble = [1.0, 1.05, 0.95][take as usize];
+    let mut b = Buf::new(LONGEST, take, wobble);
+    if let Some(end) = recorded(&mut b, species, sound, take) {
+        return b.end(end, sound.class());
+    }
+    let (kind, own) = kind_of(species);
+    let pitch = own * wobble;
     let mut b = Buf::new(2.0, take, pitch);
     let end = match sound {
         Sound::Voice => {
@@ -749,9 +957,7 @@ pub fn synth(species: Species, sound: Sound, take: u32) -> Vec<i16> {
             0.42
         }
     };
-    let n = ((end + 0.03) * RATE as f32) as usize;
-    b.s.truncate(n.min(b.s.len()));
-    b.finish(sound.class())
+    b.end(end, sound.class())
 }
 
 #[cfg(test)]
@@ -772,7 +978,7 @@ mod tests {
                     let samples = synth(s, sound, take);
                     assert!(!samples.is_empty());
                     assert!(
-                        samples.len() <= RATE as usize * 2,
+                        samples.len() as f32 <= RATE as f32 * LONGEST,
                         "{s:?} {sound:?} is too long"
                     );
                     let peak = samples.iter().map(|v| v.unsigned_abs()).max().unwrap();
@@ -821,5 +1027,63 @@ mod tests {
             assert_eq!(limit(-x), -y);
         }
         assert!(limit(1.0) > limit(0.8));
+    }
+
+    #[test]
+    fn every_recorded_clip_is_there_and_fits() {
+        use Clip::*;
+        for clip in [
+            ShibaBark,
+            ShibaWhimper,
+            ShibaGrowl,
+            FoxYip,
+            FoldMeow,
+            MunchkinMeow,
+            CatPurr,
+            CatTrill,
+            CatGrumble,
+            OwlHoot,
+            ChickPeep,
+            DucklingPeeps,
+            Snore,
+        ] {
+            let s = clip.samples();
+            let secs = s.len() as f32 / RATE as f32;
+            assert!((0.15..=LONGEST).contains(&secs), "{clip:?}: {secs} s");
+            // Baked to peak at −1 dBFS (tools/soundbake).
+            let peak = s.iter().fold(0.0f32, |m, x| m.max(x.abs()));
+            assert!((peak - PEAK).abs() < 0.01, "{clip:?}: peak {peak}");
+        }
+    }
+
+    #[test]
+    fn the_calls_are_recorded_and_the_knocks_synthesised() {
+        let mut b = Buf::new(LONGEST, 0, 1.0);
+        for s in Species::ALL {
+            for sound in [
+                Sound::Voice,
+                Sound::Greet,
+                Sound::Laugh,
+                Sound::Grumpy,
+                Sound::Snore,
+            ] {
+                assert!(recorded(&mut b, s, sound, 0).is_some(), "{s:?} {sound:?}");
+            }
+            for sound in [
+                Sound::Poke,
+                Sound::Land,
+                Sound::Eat,
+                Sound::Bell,
+                Sound::Flutter,
+                Sound::Pant,
+            ] {
+                assert!(recorded(&mut b, s, sound, 0).is_none(), "{s:?} {sound:?}");
+            }
+        }
+        // Each cat its own meow.
+        assert_ne!(
+            synth(Species::Fold, Sound::Voice, 0),
+            synth(Species::Munchkin, Sound::Voice, 0)
+        );
     }
 }

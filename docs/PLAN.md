@@ -119,7 +119,7 @@ v1 has seven species (the 九尾狐 joined on 2026-10-28). A species only sets *
 
 ### 1.5 Sound mode (on by default)
 
-- One sound set per species (OGG Vorbis): calls, laugh, sigh, snore, landing. The Shiba scream and the duck's 「呱」 are mandatory.
+- One sound set per species: calls, laugh, sigh, snore, landing. Since 2026-11-10 the calls are **real CC0 recordings** picked by Roger (§8 "Roger's fifteenth pass", item 5): cut by `tools/soundbake` from its list `sounds.json` into `assets/sounds/*.wav`, credited in `licenses/sounds.md`; knocks (poke, landing, eating, panting, the bell, wings) stay synthesised. The duckling peeps rather than quacks, by Roger's pick (the 「呱～」 in its lines stays). The Shiba scream is still mandatory.
 - **Master volume slider**, plus per-pet mute.
 - **Rate limit**: a cap on sounds per pet per minute; a poke burst plays one sound.
 - Muted automatically in any "don't disturb" state.
@@ -1124,6 +1124,13 @@ Roger's notes on the fourteenth pass build (f9e72b4, pushed and built by CI the 
 - Not a problem: `Purr` for the dog and the birds is never played (only the cats purr, `line_sound`, `fidget_sound`).
 - Unconfirmed: clicks at the start and end of the noise bursts (pant, flutter) in the clip; the synthesised envelopes are eased, so look at playback (`audio.rs`) if it is heard again.
 
+**Built 2026-11-10: recorded calls (item 5 (c)).** Roger chose a mix: real recordings for the calls, synthesis kept for the knocks. Candidates: Freesound searched with its CC0 filter (its 128 kbps previews, the same licence; no login needed) and Wikimedia Commons; about 115 clips, screened by Gemini 3.6 Flash and then measured here (noise floor, signal to noise, clipping, where each call is), because Flash's "cleanest" picks measured 12–19 dB above their noise. The best were cut to one call, pitched and levelled to the app's loudness, and put beside the old synthesis on a listening page (https://claude.ai/artifact/1oH4dcp3bM13Kk4jiNmThG); Roger picked one per row. Every pick was then checked CC0 on its own page.
+
+- **Picked**: the Shiba a small dog's bark, a happy whimper for its sigh and its coaxing greeting, a Shih Tzu's growl when fed up; the fox a puppy's bark ×1.4 (no usable CC0 fox exists, and real foxes do not sound cute); the Fold and the Munchkin each their own kitten's meow; both cats a purr, a kitten's trill to greet and laugh with, a grumble; the owl a tawny owl's hoot; the chick a chick's peep (Commons); the duckling **ducklings' peeps, not a quack** (Roger's pick over 呱; the line text stays); one dog's snore for everyone (each pet's own pitch on playback).
+- **Made from them** (`sound::recorded`): greetings, laughs and grumbles are chains of the picked calls, with uneven gaps and each a little lower and softer (the synthesis's even rate read as "a machine gun"); the birds grumble with their own call lower, short and sharp. Takes vary the pitch ×1.0/1.05/0.95 as before. Everything still goes through the class loudness and the limiter, so the mix is unchanged; the longest sound is now 2.6 s (`LONGEST`, the snore's whole breath).
+- **Still synthesised**: poke, landing, eating, panting, the bell, wings, and the cats' and birds' sighs (Gemini found these passable, 3–5).
+- **Changing one later** (Roger: keep these a while and see how they go): edit `tools/soundbake/sounds.json` (source, start, end, pitch, denoise), run `FFMPEG=… python3 tools/soundbake/bake.py`, which also rewrites `licenses/sounds.md`; how the clips are used is `recorded` in `sound.rs`.
+
 ### Phase 1: Shiba prototype (feel) — `v0.1.0`
 
 - The art pipeline (§3.3) works end to end for one Shiba, with placeholder art.
@@ -1199,7 +1206,7 @@ Roger's notes on the fourteenth pass build (f9e72b4, pushed and built by CI the 
 | Question | Affects | Decide by |
 |---|---|---|
 | **Who draws the art** (Roger, a commission, or my placeholders first) | critical path; cuteness depends on it | end of Phase 1 |
-| Sound sources (self-recorded, commissioned, CC0). Decided 2026-11-04: synthesis (built in step I); a recording can replace a single sound later, once its licence is checked | licensing | done |
+| Sound sources (self-recorded, commissioned, CC0). Decided 2026-11-04: synthesis (built in step I); 2026-11-10: the calls replaced by CC0 recordings Roger picked by ear (fifteenth pass, item 5), the knocks still synthesised | licensing | done |
 | The next release's number, now that the `v0.5.0-beta.*` releases are removed. Decided 2026-11-04: `v0.6.0-beta.1`, since the mesh pets, terrain, touch and fidgets replace most of what the 0.5 betas had | tags, README | done |
 | Owl's favourite snack | snack content | Phase 5 |
 | What 「沒有 ui/ux icon」 means. Roger, 2026-11-03: the 招牌 icon, read as the program's own signature icon (exe, taskbar, Alt-Tab, tray, settings window), to be confirmed when the designs are shown; whether the settings window also gets icons is still open | icon work in §8 "Roger's fourth pass", item 1: the next round | before that work starts |

@@ -1,0 +1,33 @@
+{
+  "about": "The recorded clips the pets' calls are made from (PLAN §8, fifteenth pass, item 5). Picked by Roger on 2026-11-10 from a listening page; every source checked CC0 on its own page that day. Times are seconds in the source; pitch is baked in (the app varies each take a little around it). bake.py turns this into assets/sounds/*.wav and licenses/sounds.md.",
+  "sources": {
+    "361544": { "title": "Small Dog Barking", "author": "Jofae", "page": "https://freesound.org/s/361544/", "audio": "https://cdn.freesound.org/previews/361/361544_6512973-hq.mp3", "license": "CC0 1.0" },
+    "427127": { "title": "82-PerritoGimoteaFeliz.wav", "author": "Caap", "page": "https://freesound.org/s/427127/", "audio": "https://cdn.freesound.org/previews/427/427127_8343580-hq.mp3", "license": "CC0 1.0" },
+    "372537": { "title": "Dog Shih Tzu Growling 03.wav", "author": "Glitchedtones", "page": "https://freesound.org/s/372537/", "audio": "https://cdn.freesound.org/previews/372/372537_3294528-hq.mp3", "license": "CC0 1.0" },
+    "583142": { "title": "Puppy Bark", "author": "AntumDeluge", "page": "https://freesound.org/s/583142/", "audio": "https://cdn.freesound.org/previews/583/583142_3403708-hq.mp3", "license": "CC0 1.0" },
+    "479272": { "title": "New Cat Meow 1", "author": "steffcaffrey", "page": "https://freesound.org/s/479272/", "audio": "https://cdn.freesound.org/previews/479/479272_1844073-hq.mp3", "license": "CC0 1.0" },
+    "448084": { "title": "Cute Kitten Meow", "author": "Breviceps", "page": "https://freesound.org/s/448084/", "audio": "https://cdn.freesound.org/previews/448/448084_9159316-hq.mp3", "license": "CC0 1.0" },
+    "575933": { "title": "Cat Purr", "author": "RazzleDizzle", "page": "https://freesound.org/s/575933/", "audio": "https://cdn.freesound.org/previews/575/575933_1824398-hq.mp3", "license": "CC0 1.0" },
+    "850103": { "title": "Chatter and Trill", "author": "CatPhony", "page": "https://freesound.org/s/850103/", "audio": "https://cdn.freesound.org/previews/850/850103_18444603-hq.mp3", "license": "CC0 1.0" },
+    "646955": { "title": "Autumn_Mehs1.wav", "author": "Keskaowl", "page": "https://freesound.org/s/646955/", "audio": "https://cdn.freesound.org/previews/646/646955_9875501-hq.mp3", "license": "CC0 1.0" },
+    "864872": { "title": "Tawny Owl in Molkom, Sweden - Cleaned", "author": "sound368", "page": "https://freesound.org/s/864872/", "audio": "https://cdn.freesound.org/previews/864/864872_4846901-hq.mp3", "license": "CC0 1.0" },
+    "842314": { "title": "Waterfowl - Ducklings, Take 2", "author": "TheKingOfGeeks360", "page": "https://freesound.org/s/842314/", "audio": "https://cdn.freesound.org/previews/842/842314_15895934-hq.mp3", "license": "CC0 1.0" },
+    "577384": { "title": "snoring", "author": "Podcapocalipsis", "page": "https://freesound.org/s/577384/", "audio": "https://cdn.freesound.org/previews/577/577384_11490791-hq.mp3", "license": "CC0 1.0" },
+    "commons-chick": { "title": "মুরগির বাচ্চার ডাক.oga", "author": "Md. Tahmid Hossain", "page": "https://commons.wikimedia.org/wiki/File:%E0%A6%AE%E0%A7%81%E0%A6%B0%E0%A6%97%E0%A6%BF%E0%A6%B0_%E0%A6%AC%E0%A6%BE%E0%A6%9A%E0%A7%8D%E0%A6%9A%E0%A6%BE%E0%A6%B0_%E0%A6%A1%E0%A6%BE%E0%A6%95.oga", "audio": "https://upload.wikimedia.org/wikipedia/commons/a/a9/%E0%A6%AE%E0%A7%81%E0%A6%B0%E0%A6%97%E0%A6%BF%E0%A6%B0_%E0%A6%AC%E0%A6%BE%E0%A6%9A%E0%A7%8D%E0%A6%9A%E0%A6%BE%E0%A6%B0_%E0%A6%A1%E0%A6%BE%E0%A6%95.oga", "license": "CC0 1.0" }
+  },
+  "clips": {
+    "shiba-bark":     { "source": "361544", "start": 0.24, "end": 0.70, "use": "the Shiba's 汪 (page row 柴犬 A)" },
+    "shiba-whimper":  { "source": "427127", "start": 0.00, "end": 0.40, "denoise": true, "use": "the Shiba's sigh and its glad, coaxing sounds (柴犬 D)" },
+    "shiba-growl":    { "source": "372537", "start": 0.00, "end": 1.10, "denoise": true, "use": "the Shiba fed up (柴犬 C)" },
+    "fox-yip":        { "source": "583142", "start": 0.08, "end": 0.32, "pitch": 1.4, "use": "the fox's call, a puppy's bark pitched up: no usable CC0 fox exists (狐狸 B)" },
+    "fold-meow":      { "source": "479272", "start": 0.03, "end": 0.58, "denoise": true, "use": "the Scottish Fold's 喵 (貓 D)" },
+    "munchkin-meow":  { "source": "448084", "start": 0.03, "end": 0.38, "denoise": true, "use": "the Munchkin's 喵 (貓 E)" },
+    "cat-purr":       { "source": "575933", "start": 0.30, "end": 2.70, "denoise": true, "highpass": 60, "use": "both cats purring (呼嚕 A; the first 2.4 s of the clip heard)" },
+    "cat-trill":      { "source": "850103", "start": 0.47, "end": 0.85, "use": "both cats' greeting and laugh (顫音 A)" },
+    "cat-grumble":    { "source": "646955", "start": 0.00, "end": 1.95, "use": "both cats fed up (咕噥 A)" },
+    "owl-hoot":       { "source": "864872", "start": 1.58, "end": 2.70, "use": "the owl's 咕 (貓頭鷹 A)" },
+    "chick-peep":     { "source": "commons-chick", "start": 0.17, "end": 0.37, "denoise": true, "use": "the chick's 啾 (小雞 D)" },
+    "duckling-peeps": { "source": "842314", "start": 0.02, "end": 0.55, "use": "the duckling's call: peeps, not a quack, by Roger's pick (小鴨 E)" },
+    "snore":          { "source": "577384", "start": 0.14, "end": 2.52, "highpass": 60, "use": "everyone asleep (打呼 A)" }
+  }
+}

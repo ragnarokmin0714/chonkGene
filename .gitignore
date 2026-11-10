@@ -5,3 +5,6 @@ docs/icon-drafts/
 
 # Clips and logs Roger hands over for review (never committed).
 /inbox/
+
+# Downloaded sources of the recorded sounds (tools/soundbake).
+/tools/soundbake/cache/
