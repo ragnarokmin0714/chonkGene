@@ -775,79 +775,244 @@ fn repeats(kind: Kind, take: u32) -> (u32, f32) {
 /// The longest a sound lasts, seconds: the snore, a whole breath.
 pub const LONGEST: f32 = 2.6;
 
+/// The 肉肉舞's tune, phrase `take` of three (the app plays takes 1, 2, 0
+/// in turn), four beats at 120 a minute each: kagura (Roger: like a
+/// miko's 神樂舞, a little more of the old about it). A bamboo flute
+/// (神樂笛) breathy and sliding up into its notes in the old 呂 scale
+/// (D E G A B, no half steps), the small drum (締太鼓) on the beat, the
+/// big drum (大太鼓) on the first, the miko's bells (神樂鈴) shaken on the
+/// off beats, and a quiet 笙 chord held under it all. The last phrase ends
+/// 「登登！」: two strokes of the big drum with the bells and a high cry
+/// of the flute, on the dance's eleventh and twelfth beats (the second as
+/// it strikes its pose). Returns its length.
+fn tune(b: &mut Buf, take: u32) -> f32 {
+    const BEAT: f32 = 0.5;
+    let hz = |m: u8| 440.0 * 2f32.powf((f32::from(m) - 69.0) / 12.0);
+    // (MIDI note, beats), one after another.
+    let flute: &[(u8, f32)] = match take {
+        1 => &[
+            (81, 1.0),
+            (83, 0.5),
+            (81, 0.5),
+            (79, 1.0),
+            (76, 0.5),
+            (79, 0.5),
+        ],
+        2 => &[
+            (86, 1.0),
+            (83, 0.5),
+            (81, 0.5),
+            (79, 0.5),
+            (81, 0.5),
+            (76, 1.0),
+        ],
+        _ => &[(74, 0.5), (76, 0.5), (81, 1.5)],
+    };
+    // The 笙's chord under it (D, E, A, B: open, old).
+    let end = if take == 0 { 2.55 } else { 2.0 };
+    for m in [74, 76, 81, 83] {
+        sho(&mut b.s, 0.0, end, hz(m), 0.026);
+    }
+    let mut at = 0.0;
+    for &(m, beats) in flute {
+        let len = beats * BEAT;
+        kagura_bue(b, at, len, hz(m), 0.3);
+        at += len;
+    }
+    // The small drum's pattern, beats in and how hard, not every beat the
+    // same (Gemini, listening: square, march-like); the bells shaken in a
+    // roll on the second and fourth. Played by hand: each stroke a little
+    // early or late, harder or softer (a strict grid read as an arcade
+    // game).
+    let last = if take == 0 { 2.0 } else { 4.0 };
+    let shime_at = [
+        (0.0, 0.45),
+        (1.0, 0.35),
+        (1.75, 0.22),
+        (2.5, 0.38),
+        (3.0, 0.3),
+        (3.5, 0.2),
+    ];
+    taiko(&mut b.s, 0.0, 0.9);
+    for (beat, g) in shime_at.into_iter().filter(|(beat, _)| *beat < last) {
+        let (dt, k) = (0.012 * b.rng.s(), 1.0 + 0.15 * b.rng.s());
+        shime(b, beat * BEAT + dt.max(0.0), g * k);
+    }
+    for beat in [1.0, 3.0].into_iter().filter(|beat| *beat < last) {
+        let (dt, k) = (0.01 * b.rng.s(), 1.0 + 0.15 * b.rng.s());
+        suzu(b, beat * BEAT + dt.max(0.0), 0.24 * k);
+    }
+    if take == 0 {
+        // 「登登！」
+        for (t, g) in [(1.5, 0.75), (2.0, 1.0)] {
+            taiko(&mut b.s, t, g);
+            shime(b, t, 0.5 * g);
+            suzu(b, t, 0.5 * g);
+        }
+        // The flute's cry over the last stroke (an octave's leap up, but
+        // not so high it is shrill).
+        kagura_bue(b, 2.0, 0.5, hz(83), 0.24);
+    }
+    // In a wooden hall: a short warm reverb over it all.
+    hall(&mut b.s, 0.22);
+    // Faded out where it is cut (see `Buf::end`): into the next phrase,
+    // which starts as this one's last 30 ms play, or the ending's last
+    // ring; a cut with the reverb still going clicked.
+    let fade = if take == 0 { 0.13 } else { 0.03 };
+    let (from, to) = (end + 0.03 - fade, end + 0.03);
+    for (i, v) in b.s.iter_mut().enumerate() {
+        let t = i as f32 / RATE as f32;
+        if t > from {
+            *v *= 1.0 - ease((t - from) / (to - from));
+        }
+    }
+    end
+}
+
+/// A small room's reverb (Schroeder: four combs, two all-passes), mixed in
+/// at `wet`.
+fn hall(s: &mut [f32], wet: f32) {
+    let ms = |m: f32| (m * RATE as f32 / 1000.0) as usize;
+    let combs = [
+        (ms(29.7), 0.77),
+        (ms(37.1), 0.75),
+        (ms(41.1), 0.73),
+        (ms(43.7), 0.71),
+    ];
+    let mut out = vec![0.0f32; s.len()];
+    for (delay, feedback) in combs {
+        let mut buf = vec![0.0f32; delay];
+        let mut low = Low::default();
+        for (i, o) in out.iter_mut().enumerate() {
+            let k = i % delay;
+            let y = buf[k];
+            // Damped: wood takes the highs out of each echo.
+            buf[k] = s[i] + feedback * low.run(y, 3500.0);
+            *o += 0.25 * y;
+        }
+    }
+    for delay in [ms(5.0), ms(1.7)] {
+        let mut buf = vec![0.0f32; delay];
+        for (i, o) in out.iter_mut().enumerate() {
+            let k = i % delay;
+            let y = buf[k];
+            let x = *o;
+            buf[k] = x + 0.5 * y;
+            *o = y - 0.5 * buf[k];
+        }
+    }
+    for (d, w) in s.iter_mut().zip(out) {
+        *d += wet * w;
+    }
+}
+
+/// The kagura flute: a soft, slightly hollow tone sliding up into its note
+/// from a little below, breath noise in it, a slow vibrato coming in on
+/// longer notes.
+fn kagura_bue(b: &mut Buf, at: f32, len: f32, hz: f32, gain: f32) {
+    let start = (at * RATE as f32) as usize;
+    let n = ((len + 0.06) * RATE as f32) as usize;
+    let mut phase = 0.0f32;
+    let mut band = Band::default();
+    for i in 0..n {
+        let t = i as f32 / RATE as f32;
+        let noise = b.rng.s();
+        let Some(out) = b.s.get_mut(start + i) else {
+            break;
+        };
+        // Up into the note from two semitones below, quick at first and
+        // settling (a finger lifted, not a synthesiser's glide); the end
+        // falling away a little as the breath goes.
+        let rise = 1.0 - (1.0 - (t / 0.08).min(1.0)).powi(3);
+        let fall = ease((t - len + 0.08) / 0.08);
+        let semis = -2.0 * (1.0 - rise) - 0.6 * fall;
+        let vib = 1.0 + 0.01 * ease((t - 0.2) / 0.3) * (TAU * 5.2 * t).sin();
+        let f = hz * 2f32.powf(semis / 12.0) * vib;
+        phase += TAU * f / RATE as f32;
+        let tone = phase.sin()
+            + 0.3 * (2.0 * phase).sin()
+            + 0.12 * (3.0 * phase).sin()
+            + 0.06 * (4.0 * phase).sin();
+        // Air across the mouth hole: noise round the note and above it.
+        let breath = band.run(noise, 1.4 * f, 1.0) * 1.6;
+        let env = ease(t / 0.03) * (1.0 - ease((t - len) / 0.06));
+        // A puff of breath at the start of each note.
+        let puff = 1.0 + 1.5 * (-t / 0.05).exp();
+        *out += (0.85 * tone + breath * puff) * env * gain;
+    }
+}
+
+/// The 笙's chord: reedy, coming in slowly and holding.
+fn sho(s: &mut [f32], at: f32, len: f32, hz: f32, gain: f32) {
+    let start = (at * RATE as f32) as usize;
+    let n = (len * RATE as f32) as usize;
+    for i in 0..n {
+        let Some(out) = s.get_mut(start + i) else {
+            break;
+        };
+        let t = i as f32 / RATE as f32;
+        // Two reeds a hair apart, beating slowly; few overtones (it read
+        // as a buzzy organ).
+        let w = TAU * hz * t;
+        let w2 = TAU * hz * 1.003 * t;
+        let tone = 0.5 * (w.sin() + w2.sin()) + 0.12 * (3.0 * w).sin() + 0.04 * (5.0 * w).sin();
+        *out += tone * gain * ease(t / 0.4) * (1.0 - ease((t - len + 0.15) / 0.15));
+    }
+}
+
+/// The big drum: a deep 「咚」 falling into its pitch.
+fn taiko(s: &mut [f32], at: f32, gain: f32) {
+    let start = (at * RATE as f32) as usize;
+    let n = (0.6 * RATE as f32) as usize;
+    let mut phase = 0.0f32;
+    for i in 0..n {
+        let Some(out) = s.get_mut(start + i) else {
+            break;
+        };
+        let t = i as f32 / RATE as f32;
+        let f = 78.0 * (1.0 + 0.8 * (-t / 0.025).exp());
+        phase += TAU * f / RATE as f32;
+        *out += phase.sin() * gain * ease(t / 0.002) * (-t / 0.22).exp();
+    }
+}
+
+/// The small, tight drum: a high 「天」 with a slap of skin on it.
+fn shime(b: &mut Buf, at: f32, gain: f32) {
+    let start = (at * RATE as f32) as usize;
+    let n = (0.18 * RATE as f32) as usize;
+    let mut phase = 0.0f32;
+    let mut band = Band::default();
+    for i in 0..n {
+        let t = i as f32 / RATE as f32;
+        let noise = b.rng.s();
+        let Some(out) = b.s.get_mut(start + i) else {
+            break;
+        };
+        let f = 420.0 * (1.0 + 0.3 * (-t / 0.01).exp());
+        phase += TAU * f / RATE as f32;
+        let slap = band.run(noise, 1700.0, 1.0) * (-t / 0.014).exp();
+        // A skin struck, not a click: three milliseconds in.
+        *out += (phase.sin() * (-t / 0.06).exp() + 0.8 * slap) * gain * ease(t / 0.003);
+    }
+}
+
+/// The miko's bells (神樂鈴, tiers of small bells on one handle) shaken
+/// once: a quick roll of strikes dying away over a seventh of a second,
+/// 「沙啦啦」, not a sleigh bell's even jingle; low and brassy.
+fn suzu(b: &mut Buf, at: f32, gain: f32) {
+    for k in 0..7 {
+        let kf = k as f32;
+        let t = at + 0.02 * kf + 0.008 * b.rng.f();
+        // Its highest partial (6.6 times) stays under half the sample rate.
+        let hz = 1500.0 + 600.0 * b.rng.f();
+        let hand = 0.8 + 0.4 * b.rng.f();
+        b.bell(t, hz, gain * (1.0 - 0.12 * kf) * hand);
+    }
+}
+
 /// Mono 16-bit samples at [`RATE`] for `sound` in `species`' voice, take
 /// `take` (any number; they repeat every [`TAKES`]): a recorded clip where
 /// there is one (see [`Clip`]), else synthesised.
-/// The 肉肉舞's tune, phrase `take` of three (the app plays takes 1, 2, 0
-/// in turn): eight bouncy plucked notes over a boinging bass on the beat,
-/// 120 a minute; the last phrase ends 「登登！」, two chords. Returns its
-/// length.
-fn tune(b: &mut Buf, take: u32) -> f32 {
-    const EIGHTH: f32 = 0.25;
-    // MIDI notes; 0 a rest.
-    let (lead, bass): ([u8; 8], [u8; 4]) = match take {
-        1 => ([72, 76, 79, 76, 81, 79, 76, 74], [48, 43, 48, 43]),
-        2 => ([74, 77, 81, 77, 79, 76, 72, 74], [50, 43, 48, 43]),
-        _ => ([72, 76, 79, 84, 0, 0, 0, 0], [48, 43, 0, 0]),
-    };
-    let hz = |m: u8| 440.0 * 2f32.powf((f32::from(m) - 69.0) / 12.0);
-    for (k, &m) in lead.iter().enumerate() {
-        if m > 0 {
-            pluck(&mut b.s, EIGHTH * k as f32, hz(m), 0.22, 0.32);
-        }
-    }
-    for (k, &m) in bass.iter().enumerate() {
-        if m > 0 {
-            boing(&mut b.s, 2.0 * EIGHTH * k as f32, hz(m), 0.5);
-        }
-    }
-    if take == 0 {
-        // 「登登！」: a short chord, then a longer one, on the dance's
-        // eleventh and twelfth beats (the phrase starts on the eighth):
-        // the second lands as it strikes its pose.
-        for (at, len, gain) in [(1.5, 0.16, 0.3), (2.0, 0.42, 0.34)] {
-            for m in [72, 76, 79, 84] {
-                pluck(&mut b.s, at, hz(m), len, gain * 0.6);
-            }
-            boing(&mut b.s, at, hz(48), gain * 1.4);
-        }
-        return 2.55;
-    }
-    2.0
-}
-
-/// A plucked, slightly square note: odd harmonics, a quick attack, an
-/// exponential fall over `decay` seconds.
-fn pluck(s: &mut [f32], at: f32, hz: f32, decay: f32, gain: f32) {
-    let start = (at * RATE as f32) as usize;
-    let n = ((decay * 4.0) * RATE as f32) as usize;
-    for i in 0..n {
-        let Some(out) = s.get_mut(start + i) else {
-            break;
-        };
-        let t = i as f32 / RATE as f32;
-        let w = TAU * hz * t;
-        let tone = w.sin() + 0.3 * (3.0 * w).sin() + 0.12 * (5.0 * w).sin();
-        *out += tone * gain * ease(t / 0.004) * (-t / decay).exp();
-    }
-}
-
-/// A round bass note that drops into its pitch, 「咚」.
-fn boing(s: &mut [f32], at: f32, hz: f32, gain: f32) {
-    let start = (at * RATE as f32) as usize;
-    let n = (0.4 * RATE as f32) as usize;
-    let mut phase = 0.0;
-    for i in 0..n {
-        let Some(out) = s.get_mut(start + i) else {
-            break;
-        };
-        let t = i as f32 / RATE as f32;
-        let f = hz * (1.0 + 0.6 * (-t / 0.03).exp());
-        phase += TAU * f / RATE as f32;
-        *out += phase.sin() * gain * ease(t / 0.003) * (-t / 0.16).exp();
-    }
-}
-
 pub fn synth(species: Species, sound: Sound, take: u32) -> Vec<i16> {
     let take = take % TAKES;
     // The same for every species: music, not a voice.
