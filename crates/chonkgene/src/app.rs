@@ -1591,13 +1591,27 @@ fn actors(pets: &[Pet], now: f64) -> Vec<Actor> {
         .collect()
 }
 
+/// When a pet given `cmd` at `now` draws next, if it was to at `next`:
+/// at once, but never later than it would have. The director sends walks
+/// and turns again every go round (招喚術, running at each other), and
+/// setting it to now each time left it just after the loop's own now: the
+/// pet was never stepped, stood still for the whole 招喚術 with a frame
+/// left waiting (Roger's log: pictures unchanged 4.5 s) while the loop
+/// spun. A walk or a turn is taken up at its next frame anyway.
+fn woken(next: Instant, cmd: &Cmd, now: Instant) -> Instant {
+    match cmd {
+        Cmd::Walk { .. } | Cmd::Face { .. } => next,
+        _ => next.min(now),
+    }
+}
+
 fn direct(pets: &mut [Pet], ctx: &mut Ctx, cmds: Vec<Cmd>) {
     for cmd in cmds {
         let id = cmd.id();
         let Some(p) = pets.iter_mut().find(|p| p.save.id == id) else {
             continue;
         };
-        p.next = Instant::now();
+        p.next = woken(p.next, &cmd, Instant::now());
         if matches!(
             cmd,
             Cmd::Tussle { .. }
@@ -3077,7 +3091,16 @@ impl ApplicationHandler<UserEvent> for App {
             // from Roger's: who was called, and when it ended).
             let skit = director.describe();
             if skit != *skit_seen {
-                diag!("skit: {}", skit.as_deref().unwrap_or("over"));
+                // Where everyone is, to see who came when called.
+                let at: Vec<String> = pets
+                    .iter()
+                    .map(|p| format!("{} {:.0}", p.save.id, p.center_x()))
+                    .collect();
+                diag!(
+                    "skit: {} (at {})",
+                    skit.as_deref().unwrap_or("over"),
+                    at.join(", ")
+                );
                 *skit_seen = skit;
             }
         }
@@ -3163,6 +3186,32 @@ impl ApplicationHandler<UserEvent> for App {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A pet the director keeps sending a walk is still stepped at its
+    /// own rate (招喚術: the called pets never moved), and a command never
+    /// puts its next frame off.
+    #[test]
+    fn the_directors_commands_never_put_a_pets_frame_off() {
+        let now = Instant::now();
+        let due = now - Duration::from_millis(5);
+        let later = now + Duration::from_millis(30);
+        let walk = Cmd::Walk {
+            id: 1,
+            x: 0.0,
+            pace: 1.0,
+        };
+        // Sent again every go round, a walk leaves a due frame due.
+        let mut next = due;
+        for k in 0..100 {
+            next = woken(next, &walk, now + Duration::from_micros(k));
+        }
+        assert_eq!(next, due);
+        assert_eq!(woken(later, &walk, now), later);
+        // Anything else brings it forward, never back.
+        let hop = Cmd::Hop { id: 1 };
+        assert_eq!(woken(later, &hop, now), now);
+        assert_eq!(woken(due, &hop, now), due);
+    }
 
     /// The beta-1 bug: five seconds in, with nothing to save, the old save
     /// time kept the loop waking at once, burning a whole core.

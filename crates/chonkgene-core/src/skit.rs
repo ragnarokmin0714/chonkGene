@@ -305,6 +305,8 @@ pub struct Director {
     forced: Option<Kind>,
     /// Called over by the fox (招喚術): theirs to walk while it lasts.
     called: Vec<u64>,
+    /// The spell a forced [`Kind::Spell`] casts (see [`Director::rush`]).
+    forced_spell: Option<Spell>,
 }
 
 /// Mean seconds between skits for 偶爾 / 常常 / 超常 (Roger: they hardly
@@ -323,12 +325,18 @@ fn pair(a: u64, b: u64) -> (u64, u64) {
 
 impl Director {
     /// For trying skits out (`CHONKGENE_SKIT`): the next one starts within
-    /// seconds, and is a `spell`, a `play`-fight or a `squabble` as named
-    /// (anything else: as it comes). True if the name was known.
+    /// seconds, and is a `spell` (定身術, or `call` 招喚術, `bless` 祝福術),
+    /// a `play`-fight or a `squabble` as named (anything else: as it
+    /// comes). True if the name was known.
     pub fn rush(&mut self, kind: &str) -> bool {
         self.next_at = Some(3.0);
+        self.forced_spell = match kind {
+            "call" => Some(Spell::Call),
+            "bless" => Some(Spell::Bless),
+            _ => None,
+        };
         self.forced = match kind {
-            "spell" => Some(Kind::Spell),
+            "spell" | "call" | "bless" => Some(Kind::Spell),
             "play" => Some(Kind::Play),
             "squabble" => Some(Kind::GlareChase),
             _ => None,
@@ -974,7 +982,8 @@ impl Director {
         if let Some((fox, other)) = fox
             && spell
         {
-            return self.begin_spell(now, actors, *fox, *other, Spell::Freeze);
+            let which = self.forced_spell.take().unwrap_or(Spell::Freeze);
+            return self.begin_spell(now, actors, *fox, *other, which);
         }
         // A chick and a duckling present always get to talk past each other.
         let talk = pairs.iter().position(|(a, b)| {
