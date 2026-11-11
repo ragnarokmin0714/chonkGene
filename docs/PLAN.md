@@ -1165,6 +1165,15 @@ Roger, the same day: **the pond borderless, its edge fading out, deeper, bigger,
 
 Still to do: Roger's look at all of it on Windows.
 
+### Roger's sixteenth pass (feedback only, 2026-11-11)
+
+Roger's notes after the fifteenth pass, to do next time:
+
+1. **Seven pets on the desktop at once by default** (「一般同時在桌面上的寵物，預設 7 隻」). Now `Settings::on_desktop` defaults to 6 (`store.rs`); 7 is every species once. Check the settings page's limit control, the first-run adoption (two pets) and the §5 budget with seven (the fair GPU share above is what makes seven bearable on a UHD 770).
+2. **In 「我的寵物」 (settings) the pet's motion lags.** Found while writing this down: the preview is ticked by a Slint timer at `PREVIEW_FPS` = 10 (`settings.rs`), the animator stepped a fixed 0.1 s a tick rather than the real time passed, and a mesh frame is collected a call late (`MeshRenderer`: sent, then picked up on the next render), so what shows is 10 fps at best and a tenth of a second behind. Plan: 30 fps or more (the renderer's own `min_fps`), step by the real time, collect the frame in the same tick (or wait for it: the settings window has nothing else to keep smooth); check the settings process's GPU budget (its own `Gpu`, one user).
+3. **Coming out of the pond, a square afterimage shows under the pet for a moment** (「從水池出來的一瞬間，下面出現方塊殘影」). Suspects: the frame where `fun.pond.now` turns `None` — `compose` stops, `draw` presents `renderer.pixmap()`, while the last composed canvas (with the pond's water and the strip cleared below its near edge) may still be what a Windows redraw shows (`had_overlay` already false), or the plain picture's legs below the pond's rim (cleared until then) show for a frame against the pond window behind; or the pond's spray/stir drawing. Ask for a clip (60 fps) to see which; check the transition frame by frame under Xvfb too (`CHONKGENE_STAGE=pond`).
+4. **Touching different parts gets different reactions, by species** (「摸動物不同部位時，會有其他反應，如貓摸下巴和肚子會很興奮，以此類推」). Now every zone (`Zone`: Head, Chin, Cheek, Belly, Paw, Tail, Bottom) gets much the same poke / pat / tickle routes (`Mind::poke`, `Mind::pat`, the tickle stages), the head following the finger and the chin lifting. Plan: a table per species of how much it likes each zone (loves / likes / does not mind / dislikes), and reactions to match: loved spots (Roger: a cat's chin and belly) excited — purring loud, eyes shut in bliss, kneading, rolling over for more, the tail curling, hearts; liked ones a lean into the hand; disliked ones (a cat's tail, a dog's paws, a bird's back) a flinch, a glance, ears back, stepping away, and with grudges as now. To propose the table to Roger before building (e.g. Shiba: loves chest/chin and belly, bottom-scratch at the tail base; cats: chin, cheeks, head, belly for some (a trap for others); owl: head and cheeks only; chick/duckling: head and back; fox: ears/head and tails).
+
 ### Phase 1: Shiba prototype (feel) — `v0.1.0`
 
 - The art pipeline (§3.3) works end to end for one Shiba, with placeholder art.
