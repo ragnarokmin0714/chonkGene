@@ -611,8 +611,10 @@ impl Waddle {
         let _pace_acc = (s - self.pace) / dt;
         self.pace = s;
         if let Some(i) = self.soft[0] {
-            // The belly rises and falls with each breath.
-            let y = self.belly.step(-0.03 * self.breath, -acc, 3.6, 0.16, dt);
+            // The belly rises and falls with each breath, more settled
+            // down asleep (Roger's fifteenth pass).
+            let amp = 0.03 + 0.04 * lie;
+            let y = self.belly.step(-amp * self.breath, -acc, 3.6, 0.16, dt);
             j[i].shift = v3(0.0, y.clamp(-0.12, 0.12), 0.0);
         }
         if let Some(i) = self.soft[1] {

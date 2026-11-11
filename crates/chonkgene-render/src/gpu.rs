@@ -129,35 +129,159 @@ const BURST: f32 = 0.05;
 const GUESS: f32 = 0.005;
 const GUESS_PIXELS: f32 = 227.0 * 201.0;
 
+/// How a frame asks the budget (see [`Budget::ask`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Ask {
+    /// Only if it can be paid for: out of what is saved, or out of the
+    /// pet's own fair share.
+    Fair,
+    /// A walking pet's (or a flying, falling one's): as [`Ask::Fair`], or
+    /// anyway if its last frame went `since` ago, at least [`KEEP_UP_GAP`]
+    /// (longer on a GPU so slow that would take more than [`WALKER_MOST`]).
+    KeepUp { since: Duration },
+    /// Whatever is saved: a touched pet's, or one held back too long.
+    Now,
+}
+
+/// A walking pet's frames come at least this often, whatever the budget
+/// says (30 a second): its window moves every frame, and legs standing
+/// still while it slides look worse than a GPU a little over its share.
+pub(crate) const KEEP_UP_GAP: Duration = Duration::from_micros(33_333);
+/// The most of the GPU's time one walking pet's frames take past the
+/// budget (a software GPU, 20 ms a frame, would be busy all the time).
+const WALKER_MOST: f32 = 0.10;
+/// How long a pet's GPU use is remembered (it fades over this long), and
+/// how long after its last frame asked for it still counts as drawing.
+const USE_SECS: f32 = 1.0;
+const ACTIVE: Duration = Duration::from_secs(2);
+
+/// One pet's recent GPU use, for its fair share.
+#[derive(Clone, Copy, Debug)]
+struct User {
+    id: u32,
+    /// GPU seconds spent, fading over [`USE_SECS`]: divided by it, the
+    /// share of GPU time it takes now.
+    used: f32,
+    at: Instant,
+    asked: Instant,
+}
+
+impl User {
+    fn fade(&mut self, now: Instant) {
+        let secs = now.saturating_duration_since(self.at).as_secs_f32();
+        self.used *= (-secs / USE_SECS).exp();
+        self.at = now;
+    }
+}
+
 /// Keeps the pets' share of GPU time at or under `share` (PLAN §5): GPU
 /// time builds up at `share` seconds a second, and every frame sent spends
 /// what it is expected to cost; a frame it cannot pay for waits.
+///
+/// Shared fairly (Roger's fifteenth pass, item 3: idle pets fell to 4 fps
+/// whenever others walked): every pet drawing may use `share` over the
+/// number drawing, saved or not, before anyone gets more; walking frames
+/// count against the walker like any other, and go anyway only at 30 a
+/// second. The debt that leaves is at most a burst deep.
 struct Budget {
     share: f32,
     saved: f32,
     at: Instant,
+    users: Vec<User>,
 }
 
 impl Budget {
-    fn try_spend(&mut self, cost: f32) -> bool {
-        let now = Instant::now();
-        let secs = (now - self.at).as_secs_f32();
-        self.at = now;
-        self.saved = (self.saved + secs * self.share).min(BURST);
-        if self.share < 1.0 && self.saved < cost {
-            return false;
+    fn new(share: f32, now: Instant) -> Self {
+        Self {
+            share,
+            saved: BURST,
+            at: now,
+            users: Vec::new(),
         }
-        self.saved -= cost;
-        true
     }
 
-    /// Pay for a frame whatever is saved (a pet starved of frames),
-    /// running into debt the others then wait out, at most a burst deep.
-    fn spend(&mut self, cost: f32) {
-        let now = Instant::now();
-        let secs = (now - self.at).as_secs_f32();
+    fn refill(&mut self, now: Instant) {
+        let secs = now.saturating_duration_since(self.at).as_secs_f32();
         self.at = now;
-        self.saved = ((self.saved + secs * self.share).min(BURST) - cost).max(-BURST);
+        self.saved = (self.saved + secs * self.share).min(BURST);
+    }
+
+    /// The user `id` (0: nobody in particular, no fair share), faded to
+    /// `now`; the ones gone quiet are forgotten.
+    fn user(&mut self, id: u32, now: Instant) -> Option<&mut User> {
+        if id == 0 {
+            return None;
+        }
+        self.users
+            .retain(|u| u.id == id || now.saturating_duration_since(u.asked) < 2 * ACTIVE);
+        let i = match self.users.iter().position(|u| u.id == id) {
+            Some(i) => i,
+            None => {
+                self.users.push(User {
+                    id,
+                    used: 0.0,
+                    at: now,
+                    asked: now,
+                });
+                self.users.len() - 1
+            }
+        };
+        let u = &mut self.users[i];
+        u.fade(now);
+        u.asked = now;
+        Some(u)
+    }
+
+    /// Each drawing pet's fair share of GPU time.
+    fn fair(&self, now: Instant) -> f32 {
+        let drawing = self
+            .users
+            .iter()
+            .filter(|u| now.saturating_duration_since(u.asked) < ACTIVE)
+            .count()
+            .max(1);
+        self.share / drawing as f32
+    }
+
+    /// May a frame costing `cost` GPU seconds go now? If so it is paid for.
+    fn ask(&mut self, id: u32, cost: f32, how: Ask, now: Instant) -> bool {
+        self.refill(now);
+        let unlimited = self.share >= 1.0;
+        let saved = self.saved >= cost;
+        let fair = self.fair(now);
+        let Some(u) = self.user(id, now) else {
+            if !(unlimited || saved || how == Ask::Now) {
+                return false;
+            }
+            self.saved = (self.saved - cost).max(-BURST);
+            return true;
+        };
+        // Within its own share, this frame and all: it goes, saved or not.
+        let mine = (u.used + cost) / USE_SECS <= fair;
+        let go = unlimited
+            || saved
+            || mine
+            || match how {
+                Ask::Fair => false,
+                Ask::KeepUp { since } => {
+                    since.as_secs_f32() >= KEEP_UP_GAP.as_secs_f32().max(cost / WALKER_MOST)
+                }
+                Ask::Now => true,
+            };
+        if go {
+            u.used += cost;
+            self.saved = (self.saved - cost).max(-BURST);
+        }
+        go
+    }
+
+    /// A frame charged `charged` GPU seconds really took `secs`.
+    fn settle(&mut self, id: u32, charged: f32, secs: f32, now: Instant) {
+        self.refill(now);
+        self.saved = (self.saved + charged - secs).clamp(-BURST, BURST);
+        if let Some(u) = self.user(id, now) {
+            u.used = (u.used + secs - charged).max(0.0);
+        }
     }
 }
 
@@ -276,11 +400,7 @@ impl Gpu {
             name,
             software,
             tick_ns,
-            budget: Mutex::new(Budget {
-                share,
-                saved: BURST,
-                at: Instant::now(),
-            }),
+            budget: Mutex::new(Budget::new(share, Instant::now())),
         })
     }
 
@@ -491,24 +611,27 @@ impl Gpu {
         Ok(())
     }
 
-    /// Pay `cost` GPU seconds out of the pets' share, if it has them now.
-    pub(crate) fn try_spend(&self, cost: f32) -> bool {
-        self.budget.lock().map_or(true, |mut b| b.try_spend(cost))
+    /// Pay `cost` GPU seconds out of the pets' share for user `id` (0: no
+    /// one in particular), if it may have them now (see [`Ask`]).
+    pub(crate) fn ask(&self, id: u32, cost: f32, how: Ask) -> bool {
+        self.budget
+            .lock()
+            .map_or(true, |mut b| b.ask(id, cost, how, Instant::now()))
     }
 
-    /// Pay for a frame now, budget or not (see [`Budget::spend`]).
-    pub(crate) fn spend(&self, cost: f32) {
+    /// A frame of user `id` charged `charged` GPU seconds really took
+    /// `secs`: give back (or take) the difference.
+    pub(crate) fn settle(&self, id: u32, charged: f32, secs: f32) {
         if let Ok(mut b) = self.budget.lock() {
-            b.spend(cost);
+            b.settle(id, charged, secs, Instant::now());
         }
     }
 
-    /// A frame charged `charged` GPU seconds really took `secs`: give back
-    /// (or take) the difference.
-    pub(crate) fn settle(&self, charged: f32, secs: f32) {
-        if let Ok(mut b) = self.budget.lock() {
-            b.saved += charged - secs;
-        }
+    /// A new user id for [`Gpu::ask`], one a canvas.
+    pub(crate) fn new_user(&self) -> u32 {
+        use std::sync::atomic::AtomicU32;
+        static NEXT: AtomicU32 = AtomicU32::new(1);
+        NEXT.fetch_add(1, Ordering::Relaxed)
     }
 
     /// [`Gpu::submit`] if the budget can pay for the frame now; false (and
@@ -520,7 +643,7 @@ impl Gpu {
         frame: &Frame,
         shadow: bool,
     ) -> Result<bool, String> {
-        if !self.try_spend(canvas.cost) {
+        if !self.ask(0, canvas.cost, Ask::Fair) {
             return Ok(false);
         }
         canvas.charged = canvas.cost;
@@ -720,7 +843,7 @@ impl Gpu {
                 if secs > 0.0 && secs < 1.0 {
                     canvas.measured += f64::from(secs);
                     canvas.cost = 0.8 * canvas.cost + 0.2 * secs;
-                    self.settle(canvas.charged, secs);
+                    self.settle(0, canvas.charged, secs);
                 }
             }
         }
@@ -882,4 +1005,115 @@ pub(crate) fn uniforms(
         u.push(palette.get(i).map_or([0.0; 4], |c| v4(*c, 1.0)));
     }
     u
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Frames a second each pet got over `secs` of seven pets asking: two
+    /// walking at 60 a second, five idle at 30, each frame `cost` GPU
+    /// seconds; and the share of GPU time they took altogether.
+    fn share_out(secs: f32, cost: f32) -> (Vec<f32>, f32) {
+        let t0 = Instant::now();
+        let mut b = Budget::new(DEFAULT_BUDGET, t0);
+        let gap = |fps: f32| Duration::from_secs_f32(1.0 / fps);
+        // (id, asks every, walking, next ask, last frame, frames)
+        let mut pets: Vec<(u32, Duration, bool, Duration, Option<Duration>, u32)> = (1..=7)
+            .map(|id| {
+                let walking = id <= 2;
+                let every = gap(if walking { 60.0 } else { 30.0 });
+                (
+                    id,
+                    every,
+                    walking,
+                    Duration::from_millis(u64::from(id)),
+                    None,
+                    0,
+                )
+            })
+            .collect();
+        let end = Duration::from_secs_f32(secs);
+        let mut now = Duration::ZERO;
+        let mut spent = 0.0;
+        while now < end {
+            for p in &mut pets {
+                if now < p.3 {
+                    continue;
+                }
+                p.3 = now + p.1;
+                let how = if p.2 {
+                    Ask::KeepUp {
+                        since: p.4.map_or(Duration::MAX, |t| now - t),
+                    }
+                } else {
+                    Ask::Fair
+                };
+                if b.ask(p.0, cost, how, t0 + now) {
+                    p.4 = Some(now);
+                    p.5 += 1;
+                    spent += cost;
+                }
+            }
+            now += Duration::from_micros(500);
+        }
+        let fps = pets.iter().map(|p| p.5 as f32 / secs).collect();
+        (fps, spent / secs)
+    }
+
+    /// Roger's fifteenth pass, item 3: with others walking, idle pets got
+    /// 3.5 frames a second (the walkers' frames took the whole budget).
+    /// Now every pet gets its fair share first, walkers still 30 a second.
+    #[test]
+    fn idle_pets_keep_their_share_while_others_walk() {
+        // Roger's UHD 770: about 2.2 ms a frame.
+        let (fps, share) = share_out(10.0, 0.0022);
+        for (i, f) in fps.iter().enumerate() {
+            if i < 2 {
+                assert!(*f >= 29.0, "walker {i}: {f:.1} fps");
+            } else {
+                assert!(*f >= 14.0, "idle pet {i}: {f:.1} fps");
+            }
+        }
+        // A little over the budget for the walkers' 30 a second, no more.
+        assert!(share <= 0.33, "GPU share {share:.3}");
+    }
+
+    /// A software GPU (20 ms a frame): the walkers' frames past the budget
+    /// are held to a tenth of its time each, not 30 a second.
+    #[test]
+    fn a_slow_gpu_is_not_kept_busy_by_walkers() {
+        let (fps, share) = share_out(10.0, 0.020);
+        assert!(fps[0] >= 4.5 && fps[0] <= 6.0, "walker: {:.1} fps", fps[0]);
+        assert!(
+            share <= 0.25 + 2.0 * WALKER_MOST + 0.02,
+            "GPU share {share:.3}"
+        );
+    }
+
+    /// A GPU that can easily afford it: everyone gets all it asks.
+    #[test]
+    fn a_cheap_gpu_gives_every_pet_all_it_asks() {
+        let (fps, share) = share_out(10.0, 0.0005);
+        for (i, f) in fps.iter().enumerate() {
+            let asked = if i < 2 { 60.0 } else { 30.0 };
+            assert!(*f >= 0.95 * asked, "pet {i}: {f:.1} of {asked} fps");
+        }
+        assert!(share <= DEFAULT_BUDGET);
+    }
+
+    /// The budget's debt stays a burst deep whatever is settled.
+    #[test]
+    fn the_debt_stays_a_burst_deep() {
+        let t0 = Instant::now();
+        let mut b = Budget::new(DEFAULT_BUDGET, t0);
+        for _ in 0..100 {
+            assert!(b.ask(1, 0.01, Ask::Now, t0));
+            b.settle(1, 0.01, 0.05, t0);
+        }
+        assert!(b.saved >= -BURST);
+        // And comes back at the budget's rate.
+        let later = t0 + Duration::from_secs_f32(2.0 * BURST / DEFAULT_BUDGET + 0.01);
+        assert!(b.ask(2, 0.01, Ask::Fair, later));
+    }
 }

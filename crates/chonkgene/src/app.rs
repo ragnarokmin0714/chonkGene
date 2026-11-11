@@ -38,7 +38,7 @@ use crate::diag::diag;
 use crate::ipc::{self, Claim, Msg};
 use crate::lines::Lines;
 use crate::store::{self, DataDir, PetSave, Pets, Settings};
-use chonkgene_render::props::Fx;
+use chonkgene_render::props::{self, Fx};
 
 mod play;
 
@@ -77,6 +77,16 @@ pub enum UserEvent {
 
 pub fn run(opts: Options) -> Result<(), String> {
     let data = DataDir::locate(opts.data).map_err(|e| format!("cannot find a data folder: {e}"))?;
+    // The pet process first, then its log: a second copy started while one
+    // runs used to start the log afresh under the running one, which then
+    // wrote on at its old place (Roger's log began with 31 KB of NULs).
+    let listener = match ipc::claim().map_err(|e| format!("cannot start: {e}"))? {
+        Claim::AlreadyRunning => {
+            println!("肉肉賴桌 is already running; asked it to bring the pets back.");
+            return Ok(());
+        }
+        Claim::Ours(listener) => listener,
+    };
     crate::diag::open(&data.path);
     diag!(
         "chonkGene {} on {}",
@@ -92,13 +102,6 @@ pub fn run(opts: Options) -> Result<(), String> {
         ),
         None => diag!("no GPU in use: drawing from sprites"),
     }
-    let listener = match ipc::claim().map_err(|e| format!("cannot start: {e}"))? {
-        Claim::AlreadyRunning => {
-            println!("肉肉賴桌 is already running; asked it to bring the pets back.");
-            return Ok(());
-        }
-        Claim::Ours(listener) => listener,
-    };
     let mut builder = EventLoop::<UserEvent>::with_user_event();
     chonkgene_platform::configure_event_loop(&mut builder);
     let event_loop = builder.build().map_err(|e| e.to_string())?;
@@ -226,6 +229,9 @@ struct Pet {
     /// standing still since (see [`FROZEN`]).
     shown_at: Instant,
     frozen: bool,
+    /// The longest wait between two of its frames since its picture last
+    /// changed, for the log.
+    draw_gap: Duration,
     /// Held up by the fox's spell.
     float: Option<Float>,
     /// The fox's face glowing with a spell: since when, until when.
@@ -447,6 +453,8 @@ struct App {
     open_settings_on_start: bool,
     proxy: EventLoopProxy<UserEvent>,
     director: Director,
+    /// The skit last written to the log (see [`Director::describe`]).
+    skit_seen: Option<String>,
     sounds: Sounds,
     tray: Option<Tray>,
     hotkey: Option<hotkey::Hotkey>,
@@ -537,6 +545,7 @@ impl App {
             open_settings_on_start: false,
             proxy,
             director: Director::default(),
+            skit_seen: None,
             sounds: Sounds::new(),
             tray: None,
             hotkey: None,
@@ -1584,20 +1593,7 @@ fn actors(pets: &[Pet], now: f64) -> Vec<Actor> {
 
 fn direct(pets: &mut [Pet], ctx: &mut Ctx, cmds: Vec<Cmd>) {
     for cmd in cmds {
-        let id = match cmd {
-            Cmd::Walk { id, .. }
-            | Cmd::Face { id, .. }
-            | Cmd::Say { id, .. }
-            | Cmd::Express { id, .. }
-            | Cmd::Act { id, .. }
-            | Cmd::Hop { id }
-            | Cmd::Tussle { id, .. }
-            | Cmd::Cast { id }
-            | Cmd::Freeze { id, .. }
-            | Cmd::Scare { id, .. }
-            | Cmd::Awe { id, .. }
-            | Cmd::Bless { id } => id,
-        };
+        let id = cmd.id();
         let Some(p) = pets.iter_mut().find(|p| p.save.id == id) else {
             continue;
         };
@@ -1722,6 +1718,12 @@ fn direct(pets: &mut [Pet], ctx: &mut Ctx, cmds: Vec<Cmd>) {
                         Fx::Bubble
                     };
                     p.fun.effect(fx, now);
+                    // Big enough for all of it (its pose stays put while
+                    // it floats).
+                    let pm = p.renderer.pixmap();
+                    let canvas = (pm.width() as f32, pm.height() as f32);
+                    p.fun.bubble_fit =
+                        props::opaque_bounds(pm).map(|b| props::bubble_fit(b, canvas, p.fun.scale));
                 }
             }
             Cmd::Scare { from, .. } => {
@@ -1758,6 +1760,17 @@ fn direct(pets: &mut [Pet], ctx: &mut Ctx, cmds: Vec<Cmd>) {
                     p.anim.walking = false;
                     p.body.facing = toward;
                 }
+                // Bigger than at first (Roger's fifteenth pass, item 2: not
+                // seen at all): a yelp, a big start and a tremble while it
+                // keeps low; three hops, hearts and a happy call; a long
+                // wiggle before the pounce.
+                let voice = |p: &mut Pet, ctx: &mut Ctx, sound, pitch| {
+                    if ctx.sound_on {
+                        let base = p.pitch();
+                        ctx.sounds
+                            .play(p.save.id, p.species, sound, now, ctx.volume, base * pitch);
+                    }
+                };
                 match how {
                     Awe::Shrink => {
                         // Startled where it stands, no hop back: in the
@@ -1766,16 +1779,24 @@ fn direct(pets: &mut [Pet], ctx: &mut Ctx, cmds: Vec<Cmd>) {
                         let (w, h) = p.renderer.size();
                         let head = p.renderer.anchor().1;
                         let side = if toward > 0.0 { 0.95 } else { 0.05 };
-                        p.anim.startle((side * w as f32, head.min(0.4 * h as f32)));
+                        p.anim.flinch((side * w as f32, head.min(0.4 * h as f32)));
                         p.anim.expression = Expression::Neutral;
                         p.fun.effect(Fx::Fright, now);
                         p.fun.cower(now);
+                        // A yelp, or (with its own call) a word about it.
+                        if p.rng.f32() < 0.5 {
+                            p.say(ctx, Line::SkitScared);
+                        } else {
+                            voice(p, ctx, Sound::Voice, 1.25);
+                        }
                     }
                     Awe::Bounce => {
-                        p.anim.cheer();
+                        p.anim.leap_for_joy();
                         p.anim.expression = Expression::Happy;
-                        p.happy_until = now + HAPPY_SECS;
+                        p.happy_until = now + HAPPY_SECS + 1.5;
                         p.fun.effect(Fx::Sparkles, now);
+                        p.fun.effect(Fx::Hearts, now);
+                        voice(p, ctx, Sound::Greet, 1.0);
                     }
                     Awe::Crouch => {
                         p.anim.gesture(Act::Wiggle);
@@ -1940,6 +1961,7 @@ fn spawn(
         purr_at: 0.0,
         shown_at: now,
         frozen: false,
+        draw_gap: Duration::ZERO,
         float: None,
         glow: None,
         draws: 0,
@@ -2077,6 +2099,7 @@ impl Pet {
         if self.renderer.changed() {
             self.shown_at = now;
             self.frozen = false;
+            self.draw_gap = Duration::ZERO;
             return;
         }
         let params = self.anim.params();
@@ -2086,7 +2109,7 @@ impl Pet {
         }
         self.frozen = true;
         diag!(
-            "{}: picture unchanged for {} ms ({:?}, {:?}, {:?}, motion {:?}, frame waiting {}, press {})",
+            "{}: picture unchanged for {} ms ({:?}, {:?}, {:?}, motion {:?}, frame waiting {}, press {}, spell-held {}, drawn every {} ms)",
             self.save.name,
             (now - self.shown_at).as_millis(),
             self.anim.expression,
@@ -2095,6 +2118,8 @@ impl Pet {
             self.body.motion,
             self.renderer.waiting(),
             self.press.is_some(),
+            self.float.is_some(),
+            self.draw_gap.as_millis(),
         );
     }
 
@@ -2446,6 +2471,11 @@ impl Pet {
                     Grumpiness::Swat | Grumpiness::PuffUp => {}
                 }
             }
+        }
+        // Cowering from the fox's fire, it trembles: a quick lean to and
+        // fro, about five times a second.
+        if self.fun.cowering(t) && self.act.is_none() {
+            self.anim.sway = 2.5 * (t as f32 * 31.0).sin();
         }
 
         let out = self.mind.tick(&ctx.world, &mut self.rng);
@@ -2905,9 +2935,17 @@ impl ApplicationHandler<UserEvent> for App {
                 }
             }
             WindowEvent::RedrawRequested => {
+                // Shown again as it was last shown: with its overlays (the
+                // pond's water over its legs, a toy in its mouth, effects)
+                // while it has them. Windows asks for this on every restack,
+                // so the plain picture here flickered the pond's water off.
                 if let Some(shared) = &self.shared {
                     let p = &mut self.pets[i];
-                    if let Err(e) = p.presenter.present(shared, p.renderer.pixmap()) {
+                    let shown = match &p.fun.canvas {
+                        Some(pm) if p.fun.had_overlay => pm,
+                        _ => p.renderer.pixmap(),
+                    };
+                    if let Err(e) = p.presenter.present(shared, shown) {
                         eprintln!("present failed: {e}");
                     }
                 }
@@ -2996,6 +3034,7 @@ impl ApplicationHandler<UserEvent> for App {
             drawing,
             presenting,
             director,
+            skit_seen,
             settings,
             rng,
             play,
@@ -3034,6 +3073,13 @@ impl ApplicationHandler<UserEvent> for App {
                 p.in_skit = director.involves(p.save.id);
                 p.play_fight = director.playing(p.save.id);
             }
+            // Every step of a skit in the log (招喚術 could not be judged
+            // from Roger's: who was called, and when it ended).
+            let skit = director.describe();
+            if skit != *skit_seen {
+                diag!("skit: {}", skit.as_deref().unwrap_or("over"));
+                *skit_seen = skit;
+            }
         }
         play::tick(play, pets, &mut ctx, visible, settings.react_to_input);
         for (i, p) in pets.iter_mut().enumerate() {
@@ -3041,6 +3087,7 @@ impl ApplicationHandler<UserEvent> for App {
                 continue;
             }
             let dt = (now - p.last).as_secs_f32().min(0.1);
+            p.draw_gap = p.draw_gap.max(now - p.last);
             p.last = now;
             p.step(&mut ctx, i, dt, now, cursor, toy);
             let started = Instant::now();
@@ -3052,7 +3099,7 @@ impl ApplicationHandler<UserEvent> for App {
             // A pet blending between poses on the GPU, or with a frame on
             // its way, needs frames to show it, even when its animation is
             // otherwise at rest; so does one slowing to a stop.
-            let gliding = if p.body.moving_on() || p.fun.had_overlay {
+            let gliding = if p.body.moving_on() || p.fun.had_overlay || p.fun.cowering(world.now) {
                 30
             } else {
                 0

@@ -138,6 +138,26 @@ pub enum Cmd {
     },
 }
 
+impl Cmd {
+    /// The pet it is for.
+    pub fn id(&self) -> u64 {
+        match *self {
+            Cmd::Walk { id, .. }
+            | Cmd::Face { id, .. }
+            | Cmd::Say { id, .. }
+            | Cmd::Express { id, .. }
+            | Cmd::Act { id, .. }
+            | Cmd::Hop { id }
+            | Cmd::Tussle { id, .. }
+            | Cmd::Cast { id }
+            | Cmd::Freeze { id, .. }
+            | Cmd::Scare { id, .. }
+            | Cmd::Awe { id, .. }
+            | Cmd::Bless { id } => id,
+        }
+    }
+}
+
 /// How a pet near the fox takes its spell's fire going up (Roger's
 /// fourteenth pass: some frightened, some excited).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -283,6 +303,8 @@ pub struct Director {
     rested: HashMap<(u64, u64), f64>,
     /// The next skit is of this kind (see [`Director::rush`]).
     forced: Option<Kind>,
+    /// Called over by the fox (招喚術): theirs to walk while it lasts.
+    called: Vec<u64>,
 }
 
 /// Mean seconds between skits for 偶爾 / 常常 / 超常 (Roger: they hardly
@@ -316,7 +338,28 @@ impl Director {
 
     /// Is this pet in a skit right now? The app leaves its walking to us.
     pub fn involves(&self, id: u64) -> bool {
-        self.skit.is_some_and(|s| s.a == id || s.b == id)
+        self.skit.is_some_and(|s| {
+            s.a == id || s.b == id || (s.phase == Phase::Called && self.called.contains(&id))
+        })
+    }
+
+    /// The skit under way, for the log: what, who, and how far along.
+    pub fn describe(&self) -> Option<String> {
+        let s = self.skit?;
+        let spell = if s.kind == Kind::Spell {
+            format!(" {:?}", s.spell)
+        } else {
+            String::new()
+        };
+        let called = if s.phase == Phase::Called {
+            format!(", called {:?}", self.called)
+        } else {
+            String::new()
+        };
+        Some(format!(
+            "{:?}{spell} of {} and {}, {:?}{called}",
+            s.kind, s.a, s.b, s.phase
+        ))
     }
 
     /// Is `id` in a play-fight (not a squabble)?
@@ -604,7 +647,10 @@ impl Director {
             Phase::Cast if now >= s.until && s.spell == Spell::Call => {
                 s.phase = Phase::Called;
                 s.until = now + CALL_SECS;
-                out.extend(call(a, actors));
+                let cmds = call(a, actors);
+                self.called = cmds.iter().map(Cmd::id).collect();
+                self.called.dedup();
+                out.extend(cmds);
             }
             Phase::Called => {
                 if now >= s.until {
@@ -624,7 +670,15 @@ impl Director {
                     }
                     return out;
                 }
-                out.extend(call(a, actors));
+                // Anyone free by now comes too (one still cowering from
+                // the cast at first).
+                let cmds = call(a, actors);
+                for id in cmds.iter().map(Cmd::id) {
+                    if !self.called.contains(&id) {
+                        self.called.push(id);
+                    }
+                }
+                out.extend(cmds);
             }
             Phase::Cast if now >= s.until => {
                 // The owl stares the spell back: the fox floats instead.
@@ -1457,6 +1511,31 @@ mod tests {
             (chick - (500.0 - CONTACT)).abs() <= 30.0,
             "chick at {chick}"
         );
+        // Called, they are the director's to walk (their own wandering
+        // cut the walks short), and one still busy when the cast ends
+        // (cowering from it) comes once it is free.
+        let mut cast = three();
+        cast[2].available = false;
+        let mut dir = Director::default();
+        dir.cast(1, Spell::Call, 0.0, &cast);
+        let mut rng = fastrand::Rng::with_seed(3);
+        let mut t = 0.0;
+        while dir.skit.is_some_and(|s| s.phase != Phase::Called) {
+            dir.tick(t, true, 2, &cast, &mut rng);
+            t += 0.05;
+        }
+        assert!(dir.involves(2) && !dir.involves(3));
+        assert!(dir.describe().is_some_and(|d| d.contains("Called")));
+        cast[2].available = true;
+        dir.tick(t, true, 2, &cast, &mut rng);
+        assert!(dir.involves(3));
+        until_over(&mut dir, &mut cast, t);
+        assert!(
+            (cast[2].x - (500.0 - CONTACT)).abs() <= 30.0,
+            "chick at {}",
+            cast[2].x
+        );
+        assert!(!dir.involves(2) && dir.describe().is_none());
         // Asked while another skit is on, or while busy: nothing.
         let mut busy = three();
         busy[0].available = false;

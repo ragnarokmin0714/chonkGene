@@ -210,10 +210,10 @@ impl Renderer {
     }
 
     /// Why the next picture has not come yet, for the log (mesh pets).
-    pub fn waiting(&self) -> &'static str {
+    pub fn waiting(&self) -> String {
         match self {
             Self::Mesh(r) => r.waiting(),
-            _ => "no",
+            _ => "no".into(),
         }
     }
 

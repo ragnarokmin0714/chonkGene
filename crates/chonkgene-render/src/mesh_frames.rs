@@ -26,7 +26,7 @@ use chonkgene_rig::{FLOOR, Layer, Look, Model, Pose, Scene, ZONES};
 use tiny_skia::{Pixmap, Transform};
 
 use crate::fidget::{Kind, Tongue};
-use crate::gpu::Gpu;
+use crate::gpu::{Ask, Gpu};
 use crate::mesh::{Mesh, bake};
 use crate::mesh_gpu::MeshCanvas;
 use crate::raymarch::PPU;
@@ -61,9 +61,9 @@ const SMOOTH_FALL: f32 = 90.0;
 
 /// How a pet's frames went over a stretch of time, for the log: new
 /// pictures shown, frames sent to the GPU (`pushed`: past the budget,
-/// touched or held back too long; `forced`: walking, never counted against
-/// it), times the budget held one back, and the GPU time the drawn ones
-/// took.
+/// touched or held back too long; `forced`: walking, flying or falling,
+/// counted against its share like the rest), times the budget held one
+/// back, and the GPU time the drawn ones took.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct FrameStats {
     pub shown: u32,
@@ -145,6 +145,8 @@ pub struct MeshRenderer {
     unsent: bool,
     /// Held back by the budget since then (see [`STARVED`]).
     unsent_since: Option<Instant>,
+    /// When the last frame went to the GPU.
+    sent_at: Option<Instant>,
     /// Touched just now: its frames do not wait for the budget.
     urgent: bool,
     /// Counted since the app last asked (see [`FrameStats`]).
@@ -223,6 +225,7 @@ impl MeshRenderer {
             look: Look::Open,
             unsent: false,
             unsent_since: None,
+            sent_at: None,
             urgent: false,
             stats: FrameStats::default(),
             gpu_seen: (0.0, 0),
@@ -347,14 +350,15 @@ impl MeshRenderer {
     }
 
     /// Why the next picture has not come yet, for the log: held back by
-    /// the GPU budget, still being drawn, or neither.
-    pub fn waiting(&self) -> &'static str {
+    /// the GPU budget, still being drawn (and since when), or neither.
+    pub fn waiting(&self) -> String {
+        let ms = |t: Option<Instant>| t.map_or(0, |t| t.elapsed().as_millis());
         if self.unsent {
-            "budget"
+            format!("budget {} ms", ms(self.unsent_since))
         } else if self.live.as_ref().is_some_and(|l| l.canvas.pending()) {
-            "gpu"
+            format!("gpu, sent {} ms ago", ms(self.sent_at))
         } else {
-            "no"
+            "no".into()
         }
     }
 
@@ -382,7 +386,7 @@ impl MeshRenderer {
             self.install(baked);
         }
         if self.live.as_ref().is_some_and(|l| !l.canvas.pending()) && self.unsent {
-            self.send(true);
+            self.push(Ask::Now, false);
         }
         self.collect(true);
         self.pixmap.data_mut().copy_from_slice(self.base.data());
@@ -643,9 +647,29 @@ impl MeshRenderer {
         arrived
     }
 
-    /// Send the wanted frame to the GPU (`force`: whatever the budget
-    /// says). The canvas must be free.
-    fn send(&mut self, force: bool) {
+    /// Send the wanted frame to the GPU if the budget lets it (`keep_up`:
+    /// walking, flying or falling, see [`Ask::KeepUp`]). The canvas must be
+    /// free.
+    fn send(&mut self, keep_up: bool) {
+        // Held back too long (others took the budget, or it is far too
+        // small): this one goes anyway, so no pet ever stands still on the
+        // screen for long.
+        let starved = self.urgent || self.unsent_since.is_some_and(|t| t.elapsed() >= STARVED);
+        let how = if starved {
+            Ask::Now
+        } else if keep_up {
+            Ask::KeepUp {
+                since: self.sent_at.map_or(Duration::MAX, |t| t.elapsed()),
+            }
+        } else {
+            Ask::Fair
+        };
+        self.push(how, keep_up);
+    }
+
+    /// Send the wanted frame to the GPU if the budget lets it go `how`.
+    fn push(&mut self, how: Ask, keep_up: bool) {
+        let starved = how == Ask::Now;
         let Some(live) = self.live.as_mut() else {
             return;
         };
@@ -661,26 +685,18 @@ impl MeshRenderer {
         live.canvas.press = self.press;
         live.canvas.floor_shadow = self.floor_shadow;
         live.canvas.glow = self.glow;
-        let sent = if force {
-            live.canvas
-                .submit(self.gpu, &scene, &self.bones, yaw)
-                .map(|()| true)
-        } else {
-            // Held back too long (others took the budget, or it is far too
-            // small): this one goes anyway, so no pet ever stands still on
-            // the screen for long.
-            let starved = self.urgent || self.unsent_since.is_some_and(|t| t.elapsed() >= STARVED);
-            self.stats.pushed += u32::from(starved);
-            live.canvas
-                .try_submit(self.gpu, &scene, &self.bones, yaw, starved)
-        };
+        let sent = live
+            .canvas
+            .try_submit(self.gpu, &scene, &self.bones, yaw, how);
         match sent {
             Ok(true) => {
                 self.sent_bones.clone_from(&self.bones);
                 self.unsent = false;
                 self.unsent_since = None;
+                self.sent_at = Some(Instant::now());
                 self.stats.sent += 1;
-                self.stats.forced += u32::from(force);
+                self.stats.pushed += u32::from(starved);
+                self.stats.forced += u32::from(keep_up && !starved);
             }
             // Over the budget: try again on a later call, with a newer
             // pose (the frame rate drops instead of the GPU share rising).

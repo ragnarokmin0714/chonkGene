@@ -725,7 +725,7 @@ pub fn effect(pm: &mut Pixmap, fx: Fx, at: (f32, f32), s: f32, t: f32) {
         }
         Fx::Bubble | Fx::Dream => {
             let fade = (1.0 - ((u - 0.92) / 0.08).max(0.0)).min(1.0);
-            bubble(pm, at, s, t, fade, fx == Fx::Dream);
+            bubble(pm, at, (74.0 * s, 70.0 * s), s, t, fade, fx == Fx::Dream);
         }
         Fx::Spell => spell(pm, at, s, t, u, fade),
         Fx::Brawl => brawl(pm, at, s, t, 1.0 - ((u - 0.9) / 0.1).max(0.0)),
@@ -748,15 +748,81 @@ pub fn effect(pm: &mut Pixmap, fx: Fx, at: (f32, f32), s: f32, t: f32) {
     }
 }
 
+/// The spell's bubble (or a dream bubble) round a pet, `t` seconds in:
+/// as [`effect`] for [`Fx::Bubble`] and [`Fx::Dream`], but in the middle
+/// `at` and of the radii `size` that [`bubble_fit`] found for it.
+pub fn bubble_round(
+    pm: &mut Pixmap,
+    dream: bool,
+    at: (f32, f32),
+    size: (f32, f32),
+    s: f32,
+    t: f32,
+) {
+    let u = (t / Fx::Bubble.secs()).clamp(0.0, 1.0);
+    let fade = (1.0 - ((u - 0.92) / 0.08).max(0.0)).min(1.0);
+    bubble(pm, at, size, s, t, fade, dream);
+}
+
+/// Where the opaque part of `pm` is (alpha over half): left, top, right,
+/// bottom, pixels; none if it is all see-through.
+pub fn opaque_bounds(pm: &Pixmap) -> Option<(f32, f32, f32, f32)> {
+    let w = pm.width() as usize;
+    let mut b: Option<(usize, usize, usize, usize)> = None;
+    for (i, px) in pm.pixels().iter().enumerate() {
+        if px.alpha() > 128 {
+            let (x, y) = (i % w, i / w);
+            b = Some(b.map_or((x, y, x, y), |(x0, y0, x1, y1)| {
+                (x0.min(x), y0.min(y), x1.max(x), y1.max(y))
+            }));
+        }
+    }
+    b.map(|(x0, y0, x1, y1)| (x0 as f32, y0 as f32, x1 as f32 + 1.0, y1 as f32 + 1.0))
+}
+
+/// The middle and radii of a bubble round a pet whose picture's opaque
+/// part is `bounds`, on a canvas `canvas` big (Roger's fifteenth pass,
+/// item 7: tall heads, ears and tufts stuck out of the one size for all):
+/// all of it inside with room to spare, never smaller than the old bubble
+/// (74 × 70 at 100%) unless the canvas is, and moved inside the canvas.
+pub fn bubble_fit(
+    bounds: (f32, f32, f32, f32),
+    canvas: (f32, f32),
+    s: f32,
+) -> ((f32, f32), (f32, f32)) {
+    let (x0, y0, x1, y1) = bounds;
+    let (cx, cy) = (0.5 * (x0 + x1), 0.5 * (y0 + y1));
+    // A pet is round, its box's corners empty: a fifth more than its half
+    // sides, and a little, covers the ears and tufts at the top.
+    let pad = 6.0 * s;
+    let rx = (0.5 * (x1 - x0) * 1.2 + pad).max(74.0 * s);
+    let ry = (0.5 * (y1 - y0) * 1.2 + pad).max(70.0 * s);
+    // Inside the canvas: moved in from its edges, smaller only if it is
+    // bigger than the canvas.
+    let rx = rx.min(0.5 * canvas.0 - 1.0).max(1.0);
+    let ry = ry.min(0.5 * canvas.1 - 1.0).max(1.0);
+    let cx = cx.clamp(rx + 1.0, canvas.0 - rx - 1.0);
+    let cy = cy.clamp(ry + 1.0, canvas.1 - ry - 1.0);
+    ((cx, cy), (rx, ry))
+}
+
 /// The spell's bubble round a pet (see [`Fx::Bubble`]): see-through, a
 /// bright rim, a highlight and a twinkle going round it; `dream`: lilac,
 /// with a crescent moon and stars (see [`Fx::Dream`]).
-fn bubble(pm: &mut Pixmap, at: (f32, f32), s: f32, t: f32, fade: f32, dream: bool) {
+fn bubble(
+    pm: &mut Pixmap,
+    at: (f32, f32),
+    size: (f32, f32),
+    s: f32,
+    t: f32,
+    fade: f32,
+    dream: bool,
+) {
     let (x, y) = at;
     // Swelling up as it forms, wobbling a little after.
     let grow = (t / 0.35).min(1.0);
     let wob = 1.0 + 0.03 * (TAU * 1.3 * t).sin();
-    let (rx, ry) = (74.0 * s * grow * wob, 70.0 * s * grow / wob);
+    let (rx, ry) = (size.0 * grow * wob, size.1 * grow / wob);
     let id = Transform::identity();
     oval(
         pm,
@@ -832,23 +898,39 @@ fn bubble(pm: &mut Pixmap, at: (f32, f32), s: f32, t: f32, fade: f32, dream: boo
 fn spell(pm: &mut Pixmap, at: (f32, f32), s: f32, t: f32, u: f32, fade: f32) {
     let (x, y) = at;
     let id = Transform::identity();
-    // Wide, and the fire tall, so it reads as a spell from across the
-    // desk (Roger's fourteenth pass: bigger).
-    let grow = (u / 0.2).min(1.0);
-    let (rx, ry) = (100.0 * s * grow, 14.0 * s * grow);
+    // Wide, and the fire tall and big, so it reads as a spell from across
+    // the desk (Roger's fourteenth and fifteenth passes: bigger, bigger
+    // still). As wide as the fox's window allows, its glow and all.
+    let grow = (u / 0.15).min(1.0);
+    let (rx, ry) = (120.0 * s * grow, 17.0 * s * grow);
     // Raised a little off the feet, so the window's bottom edge does not
     // cut its near side off.
-    let y = y - 6.0 * s;
+    let y = y - 8.0 * s;
+    // A column of light going up from the ring.
+    let rise = 175.0 * s;
+    for k in 0..4 {
+        let kf = k as f32 / 4.0;
+        let a = (1.0 - kf) * fade * (0.5 + 0.5 * grow);
+        oval(
+            pm,
+            x,
+            y - kf * 0.75 * rise,
+            rx * (1.0 - 0.45 * kf),
+            ry + kf * 0.3 * rise,
+            with_alpha([0xA8, 0xD4, 0xFF, 22], a),
+            id,
+        );
+    }
     oval(
         pm,
         x,
         y,
         rx,
         ry,
-        with_alpha([0xA8, 0xD8, 0xFF, 70], fade),
+        with_alpha([0xA8, 0xD8, 0xFF, 90], fade),
         id,
     );
-    for (k, c) in [[0x9E, 0xD4, 0xFF, 230], [0xFF, 0xB3, 0xD1, 200]]
+    for (k, c) in [[0x9E, 0xD4, 0xFF, 240], [0xFF, 0xB3, 0xD1, 220]]
         .iter()
         .enumerate()
     {
@@ -857,7 +939,7 @@ fn spell(pm: &mut Pixmap, at: (f32, f32), s: f32, t: f32, u: f32, fade: f32) {
         if let Some(r) = Rect::from_xywh(x - f * rx, y - f * ry, 2.0 * f * rx, 2.0 * f * ry) {
             ring.push_oval(r);
         }
-        stroke_path(pm, ring, with_alpha(*c, fade), 2.6 * s, id);
+        stroke_path(pm, ring, with_alpha(*c, fade), 3.4 * s, id);
     }
     // A flash going out as it is cast.
     if u < 0.3 {
@@ -870,30 +952,31 @@ fn spell(pm: &mut Pixmap, at: (f32, f32), s: f32, t: f32, u: f32, fade: f32) {
         stroke_path(
             pm,
             flash,
-            with_alpha([255, 255, 255, 230], 1.0 - v),
-            (4.0 - 2.5 * v) * s,
+            with_alpha([255, 255, 255, 240], 1.0 - v),
+            (6.0 - 4.0 * v) * s,
             id,
         );
     }
     // Fox-fire rising round it, each flame in its own place, swaying as it
-    // goes up (Roger: not spinning round), a bright heart in each.
-    const FLAMES: usize = 10;
+    // goes up (Roger: not spinning round), a bright heart in each; big at
+    // the ring, smaller as they rise.
+    const FLAMES: usize = 14;
     for k in 0..FLAMES {
         let kf = k as f32 / FLAMES as f32;
-        let p = (u * 1.5 + kf).fract();
+        let p = (u * 1.4 + kf).fract();
         let a = TAU * (kf + 0.5 / FLAMES as f32);
-        let sway = 5.0 * s * (TAU * 1.6 * t + k as f32 * 1.9).sin();
+        let sway = 7.0 * s * (TAU * 1.6 * t + k as f32 * 1.9).sin();
         let (ox, oy) = (
-            x + a.cos() * rx * (1.0 - 0.4 * p) + sway * p,
-            y - p * 150.0 * s + a.sin() * ry,
+            x + a.cos() * rx * (1.0 - 0.35 * p) + sway * p,
+            y - p * rise + a.sin() * ry,
         );
         let c = if k % 2 == 0 {
             [0x8F, 0xCF, 0xFF, 255]
         } else {
             [0xFF, 0xA8, 0xCC, 255]
         };
-        let alpha = fade * (1.0 - p * p);
-        flame(pm, (ox, oy), (1.4 - 0.7 * p) * s, c, t + k as f32, alpha);
+        let alpha = fade * (1.0 - p * p) * grow;
+        flame(pm, (ox, oy), (2.3 - 1.1 * p) * s, c, t + k as f32, alpha);
     }
 }
 
@@ -1411,6 +1494,34 @@ mod tests {
             };
             assert!(count(0.9) < count(0.0), "{thing:?} looks no less used");
         }
+    }
+
+    /// The spell's bubble holds all of a tall pet (Roger: ears and heads
+    /// stuck out), is never smaller than before, and stays in the canvas.
+    #[test]
+    fn the_bubble_fits_round_the_whole_pet() {
+        let canvas = (261.0, 191.0);
+        // A small chick: the old size.
+        let (_, size) = bubble_fit((110.0, 120.0, 150.0, 180.0), canvas, 1.0);
+        assert_eq!(size, (74.0, 70.0));
+        // A fox with its tails up, 200 × 150: all of its box's middle
+        // edges inside, with room.
+        let b = (30.0, 30.0, 230.0, 180.0);
+        let ((cx, cy), (rx, ry)) = bubble_fit(b, canvas, 1.0);
+        assert!(cy - ry <= b.1 && cy + ry >= b.3, "{cy} ± {ry}");
+        assert!(cx - rx <= b.0 && cx + rx >= b.2, "{cx} ± {rx}");
+        // Never past the canvas.
+        assert!(cy - ry >= 0.0 && cy + ry <= canvas.1);
+        assert!(cx - rx >= 0.0 && cx + rx <= canvas.0);
+        // Opaque bounds found from a picture.
+        let mut pm = Pixmap::new(40, 30).unwrap();
+        pm.fill_rect(
+            Rect::from_xywh(10.0, 5.0, 12.0, 20.0).unwrap(),
+            &paint([255, 0, 0, 255]),
+            Transform::identity(),
+            None,
+        );
+        assert_eq!(opaque_bounds(&pm), Some((10.0, 5.0, 22.0, 25.0)));
     }
 
     #[test]

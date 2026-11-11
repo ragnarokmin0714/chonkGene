@@ -9,7 +9,7 @@ use chonkgene_rig::Scene;
 use chonkgene_rig::math::V3;
 use tiny_skia::Pixmap;
 
-use crate::gpu::{Frame, Gpu, MAP_FAILED, MAPPED, MAPPING, Vec4, uniforms, v4};
+use crate::gpu::{Ask, Frame, Gpu, MAP_FAILED, MAPPED, MAPPING, Vec4, uniforms, v4};
 use crate::mesh::{Mesh, Vertex};
 use crate::raymarch::Camera;
 use crate::skin::{Affine, ROOT_PIVOT};
@@ -53,6 +53,8 @@ pub struct MeshCanvas {
     cost: f32,
     charged: f32,
     last_secs: Option<f32>,
+    /// Who it is to the budget, for its fair share.
+    user: u32,
     /// GPU seconds measured so far, and frames drawn.
     pub measured: f64,
     pub frames: u32,
@@ -259,6 +261,7 @@ impl MeshCanvas {
             pending: None,
             cost: GUESS * (w * h) as f32 / GUESS_PIXELS,
             charged: 0.0,
+            user: gpu.new_user(),
             last_secs: None,
             measured: 0.0,
             frames: 0,
@@ -300,26 +303,22 @@ impl MeshCanvas {
         self.pending.is_some()
     }
 
-    /// [`MeshCanvas::submit`] if the GPU budget can pay for the frame now;
-    /// false (and nothing sent) if it has to wait. A `starved` frame (one
-    /// that has waited too long already) goes anyway, the budget running
-    /// into debt for it.
-    pub fn try_submit(
+    /// [`MeshCanvas::submit`] if the GPU budget lets the frame go now (see
+    /// [`Ask`]); false (and nothing sent) if it has to wait.
+    pub(crate) fn try_submit(
         &mut self,
         gpu: &Gpu,
         scene: &Scene,
         bones: &[Affine],
         yaw: f32,
-        starved: bool,
+        how: Ask,
     ) -> Result<bool, String> {
-        if starved {
-            gpu.spend(self.cost);
-        } else if !gpu.try_spend(self.cost) {
+        if !gpu.ask(self.user, self.cost, how) {
             return Ok(false);
         }
         self.charged = self.cost;
         if let Err(e) = self.submit(gpu, scene, bones, yaw) {
-            gpu.settle(self.charged, 0.0);
+            gpu.settle(self.user, self.charged, 0.0);
             self.charged = 0.0;
             return Err(e);
         }
@@ -493,7 +492,7 @@ impl MeshCanvas {
                     self.measured += f64::from(t);
                     self.last_secs = Some(t);
                     self.cost = 0.8 * self.cost + 0.2 * t;
-                    gpu.settle(self.charged, t);
+                    gpu.settle(self.user, self.charged, t);
                 }
             }
         }

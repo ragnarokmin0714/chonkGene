@@ -6,6 +6,7 @@
 //! over a pet's picture (hearts, sparkles, dust, the water it swims in, the
 //! fox's fire, a toy in its mouth).
 
+use crate::diag::diag;
 use chonkgene_core::activity::{Activity, Watcher};
 use chonkgene_core::anim::{Act, Expression, Posture};
 use chonkgene_core::mind::Line;
@@ -435,10 +436,10 @@ impl Pet {
 }
 
 /// Frightened by the fox's spell, it keeps low this long, seconds.
-const AWE_HOLD: f64 = 2.5;
+const AWE_HOLD: f64 = 3.5;
 /// A cat crouched at the fox's flames pounces this long after, seconds
 /// (its bottom wiggling first).
-const STALK_SECS: f64 = 0.9;
+const STALK_SECS: f64 = 1.4;
 
 /// Into a pond with the feet within this share of its half-width...
 const POND_IN: f32 = 0.85;
@@ -547,6 +548,9 @@ pub(super) struct Fun {
     dozed: bool,
     /// Its picture with the effects over it.
     pub canvas: Option<Pixmap>,
+    /// The spell's (or a dream's) bubble round its picture: middle and
+    /// radii, pixels (see [`props::bubble_fit`]); found as it floats up.
+    pub bubble_fit: Option<((f32, f32), (f32, f32))>,
     /// Drawn with effects last frame: the plain picture must be shown again
     /// once they are gone.
     pub had_overlay: bool,
@@ -563,6 +567,11 @@ impl Fun {
     /// Frightened by the fox's spell: low to the floor a while.
     pub fn cower(&mut self, now: f64) {
         self.cower_until = now + AWE_HOLD;
+    }
+
+    /// Cowering from the fox's fire (it trembles).
+    pub fn cowering(&self, now: f64) -> bool {
+        now < self.cower_until
     }
 
     /// Crouched for the fox's flames: a pounce at them shortly.
@@ -618,6 +627,9 @@ pub(super) struct Playground {
     /// pets', so the pets (and their bubbles) go back above it (Roger: the
     /// pond was still drawn over the duckling on Windows).
     restack: bool,
+    /// Where every pet stands this go round: (id, feet x, feet y, the half
+    /// width of its body), so a pond or a sunbeam comes out where nobody is.
+    standing: Vec<(u64, f32, f32, f32)>,
     rng: Option<fastrand::Rng>,
 }
 
@@ -1048,6 +1060,11 @@ impl Pet {
             }
         });
         for &(fx, since) in &self.fun.fx {
+            if let (Fx::Bubble | Fx::Dream, Some((at, size))) = (fx, self.fun.bubble_fit) {
+                let t = (t - since) as f32;
+                props::bubble_round(canvas, fx == Fx::Dream, at, size, s, t);
+                continue;
+            }
             let at = match fx {
                 Fx::Hearts | Fx::Fright => head,
                 Fx::Sparkles => mouth,
@@ -1093,11 +1110,6 @@ pub(super) fn tick(
         ground.activity = Some(ground.watcher.activity(now));
     }
     let cursor = ground.cursor;
-    if std::mem::take(&mut ground.restack) {
-        for p in pets.iter() {
-            p.raise(ctx.shared);
-        }
-    }
     // The things fall, bounce and roll; the used up go.
     let gone: Vec<u32> = ground
         .things
@@ -1180,6 +1192,13 @@ pub(super) fn tick(
         Activity::Busy
     };
     let typing_for = ground.watcher.typing_for(now);
+    ground.standing = pets
+        .iter()
+        .map(|p| {
+            let (x, y) = p.body.feet();
+            (p.save.id, x, y, FOOTPRINT * p.body.size.0)
+        })
+        .collect();
     let scene_on = pets.iter().any(|p| p.fun.scene.is_some());
     // The fox calling up its fire: where, for the cats to bat at it.
     let fire = pets.iter().find_map(|p| {
@@ -1261,6 +1280,14 @@ pub(super) fn tick(
         }
     }
     ground.set_visible(ctx.shared, now, true);
+    // In the same go round as a new thing's first picture, so it never
+    // shows over the pets for a tick (a new pond covered the sleeping owl
+    // for 0.1 s in Roger's clip).
+    if std::mem::take(&mut ground.restack) {
+        for p in pets.iter() {
+            p.raise(ctx.shared);
+        }
+    }
 }
 
 trait Held {
@@ -1836,7 +1863,28 @@ pub(super) fn start_scene(
     // The side with more room.
     let a = ctx.area;
     let side = if fx < a.x + a.w / 2.0 { 1.0 } else { -1.0 };
-    let beside = fx + side * 1.1 * w;
+    let mut beside = fx + side * 1.1 * w;
+    if let Some(thing) = scene
+        .thing()
+        .filter(|t| matches!(t, Thing::Pond | Thing::Sunbeam))
+    {
+        // Big things on the floor: nobody else may be standing in them
+        // (an owl asleep where a pond came out sat on its near rim).
+        let others: Vec<(f32, f32)> = ground
+            .standing
+            .iter()
+            .filter(|o| o.0 != p.save.id && (o.2 - fy).abs() < 30.0 * s)
+            .map(|o| (o.1, o.3))
+            .collect();
+        let half = 0.5 * thing.size().0 * s;
+        match free_spot(fx, side, w, half, (a.x, a.x + a.w), &others) {
+            Some(x) => beside = x,
+            None => {
+                diag!("{}: no room for its {scene:?}", p.save.name);
+                return false;
+            }
+        }
+    }
     let mut prop = None;
     let mut spot = beside;
     if let Some(thing) = scene.thing() {
@@ -1887,6 +1935,35 @@ pub(super) fn start_scene(
     println!("{}: starts its scene, {scene:?}", p.save.name);
     p.say(ctx, Line::Scene);
     true
+}
+
+/// How much of a pet's window its body stands on, each side of its
+/// middle, as a share of the window's width.
+const FOOTPRINT: f32 = 0.3;
+
+/// Where to put the middle of a thing `half` wide on the floor beside a
+/// pet `w` wide with its feet at `fx`: the `side` with more room first,
+/// a little further out if someone `others` (their middle, half width)
+/// stands there, never past the edges `x`; none if every place is taken.
+fn free_spot(
+    fx: f32,
+    side: f32,
+    w: f32,
+    half: f32,
+    x: (f32, f32),
+    others: &[(f32, f32)],
+) -> Option<f32> {
+    let margin = 0.1 * w;
+    [side, -side]
+        .into_iter()
+        .flat_map(|side| [1.1, 1.6, 2.2, 3.0].map(|k| fx + side * k * w))
+        .find(|&c| {
+            c - half >= x.0
+                && c + half <= x.1
+                && others
+                    .iter()
+                    .all(|&(ox, oh)| (ox - c).abs() >= half + oh + margin)
+        })
 }
 
 /// A scene under way, phase by phase.
@@ -2176,6 +2253,25 @@ fn react_to(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A pond comes out where nobody stands: further out, the other side,
+    /// or not at all (Roger's clip: an owl asleep on its near rim).
+    #[test]
+    fn a_pond_comes_out_where_nobody_stands() {
+        let (w, half, x) = (150.0, 125.0, (0.0, 2000.0));
+        // Nobody about: just beside it.
+        assert_eq!(free_spot(800.0, 1.0, w, half, x, &[]), Some(965.0));
+        // Someone sleeping there: further out on the same side.
+        let owl = [(965.0, 45.0)];
+        let at = free_spot(800.0, 1.0, w, half, x, &owl).unwrap();
+        assert!(at > 965.0 && (at - 965.0).abs() >= half + 45.0);
+        // That side full up to the edge: the other side.
+        let crowd = [(965.0, 45.0), (1100.0, 45.0), (1300.0, 45.0)];
+        let at = free_spot(800.0, 1.0, w, half, x, &crowd).unwrap();
+        assert!(at < 800.0);
+        // Hemmed in by the screen's edges: none.
+        assert_eq!(free_spot(800.0, 1.0, w, half, (600.0, 1000.0), &[]), None);
+    }
 
     /// A pet stepping about at a pond's edge stays in, splashes once, and
     /// is out only after the hold (Roger: the pond flickered).

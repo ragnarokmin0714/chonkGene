@@ -559,6 +559,18 @@ impl Animator {
         self.jump(250.0, 1);
     }
 
+    /// Thrilled to bits (the fox's fire): three hops, higher than a cheer.
+    pub fn leap_for_joy(&mut self) {
+        self.jump(320.0, 2);
+    }
+
+    /// A big start where it stands (the fox's fire flaring up near by):
+    /// twice the jolt of [`Animator::startle`].
+    pub fn flinch(&mut self, at: (f32, f32)) {
+        self.startle(at);
+        self.body.kick(3.0);
+    }
+
     /// A pounce at a toy: one big hop.
     pub fn pounce(&mut self) {
         self.jump(300.0, 0);

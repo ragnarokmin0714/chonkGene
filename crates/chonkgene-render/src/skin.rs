@@ -609,6 +609,8 @@ const CURL_TAIL_WRAP: f32 = 110.0;
 /// Asleep on its back, the belly swells and sinks this much more with each
 /// breath (world units along the belly bone).
 const BELLY_UP_BREATH: f32 = 0.11;
+/// Lying down in any pose, how much more its belly swells with a breath.
+const LYING_BREATH: f32 = 0.05;
 /// Lying chin on paws, turned this far, so its length shows behind the head.
 pub(crate) const CHIN_YAW: f32 = 30.0;
 /// Rolled over (degrees about its length): on its back laughing or asleep,
@@ -1279,12 +1281,14 @@ impl Walk {
             }
         }
         if let Some(i) = b.belly {
-            // The belly rises and falls with each breath; asleep on its
-            // back, round and plain to see (Roger: like breathing).
+            // The belly rises and falls with each breath; lying down (on
+            // its side, its front, curled up) the flank swells more, and
+            // asleep on its back it is round and plain to see (Roger: like
+            // breathing; his fifteenth pass: in every sleeping pose).
             let back = lie * chonkgene_rig::math::smoothstep(90.0, 150.0, self.roll.x);
-            let amp = 0.05 + BELLY_UP_BREATH * back;
+            let amp = 0.05 + LYING_BREATH * lie + BELLY_UP_BREATH * back;
             let y = self.belly.step(-amp * self.breath, -acc, 3.6, 0.16, dt);
-            let most = 0.12 + BELLY_UP_BREATH * back;
+            let most = 0.12 + LYING_BREATH * lie + BELLY_UP_BREATH * back;
             j[i].shift = v3(0.0, y.clamp(-most, most), 0.0);
         }
         if let Some(i) = b.butt {
