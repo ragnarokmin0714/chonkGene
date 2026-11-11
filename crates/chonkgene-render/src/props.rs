@@ -500,6 +500,11 @@ pub fn draw(pm: &mut Pixmap, thing: Thing, at: (f32, f32), s: f32, look: Look) {
             let fade = (look.t / 1.5).min(1.0) * (1.0 - look.used).clamp(0.0, 1.0);
             sunbeam(pm, (x, y), (w * s, h * s), look.t, fade);
         }
+        Thing::Spotlight => {
+            // Snapping on in a quarter of a second, out over the last one.
+            let on = (look.t / 0.25).min(1.0) * (1.0 - look.used).clamp(0.0, 1.0);
+            spotlight(pm, (x, y), (w * s, h * s), look.t, on);
+        }
         Thing::Butterfly => {
             // Wings beating: squeezed sideways as they close.
             let beat = (TAU * 3.0 * look.t).sin();
@@ -586,10 +591,13 @@ pub enum Fx {
     /// The spell's bubble round a pet asleep: lilac, a crescent moon and
     /// stars drifting round its rim; `at` is the middle of the pet.
     Dream,
+    /// Music notes floating up, swaying (dancing); `at` is the top of the
+    /// head.
+    Notes,
 }
 
 impl Fx {
-    pub const ALL: [Fx; 9] = [
+    pub const ALL: [Fx; 10] = [
         Fx::Hearts,
         Fx::Sparkles,
         Fx::Dust,
@@ -599,6 +607,7 @@ impl Fx {
         Fx::Brawl,
         Fx::Fright,
         Fx::Dream,
+        Fx::Notes,
     ];
 
     /// How long it shows, seconds.
@@ -612,6 +621,7 @@ impl Fx {
             Fx::Spell => 1.8,
             Fx::Brawl => 2.6,
             Fx::Fright => 1.8,
+            Fx::Notes => 2.2,
         }
     }
 }
@@ -678,6 +688,7 @@ pub fn effect(pm: &mut Pixmap, fx: Fx, at: (f32, f32), s: f32, t: f32) {
         Fx::Spell => spell(pm, at, s, t, u, fade),
         Fx::Brawl => brawl(pm, at, s, t, 1.0 - ((u - 0.9) / 0.1).max(0.0)),
         Fx::Fright => fright(pm, at, s, t, fade),
+        Fx::Notes => notes(pm, at, s, t, fade),
         Fx::Splash => {
             for k in 0..7 {
                 let a = PI * (0.15 + 0.7 * k as f32 / 6.0);
@@ -1098,6 +1109,169 @@ pub fn sunlit(pm: &mut Pixmap, k: f32) {
             }
         }
     }
+}
+
+/// A stage spotlight (see [`Thing::Spotlight`]): a cone of white light
+/// straight down from above with crisp sides, a bright pool on the floor
+/// with a sharp rim, dust sparkling in it; `on` 0 … 1.
+fn spotlight(pm: &mut Pixmap, at: (f32, f32), size: (f32, f32), t: f32, on: f32) {
+    if on <= 0.0 {
+        return;
+    }
+    let ((x, y), (w, h)) = (at, size);
+    let s = w / 240.0;
+    let top = y - h;
+    let (half_top, half_floor) = (0.07 * w, 0.42 * w);
+    let (pw, ph) = (pm.width() as usize, pm.height() as usize);
+    let data = pm.data_mut();
+    for py in (top.max(0.0) as usize)..(y.max(0.0) as usize).min(ph) {
+        let v = (py as f32 + 0.5 - top) / h;
+        let half = half_top + (half_floor - half_top) * v;
+        // A beam of light seen side on: brighter in the middle, the edges
+        // crisp (a stage light, not the sun), stronger near the lamp.
+        let down = 0.42 - 0.12 * v;
+        let x0 = (x - half).floor().max(0.0) as usize;
+        let x1 = ((x + half).ceil().max(0.0) as usize).min(pw);
+        for px in x0..x1 {
+            let f = ((px as f32 + 0.5 - x) / half).abs();
+            if f > 1.0 {
+                continue;
+            }
+            let edge = smooth(1.0, 0.9, f);
+            let core = 0.75 + 0.25 * (1.0 - f * f);
+            let a = (down * core * edge * on).min(0.85);
+            if a <= 0.0 {
+                continue;
+            }
+            let i = 4 * (py * pw + px);
+            let keep = 1.0 - a;
+            for (k, cv) in [255.0, 253.0, 244.0].iter().enumerate() {
+                data[i + k] = (cv * a + f32::from(data[i + k]) * keep).min(255.0) as u8;
+            }
+            data[i + 3] = (255.0 * a + f32::from(data[i + 3]) * keep).min(255.0) as u8;
+        }
+    }
+    // The pool: bright right out to a sharp rim.
+    let (rx, ry) = (half_floor * 1.02, 0.1 * w);
+    let cy = y - 2.0 * s;
+    let alpha = |a: f32| (a * on) as u8;
+    if let Some(shader) = RadialGradient::new(
+        Point::from_xy(0.0, 0.0),
+        0.0,
+        Point::from_xy(0.0, 0.0),
+        rx,
+        vec![
+            GradientStop::new(0.0, Color::from_rgba8(0xFF, 0xFF, 0xFA, alpha(230.0))),
+            GradientStop::new(0.8, Color::from_rgba8(0xFF, 0xFB, 0xEC, alpha(200.0))),
+            GradientStop::new(0.93, Color::from_rgba8(0xFF, 0xF4, 0xD8, alpha(150.0))),
+            GradientStop::new(1.0, Color::from_rgba8(0xFF, 0xF0, 0xD0, 0)),
+        ],
+        SpreadMode::Pad,
+        Transform::from_scale(1.0, ry / rx).post_translate(x, cy),
+    ) && let Some(path) = oval_path(x, cy, rx, ry)
+    {
+        let p = Paint {
+            shader,
+            anti_alias: true,
+            ..Paint::default()
+        };
+        pm.fill_path(&path, &p, FillRule::Winding, Transform::identity(), None);
+    }
+    // The lamp's glare at the top.
+    glow(
+        pm,
+        x,
+        top + 6.0 * s,
+        26.0 * s,
+        [255, 255, 245, (200.0 * on) as u8],
+    );
+    // Dust sparkling in the light, drifting down slowly.
+    for k in 0..14 {
+        let kf = k as f32;
+        let p = (kf * 0.137 + 0.03 * t).fract();
+        let v = 0.12 + 0.82 * p;
+        let half = half_top + (half_floor - half_top) * v;
+        let u = (kf * 2.39).sin() * 0.8 + 0.08 * (0.6 * t + kf).sin();
+        let twinkle = (0.5 + 0.5 * (6.0 * t + 1.7 * kf).sin()).powi(3);
+        let a = twinkle * on * smooth(0.0, 0.1, p) * smooth(1.0, 0.9, p);
+        let (sx, sy) = (x + u * half, top + v * h);
+        star(
+            pm,
+            sx,
+            sy,
+            (1.5 + 2.5 * twinkle) * s,
+            [255, 255, 250, (240.0 * a) as u8],
+        );
+    }
+}
+
+/// Music notes floating up from `at` and swaying, in pastels (♪ and ♫).
+fn notes(pm: &mut Pixmap, at: (f32, f32), s: f32, t: f32, fade: f32) {
+    const COLOURS: [[u8; 4]; 3] = [
+        [0xF4, 0x8F, 0xB1, 255],
+        [0x7F, 0xB8, 0xEC, 255],
+        [0xF2, 0xB8, 0x4B, 255],
+    ];
+    let (x, y) = at;
+    for k in 0..3 {
+        let kf = k as f32;
+        let u = (t - 0.35 * kf).max(0.0);
+        if u <= 0.0 {
+            continue;
+        }
+        let side = if k % 2 == 0 { -1.0 } else { 1.0 };
+        let nx = x + side * (14.0 + 10.0 * kf) * s + 7.0 * s * (3.0 * u + kf).sin();
+        let ny = y - 8.0 * s - 34.0 * s * u;
+        let a = fade * (1.0 - (u / 1.8).min(1.0)).max(0.0) * (u / 0.2).min(1.0);
+        let c = with_alpha(COLOURS[k % 3], a);
+        let r = 4.2 * s;
+        let tilt = Transform::from_rotate_at(-20.0, nx, ny);
+        oval(pm, nx, ny, r, 0.75 * r, c, tilt);
+        let stem_x = nx + 0.9 * r;
+        let mut stem = PathBuilder::new();
+        stem.move_to(stem_x, ny - 0.2 * r);
+        stem.line_to(stem_x, ny - 3.2 * r);
+        if k == 1 {
+            // ♫: two heads joined by a beam.
+            let (x2, y2) = (nx + 2.6 * r, ny - 0.5 * r);
+            oval(
+                pm,
+                x2,
+                y2,
+                r,
+                0.75 * r,
+                c,
+                Transform::from_rotate_at(-20.0, x2, y2),
+            );
+            stem.move_to(x2 + 0.9 * r, y2 - 0.2 * r);
+            stem.line_to(x2 + 0.9 * r, y2 - 3.2 * r);
+            stem_path_beam(
+                pm,
+                (stem_x, ny - 3.2 * r),
+                (x2 + 0.9 * r, y2 - 3.2 * r),
+                c,
+                1.4 * s,
+            );
+        } else {
+            // ♪: a flag.
+            stem.move_to(stem_x, ny - 3.2 * r);
+            stem.quad_to(
+                stem_x + 1.6 * r,
+                ny - 2.4 * r,
+                stem_x + 1.1 * r,
+                ny - 1.2 * r,
+            );
+        }
+        stroke_path(pm, stem, c, 1.3 * s, Transform::identity());
+    }
+}
+
+/// The beam joining two notes' stems.
+fn stem_path_beam(pm: &mut Pixmap, a: (f32, f32), b: (f32, f32), c: [u8; 4], width: f32) {
+    let mut pb = PathBuilder::new();
+    pb.move_to(a.0, a.1);
+    pb.line_to(b.0, b.1);
+    stroke_path(pm, pb, c, 2.0 * width, Transform::identity());
 }
 
 /// One flame of fox-fire at `at`, `size` 1 for the fox-fire scene's: a

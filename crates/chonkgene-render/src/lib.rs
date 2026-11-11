@@ -350,7 +350,7 @@ pub fn key_for(expression: Expression, params: &PoseParams) -> Key {
         Act::Shake => (PoseId::Sit, Look::Shut),
         Act::Preen => (PoseId::LookLeft, Look::Happy),
         Act::Flap => (PoseId::Wave, Look::Happy),
-        Act::Wiggle | Act::Bounce | Act::Spin => (PoseId::Stretch, Look::Happy),
+        Act::Wiggle | Act::Bounce | Act::Spin | Act::Dance => (PoseId::Stretch, Look::Happy),
         Act::Knead | Act::Tap | Act::Chew => (PoseId::Sit, Look::Happy),
         Act::Paw => (PoseId::Wave, eyes),
         Act::Tilt => (PoseId::LookLeft, eyes),

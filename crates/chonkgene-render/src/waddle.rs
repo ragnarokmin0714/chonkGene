@@ -325,6 +325,8 @@ pub struct Waddle {
     fidget: Out,
     /// −1 … 1 over a breath: the belly rises and falls with it.
     breath: f32,
+    /// The owl: it dances bobbing and tilting its head, not foot to foot.
+    owl: bool,
 }
 
 impl Waddle {
@@ -389,6 +391,7 @@ impl Waddle {
             fidgets: Fidgets::new(&model.species, 1),
             fidget: Out::default(),
             breath: 0.0,
+            owl: model.species == "owl",
         })
     }
 
@@ -788,6 +791,77 @@ impl Waddle {
                     let poke = peck(g.t, 2.4);
                     j[self.body].rot.x += e * 12.0;
                     j[self.head].rot.x += e * (20.0 + 10.0 * poke);
+                }
+                // 肉肉舞 for a bird (see `dance_at`): the chick and the
+                // duckling sway from foot to foot all through, the owl bobs
+                // and tilts its head to the beat; then each move in turn.
+                Act::Dance => {
+                    use chonkgene_core::anim::{DanceMove, dance_at};
+                    let d = dance_at(g.t);
+                    let on_beat = (TAU * d.beat).cos();
+                    let side = PI * (d.count as f32 + d.beat);
+                    let wing = |j: &mut Vec<Joint>, k: usize, deg: f32| {
+                        if let Some(wg) = self.wings[k] {
+                            let sign = if k == 0 { 1.0 } else { -1.0 };
+                            j[wg].rot.z += sign * deg;
+                        }
+                    };
+                    if self.owl {
+                        j[self.head].rot.x += e * 12.0 * on_beat;
+                        j[self.head].rot.z += e * 16.0 * side.sin();
+                    } else {
+                        j[self.body].rot.z += e * 10.0 * side.sin();
+                        j[self.head].rot.z -= e * 7.0 * (side - 0.8).sin();
+                        for (k, &leg) in self.legs.iter().enumerate() {
+                            let up = if k == 0 { side.sin() } else { -side.sin() }.max(0.0);
+                            j[leg].shift.y += e * 0.06 * up;
+                        }
+                    }
+                    if let Some(t) = self.tail {
+                        j[t].rot.z += e * 20.0 * (2.0 * side).sin();
+                    }
+                    match d.step {
+                        // Wings out, fluttering on each hop.
+                        DanceMove::Bounce => {
+                            let flap = 24.0 + 16.0 * on_beat;
+                            wing(&mut j, 0, e * flap);
+                            wing(&mut j, 1, e * flap);
+                            j[self.head].rot.x -= 8.0 * e;
+                        }
+                        // The tail end out to each side on the beat.
+                        DanceMove::Wiggle => {
+                            j[self.body].rot.y += e * 18.0 * side.sin();
+                            self.butt_x.v += e * 2.4 * side.cos() * dt * 30.0;
+                            wing(&mut j, 0, e * 18.0);
+                            wing(&mut j, 1, e * 18.0);
+                        }
+                        // One wing up and then the other.
+                        DanceMove::Paws => {
+                            let k = (d.count % 2) as usize;
+                            let wave = (TAU * 2.0 * g.t).sin();
+                            wing(&mut j, k, e * (70.0 + 12.0 * wave));
+                            wing(&mut j, 1 - k, e * 12.0);
+                        }
+                        DanceMove::Spin => {
+                            let u = d.u;
+                            j[0].rot.y += facing * 360.0 * u * u * (3.0 - 2.0 * u);
+                            for (k, &leg) in self.legs.iter().enumerate() {
+                                let p = TAU * 4.0 * g.t + PI * k as f32;
+                                j[leg].shift.y += e * 0.05 * p.cos().max(0.0);
+                            }
+                            wing(&mut j, 0, e * 30.0);
+                            wing(&mut j, 1, e * 30.0);
+                        }
+                        // 「登登！」: both wings up high, head up, held.
+                        DanceMove::Pose => {
+                            let hold = chonkgene_rig::math::smoothstep(0.0, 0.25, d.u);
+                            wing(&mut j, 0, e * hold * 80.0);
+                            wing(&mut j, 1, e * hold * 80.0);
+                            j[self.head].rot.x -= e * hold * 14.0;
+                            j[self.body].rot.x -= e * hold * 5.0;
+                        }
+                    }
+                    self.belly.v += e * 0.5 * on_beat.max(0.0) * dt * 30.0;
                 }
                 // One wing up, waving.
                 Act::Wave => {

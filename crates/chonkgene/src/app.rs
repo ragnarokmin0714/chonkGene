@@ -287,6 +287,10 @@ enum Action {
     Catnip,
     /// 躲貓貓: it goes and hides.
     Hide,
+    /// 跳舞: a spotlight comes down on it and it dances the 肉肉舞.
+    Dance,
+    /// 放聚光燈: a spotlight put down beside it (or taken away).
+    Stage,
 }
 
 struct Menu {
@@ -455,6 +459,11 @@ struct App {
     director: Director,
     /// The skit last written to the log (see [`Director::describe`]).
     skit_seen: Option<String>,
+    /// For trying the 肉肉舞 out (`CHONKGENE_STAGE`): a spotlight put down
+    /// beside the first pet at this time.
+    stage_at: Option<f64>,
+    /// `CHONKGENE_STAGE=dance`: 跳舞 asked of the first pet instead.
+    dance_test: bool,
     sounds: Sounds,
     tray: Option<Tray>,
     hotkey: Option<hotkey::Hotkey>,
@@ -546,6 +555,8 @@ impl App {
             proxy,
             director: Director::default(),
             skit_seen: None,
+            stage_at: std::env::var_os("CHONKGENE_STAGE").map(|_| 3.0),
+            dance_test: std::env::var("CHONKGENE_STAGE").is_ok_and(|v| v == "dance"),
             sounds: Sounds::new(),
             tray: None,
             hotkey: None,
@@ -841,6 +852,46 @@ impl App {
 
     /// Put down a sprig of catnip under the cursor, or take it away (PLAN
     /// §8 "Catnip").
+    /// 跳舞: a spotlight comes down on `pet` and it dances the 肉肉舞, if
+    /// it is free.
+    fn dance(&mut self, el: &ActiveEventLoop, pet: u64, world: World, now: Instant) {
+        let App {
+            pets,
+            play,
+            shared,
+            lines,
+            bubble_face,
+            sounds,
+            settings,
+            area,
+            terrain,
+            ui_scale,
+            ..
+        } = self;
+        let (Some(shared), Some(p)) = (shared.as_ref(), pets.iter_mut().find(|p| p.save.id == pet))
+        else {
+            return;
+        };
+        if p.fun.busy(world.now) || p.mind.asleep() || p.in_skit {
+            return;
+        }
+        let mut ctx = Ctx {
+            el,
+            shared,
+            lines,
+            face: bubble_face,
+            sounds,
+            sound_on: settings.sound,
+            volume: f32::from(settings.volume) / 100.0,
+            area: *area,
+            terrain,
+            ui_scale: *ui_scale,
+            world,
+        };
+        play::start_scene(play, p, &mut ctx, Scene::Dance);
+        p.next = now;
+    }
+
     fn catnip(&mut self, el: &ActiveEventLoop) {
         let Some(shared) = &self.shared else {
             return;
@@ -1114,6 +1165,8 @@ impl App {
                 .map(|label| item(label, None, Icon::Paw, false))
                 .collect();
             let mut actions: Vec<Action> = Ask::ALL.iter().map(|&c| Action::Command(c)).collect();
+            items.push(item("跳舞", None, Icon::Note, false));
+            actions.push(Action::Dance);
             items.push(item("返回", None, Icon::Back, true));
             actions.push(Action::Back);
             return self.show_menu(el, i, items, actions, at);
@@ -1180,6 +1233,17 @@ impl App {
             false,
         ));
         actions.push(Action::Catnip);
+        items.push(item(
+            if self.play.stage.is_some() {
+                "把聚光燈收起來"
+            } else {
+                "放聚光燈"
+            },
+            None,
+            Icon::Spotlight,
+            false,
+        ));
+        actions.push(Action::Stage);
         items.push(item("說再見…", None, Icon::Bye, false));
         actions.push(Action::Bye);
         items.push(item(
@@ -1297,6 +1361,21 @@ impl App {
                 if let Some(i) = self.pets.iter().position(|p| p.save.id == pet) {
                     self.open_menu(el, i, &world, page, at);
                 }
+                return;
+            }
+            Action::Stage => {
+                if self.hidden || self.fullscreen {
+                    return;
+                }
+                let Some(shared) = &self.shared else {
+                    return;
+                };
+                self.play
+                    .toggle_stage(el, shared, &mut self.pets, pet, self.area, world.now);
+                return;
+            }
+            Action::Dance => {
+                self.dance(el, pet, world, now);
                 return;
             }
             Action::Magic(Magic::Foxfire) => {
@@ -3104,6 +3183,7 @@ impl ApplicationHandler<UserEvent> for App {
                 *skit_seen = skit;
             }
         }
+        play.irrational = settings.irrational;
         play::tick(play, pets, &mut ctx, visible, settings.react_to_input);
         for (i, p) in pets.iter_mut().enumerate() {
             if !visible || p.next > now {
@@ -3142,6 +3222,22 @@ impl ApplicationHandler<UserEvent> for App {
         if self.dirty && now >= self.save_at {
             self.save_at = now + SAVE_EVERY;
             self.save_now();
+        }
+        if let Some(at) = self.stage_at
+            && self.secs(now) >= at
+            && let (Some(shared), Some(first)) = (&self.shared, self.pets.first())
+        {
+            self.stage_at = None;
+            let (pet, t) = (first.save.id, self.secs(now));
+            if self.dance_test {
+                let world = self.world(now);
+                self.dance(el, pet, world, now);
+                diag!("CHONKGENE_STAGE=dance: asked to dance");
+            } else {
+                self.play
+                    .toggle_stage(el, shared, &mut self.pets, pet, self.area, t);
+                diag!("CHONKGENE_STAGE: a spotlight put down");
+            }
         }
         if self.stats && now >= self.stats_at {
             self.report(now);

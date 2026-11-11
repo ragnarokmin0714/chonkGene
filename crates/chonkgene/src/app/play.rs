@@ -163,6 +163,8 @@ impl PropWin {
     fn used(&self, now: f64) -> f32 {
         match self.prop.thing {
             Thing::Catnip => ((now - self.born) / CATNIP_SECS).clamp(0.0, 1.0) as f32,
+            // A spotlight goes out over its last second.
+            Thing::Spotlight => (1.0 - (self.until - now)).clamp(0.0, 1.0) as f32,
             Thing::Seeds | Thing::Sunbeam => {
                 let span = (self.until - self.born).max(1.0);
                 let left = (self.until - now) / span;
@@ -197,7 +199,12 @@ impl PropWin {
         }
         let alive = matches!(
             self.prop.thing,
-            Thing::Catnip | Thing::Pond | Thing::Sunbeam | Thing::Butterfly | Thing::Branch
+            Thing::Catnip
+                | Thing::Pond
+                | Thing::Sunbeam
+                | Thing::Butterfly
+                | Thing::Branch
+                | Thing::Spotlight
         );
         let grounded = self.prop.resting || (self.prop.vel.1 == 0.0 && self.prop.thing.falls());
         let fresh = self.drawn.is_some_and(|(at, _, spin, g)| {
@@ -251,6 +258,11 @@ pub(super) struct Run {
     home: (f32, f32),
     /// Where on its thing it goes (the owl lands here on the branch).
     spot: f32,
+    /// Its thing is shared (a spotlight put down from the menu): it stays
+    /// when this pet is done.
+    keep: bool,
+    /// Beats counted so far (the 肉肉舞).
+    count: u32,
 }
 
 /// At the catnip.
@@ -554,6 +566,8 @@ pub(super) struct Fun {
     /// How brightly the sunbeam lights it, 0 … 1, easing in and out, and
     /// the clock when that was last worked out.
     sun: (f32, f64),
+    /// When it last finished a 肉肉舞 (it does not dance again at once).
+    pub danced: f64,
     /// Drawn with effects last frame: the plain picture must be shown again
     /// once they are gone.
     pub had_overlay: bool,
@@ -633,6 +647,13 @@ pub(super) struct Playground {
     /// Where every pet stands this go round: (id, feet x, feet y, the half
     /// width of its body), so a pond or a sunbeam comes out where nobody is.
     standing: Vec<(u64, f32, f32, f32)>,
+    /// The spotlight put down from the menu (「放聚光燈」), if any.
+    pub stage: Option<u32>,
+    /// 非理性模式 is on: pets near a spotlight run into it and join in.
+    pub irrational: bool,
+    /// The pet whose dance the tune goes with, until when: dancing
+    /// together, only one plays it.
+    tune: Option<(u64, f64)>,
     rng: Option<fastrand::Rng>,
 }
 
@@ -1087,7 +1108,7 @@ impl Pet {
                 continue;
             }
             let at = match fx {
-                Fx::Hearts | Fx::Fright => head,
+                Fx::Hearts | Fx::Fright | Fx::Notes => head,
                 Fx::Sparkles => mouth,
                 Fx::Dust => (w / 2.0, floor),
                 Fx::Splash => (w / 2.0, floor - 0.13 * PPU * s),
@@ -1233,6 +1254,7 @@ pub(super) fn tick(
                 half: 0.5 * p.body.size.0,
             })
     });
+    ground.stage_step(pets, now, dt);
     let mut start_scene = !scene_on;
     for i in 0..pets.len() {
         chase(ground, pets, i, ctx);
@@ -1925,6 +1947,11 @@ pub(super) fn start_scene(
                 (x, fy - (a.h * 0.45).min(420.0 * s))
             }
             Scene::Butterfly => (beside, fy - 90.0 * s),
+            // The light comes down on it where it stands.
+            Scene::Dance => {
+                spot = fx;
+                (fx, fy)
+            }
             _ => (beside, fy),
         };
         let mut put = Prop::put(thing, at, s);
@@ -1952,9 +1979,14 @@ pub(super) fn start_scene(
         until: now + scene.secs(),
         home: (fx, fy),
         spot,
+        keep: false,
+        count: 0,
     });
     println!("{}: starts its scene, {scene:?}", p.save.name);
-    p.say(ctx, Line::Scene);
+    // A dance says its own line once the music starts.
+    if scene != Scene::Dance {
+        p.say(ctx, Line::Scene);
+    }
     true
 }
 
@@ -1999,8 +2031,14 @@ fn scene(ground: &mut Playground, p: &mut Pet, ctx: &mut Ctx) {
     let interrupted = lifted || p.mind.asleep() || p.in_skit;
     let prop = run.prop.and_then(|id| ground.get(id)).map(|w| w.prop);
     let end = |ground: &mut Playground, p: &mut Pet, run: &Run| {
-        if let Some(id) = run.prop {
+        if let Some(id) = run.prop.filter(|_| !run.keep) {
             ground.remove(id);
+        }
+        if run.scene == Scene::Dance {
+            p.fun.danced = now;
+            if ground.tune.is_some_and(|(id, _)| id == p.save.id) {
+                ground.tune = None;
+            }
         }
         p.fun.carry = None;
         p.fun.scene = None;
@@ -2099,6 +2137,11 @@ fn scene(ground: &mut Playground, p: &mut Pet, ctx: &mut Ctx) {
                 p.play(at, now, ctx.terrain);
             }
         }
+        (Scene::Dance, phase) => {
+            if dance(ground, p, ctx, &mut run, phase) {
+                return end(ground, p, &run);
+            }
+        }
         (_, 0) => {
             let Some(at) = prop else {
                 return end(ground, p, &run);
@@ -2188,6 +2231,225 @@ fn scene(ground: &mut Playground, p: &mut Pet, ctx: &mut Ctx) {
         }
     }
     p.fun.scene = Some(run);
+}
+
+/// The 肉肉舞 is over a while: it may dance again after this long.
+const DANCE_AGAIN: f64 = 20.0;
+/// A spotlight put down from the menu stays this long, seconds.
+const STAGE_SECS: f64 = 45.0;
+/// The tune's player id (its takes go A, B, ending in turn).
+const TUNE_ID: u64 = u64::MAX - 2;
+
+/// One step of the 肉肉舞 scene, `phase` 0 going into the light, 1
+/// starting, 2 dancing; true when it is over.
+fn dance(ground: &mut Playground, p: &mut Pet, ctx: &mut Ctx, run: &mut Run, phase: u8) -> bool {
+    let now = ctx.world.now;
+    match phase {
+        0 => {
+            let heading = p.walk_to(run.spot, 1.6, ctx.terrain);
+            if heading == Heading::Blocked || now >= run.until {
+                return true;
+            }
+            if heading == Heading::There {
+                p.stop();
+                run.phase = 1;
+                run.since = now;
+            }
+            false
+        }
+        1 => {
+            // Up on its feet to dance (lying about with a still mouse, it
+            // stayed down; a hold keeps it lying: `max_hold`). The scene
+            // alone keeps its own wandering away.
+            p.fun.hold_until = 0.0;
+            p.fun.lounge_until = 0.0;
+            p.anim.posture = Posture::Free;
+            if p.try_gesture(Act::Dance) {
+                run.phase = 2;
+                run.since = now;
+                run.count = 0;
+                run.until = now + f64::from(chonkgene_core::anim::DANCE_SECS) + 0.5;
+                p.anim.expression = Expression::Happy;
+                p.happy_until = now + f64::from(chonkgene_core::anim::DANCE_SECS);
+                p.fun.effect(Fx::Notes, now);
+                p.say(ctx, Line::Dance);
+                diag!("{}: dances", p.save.name);
+                // One tune for everyone in the light.
+                if ground.tune.is_none_or(|(_, until)| now >= until) {
+                    ground.tune = Some((p.save.id, run.until));
+                    tune(ctx, 0);
+                }
+            } else if now - run.since > 3.0 {
+                return true;
+            }
+            false
+        }
+        _ => {
+            p.fun.hold_until = 0.0;
+            p.anim.posture = Posture::Free;
+            let t = (now - run.since) as f32;
+            let beat = (t / chonkgene_core::anim::DANCE_BEAT) as u32;
+            while run.count < beat {
+                run.count += 1;
+                let k = run.count;
+                let lead = ground.tune.is_some_and(|(id, _)| id == p.save.id);
+                if lead && (k == 4 || k == 8) {
+                    tune(ctx, k / 4);
+                }
+                if k.is_multiple_of(3) && k < 12 {
+                    p.fun.effect(Fx::Notes, now);
+                }
+                // 「登登！」
+                if k == 12 {
+                    p.fun.effect(Fx::Hearts, now);
+                    p.fun.effect(Fx::Sparkles, now);
+                    p.say(ctx, Line::DanceEnd);
+                    p.bell(ctx);
+                }
+            }
+            let done = p.anim.doing() != Some(Act::Dance) && t > 1.0;
+            if done || now >= run.until {
+                // Cut short, what it was doing instead says why.
+                diag!(
+                    "{}: done dancing after {t:.1} s (then {:?})",
+                    p.save.name,
+                    p.anim.doing()
+                );
+                cheer(p, ctx);
+                return true;
+            }
+            false
+        }
+    }
+}
+
+/// Play phrase `k` (0 A, 1 B, 2 the ending) of the 肉肉舞's tune.
+fn tune(ctx: &mut Ctx, k: u32) {
+    if !ctx.sound_on {
+        return;
+    }
+    // The takes play in turn, one more each time: set the one before, so
+    // phrase k is take k + 1 whatever went before (a dance cut short).
+    ctx.sounds
+        .takes
+        .insert((TUNE_ID, Sound::Tune), k % chonkgene_core::sound::TAKES);
+    ctx.sounds.play(
+        TUNE_ID,
+        Species::Shiba,
+        Sound::Tune,
+        ctx.world.now,
+        ctx.volume,
+        1.0,
+    );
+}
+
+/// `p` goes into the spotlight `stage` and dances, at screen x `x`.
+pub(super) fn join_dance(p: &mut Pet, stage: u32, x: f32, now: f64) {
+    let feet = p.body.feet();
+    p.fun.scene = Some(Run {
+        scene: Scene::Dance,
+        prop: Some(stage),
+        phase: 0,
+        since: now,
+        until: now + 8.0,
+        home: feet,
+        spot: x,
+        keep: true,
+        count: 0,
+    });
+}
+
+impl Playground {
+    /// Put a spotlight down beside `pet` (「放聚光燈」), or take the one
+    /// down away; `pet` goes into it and dances.
+    pub fn toggle_stage(
+        &mut self,
+        el: &ActiveEventLoop,
+        shared: &Shared,
+        pets: &mut [Pet],
+        pet: u64,
+        area: chonkgene_core::motion::Area,
+        now: f64,
+    ) {
+        if let Some(id) = self.stage.take() {
+            self.remove(id);
+            return;
+        }
+        let Some(i) = pets.iter().position(|p| p.save.id == pet) else {
+            return;
+        };
+        let (fx, fy) = pets[i].body.feet();
+        let (w, s) = (pets[i].body.size.0, pets[i].fun.scale);
+        let side = if fx < area.x + area.w / 2.0 {
+            1.0
+        } else {
+            -1.0
+        };
+        let others: Vec<(f32, f32)> = pets
+            .iter()
+            .filter(|o| o.save.id != pet && (o.body.feet().1 - fy).abs() < 30.0 * s)
+            .map(|o| (o.body.feet().0, FOOTPRINT * o.body.size.0))
+            .collect();
+        let half = 0.5 * Thing::Spotlight.size().0 * s;
+        let x = free_spot(fx, side, w, half, (area.x, area.x + area.w), &others)
+            .unwrap_or(fx + side * 1.1 * w);
+        let mut put = Prop::put(Thing::Spotlight, (x, fy), s);
+        put.resting = true;
+        let Some(id) = self.add(el, shared, put, now, now + STAGE_SECS) else {
+            return;
+        };
+        self.stage = Some(id);
+        let p = &mut pets[i];
+        if p.free_to_play(now) && !p.fun.busy(now) {
+            join_dance(p, id, x, now);
+        }
+    }
+
+    /// Pets walking into the spotlight put down join in; with 非理性模式
+    /// on, those near by run over now and then. Several dance at once,
+    /// side by side.
+    fn stage_step(&mut self, pets: &mut [Pet], now: f64, dt: f32) {
+        let Some(id) = self.stage else {
+            return;
+        };
+        let Some(light) = self.get(id).map(|w| w.prop) else {
+            self.stage = None;
+            return;
+        };
+        let (sx, sy) = light.pos;
+        let half = 0.42 * light.px().0;
+        let mut dancers = pets
+            .iter()
+            .filter(|p| {
+                p.fun
+                    .scene
+                    .is_some_and(|r| r.scene == Scene::Dance && r.prop == Some(id))
+            })
+            .count();
+        for p in pets.iter_mut() {
+            let rested = p.fun.danced == 0.0 || now - p.fun.danced >= DANCE_AGAIN;
+            if !p.free_to_play(now) || p.fun.busy(now) || p.playing || !rested {
+                continue;
+            }
+            let (fx, fy) = p.body.feet();
+            let s = p.fun.scale;
+            let level = (fy - sy).abs() < 30.0 * s;
+            let inside = level && (fx - sx).abs() < half;
+            let drawn =
+                self.irrational && level && (fx - sx).abs() < 700.0 * s && self.roll() < 0.5 * dt;
+            if inside || drawn {
+                diag!(
+                    "{}: joins the dance ({})",
+                    p.save.name,
+                    if inside { "walked in" } else { "ran over" }
+                );
+                // Side by side: the middle, then either side.
+                let slot = [0.0, -1.0, 1.0, -2.0, 2.0][dancers % 5] * 0.4 * half;
+                join_dance(p, id, sx + slot, now);
+                dancers += 1;
+            }
+        }
+    }
 }
 
 /// What you are doing, as the pets see it: read with the mouse still and

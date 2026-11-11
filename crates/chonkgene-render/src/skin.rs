@@ -609,6 +609,9 @@ const CURL_TAIL_WRAP: f32 = 110.0;
 /// Asleep on its back, the belly swells and sinks this much more with each
 /// breath (world units along the belly bone).
 const BELLY_UP_BREATH: f32 = 0.11;
+/// Dancing, how far a front paw goes out to the side, degrees (the first
+/// front leg's way; the other's the opposite).
+const DANCE_OUT: f32 = 45.0;
 /// Lying down in any pose, how much more its belly swells with a breath.
 const LYING_BREATH: f32 = 0.05;
 /// Lying chin on paws, turned this far, so its length shows behind the head.
@@ -1209,7 +1212,7 @@ impl Walk {
             .gesture
             .filter(|g| {
                 use chonkgene_core::anim::Act;
-                matches!(g.act, Act::Wiggle | Act::Bounce | Act::Spin)
+                matches!(g.act, Act::Wiggle | Act::Bounce | Act::Spin | Act::Dance)
             })
             .map_or(0.0, |g| g.e);
         // Pleased or at play, a dog's tail (and the fox's) wags all the
@@ -1219,6 +1222,12 @@ impl Walk {
             TailStyle::Curl => 0.0,
         };
         let wag = f.get(Kind::Wag).map_or(0.0, |w| w.0).max(joy).max(keen);
+        // Dancing (肉肉舞): the Shiba's tail goes round like a helicopter,
+        // the fox fans its tails out like a peacock.
+        let dance = self
+            .gesture
+            .filter(|g| g.act == chonkgene_core::anim::Act::Dance)
+            .map(|g| (g.e, g.t));
         let curl = if self.tail_style == TailStyle::Curl {
             f.lively
         } else {
@@ -1273,7 +1282,18 @@ impl Walk {
                 if k == 0 {
                     // Sulking, back to you, the tails stay together: a fan
                     // seen from behind stretches the skin between them.
-                    let fan = sit * (1.0 - lv.sulk);
+                    let mut fan = sit * (1.0 - lv.sulk);
+                    if let Some((e, t)) = dance {
+                        match self.tail_style {
+                            TailStyle::Ripple => fan = fan.max(e),
+                            TailStyle::Wag => {
+                                let w = TAU * 2.6 * t;
+                                j[bone].rot.x += e * 28.0 * w.cos();
+                                j[bone].rot.z += e * 28.0 * w.sin();
+                            }
+                            TailStyle::Curl => {}
+                        }
+                    }
                     j[bone].rot = j[bone].rot + tail.sit_turn * fan + tail.lie_turn * lie;
                 } else {
                     j[bone].rot = j[bone].rot + tail.lie_curl * lie;
@@ -1687,6 +1707,89 @@ impl Walk {
                     j[b.hips].rot.y -= facing * e * 14.0 * sweep;
                     j[b.head].rot.y += facing * 16.0 * e;
                     self.bell.1.v += e * 40.0 * sweep * dt * 30.0;
+                }
+                // 肉肉舞 (see `dance_at`): the head bobbing to the beat
+                // all through, and each move in turn.
+                Act::Dance => {
+                    use chonkgene_core::anim::{DanceMove, dance_at};
+                    let d = dance_at(g.t);
+                    let on_beat = (TAU * d.beat).cos();
+                    j[b.head].rot.x += e * 9.0 * on_beat;
+                    let fronts: Vec<usize> =
+                        self.legs.iter().filter(|l| l.2).map(|l| l.0).collect();
+                    match d.step {
+                        // Bouncing: down into the beat, legs tucked up in
+                        // the air between, nose up.
+                        DanceMove::Bounce => {
+                            let crouch = (0.5 + 0.5 * on_beat).powi(2);
+                            j[0].shift.y -= e * 0.12 * self.leg_len * crouch;
+                            j[b.head].rot.x -= e * 10.0;
+                            for &(leg, _, front) in &self.legs {
+                                j[leg].rot.x +=
+                                    if front { -16.0 } else { 16.0 } * e * (1.0 - crouch);
+                            }
+                        }
+                        // The bottom out to one side on each beat.
+                        DanceMove::Wiggle => {
+                            let w = PI * (d.count as f32 + d.beat);
+                            j[b.body].rot.x += 7.0 * e;
+                            j[b.hips].rot.y += e * 26.0 * w.sin();
+                            j[b.hips].rot.z += e * 11.0 * w.sin();
+                            j[b.body].rot.y -= e * 7.0 * w.sin();
+                            j[b.head].rot.z += e * 10.0 * (w - 1.0).sin();
+                            self.butt_x.v += e * 2.6 * w.cos() * dt * 30.0;
+                        }
+                        // A cat kneads the air with both front paws; the
+                        // rest wave one front paw and then the other.
+                        DanceMove::Paws => {
+                            // Out to the side as well as up: facing you, a
+                            // paw lifted only forward hardly shows.
+                            let cat = self.tail_style == TailStyle::Curl;
+                            for (k, &leg) in fronts.iter().enumerate() {
+                                let out = if k == 0 { DANCE_OUT } else { -DANCE_OUT };
+                                if cat {
+                                    let p = TAU * 2.0 * g.t + PI * k as f32;
+                                    let up = p.sin().max(0.0);
+                                    j[leg].rot.x -= e * (50.0 + 25.0 * up);
+                                    j[leg].rot.z += e * out * (0.4 + 0.3 * up);
+                                    j[leg].shift.y += e * (0.08 + 0.06 * up);
+                                } else if (d.count as usize + k).is_multiple_of(2) {
+                                    let wave = (TAU * 2.0 * g.t).sin();
+                                    j[leg].rot.x -= e * 60.0;
+                                    j[leg].rot.z += e * out * (1.0 + 0.3 * wave);
+                                    j[leg].shift.y += e * 0.06;
+                                }
+                            }
+                            let lean = if d.count.is_multiple_of(2) { 1.0 } else { -1.0 };
+                            j[b.body].rot.z += e * 5.0 * lean;
+                            j[b.head].rot.z -= e * 8.0 * lean;
+                        }
+                        // Right round, the legs stepping it round.
+                        DanceMove::Spin => {
+                            let u = d.u;
+                            j[0].rot.y += facing * 360.0 * u * u * (3.0 - 2.0 * u);
+                            for (k, &(leg, offset, _)) in self.legs.iter().enumerate() {
+                                let p = TAU * (4.0 * g.t + offset + 0.5 * k as f32);
+                                j[leg].rot.x += e * 18.0 * p.sin();
+                            }
+                        }
+                        // 「登登！」: a front paw high, chin up, leaning
+                        // back, held.
+                        DanceMove::Pose => {
+                            let hold = chonkgene_rig::math::smoothstep(0.0, 0.25, d.u);
+                            if let Some(&leg) = fronts.first() {
+                                j[leg].rot.x -= e * hold * 80.0;
+                                j[leg].rot.z += e * hold * 1.2 * DANCE_OUT;
+                                j[leg].shift.y += e * hold * 0.1;
+                            }
+                            j[b.body].rot.x -= e * hold * 6.0;
+                            j[b.body].rot.z -= facing * e * hold * 5.0;
+                            j[b.head].rot.x -= e * hold * 16.0;
+                            j[b.head].rot.z += facing * e * hold * 12.0;
+                        }
+                    }
+                    // The fox's bell rings on the beat.
+                    self.bell.1.v += e * 30.0 * (TAU * d.beat).sin() * dt * 30.0;
                 }
                 // A front paw up, waving.
                 Act::Wave => {

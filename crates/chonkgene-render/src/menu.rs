@@ -40,6 +40,10 @@ pub enum Icon {
     Bubble,
     /// A flame licking up: 狐火.
     Flame,
+    /// A music note: 跳舞.
+    Note,
+    /// A stage light shining down on the floor: 放聚光燈.
+    Spotlight,
 }
 
 #[derive(Clone, Debug)]
@@ -568,6 +572,50 @@ fn icon(pm: &mut Pixmap, icon: Icon, ts: Transform, bg: [u8; 4]) {
                 ('Z', &[]),
             ],
         ),
+        Icon::Note => {
+            // ♪: an oval head, a stem, a flag.
+            stroke(
+                pm,
+                &[
+                    ('M', &[11.0, 17.5]),
+                    ('C', &[11.0, 20.0, 5.5, 21.0, 5.5, 18.5]),
+                    ('C', &[5.5, 16.0, 11.0, 15.0, 11.0, 17.5]),
+                    ('Z', &[]),
+                ],
+            );
+            stroke(pm, &[('M', &[11.0, 17.5]), ('L', &[11.0, 4.0])]);
+            stroke(
+                pm,
+                &[
+                    ('M', &[11.0, 4.0]),
+                    ('C', &[14.0, 5.5, 18.5, 7.0, 17.0, 12.0]),
+                ],
+            );
+        }
+        Icon::Spotlight => {
+            // A lamp at the top, its cone, a pool of light on the floor.
+            stroke(
+                pm,
+                &[
+                    ('M', &[9.0, 3.0]),
+                    ('L', &[15.0, 3.0]),
+                    ('L', &[14.0, 6.5]),
+                    ('L', &[10.0, 6.5]),
+                    ('Z', &[]),
+                ],
+            );
+            stroke(pm, &[('M', &[10.0, 6.5]), ('L', &[5.0, 18.0])]);
+            stroke(pm, &[('M', &[14.0, 6.5]), ('L', &[19.0, 18.0])]);
+            stroke(
+                pm,
+                &[
+                    ('M', &[4.0, 19.5]),
+                    ('C', &[4.0, 22.0, 20.0, 22.0, 20.0, 19.5]),
+                    ('C', &[20.0, 17.0, 4.0, 17.0, 4.0, 19.5]),
+                    ('Z', &[]),
+                ],
+            );
+        }
         Icon::Back => {
             stroke(pm, &[('M', &[19.0, 12.0]), ('L', &[5.5, 12.0])]);
             stroke(

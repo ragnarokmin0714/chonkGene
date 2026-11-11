@@ -89,10 +89,14 @@ pub enum Line {
     SpellBless,
     /// The fox casting 招喚術 (everyone come here).
     SpellCall,
+    /// Starting the 肉肉舞 in a spotlight.
+    Dance,
+    /// The 肉肉舞's 「登登！」 at the end.
+    DanceEnd,
 }
 
 impl Line {
-    pub const ALL: [Line; 44] = [
+    pub const ALL: [Line; 46] = [
         Line::Hello,
         Line::WelcomeBack,
         Line::PokeSmall,
@@ -137,6 +141,8 @@ impl Line {
         Line::SkitScared,
         Line::SpellBless,
         Line::SpellCall,
+        Line::Dance,
+        Line::DanceEnd,
     ];
 
     /// Key in the line tables.
@@ -186,6 +192,8 @@ impl Line {
             Line::SkitScared => "skit_scared",
             Line::SpellBless => "spell_bless",
             Line::SpellCall => "spell_call",
+            Line::Dance => "dance",
+            Line::DanceEnd => "dance_end",
         }
     }
 }

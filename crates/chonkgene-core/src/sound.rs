@@ -32,10 +32,13 @@ pub enum Sound {
     Flutter,
     /// Glad to see you: hello, welcome back, made up.
     Greet,
+    /// The 肉肉舞's little tune: a two-second phrase, each take the next
+    /// one (A, B, then the 「登登！」 ending), played one after another.
+    Tune,
 }
 
 impl Sound {
-    pub const ALL: [Sound; 13] = [
+    pub const ALL: [Sound; 14] = [
         Sound::Voice,
         Sound::Poke,
         Sound::Laugh,
@@ -49,12 +52,13 @@ impl Sound {
         Sound::Bell,
         Sound::Flutter,
         Sound::Greet,
+        Sound::Tune,
     ];
 
     pub fn class(self) -> Class {
         match self {
             Sound::Voice | Sound::Laugh | Sound::Grumpy | Sound::Greet => Class::Call,
-            Sound::Poke | Sound::Land | Sound::Bell | Sound::Flutter => Class::Knock,
+            Sound::Poke | Sound::Land | Sound::Bell | Sound::Flutter | Sound::Tune => Class::Knock,
             Sound::Sigh | Sound::Snore | Sound::Eat | Sound::Purr | Sound::Pant => Class::Soft,
         }
     }
@@ -774,8 +778,84 @@ pub const LONGEST: f32 = 2.6;
 /// Mono 16-bit samples at [`RATE`] for `sound` in `species`' voice, take
 /// `take` (any number; they repeat every [`TAKES`]): a recorded clip where
 /// there is one (see [`Clip`]), else synthesised.
+/// The 肉肉舞's tune, phrase `take` of three (the app plays takes 1, 2, 0
+/// in turn): eight bouncy plucked notes over a boinging bass on the beat,
+/// 120 a minute; the last phrase ends 「登登！」, two chords. Returns its
+/// length.
+fn tune(b: &mut Buf, take: u32) -> f32 {
+    const EIGHTH: f32 = 0.25;
+    // MIDI notes; 0 a rest.
+    let (lead, bass): ([u8; 8], [u8; 4]) = match take {
+        1 => ([72, 76, 79, 76, 81, 79, 76, 74], [48, 43, 48, 43]),
+        2 => ([74, 77, 81, 77, 79, 76, 72, 74], [50, 43, 48, 43]),
+        _ => ([72, 76, 79, 84, 0, 0, 0, 0], [48, 43, 0, 0]),
+    };
+    let hz = |m: u8| 440.0 * 2f32.powf((f32::from(m) - 69.0) / 12.0);
+    for (k, &m) in lead.iter().enumerate() {
+        if m > 0 {
+            pluck(&mut b.s, EIGHTH * k as f32, hz(m), 0.22, 0.32);
+        }
+    }
+    for (k, &m) in bass.iter().enumerate() {
+        if m > 0 {
+            boing(&mut b.s, 2.0 * EIGHTH * k as f32, hz(m), 0.5);
+        }
+    }
+    if take == 0 {
+        // 「登登！」: a short chord, then a longer one, on the dance's
+        // eleventh and twelfth beats (the phrase starts on the eighth):
+        // the second lands as it strikes its pose.
+        for (at, len, gain) in [(1.5, 0.16, 0.3), (2.0, 0.42, 0.34)] {
+            for m in [72, 76, 79, 84] {
+                pluck(&mut b.s, at, hz(m), len, gain * 0.6);
+            }
+            boing(&mut b.s, at, hz(48), gain * 1.4);
+        }
+        return 2.55;
+    }
+    2.0
+}
+
+/// A plucked, slightly square note: odd harmonics, a quick attack, an
+/// exponential fall over `decay` seconds.
+fn pluck(s: &mut [f32], at: f32, hz: f32, decay: f32, gain: f32) {
+    let start = (at * RATE as f32) as usize;
+    let n = ((decay * 4.0) * RATE as f32) as usize;
+    for i in 0..n {
+        let Some(out) = s.get_mut(start + i) else {
+            break;
+        };
+        let t = i as f32 / RATE as f32;
+        let w = TAU * hz * t;
+        let tone = w.sin() + 0.3 * (3.0 * w).sin() + 0.12 * (5.0 * w).sin();
+        *out += tone * gain * ease(t / 0.004) * (-t / decay).exp();
+    }
+}
+
+/// A round bass note that drops into its pitch, 「咚」.
+fn boing(s: &mut [f32], at: f32, hz: f32, gain: f32) {
+    let start = (at * RATE as f32) as usize;
+    let n = (0.4 * RATE as f32) as usize;
+    let mut phase = 0.0;
+    for i in 0..n {
+        let Some(out) = s.get_mut(start + i) else {
+            break;
+        };
+        let t = i as f32 / RATE as f32;
+        let f = hz * (1.0 + 0.6 * (-t / 0.03).exp());
+        phase += TAU * f / RATE as f32;
+        *out += phase.sin() * gain * ease(t / 0.003) * (-t / 0.16).exp();
+    }
+}
+
 pub fn synth(species: Species, sound: Sound, take: u32) -> Vec<i16> {
     let take = take % TAKES;
+    // The same for every species: music, not a voice.
+    if sound == Sound::Tune {
+        let mut b = Buf::new(LONGEST, take, 1.0);
+        let end = tune(&mut b, take);
+        return b.end(end, sound.class());
+    }
     // Each take a little higher or lower.
     let wobble = [1.0, 1.05, 0.95][take as usize];
     let mut b = Buf::new(LONGEST, take, wobble);
@@ -931,6 +1011,8 @@ pub fn synth(species: Species, sound: Sound, take: u32) -> Vec<i16> {
             }
             1.25
         }
+        // Made above, before any species' voice.
+        Sound::Tune => 0.0,
         Sound::Bell => {
             // A small bell (suzu) shaken: a few strikes, one after another.
             let hz = 2350.0;

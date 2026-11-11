@@ -51,6 +51,8 @@ pub enum Thing {
     Sunbeam,
     /// A cat's scene: a butterfly to chase.
     Butterfly,
+    /// A stage spotlight: whoever is in its pool dances the 肉肉舞.
+    Spotlight,
 }
 
 impl Thing {
@@ -67,6 +69,7 @@ impl Thing {
             Thing::Pond => (250.0, 70.0),
             Thing::Sunbeam => (260.0, 300.0),
             Thing::Butterfly => (28.0, 24.0),
+            Thing::Spotlight => (240.0, 380.0),
         }
     }
 
@@ -610,6 +613,9 @@ pub enum Scene {
     Bone,
     /// The fox chases its tails round in fox-fire.
     Foxfire,
+    /// 肉肉舞 in a spotlight (any species; asked for, or a spotlight put
+    /// down).
+    Dance,
 }
 
 impl Scene {
@@ -623,6 +629,8 @@ impl Scene {
             Scene::Butterfly => 20.0,
             Scene::Bone => 25.0,
             Scene::Foxfire => 10.0,
+            // The light comes on, the dance, the light goes out.
+            Scene::Dance => f64::from(crate::anim::DANCE_SECS) + 2.0,
         }
     }
 
@@ -636,6 +644,7 @@ impl Scene {
             Scene::Butterfly => Some(Thing::Butterfly),
             Scene::Bone => Some(Thing::Bone),
             Scene::Foxfire => None,
+            Scene::Dance => Some(Thing::Spotlight),
         }
     }
 }

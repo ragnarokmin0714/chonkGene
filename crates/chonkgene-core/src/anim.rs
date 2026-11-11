@@ -101,6 +101,64 @@ pub enum Act {
     Swish,
     /// Nose down to a ball and a bump that sends it rolling.
     Nudge,
+    /// 肉肉舞 in a spotlight (see [`dance_at`]).
+    Dance,
+}
+
+/// How long the 肉肉舞 lasts, seconds, and its beat (120 a minute).
+pub const DANCE_SECS: f32 = 7.0;
+pub const DANCE_BEAT: f32 = 0.5;
+
+/// A part of the 肉肉舞 (Roger's fifteenth pass, item 9).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DanceMove {
+    /// Bouncing to the beat, the belly jiggling.
+    Bounce,
+    /// The bottom wiggling side to side.
+    Wiggle,
+    /// Front paws (wings) waving in turn; a cat kneads the air.
+    Paws,
+    /// A turn right round.
+    Spin,
+    /// 「登登！」: a paw (a wing) up high, held.
+    Pose,
+}
+
+/// Where the 肉肉舞 is `t` seconds in: the move, how far into it (0 … 1),
+/// and where in the beat (0 … 1, the beat falling at 0).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct DanceStep {
+    pub step: DanceMove,
+    pub u: f32,
+    pub beat: f32,
+    /// Which beat of the dance this is (0 …), for moves done in turn.
+    pub count: u32,
+}
+
+/// The 肉肉舞's moves, each to the beat: four beats bouncing, three
+/// wiggling, three waving, a two-beat spin, two beats of the pose.
+pub fn dance_at(t: f32) -> DanceStep {
+    const MOVES: [(DanceMove, f32); 5] = [
+        (DanceMove::Bounce, 4.0),
+        (DanceMove::Wiggle, 3.0),
+        (DanceMove::Paws, 3.0),
+        (DanceMove::Spin, 2.0),
+        (DanceMove::Pose, 2.0),
+    ];
+    let beats = (t / DANCE_BEAT).max(0.0);
+    let mut start = 0.0;
+    for (step, len) in MOVES {
+        if beats < start + len || step == DanceMove::Pose {
+            return DanceStep {
+                step,
+                u: ((beats - start) / len).clamp(0.0, 1.0),
+                beat: beats.fract(),
+                count: beats as u32,
+            };
+        }
+        start += len;
+    }
+    unreachable!("the pose is last")
 }
 
 /// How the whole body is held for a while, under any gesture: as it likes,
@@ -201,6 +259,7 @@ pub fn gesture_secs(act: Act) -> Option<f32> {
         Act::Chew => Some(6.0),
         Act::Swish => Some(1.2),
         Act::Nudge => Some(0.8),
+        Act::Dance => Some(DANCE_SECS),
         _ => None,
     }
 }
@@ -611,7 +670,8 @@ impl Animator {
 
     /// Start a gesture now if the pet is free for it (a wave hello).
     pub fn gesture(&mut self, act: Act) {
-        if self.free() {
+        // Nothing cuts into the 肉肉舞 (a hello wave did, half way).
+        if self.free() && self.doing() != Some(Act::Dance) {
             self.start(act);
         }
     }
@@ -714,7 +774,22 @@ impl Animator {
     }
 
     pub fn step(&mut self, dt: f32) {
+        let was = self.t;
         self.t += dt;
+        // Dancing: a little hop and a jolt of the belly on every beat while
+        // it bounces, the belly on the beat all through (肉肉舞).
+        if let Some((Act::Dance, since, _)) = self.gesture {
+            let (a, b) = (dance_at(was - since), dance_at(self.t - since));
+            if b.count != a.count {
+                if b.step == DanceMove::Bounce {
+                    self.jump(150.0, 0);
+                    self.belly.kick(-2.2);
+                } else if b.step != DanceMove::Spin {
+                    self.belly.kick(-1.4);
+                    self.body.kick(0.9);
+                }
+            }
+        }
         self.body.step(dt);
         self.belly.step(dt);
         // A scratch fades once the finger stops, quicker once it lets go.
@@ -806,7 +881,9 @@ impl Animator {
         }
         self.was_happy = happy;
         if let Some((act, _, until)) = self.gesture {
-            if !self.free() || self.t >= until {
+            // The 肉肉舞 hops on its own beat: only a press or a walk stops it.
+            let dancing = act == Act::Dance && !self.walking && !self.pressed;
+            if !(self.free() || dancing) || self.t >= until {
                 self.gesture = None;
                 self.body.target = if self.pressed { PRESS_SQUASH } else { 0.0 };
                 // Rests are filled with little things to do (Roger: idling
@@ -1283,6 +1360,44 @@ mod tests {
         let mut most = 0.0f32;
         run(&mut a, 0.3, |a| most = most.max(a.params().squash));
         assert!(most > 0.2, "{most}");
+    }
+
+    /// The 肉肉舞 goes on through its own hops to the end, the moves in
+    /// order, and a press stops it.
+    #[test]
+    fn the_dance_hops_to_the_beat_and_lasts_its_length() {
+        let mut a = Animator::new(9, 0.33, 0.35);
+        a.gesture(Act::Dance);
+        assert_eq!(a.doing(), Some(Act::Dance));
+        let (mut hops, mut up, mut t) = (0, false, 0.0);
+        while t < DANCE_SECS - 0.1 {
+            a.step(1.0 / 60.0);
+            t += 1.0 / 60.0;
+            assert_eq!(a.doing(), Some(Act::Dance), "stopped at {t:.2} s");
+            let air = a.params().bob < 0.0;
+            hops += u32::from(air && !up);
+            up = air;
+        }
+        assert!(hops >= 3, "{hops} hops");
+        let steps: Vec<DanceMove> = (0..14)
+            .map(|k| dance_at(0.5 * k as f32 + 0.1).step)
+            .collect();
+        assert_eq!(steps[0], DanceMove::Bounce);
+        assert_eq!(steps[4], DanceMove::Wiggle);
+        assert_eq!(steps[7], DanceMove::Paws);
+        assert_eq!(steps[10], DanceMove::Spin);
+        assert_eq!(steps[12], DanceMove::Pose);
+        // Another gesture asked for meanwhile (a hello wave) waits.
+        let mut c = Animator::new(9, 0.33, 0.35);
+        c.gesture(Act::Dance);
+        c.step(0.6);
+        c.gesture(Act::Wave);
+        assert_eq!(c.doing(), Some(Act::Dance));
+        let mut b = Animator::new(9, 0.33, 0.35);
+        b.gesture(Act::Dance);
+        b.press(Zone::Belly, (10.0, 10.0));
+        b.step(1.0 / 60.0);
+        assert_ne!(b.doing(), Some(Act::Dance));
     }
 
     #[test]
