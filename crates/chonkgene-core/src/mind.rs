@@ -93,10 +93,14 @@ pub enum Line {
     Dance,
     /// The 肉肉舞's 「登登！」 at the end.
     DanceEnd,
+    /// Throwing water at another in the pond (a water fight).
+    Splash,
+    /// Splashed in a water fight.
+    Splashed,
 }
 
 impl Line {
-    pub const ALL: [Line; 46] = [
+    pub const ALL: [Line; 48] = [
         Line::Hello,
         Line::WelcomeBack,
         Line::PokeSmall,
@@ -143,6 +147,8 @@ impl Line {
         Line::SpellCall,
         Line::Dance,
         Line::DanceEnd,
+        Line::Splash,
+        Line::Splashed,
     ];
 
     /// Key in the line tables.
@@ -194,6 +200,8 @@ impl Line {
             Line::SpellCall => "spell_call",
             Line::Dance => "dance",
             Line::DanceEnd => "dance_end",
+            Line::Splash => "splash",
+            Line::Splashed => "splashed",
         }
     }
 }

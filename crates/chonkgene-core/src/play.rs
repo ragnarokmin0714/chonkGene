@@ -66,7 +66,7 @@ impl Thing {
             Thing::Bone => (46.0, 24.0),
             Thing::Seeds => (70.0, 14.0),
             Thing::Branch => (260.0, 60.0),
-            Thing::Pond => (250.0, 70.0),
+            Thing::Pond => (460.0, 96.0),
             Thing::Sunbeam => (260.0, 300.0),
             Thing::Butterfly => (28.0, 24.0),
             Thing::Spotlight => (240.0, 380.0),
@@ -623,7 +623,7 @@ impl Scene {
     pub fn secs(self) -> f64 {
         match self {
             Scene::Perch => 40.0,
-            Scene::Pond => 30.0,
+            Scene::Pond => 45.0,
             Scene::Seeds => 18.0,
             Scene::Sunbeam => 40.0,
             Scene::Butterfly => 20.0,

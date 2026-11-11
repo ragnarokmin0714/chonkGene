@@ -462,8 +462,9 @@ struct App {
     /// For trying the 肉肉舞 out (`CHONKGENE_STAGE`): a spotlight put down
     /// beside the first pet at this time.
     stage_at: Option<f64>,
-    /// `CHONKGENE_STAGE=dance`: 跳舞 asked of the first pet instead.
-    dance_test: bool,
+    /// `CHONKGENE_STAGE=dance`: 跳舞 asked of the first pet instead;
+    /// `pond`: the duckling's pond scene started.
+    stage_test: String,
     sounds: Sounds,
     tray: Option<Tray>,
     hotkey: Option<hotkey::Hotkey>,
@@ -556,7 +557,7 @@ impl App {
             director: Director::default(),
             skit_seen: None,
             stage_at: std::env::var_os("CHONKGENE_STAGE").map(|_| 3.0),
-            dance_test: std::env::var("CHONKGENE_STAGE").is_ok_and(|v| v == "dance"),
+            stage_test: std::env::var("CHONKGENE_STAGE").unwrap_or_default(),
             sounds: Sounds::new(),
             tray: None,
             hotkey: None,
@@ -852,9 +853,16 @@ impl App {
 
     /// Put down a sprig of catnip under the cursor, or take it away (PLAN
     /// §8 "Catnip").
-    /// 跳舞: a spotlight comes down on `pet` and it dances the 肉肉舞, if
-    /// it is free.
-    fn dance(&mut self, el: &ActiveEventLoop, pet: u64, world: World, now: Instant) {
+    /// Start `scene` for `pet` now, if it is free (跳舞: a spotlight comes
+    /// down on it and it dances the 肉肉舞).
+    fn start_scene(
+        &mut self,
+        el: &ActiveEventLoop,
+        pet: u64,
+        scene: Scene,
+        world: World,
+        now: Instant,
+    ) {
         let App {
             pets,
             play,
@@ -888,7 +896,7 @@ impl App {
             ui_scale: *ui_scale,
             world,
         };
-        play::start_scene(play, p, &mut ctx, Scene::Dance);
+        play::start_scene(play, p, &mut ctx, scene);
         p.next = now;
     }
 
@@ -1375,7 +1383,7 @@ impl App {
                 return;
             }
             Action::Dance => {
-                self.dance(el, pet, world, now);
+                self.start_scene(el, pet, Scene::Dance, world, now);
                 return;
             }
             Action::Magic(Magic::Foxfire) => {
@@ -3229,10 +3237,16 @@ impl ApplicationHandler<UserEvent> for App {
         {
             self.stage_at = None;
             let (pet, t) = (first.save.id, self.secs(now));
-            if self.dance_test {
-                let world = self.world(now);
-                self.dance(el, pet, world, now);
+            let world = self.world(now);
+            if self.stage_test == "dance" {
+                self.start_scene(el, pet, Scene::Dance, world, now);
                 diag!("CHONKGENE_STAGE=dance: asked to dance");
+            } else if self.stage_test == "pond" {
+                let duck = self.pets.iter().find(|p| p.species == Species::Duck);
+                if let Some(duck) = duck.map(|p| p.save.id) {
+                    self.start_scene(el, duck, Scene::Pond, world, now);
+                    diag!("CHONKGENE_STAGE=pond: the duckling's pond");
+                }
             } else {
                 self.play
                     .toggle_stage(el, shared, &mut self.pets, pet, self.area, t);

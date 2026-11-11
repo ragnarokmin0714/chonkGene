@@ -51,8 +51,8 @@ const ALIVE_FPS: f64 = 15.0;
 /// side of its middle, so its body stays inside the water.
 const POND_PADDLE: f32 = 0.16;
 /// Wading in a pond, the water comes this share of the picture's height
-/// up its legs.
-const WADE: f32 = 0.07;
+/// up its legs (Roger: deeper water; was 0.07, the paws only).
+const WADE: f32 = 0.18;
 
 /// Thrown with the mouse, a toy goes at most this fast (pixels a second
 /// at 100%); let go slower than this, it just drops.
@@ -106,6 +106,9 @@ pub(super) struct PropWin {
     grab: Option<Grab>,
     /// A pond: the screen x of each pet in it, for the rings they stir.
     stirs: Vec<f32>,
+    /// A pond: water thrown in a water fight, from and to (screen x) and
+    /// when.
+    pub sprays: Vec<(f32, f32, f64)>,
 }
 
 impl PropWin {
@@ -149,6 +152,7 @@ impl PropWin {
             cursor: (0.0, 0.0),
             grab: None,
             stirs: Vec::new(),
+            sprays: Vec::new(),
         })
     }
 
@@ -207,19 +211,35 @@ impl PropWin {
                 | Thing::Spotlight
         );
         let grounded = self.prop.resting || (self.prop.vel.1 == 0.0 && self.prop.thing.falls());
+        // Water flying about: drawn at twice the rate.
+        self.sprays.retain(|s| now - s.2 < SPRAY_SECS);
+        let fps = if self.sprays.is_empty() {
+            ALIVE_FPS
+        } else {
+            2.0 * ALIVE_FPS
+        };
         let fresh = self.drawn.is_some_and(|(at, _, spin, g)| {
-            (!alive || now - at < 1.0 / ALIVE_FPS) && spin == self.prop.spin && g == grounded
+            (!alive || now - at < 1.0 / fps) && spin == self.prop.spin && g == grounded
         });
         if fresh {
             return;
         }
         self.pixmap.fill(tiny_skia::Color::TRANSPARENT);
+        let mut sprays = [None; 4];
+        for (slot, &(from, to, since)) in sprays.iter_mut().zip(&self.sprays) {
+            *slot = Some((
+                from - self.prop.pos.0,
+                to - self.prop.pos.0,
+                ((now - since) / SPRAY_SECS) as f32,
+            ));
+        }
         let look = props::Look {
             spin: self.prop.spin,
             t: (now - self.born) as f32,
             used: self.used(now),
             grounded,
             flip: self.flip,
+            sprays,
             ..props::Look::default()
         };
         props::draw(
@@ -568,6 +588,8 @@ pub(super) struct Fun {
     sun: (f32, f64),
     /// When it last finished a 肉肉舞 (it does not dance again at once).
     pub danced: f64,
+    /// When it last went into a pond to join the others.
+    bathed: f64,
     /// Drawn with effects last frame: the plain picture must be shown again
     /// once they are gone.
     pub had_overlay: bool,
@@ -645,8 +667,9 @@ pub(super) struct Playground {
     /// pond was still drawn over the duckling on Windows).
     restack: bool,
     /// Where every pet stands this go round: (id, feet x, feet y, the half
-    /// width of its body), so a pond or a sunbeam comes out where nobody is.
-    standing: Vec<(u64, f32, f32, f32)>,
+    /// width of its body, settled: asleep or busy, so it will not move), so
+    /// a pond or a sunbeam comes out where nobody is.
+    standing: Vec<(u64, f32, f32, f32, bool)>,
     /// The spotlight put down from the menu (「放聚光燈」), if any.
     pub stage: Option<u32>,
     /// 非理性模式 is on: pets near a spotlight run into it and join in.
@@ -654,6 +677,12 @@ pub(super) struct Playground {
     /// The pet whose dance the tune goes with, until when: dancing
     /// together, only one plays it.
     tune: Option<(u64, f64)>,
+    /// The next water thrown in a pond, and by whom if it is throwing
+    /// back.
+    splash_at: f64,
+    splash_back: Option<u64>,
+    /// Splashed, and when it lands: (pet, when, from screen x).
+    hits: Vec<(u64, f64, f32)>,
     rng: Option<fastrand::Rng>,
 }
 
@@ -1072,7 +1101,7 @@ impl Pet {
             let at = (pond.0 - self.placed.0 as f32, pond.1 - self.placed.1 as f32);
             let (_, cy, _, ry) = props::pond_oval(at, s);
             let line = if swimming {
-                cy + 0.2 * ry
+                cy - 0.05 * ry
             } else {
                 floor - WADE * h
             };
@@ -1238,7 +1267,8 @@ pub(super) fn tick(
         .iter()
         .map(|p| {
             let (x, y) = p.body.feet();
-            (p.save.id, x, y, FOOTPRINT * p.body.size.0)
+            let settled = p.mind.asleep() || p.fun.busy(now);
+            (p.save.id, x, y, FOOTPRINT * p.body.size.0, settled)
         })
         .collect();
     let scene_on = pets.iter().any(|p| p.fun.scene.is_some());
@@ -1255,6 +1285,8 @@ pub(super) fn tick(
             })
     });
     ground.stage_step(pets, now, dt);
+    ground.pond_step(pets, now, dt);
+    water_fight(ground, pets, ctx);
     let mut start_scene = !scene_on;
     for i in 0..pets.len() {
         chase(ground, pets, i, ctx);
@@ -1911,12 +1943,14 @@ pub(super) fn start_scene(
         .thing()
         .filter(|t| matches!(t, Thing::Pond | Thing::Sunbeam))
     {
-        // Big things on the floor: nobody else may be standing in them
-        // (an owl asleep where a pond came out sat on its near rim).
+        // Big things on the floor: nobody settled may be in them (an owl
+        // asleep where a pond came out sat on its near rim); one awake and
+        // free is welcome in the water (the pond is big now, and too
+        // strict a rule left no room on a crowded desktop).
         let others: Vec<(f32, f32)> = ground
             .standing
             .iter()
-            .filter(|o| o.0 != p.save.id && (o.2 - fy).abs() < 30.0 * s)
+            .filter(|o| o.0 != p.save.id && o.4 && (o.2 - fy).abs() < 30.0 * s)
             .map(|o| (o.1, o.3))
             .collect();
         let half = 0.5 * thing.size().0 * s;
@@ -2146,7 +2180,9 @@ fn scene(ground: &mut Playground, p: &mut Pet, ctx: &mut Ctx) {
             let Some(at) = prop else {
                 return end(ground, p, &run);
             };
-            let heading = p.walk_to(at.pos.0, 1.3, ctx.terrain);
+            // Joining others in a pond: its own place in it.
+            let to = if run.keep { run.spot } else { at.pos.0 };
+            let heading = p.walk_to(to, 1.3, ctx.terrain);
             if heading == Heading::Blocked {
                 return end(ground, p, &run);
             }
@@ -2198,8 +2234,9 @@ fn scene(ground: &mut Playground, p: &mut Pet, ctx: &mut Ctx) {
                     // over to one side, a stop, round, and back.
                     p.fun.hold_until = 0.0;
                     if let Some(pond) = prop {
-                        let half = POND_PADDLE * pond.px().0;
-                        let x = pond.pos.0 + p.body.facing * half;
+                        // Each about its own place, so several fit.
+                        let half = POND_PADDLE * pond.px().0 * if run.keep { 0.5 } else { 1.0 };
+                        let x = run.spot + p.body.facing * half;
                         let near = 4.0 * p.fun.scale;
                         if p.body.head_for(x, 0.35, near, ctx.terrain) == Heading::There
                             && p.body.speed == 0.0
@@ -2231,6 +2268,189 @@ fn scene(ground: &mut Playground, p: &mut Pet, ctx: &mut Ctx) {
         }
     }
     p.fun.scene = Some(run);
+}
+
+/// Water thrown in a water fight flies this long, seconds.
+const SPRAY_SECS: f64 = 0.6;
+/// A pet that went into a pond to join in stays this long, and goes in
+/// again only this long after.
+const BATH_SECS: f64 = 18.0;
+const BATH_AGAIN: f64 = 40.0;
+
+impl Playground {
+    /// With a pond out and 非理性模式 on, pets near it come and get in now
+    /// and then (Roger: room for more of them, a water fight), each to its
+    /// own place in the water.
+    fn pond_step(&mut self, pets: &mut [Pet], now: f64, dt: f32) {
+        if !self.irrational {
+            return;
+        }
+        let ponds: Vec<(u32, (f32, f32), f32)> = self
+            .things
+            .iter()
+            .filter(|w| w.prop.thing == Thing::Pond)
+            .map(|w| (w.id, w.prop.pos, w.prop.px().0))
+            .collect();
+        for (id, (px, py), width) in ponds {
+            let mut inside = pets
+                .iter()
+                .filter(|p| p.fun.scene.is_some_and(|r| r.prop == Some(id)))
+                .count();
+            for p in pets.iter_mut() {
+                if inside >= 5 {
+                    break;
+                }
+                let rested = p.fun.bathed == 0.0 || now - p.fun.bathed >= BATH_AGAIN;
+                if !p.free_to_play(now) || p.fun.busy(now) || p.playing || !rested {
+                    continue;
+                }
+                let (fx, fy) = p.body.feet();
+                let s = p.fun.scale;
+                if (fy - py).abs() > 30.0 * s || (fx - px).abs() > 700.0 * s {
+                    continue;
+                }
+                if self.roll() >= 0.25 * dt {
+                    continue;
+                }
+                // Places along the water, apart.
+                let slot = [-0.3, 0.3, -0.15, 0.15, 0.0][inside % 5] * width;
+                diag!("{}: gets in the pond", p.save.name);
+                p.fun.bathed = now;
+                p.fun.scene = Some(Run {
+                    scene: Scene::Pond,
+                    prop: Some(id),
+                    phase: 0,
+                    since: now,
+                    until: now + BATH_SECS,
+                    home: (fx, fy),
+                    spot: px + slot,
+                    keep: true,
+                    count: 0,
+                });
+                inside += 1;
+            }
+        }
+    }
+}
+
+/// Two or more in the same pond throw water at each other (Roger: 打水仗):
+/// one scoops it at the nearest other (paws, wings, the fox's tails), it
+/// flies over in an arc, and the other starts, then shakes it off, laughs,
+/// or throws some back.
+fn water_fight(ground: &mut Playground, pets: &mut [Pet], ctx: &mut Ctx) {
+    let now = ctx.world.now;
+    // Water landing.
+    let landed: Vec<(u64, f32)> = ground
+        .hits
+        .iter()
+        .filter(|h| now >= h.1)
+        .map(|h| (h.0, h.2))
+        .collect();
+    ground.hits.retain(|h| now < h.1);
+    for (id, from) in landed {
+        let Some(p) = pets.iter_mut().find(|p| p.save.id == id) else {
+            continue;
+        };
+        if p.fun.pond.now.is_none() || p.press.is_some() {
+            continue;
+        }
+        let (w, h) = p.renderer.size();
+        let side = if from > p.center_x() { 0.9 } else { 0.1 };
+        p.anim.flinch((side * w as f32, 0.35 * h as f32));
+        p.fun.effect(Fx::Splash, now);
+        let roll = ground.roll();
+        if roll < 0.35 {
+            // Laughing it off.
+            p.anim.expression = Expression::Giggle;
+            p.giggle_until = Some(now + 1.4);
+            if ctx.sound_on {
+                let pitch = p.pitch();
+                ctx.sounds
+                    .play(id, p.species, Sound::Laugh, now, ctx.volume, pitch);
+            }
+        } else if roll < 0.65 {
+            p.try_gesture(Act::Shake);
+            if ground.roll() < 0.5 {
+                p.say(ctx, Line::Splashed);
+            }
+        } else {
+            // Throwing some back, straight away.
+            ground.splash_back = Some(id);
+            ground.splash_at = ground.splash_at.min(now + 0.5);
+        }
+    }
+    if now < ground.splash_at {
+        return;
+    }
+    ground.splash_at = now + 1.3 + 1.4 * f64::from(ground.roll());
+    // Who is in which pond, free to throw.
+    let in_pond: Vec<(usize, (f32, f32))> = pets
+        .iter()
+        .enumerate()
+        .filter_map(|(i, p)| {
+            let pond = p.fun.pond.now?;
+            let free = !p.mind.asleep() && p.press.is_none() && p.act.is_none() && !p.in_skit;
+            free.then_some((i, pond))
+        })
+        .collect();
+    let back = ground.splash_back.take();
+    let thrower = back
+        .and_then(|id| in_pond.iter().find(|(i, _)| pets[*i].save.id == id))
+        .copied()
+        .or_else(|| {
+            // Anyone with company in its pond.
+            let crowded: Vec<&(usize, (f32, f32))> = in_pond
+                .iter()
+                .filter(|(i, pond)| in_pond.iter().any(|(j, q)| j != i && q == pond))
+                .collect();
+            (!crowded.is_empty())
+                .then(|| *crowded[(ground.roll() * crowded.len() as f32) as usize % crowded.len()])
+        });
+    let Some((i, pond)) = thrower else {
+        return;
+    };
+    let x = pets[i].center_x();
+    let Some(j) = in_pond
+        .iter()
+        .filter(|(j, q)| *j != i && *q == pond)
+        .min_by(|a, b| {
+            (pets[a.0].center_x() - x)
+                .abs()
+                .total_cmp(&(pets[b.0].center_x() - x).abs())
+        })
+        .map(|(j, _)| *j)
+    else {
+        return;
+    };
+    let to = pets[j].center_x();
+    let (target, target_name) = (pets[j].save.id, pets[j].save.name.clone());
+    let p = &mut pets[i];
+    p.body.facing = if to >= x { 1.0 } else { -1.0 };
+    let act = match p.species {
+        Species::Fox => Act::Swish,
+        Species::Chick | Species::Duck | Species::Owl => Act::Flap,
+        _ => Act::Dig,
+    };
+    p.try_gesture(act);
+    if ground.roll() < 0.3 {
+        p.say(ctx, Line::Splash);
+    }
+    if ctx.sound_on {
+        ctx.sounds
+            .play(p.save.id, p.species, Sound::Splash, now, ctx.volume, 1.0);
+    }
+    diag!("{}: throws water at {target_name}", p.save.name);
+    if let Some(w) = ground
+        .things
+        .iter_mut()
+        .find(|w| w.prop.thing == Thing::Pond && w.prop.pos == pond)
+    {
+        w.sprays.push((x, to, now));
+        if w.sprays.len() > 4 {
+            w.sprays.remove(0);
+        }
+    }
+    ground.hits.push((target, now + 0.85 * SPRAY_SECS, x));
 }
 
 /// The 肉肉舞 is over a while: it may dance again after this long.

@@ -10,7 +10,7 @@ use chonkgene_core::play::Thing;
 use chonkgene_render::props::{self, Fx, Look};
 use tiny_skia::{Color, Pixmap, PixmapPaint, Transform};
 
-const THINGS: [Thing; 9] = [
+const THINGS: [Thing; 10] = [
     Thing::Ball,
     Thing::Frisbee,
     Thing::Catnip,
@@ -20,6 +20,7 @@ const THINGS: [Thing; 9] = [
     Thing::Pond,
     Thing::Sunbeam,
     Thing::Butterfly,
+    Thing::Spotlight,
 ];
 
 fn main() {
@@ -50,6 +51,8 @@ fn main() {
                 flip: false,
                 turn: 0.0,
                 held: false,
+                // The pond: water thrown from one side to the other.
+                sprays: [Some((-120.0 * scale, 120.0 * scale, 0.5)), None, None, None],
             },
         );
         let (cx, cy) = ((i as u32 % 3) * cell, (i as u32 / 3) * row);

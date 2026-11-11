@@ -35,10 +35,12 @@ pub enum Sound {
     /// The 肉肉舞's little tune: a two-second phrase, each take the next
     /// one (A, B, then the 「登登！」 ending), played one after another.
     Tune,
+    /// Water splashed (a water fight in the pond).
+    Splash,
 }
 
 impl Sound {
-    pub const ALL: [Sound; 14] = [
+    pub const ALL: [Sound; 15] = [
         Sound::Voice,
         Sound::Poke,
         Sound::Laugh,
@@ -53,12 +55,18 @@ impl Sound {
         Sound::Flutter,
         Sound::Greet,
         Sound::Tune,
+        Sound::Splash,
     ];
 
     pub fn class(self) -> Class {
         match self {
             Sound::Voice | Sound::Laugh | Sound::Grumpy | Sound::Greet => Class::Call,
-            Sound::Poke | Sound::Land | Sound::Bell | Sound::Flutter | Sound::Tune => Class::Knock,
+            Sound::Poke
+            | Sound::Land
+            | Sound::Bell
+            | Sound::Flutter
+            | Sound::Tune
+            | Sound::Splash => Class::Knock,
             Sound::Sigh | Sound::Snore | Sound::Eat | Sound::Purr | Sound::Pant => Class::Soft,
         }
     }
@@ -1123,11 +1131,25 @@ pub fn synth(species: Species, sound: Sound, take: u32) -> Vec<i16> {
             1.0
         }
         Sound::Poke => {
-            // Boop: a soft, quick drop with a tiny click.
-            b.tone(0.0, 0.13, 760.0 * pitch, 330.0 * pitch, 1.0);
-            b.tone(0.0, 0.1, 1520.0 * pitch, 660.0 * pitch, 0.25);
-            b.noise(0.0, 0.012, 3000.0, 1.0, &|t| 1.0 - t, 0.3);
-            0.14
+            // A finger sinking into something soft: a muffled thump, a puff
+            // of air pushed out, a little rubbery give (Gemini, listening:
+            // the clean falling tone read as a UI boop).
+            b.tone(0.0, 0.09, 230.0 * pitch, 150.0 * pitch, 1.0);
+            b.noise(0.0, 0.07, 700.0, 0.8, &|t| (1.0 - t).powi(2), 0.6);
+            b.tone(0.03, 0.07, 420.0 * pitch, 560.0 * pitch, 0.18);
+            0.12
+        }
+        Sound::Splash => {
+            // Water thrown: a hiss of spray, the slap of it, then drops
+            // plinking down.
+            b.noise(0.0, 0.22, 2800.0, 0.6, &|t| (1.0 - t).powf(2.5), 1.0);
+            b.noise(0.0, 0.08, 900.0, 0.8, &|t| 1.0 - t, 0.5);
+            for k in 0..6 {
+                let at = 0.06 + 0.045 * k as f32 + 0.02 * b.rng.f();
+                let hz = 1200.0 + 1000.0 * b.rng.f();
+                b.tone(at, 0.025, hz, 1.5 * hz, 0.25);
+            }
+            0.38
         }
         Sound::Land => {
             // A soft thump and a patter of paws.

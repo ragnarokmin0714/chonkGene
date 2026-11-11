@@ -22,6 +22,8 @@ use tiny_skia::{
 const MARGIN: f32 = 6.0;
 /// Above catnip, for the wavy smell rising from it, pixels at 100%.
 const SMELL_ROOM: f32 = 46.0;
+/// Room over a pond for water thrown in a water fight, pixels at 100%.
+const SPRAY_ROOM: f32 = 130.0;
 
 fn paint(c: [u8; 4]) -> Paint<'static> {
     let mut p = Paint::default();
@@ -118,10 +120,10 @@ fn shadow(pm: &mut Pixmap, x: f32, y: f32, w: f32, s: f32) {
 /// where in it the middle of the thing's bottom goes.
 pub fn canvas(thing: Thing, scale: f32) -> ((u32, u32), (f32, f32)) {
     let (w, h) = thing.size();
-    let top = if thing == Thing::Catnip {
-        SMELL_ROOM
-    } else {
-        MARGIN
+    let top = match thing {
+        Thing::Catnip => SMELL_ROOM,
+        Thing::Pond => SPRAY_ROOM,
+        _ => MARGIN,
     };
     let size = (
         ((w + 2.0 * MARGIN) * scale).ceil() as u32,
@@ -151,6 +153,10 @@ pub struct Look {
     pub turn: f32,
     /// Held by its rim in a mouth: a frisbee shows more of its face.
     pub held: bool,
+    /// A pond: water thrown in a water fight, from and to (x from the
+    /// middle of the pond's bottom, pixels) and how far it has flown (0 …
+    /// 1).
+    pub sprays: [Option<(f32, f32, f32)>; 4],
 }
 
 /// A frisbee in a mouth is drawn this much smaller than on the floor.
@@ -407,91 +413,54 @@ pub fn draw(pm: &mut Pixmap, thing: Thing, at: (f32, f32), s: f32, look: Look) {
             }
         }
         Thing::Pond => {
+            // No bank: water fading out into the desktop at its edges,
+            // light at the rim and deep in the middle (Roger: borderless,
+            // deeper, bigger, room for more of them).
             let (cx, cy, rx, ry) = pond_oval(at, s);
-            let id = Transform::identity();
-            // The bank round it, a little wider at the front, grass at the
-            // ends.
-            oval(
-                pm,
-                cx,
-                cy + 2.5 * s,
-                rx + 5.0 * s,
-                ry + 4.5 * s,
-                [0xA8, 0x94, 0x78, 230],
-                id,
-            );
-            for (k, end) in [-1.0f32, 1.0].iter().enumerate() {
-                for blade in 0..3 {
-                    let bx = cx + end * (rx + (1.0 - blade as f32) * 4.0 * s);
-                    let by = cy + (0.1 + 0.25 * blade as f32) * ry;
-                    let sway = 1.5 * s * (TAU * 0.4 * look.t + (k * 3 + blade) as f32).sin();
-                    let mut pb = PathBuilder::new();
-                    pb.move_to(bx, by);
-                    pb.quad_to(
-                        bx + end * 2.0 * s,
-                        by - 6.0 * s,
-                        bx + end * 3.0 * s + sway,
-                        by - 11.0 * s,
-                    );
-                    stroke_path(pm, pb, [0x6E, 0xA8, 0x5C, 255], 2.0 * s, id);
-                }
-            }
-            // The water, deep at the back under the far bank, shallower
-            // toward you.
-            if let Some(water) = oval_path(cx, cy, rx, ry) {
-                pm.fill_path(&water, &paint(POND_BANK), FillRule::Winding, id, None);
-                if let (Some(shallow), Some(mut inside)) = (
-                    oval_path(cx, cy + 0.3 * ry, 0.98 * rx, 0.8 * ry),
-                    Mask::new(pm.width(), pm.height()),
-                ) {
-                    inside.fill_path(&water, FillRule::Winding, true, id);
-                    pm.fill_path(
-                        &shallow,
-                        &water_paint(cy, ry),
-                        FillRule::Winding,
-                        id,
-                        Some(&inside),
-                    );
-                }
-            }
-            let (hx, hy, hrx, hry) = pond_light(cx, cy, rx, ry);
-            oval(pm, hx, hy, hrx, hry, POND_LIGHT, id);
-            // A light rim along the near edge.
-            let mut rim = PathBuilder::new();
-            rim.move_to(cx - 0.92 * rx, cy + 0.35 * ry);
-            rim.quad_to(cx, cy + 1.32 * ry, cx + 0.92 * rx, cy + 0.35 * ry);
-            stroke_path(pm, rim, [0xE4, 0xF4, 0xFA, 200], 2.0 * s, id);
+            water(pm, (cx, cy, rx, ry), look.t, None);
             // Rings spreading on the water.
-            for k in 0..3 {
-                let p = (look.t * 0.35 + k as f32 / 3.0).fract();
-                let (ox, oy) = (cx + (k as f32 - 1.0) * 0.4 * rx, cy + 0.15 * ry);
-                ripple(pm, (ox, oy), (0.32 * rx, 0.45 * ry), p, s);
+            for k in 0..4 {
+                let p = (look.t * 0.3 + k as f32 / 4.0).fract();
+                let (ox, oy) = (cx + (k as f32 - 1.5) * 0.4 * rx, cy + 0.1 * ry);
+                ripple(pm, (ox, oy), (0.22 * rx, 0.4 * ry), p, s);
             }
-            // A lily pad with a notch, and a flower.
-            let (lx, ly) = (cx + 0.6 * rx, cy + 0.2 * ry);
-            oval(
-                pm,
-                lx,
-                ly,
-                13.0 * s,
-                5.0 * s,
-                [0x5E, 0x9E, 0x55, 255],
-                Transform::identity(),
-            );
-            circle(
-                pm,
-                lx + 2.0 * s,
-                ly - 3.0 * s,
-                3.2 * s,
-                [0xF6, 0xB8, 0xC8, 255],
-            );
-            circle(
-                pm,
-                lx + 2.0 * s,
-                ly - 3.0 * s,
-                1.4 * s,
-                [0xFF, 0xE8, 0x9A, 255],
-            );
+            // Two lily pads with a notch, one with a flower.
+            for (k, (u, v, r)) in [(0.62, 0.25, 1.0), (-0.7, -0.15, 0.8)]
+                .into_iter()
+                .enumerate()
+            {
+                let (lx, ly) = (cx + u * rx, cy + v * ry);
+                let bob = 0.8 * s * (TAU * 0.3 * look.t + k as f32).sin();
+                oval(
+                    pm,
+                    lx,
+                    ly + bob,
+                    15.0 * r * s,
+                    5.5 * r * s,
+                    [0x5E, 0x9E, 0x55, 240],
+                    Transform::identity(),
+                );
+                if k == 0 {
+                    circle(
+                        pm,
+                        lx + 2.0 * s,
+                        ly + bob - 3.5 * s,
+                        3.4 * s,
+                        [0xF6, 0xB8, 0xC8, 255],
+                    );
+                    circle(
+                        pm,
+                        lx + 2.0 * s,
+                        ly + bob - 3.5 * s,
+                        1.5 * s,
+                        [0xFF, 0xE8, 0x9A, 255],
+                    );
+                }
+            }
+            // Water being thrown about (a water fight).
+            for spray in look.sprays.iter().flatten() {
+                splash_arc(pm, (at.0 + spray.0, cy), (at.0 + spray.1, cy), spray.2, s);
+            }
         }
         Thing::Sunbeam => {
             // A warm slanting shaft of light down to the floor, a bright
@@ -1481,33 +1450,162 @@ fn star(pm: &mut Pixmap, x: f32, y: f32, r: f32, c: [u8; 4]) {
     }
 }
 
-/// The pond's water and its lighter middle.
-const POND_WATER: [u8; 4] = [0x6F, 0xB8, 0xE0, 235];
-const POND_DEEP: [u8; 4] = [0x3C, 0x84, 0xB8, 240];
-const POND_BANK: [u8; 4] = [0x2E, 0x62, 0x8A, 245];
-const POND_LIGHT: [u8; 4] = [0x9C, 0xD6, 0xF2, 150];
+/// The pond's water in the oval `(cx, cy, rx, ry)`, worked out pixel by
+/// pixel: a light turquoise at the rim going deep blue toward the middle
+/// and the back, fading out into whatever is under it over the outer
+/// quarter (no bank), a soft band of sky reflected near the back. With `over` (a waterline, and how much of what is
+/// under it still shows), it is drawn over a pet in it instead: from the
+/// line down only, the pet's own pixels mixed into the water (deep: hardly
+/// any of it shows), so the body goes down into the same water as the pond
+/// behind it.
+fn water(pm: &mut Pixmap, oval: (f32, f32, f32, f32), t: f32, over: Option<(f32, f32)>) {
+    let (cx, cy, rx, ry) = oval;
+    let (w, h) = (pm.width() as usize, pm.height() as usize);
+    let x0 = (cx - rx).floor().max(0.0) as usize;
+    let x1 = ((cx + rx).ceil().max(0.0) as usize).min(w);
+    let y0 = (cy - ry).floor().max(0.0) as usize;
+    let y1 = ((cy + ry).ceil().max(0.0) as usize).min(h);
+    let shallow: [u8; 3] = [0x7C, 0xC8, 0xE6];
+    let deep: [u8; 3] = [0x14, 0x48, 0x80];
+    let data = pm.data_mut();
+    for py in y0..y1 {
+        let fy = (py as f32 + 0.5 - cy) / ry;
+        for px in x0..x1 {
+            let fx = (px as f32 + 0.5 - cx) / rx;
+            let d = (fx * fx + fy * fy).sqrt();
+            if d >= 1.0 {
+                continue;
+            }
+            if let Some((line, _)) = over
+                && (py as f32) < line
+            {
+                continue;
+            }
+            // Deeper toward the middle and the back.
+            let depth =
+                (1.0 - d).powf(0.6) * (0.75 + 0.25 * (-fy).max(0.0)) + 0.15 * (-fy).max(0.0);
+            let depth = depth.clamp(0.0, 1.0);
+            let mut c = [0.0f32; 3];
+            for k in 0..3 {
+                c[k] = f32::from(shallow[k]) + (f32::from(deep[k]) - f32::from(shallow[k])) * depth;
+            }
+            // The sky in it, a soft band near the back, moving a little.
+            let band = (-((fy + 0.45) / 0.18).powi(2)).exp()
+                * (0.75 + 0.25 * (TAU * (0.6 * fx + 0.15 * t)).sin());
+            let light = 0.35 * band * (1.0 - d);
+            for v in &mut c {
+                *v += (255.0 - *v) * light;
+            }
+            let edge = smooth(1.0, 0.72, d);
+            let a = 0.94 * edge;
+            let i = 4 * (py * w + px);
+            match over {
+                None => {
+                    let keep = 1.0 - a;
+                    for k in 0..3 {
+                        data[i + k] = (c[k] * a + f32::from(data[i + k]) * keep).min(255.0) as u8;
+                    }
+                    data[i + 3] = (255.0 * a + f32::from(data[i + 3]) * keep).min(255.0) as u8;
+                }
+                Some((_, through)) => {
+                    // Only over the pet itself (the pond behind shows
+                    // through the rest of its window: a second layer of
+                    // water there boxed the pet in): the body turned to
+                    // water, a little of it showing through, less so as
+                    // the water thins out at the edge.
+                    let cover = f32::from(data[i + 3]) / 255.0;
+                    let m = a * (1.0 - through);
+                    for k in 0..3 {
+                        data[i + k] = (f32::from(data[i + k]) * (1.0 - m) + c[k] * cover * m)
+                            .min(255.0) as u8;
+                    }
+                    // Where the water thins out to nothing, so does what
+                    // is under it (it poked out past the pond's edge).
+                    for v in &mut data[i..i + 4] {
+                        *v = (f32::from(*v) * edge) as u8;
+                    }
+                }
+            }
+        }
+    }
+}
 
-/// The pond's water: deep blue at the back (`cy - ry`) to light at the
-/// front.
-fn water_paint(cy: f32, ry: f32) -> Paint<'static> {
-    let c = |c: [u8; 4]| Color::from_rgba8(c[0], c[1], c[2], c[3]);
-    let stops = vec![
-        GradientStop::new(0.0, c(POND_DEEP)),
-        GradientStop::new(1.0, c(POND_WATER)),
-    ];
-    match tiny_skia::LinearGradient::new(
-        Point::from_xy(0.0, cy - ry),
-        Point::from_xy(0.0, cy + ry),
-        stops,
-        SpreadMode::Pad,
-        Transform::identity(),
-    ) {
-        Some(shader) => Paint {
-            shader,
-            anti_alias: true,
-            ..Paint::default()
-        },
-        None => paint(POND_WATER),
+/// Water thrown from `from` to `to` (both on the water, pixels), `p` of
+/// the way (0 … 1): a sheet of drops flying up in an arc and coming down
+/// on the other one.
+fn splash_arc(pm: &mut Pixmap, from: (f32, f32), to: (f32, f32), p: f32, s: f32) {
+    if !(0.0..1.0).contains(&p) {
+        return;
+    }
+    let high = 55.0 * s + 0.15 * (to.0 - from.0).abs();
+    let fade = smooth(1.0, 0.8, p) * smooth(0.0, 0.08, p);
+    let at = |u: f32, lift: f32| {
+        let x = from.0 + (to.0 - from.0) * u;
+        // Landing on the other one's body, not its feet.
+        let y = from.1 + (to.1 - 40.0 * s - from.1) * u - 4.0 * high * lift * u * (1.0 - u);
+        (x, y)
+    };
+    // The water itself: a stream with a tail, thick at its head.
+    let tail = 0.3;
+    let n = 12;
+    for k in 0..n {
+        let (u0, u1) = (
+            (p - tail * (k + 1) as f32 / n as f32).max(0.0),
+            (p - tail * k as f32 / n as f32).max(0.0),
+        );
+        if u1 <= u0 {
+            continue;
+        }
+        let (a, b) = (at(u0, 1.0), at(u1, 1.0));
+        let mut pb = PathBuilder::new();
+        pb.move_to(a.0, a.1);
+        pb.line_to(b.0, b.1);
+        let thin = 1.0 - k as f32 / n as f32;
+        stroke_path(
+            pm,
+            pb,
+            with_alpha([0xC8, 0xEC, 0xFF, 150], fade * thin),
+            (2.0 + 5.0 * thin) * s,
+            Transform::identity(),
+        );
+    }
+    // Drops flying off it, round the head and trailing behind.
+    for k in 0..22 {
+        let kf = k as f32;
+        let u = (p - 0.32 * ((kf * 0.618).fract())).clamp(0.0, 1.0);
+        let lift = 1.0 + 0.22 * (kf * 1.7).sin();
+        let (x, y) = at(u, lift);
+        let (x, y) = (
+            x + 5.0 * s * (kf * 2.3).sin(),
+            y + 4.0 * s * (kf * 3.1).cos(),
+        );
+        let r = (3.4 - 0.1 * kf).max(1.2) * s;
+        circle(pm, x, y, r, with_alpha([0xD8, 0xF2, 0xFF, 235], fade));
+        circle(
+            pm,
+            x - 0.35 * r,
+            y - 0.35 * r,
+            0.4 * r,
+            with_alpha([255, 255, 255, 255], fade),
+        );
+    }
+    // Where it lands: a burst of drops.
+    if p > 0.75 {
+        let q = (p - 0.75) / 0.25;
+        for k in 0..6 {
+            let a = PI * (0.15 + 0.7 * k as f32 / 5.0);
+            let (dx, dy) = (
+                -a.cos() * 26.0 * s * q,
+                -a.sin() * 20.0 * s * q + 30.0 * s * q * q,
+            );
+            circle(
+                pm,
+                to.0 + dx,
+                to.1 - 40.0 * s + dy,
+                1.8 * s,
+                with_alpha([0xD8, 0xF2, 0xFF, 230], 1.0 - q),
+            );
+        }
     }
 }
 
@@ -1552,7 +1650,7 @@ pub fn pond_stirs(pm: &mut Pixmap, pond: (f32, f32), xs: &[f32], s: f32, t: f32)
         };
         for k in 0..2 {
             let p = (t * 0.8 + 0.5 * k as f32 + 0.37 * i as f32).fract();
-            ripple(rings, (x, cy + 0.25 * ry), (0.45 * rx, 0.7 * ry), p, s);
+            ripple(rings, (x, cy + 0.25 * ry), (0.2 * rx, 0.7 * ry), p, s);
         }
     }
     if let Some(rings) = rings {
@@ -1574,11 +1672,6 @@ pub fn pond_oval(at: (f32, f32), s: f32) -> (f32, f32, f32, f32) {
     (at.0, at.1 - 0.45 * h * s, 0.47 * w * s, 0.38 * h * s)
 }
 
-/// The lighter middle of the pond's water (middle and radii).
-fn pond_light(cx: f32, cy: f32, rx: f32, ry: f32) -> (f32, f32, f32, f32) {
-    (cx - 0.1 * rx, cy - 0.15 * ry, 0.7 * rx, 0.55 * ry)
-}
-
 fn oval_path(cx: f32, cy: f32, rx: f32, ry: f32) -> Option<Path> {
     let r = Rect::from_xywh(cx - rx, cy - ry, 2.0 * rx, 2.0 * ry)?;
     let mut pb = PathBuilder::new();
@@ -1595,66 +1688,38 @@ fn oval_path(cx: f32, cy: f32, rx: f32, ry: f32) -> Option<Path> {
 /// lies on `pm` (its own window is behind), `x` the middle of the body,
 /// for the rings spreading from it.
 pub fn pond_front(pm: &mut Pixmap, pond: (f32, f32), x: f32, line: f32, s: f32, t: f32) {
-    let (w, h) = (pm.width(), pm.height());
     let (cx, cy, rx, ry) = pond_oval(pond, s);
-    let (Some(water), Some(mut inside)) = (oval_path(cx, cy, rx, ry), Mask::new(w, h)) else {
-        return;
-    };
-    inside.fill_path(&water, FillRule::Winding, true, Transform::identity());
-    // Under a waterline that laps a little.
-    let mut pb = PathBuilder::new();
-    let n = 24;
-    for k in 0..=n {
-        let u = k as f32 / n as f32;
-        let wx = u * w as f32;
-        let wy = line + 1.1 * s * (TAU * (u * w as f32 / (60.0 * s) + 0.6 * t)).sin();
-        if k == 0 {
-            pb.move_to(wx, wy);
-        } else {
-            pb.line_to(wx, wy);
-        }
+    let (w, h) = (pm.width() as f32, pm.height() as f32);
+    // Below the pond's near edge, nothing of the body shows (on the
+    // desktop either side of the pond, the legs do): cleared between the
+    // pond's ends, from the waterline down, wherever the water is not.
+    if let Some(strip) = Rect::from_ltrb((cx - rx).max(0.0), line.max(0.0), (cx + rx).min(w), h)
+        && let (Some(water), Some(mut outside)) = (
+            oval_path(cx, cy, rx, ry),
+            Mask::new(pm.width(), pm.height()),
+        )
+    {
+        let id = Transform::identity();
+        outside.fill_path(&water, FillRule::Winding, true, id);
+        outside.invert();
+        let clear = Paint {
+            blend_mode: BlendMode::Clear,
+            ..Paint::default()
+        };
+        pm.fill_rect(strip, &clear, id, Some(&outside));
     }
-    pb.line_to(w as f32, h as f32);
-    pb.line_to(0.0, h as f32);
-    pb.close();
-    let Some(under) = pb.finish() else {
-        return;
-    };
+    // The water over the body from the waterline down: deep, a little of
+    // the body showing through.
+    water(pm, (cx, cy, rx, ry), t, Some((line, 0.22)));
+    // A bright line along the waterline and rings spreading from the body.
     let id = Transform::identity();
-    // Below the pond's near edge, nothing of the body shows (on the bank
-    // either side of the pond, the legs do).
-    let mut outside = inside.clone();
-    outside.invert();
-    if let Some(strip) = Rect::from_xywh(cx - rx, 0.0, 2.0 * rx, h as f32) {
-        outside.intersect_path(&PathBuilder::from_rect(strip), FillRule::Winding, false, id);
-    }
-    let clear = Paint {
-        blend_mode: BlendMode::Clear,
-        ..Paint::default()
+    let (Some(oval), Some(mut inside)) = (
+        oval_path(cx, cy, rx, ry),
+        Mask::new(pm.width(), pm.height()),
+    ) else {
+        return;
     };
-    pm.fill_path(&under, &clear, FillRule::Winding, id, Some(&outside));
-    // In the water: the pond's blues over the body, a touch thinner.
-    let mut wet = inside.clone();
-    wet.intersect_path(&under, FillRule::Winding, true, id);
-    pm.fill_path(
-        &under,
-        &water_paint(cy, ry),
-        FillRule::Winding,
-        id,
-        Some(&wet),
-    );
-    let (hx, hy, hrx, hry) = pond_light(cx, cy, rx, ry);
-    if let Some(light) = oval_path(hx, hy, hrx, hry) {
-        pm.fill_path(
-            &light,
-            &paint(with_alpha(POND_LIGHT, 0.92)),
-            FillRule::Winding,
-            id,
-            Some(&wet),
-        );
-    }
-    // A bright line along the waterline and rings spreading from the
-    // body, on the water only.
+    inside.fill_path(&oval, FillRule::Winding, true, id);
     let stroke = |pm: &mut Pixmap, pb: PathBuilder, c: [u8; 4], width: f32| {
         let Some(path) = pb.finish() else {
             return;
@@ -1666,13 +1731,23 @@ pub fn pond_front(pm: &mut Pixmap, pond: (f32, f32), x: f32, line: f32, s: f32, 
         };
         pm.stroke_path(&path, &paint(c), &st, id, Some(&inside));
     };
+    let span = 0.12 * rx;
     let mut top = PathBuilder::new();
-    top.move_to(x - 0.3 * rx, line + 1.0 * s);
-    top.line_to(x + 0.3 * rx, line + 1.0 * s);
-    stroke(pm, top, [0xC8, 0xE8, 0xF8, 210], 1.5 * s);
+    let n = 12;
+    for k in 0..=n {
+        let u = k as f32 / n as f32;
+        let wx = x - span + 2.0 * span * u;
+        let wy = line + 1.0 * s + 1.1 * s * (TAU * (wx / (40.0 * s) + 0.6 * t)).sin();
+        if k == 0 {
+            top.move_to(wx, wy);
+        } else {
+            top.line_to(wx, wy);
+        }
+    }
+    stroke(pm, top, [0xD8, 0xF0, 0xFA, 220], 1.6 * s);
     for k in 0..2 {
         let p = (t * 0.5 + k as f32 * 0.5).fract();
-        let (ex, ey) = ((0.2 + 0.25 * p) * rx, (2.0 + 4.0 * p) * s);
+        let (ex, ey) = ((0.1 + 0.12 * p) * rx, (2.0 + 4.0 * p) * s);
         let mut ring = PathBuilder::new();
         if let Some(r) = Rect::from_xywh(x - ex, line + 2.0 * s - ey, 2.0 * ex, 2.0 * ey) {
             ring.push_oval(r);
@@ -1848,6 +1923,31 @@ mod tests {
         let mut off = before.clone();
         sunlit(&mut off, 0.0);
         assert_eq!(off.data(), before.data());
+    }
+
+    /// Water thrown right across the pond, from one end to the other and
+    /// at every moment of its flight, stays inside the pond's window.
+    #[test]
+    fn water_thrown_across_the_pond_stays_in_its_window() {
+        for scale in [1.0, 2.0] {
+            let ((w, h), foot) = canvas(Thing::Pond, scale);
+            let reach = 0.45 * Thing::Pond.size().0 * scale;
+            for p in [0.1, 0.3, 0.5, 0.7, 0.9] {
+                let mut pm = Pixmap::new(w, h).unwrap();
+                let look = Look {
+                    t: 1.0,
+                    sprays: [
+                        Some((-reach, reach, p)),
+                        Some((reach, -reach, p)),
+                        None,
+                        None,
+                    ],
+                    ..Look::default()
+                };
+                draw(&mut pm, Thing::Pond, foot, scale, look);
+                assert!(edges_clear(&pm), "at {scale}, {p} of the way");
+            }
+        }
     }
 
     #[test]
