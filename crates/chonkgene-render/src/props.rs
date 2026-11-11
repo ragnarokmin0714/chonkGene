@@ -494,63 +494,11 @@ pub fn draw(pm: &mut Pixmap, thing: Thing, at: (f32, f32), s: f32, look: Look) {
             );
         }
         Thing::Sunbeam => {
-            // A warm slanting shaft of light down to the floor, motes in it.
-            let (bw, bh) = (w * s, h * s);
+            // A warm slanting shaft of light down to the floor, a bright
+            // pool where it lands, motes glowing in it (Roger's fifteenth
+            // pass, item 8: the flat one looked weak and fake).
             let fade = (look.t / 1.5).min(1.0) * (1.0 - look.used).clamp(0.0, 1.0);
-            let stops = vec![
-                GradientStop::new(0.0, Color::from_rgba8(0xFF, 0xF1, 0xB8, 0)),
-                GradientStop::new(
-                    0.55,
-                    Color::from_rgba8(0xFF, 0xEA, 0xA0, (70.0 * fade) as u8),
-                ),
-                GradientStop::new(
-                    1.0,
-                    Color::from_rgba8(0xFF, 0xE2, 0x8A, (110.0 * fade) as u8),
-                ),
-            ];
-            if let Some(shader) = tiny_skia::LinearGradient::new(
-                Point::from_xy(x, y - bh),
-                Point::from_xy(x, y),
-                stops,
-                SpreadMode::Pad,
-                Transform::identity(),
-            ) {
-                let p = Paint {
-                    shader,
-                    anti_alias: true,
-                    ..Paint::default()
-                };
-                let mut beam = PathBuilder::new();
-                beam.move_to(x - 0.05 * bw, y - bh);
-                beam.line_to(x + 0.25 * bw, y - bh);
-                beam.line_to(x + 0.5 * bw, y);
-                beam.line_to(x - 0.5 * bw, y);
-                beam.close();
-                if let Some(path) = beam.finish() {
-                    pm.fill_path(&path, &p, FillRule::Winding, Transform::identity(), None);
-                }
-            }
-            oval(
-                pm,
-                x,
-                y - 1.5 * s,
-                0.5 * bw,
-                4.0 * s,
-                [0xFF, 0xE4, 0x90, (90.0 * fade) as u8],
-                Transform::identity(),
-            );
-            for k in 0..9 {
-                let p = (look.t * 0.08 + k as f32 * 0.13).fract();
-                let mx = x + ((k as f32 * 0.7).sin() * 0.3 + 0.1 * (look.t + k as f32).sin()) * bw;
-                let my = y - p * bh;
-                circle(
-                    pm,
-                    mx,
-                    my,
-                    1.3 * s,
-                    [255, 252, 230, (160.0 * fade * (1.0 - p)) as u8],
-                );
-            }
+            sunbeam(pm, (x, y), (w * s, h * s), look.t, fade);
         }
         Thing::Butterfly => {
             // Wings beating: squeezed sideways as they close.
@@ -977,6 +925,178 @@ fn spell(pm: &mut Pixmap, at: (f32, f32), s: f32, t: f32, u: f32, fade: f32) {
         };
         let alpha = fade * (1.0 - p * p) * grow;
         flame(pm, (ox, oy), (2.3 - 1.1 * p) * s, c, t + k as f32, alpha);
+    }
+}
+
+/// The sunbeam's shaft, its corners (top left, top right, bottom right,
+/// bottom left) for a thing `size` big with its foot at `at`: slanting in
+/// from the upper right, narrow at the top and wide on the floor.
+fn sunbeam_corners(at: (f32, f32), size: (f32, f32)) -> [(f32, f32); 4] {
+    let ((x, y), (w, h)) = (at, size);
+    [
+        (x - 0.04 * w, y - h),
+        (x + 0.2 * w, y - h),
+        (x + 0.39 * w, y),
+        (x - 0.39 * w, y),
+    ]
+}
+
+fn smooth(a: f32, b: f32, v: f32) -> f32 {
+    let k = ((v - a) / (b - a)).clamp(0.0, 1.0);
+    k * k * (3.0 - 2.0 * k)
+}
+
+/// The sunbeam (see [`Thing::Sunbeam`]): its shaft worked out pixel by
+/// pixel (feathered sides, whiter high up and golden low, streaks drifting
+/// in it), the pool on the floor, the motes; `fade` 0 … 1. A layered
+/// window can only lay colour over the desktop, so the pool is what makes
+/// it read as light over a dark one.
+fn sunbeam(pm: &mut Pixmap, at: (f32, f32), size: (f32, f32), t: f32, fade: f32) {
+    if fade <= 0.0 {
+        return;
+    }
+    let (x, y) = at;
+    let (w, h) = size;
+    let c = sunbeam_corners(at, size);
+    let top = y - h;
+    let (pw, ph) = (pm.width() as usize, pm.height() as usize);
+    let data = pm.data_mut();
+    for py in (top.max(0.0) as usize)..(y.max(0.0) as usize).min(ph) {
+        let v = (py as f32 + 0.5 - top) / h;
+        let left = c[0].0 + (c[3].0 - c[0].0) * v;
+        let right = c[1].0 + (c[2].0 - c[1].0) * v;
+        // In from nothing at the top, strongest low; white high up, golden
+        // by the floor.
+        let down = smooth(0.0, 0.25, v) * (0.62 + 0.38 * v);
+        let colour = [255.0, 253.0 - 17.0 * v, 242.0 - 108.0 * v];
+        let x0 = left.floor().max(0.0) as usize;
+        let x1 = (right.ceil().max(0.0) as usize).min(pw);
+        for px in x0..x1 {
+            let f = (px as f32 + 0.5 - left) / (right - left);
+            if !(0.0..=1.0).contains(&f) {
+                continue;
+            }
+            let soft = smooth(0.0, 0.22, f) * smooth(1.0, 0.78, f);
+            let mut streak = 0.0;
+            for k in 0..3 {
+                let kf = k as f32;
+                let mid = 0.3 + 0.2 * kf + 0.05 * (0.35 * t + 2.0 * kf).sin();
+                let d = (f - mid).abs() / (0.025 + 0.012 * kf);
+                streak += (1.0 - d * d).max(0.0) * 0.35 * smooth(0.1, 0.5, v) * (1.0 - v);
+            }
+            let a = (soft * (0.55 * down + 0.5 * streak)).min(0.8) * fade;
+            if a <= 0.0 {
+                continue;
+            }
+            // Over what is there (premultiplied).
+            let i = 4 * (py * pw + px);
+            let keep = 1.0 - a;
+            for (k, cv) in colour.iter().enumerate() {
+                data[i + k] = (cv * a + f32::from(data[i + k]) * keep).min(255.0) as u8;
+            }
+            data[i + 3] = (255.0 * a + f32::from(data[i + 3]) * keep).min(255.0) as u8;
+        }
+    }
+    // The pool where it lands: bright in the middle, soft round the edge.
+    let (rx, ry) = (0.48 * w, 0.088 * w);
+    let cy = y - 2.0 * (w / 260.0);
+    let alpha = |a: f32| (a * fade) as u8;
+    if let Some(shader) = tiny_skia::RadialGradient::new(
+        Point::from_xy(0.0, 0.0),
+        0.0,
+        Point::from_xy(0.0, 0.0),
+        rx,
+        vec![
+            GradientStop::new(0.0, Color::from_rgba8(0xFF, 0xF8, 0xE2, alpha(210.0))),
+            GradientStop::new(0.55, Color::from_rgba8(0xFF, 0xEC, 0xB4, alpha(150.0))),
+            GradientStop::new(1.0, Color::from_rgba8(0xFF, 0xE0, 0x90, 0)),
+        ],
+        SpreadMode::Pad,
+        Transform::from_scale(1.0, ry / rx).post_translate(x, cy),
+    ) && let Some(r) = Rect::from_xywh(x - rx, cy - ry, 2.0 * rx, 2.0 * ry)
+    {
+        let mut pool = PathBuilder::new();
+        pool.push_oval(r);
+        if let Some(path) = pool.finish() {
+            let p = Paint {
+                shader,
+                anti_alias: true,
+                ..Paint::default()
+            };
+            pm.fill_path(&path, &p, FillRule::Winding, Transform::identity(), None);
+        }
+    }
+    // Motes drifting up through it, glowing and twinkling.
+    let s = w / 260.0;
+    for k in 0..11 {
+        let kf = k as f32;
+        let p = (t * 0.06 + kf * 0.093).fract();
+        let u = 0.5 + 0.38 * (kf * 1.7).sin() + 0.06 * (0.7 * t + kf).sin();
+        let my = y - (1.0 - p) * h * 0.92;
+        let v = (my - top) / h;
+        let left = c[0].0 + (c[3].0 - c[0].0) * v;
+        let right = c[1].0 + (c[2].0 - c[1].0) * v;
+        let mx = left + (right - left) * u;
+        let twinkle = 0.55 + 0.45 * (5.0 * t + 2.3 * kf).sin();
+        let a = (1.0 - (2.0 * p - 1.0).powi(2)) * twinkle * fade;
+        circle(pm, mx, my, 5.0 * s, [255, 246, 210, (55.0 * a) as u8]);
+        circle(pm, mx, my, 1.9 * s, [255, 255, 245, (235.0 * a) as u8]);
+    }
+}
+
+/// A pet lying in the sunbeam, lit by it (Roger's pick, fifteenth pass,
+/// item 8): warmer and brighter on the side toward the light (the upper
+/// right), and a warm rim along its edges facing it; `k` 0 … 1. Only its
+/// own pixels change: `pm` must hold nothing but the pet.
+pub fn sunlit(pm: &mut Pixmap, k: f32) {
+    if k <= 0.0 {
+        return;
+    }
+    let h = pm.height() as f32;
+    // Across the pet itself, not its whole window.
+    let Some((x0, y0, x1, y1)) = opaque_bounds(pm) else {
+        return;
+    };
+    let (bw, bh) = (x1 - x0, y1 - y0);
+    let w = pm.width() as f32;
+    let a = |v: f32| (v * k) as u8;
+    if let Some(shader) = tiny_skia::LinearGradient::new(
+        Point::from_xy(x1, y0),
+        Point::from_xy(x0 + 0.15 * bw, y0 + 0.85 * bh),
+        vec![
+            GradientStop::new(0.0, Color::from_rgba8(0xFF, 0xE6, 0xA8, a(120.0))),
+            GradientStop::new(0.6, Color::from_rgba8(0xFF, 0xE0, 0x9C, a(45.0))),
+            GradientStop::new(1.0, Color::from_rgba8(0xFF, 0xD8, 0x90, 0)),
+        ],
+        SpreadMode::Pad,
+        Transform::identity(),
+    ) && let Some(r) = Rect::from_xywh(0.0, 0.0, w, h)
+    {
+        let warm = Paint {
+            shader,
+            blend_mode: BlendMode::SourceAtop,
+            anti_alias: true,
+            ..Paint::default()
+        };
+        pm.fill_rect(r, &warm, Transform::identity(), None);
+    }
+    // The rim: its pixels with nothing just up and to the right of them.
+    let (iw, ih) = (pm.width() as usize, pm.height() as usize);
+    let d = ((3.0 * h / 191.0).round() as usize).max(1);
+    let alpha: Vec<u8> = pm.pixels().iter().map(|p| p.alpha()).collect();
+    let data = pm.data_mut();
+    for y in d..ih {
+        for x in 0..iw.saturating_sub(d) {
+            let i = y * iw + x;
+            let here = alpha[i];
+            if here > 160 && alpha[(y - d) * iw + x + d] < 40 {
+                let m = 0.6 * k * f32::from(here) / 255.0;
+                let cover = f32::from(here) / 255.0;
+                for (c, warm) in data[4 * i..4 * i + 3].iter_mut().zip([255.0, 244.0, 205.0]) {
+                    *c = (f32::from(*c) * (1.0 - m) + warm * m * cover) as u8;
+                }
+            }
+        }
     }
 }
 
@@ -1522,6 +1642,38 @@ mod tests {
             None,
         );
         assert_eq!(opaque_bounds(&pm), Some((10.0, 5.0, 22.0, 25.0)));
+    }
+
+    /// Lit by the sunbeam, only the pet's own pixels change, warmer on
+    /// the side toward the light (the right) than the other.
+    #[test]
+    fn the_sun_lights_only_the_pet_warmer_toward_it() {
+        let mut pm = Pixmap::new(120, 80).unwrap();
+        let grey = [150, 150, 170, 255];
+        pm.fill_rect(
+            Rect::from_xywh(20.0, 20.0, 80.0, 50.0).unwrap(),
+            &paint(grey),
+            Transform::identity(),
+            None,
+        );
+        let before = pm.clone();
+        sunlit(&mut pm, 1.0);
+        let px = |pm: &Pixmap, x: u32, y: u32| pm.pixel(x, y).unwrap();
+        // Outside the pet: still nothing.
+        assert_eq!(px(&pm, 5, 5).alpha(), 0);
+        assert_eq!(px(&pm, 110, 75).alpha(), 0);
+        // Inside: warmer (more red than blue) toward the right.
+        let warmth = |x| {
+            let p = px(&pm, x, 50);
+            i32::from(p.red()) - i32::from(p.blue())
+        };
+        assert!(warmth(90) > warmth(30), "{} vs {}", warmth(90), warmth(30));
+        assert!(warmth(90) > i32::from(grey[0]) - i32::from(grey[2]));
+        assert_ne!(pm.data(), before.data());
+        // Not lit at all: unchanged.
+        let mut off = before.clone();
+        sunlit(&mut off, 0.0);
+        assert_eq!(off.data(), before.data());
     }
 
     #[test]

@@ -65,7 +65,7 @@ impl Thing {
             Thing::Seeds => (70.0, 14.0),
             Thing::Branch => (260.0, 60.0),
             Thing::Pond => (250.0, 70.0),
-            Thing::Sunbeam => (200.0, 300.0),
+            Thing::Sunbeam => (260.0, 300.0),
             Thing::Butterfly => (28.0, 24.0),
         }
     }

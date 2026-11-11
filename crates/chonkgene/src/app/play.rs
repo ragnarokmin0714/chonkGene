@@ -551,6 +551,9 @@ pub(super) struct Fun {
     /// The spell's (or a dream's) bubble round its picture: middle and
     /// radii, pixels (see [`props::bubble_fit`]); found as it floats up.
     pub bubble_fit: Option<((f32, f32), (f32, f32))>,
+    /// How brightly the sunbeam lights it, 0 … 1, easing in and out, and
+    /// the clock when that was last worked out.
+    sun: (f32, f64),
     /// Drawn with effects last frame: the plain picture must be shown again
     /// once they are gone.
     pub had_overlay: bool,
@@ -977,7 +980,22 @@ impl Pet {
             .is_some_and(|r| r.scene == Scene::Foxfire && r.phase == 1);
         let hide = self.fun.hide;
         let vanished = t < self.fun.vanish_until || hide.is_some_and(|h| h.base.is_none());
-        let any = !self.fun.fx.is_empty()
+        // Lying in the sunbeam, lit by it: in over a second and a half,
+        // out as the beam fades.
+        let basking = self
+            .fun
+            .scene
+            .is_some_and(|r| r.scene == Scene::Sunbeam && r.phase == 1);
+        let (sun, last) = self.fun.sun;
+        let step = ((t - last).clamp(0.0, 0.1) / 1.5) as f32;
+        let sun = if basking {
+            (sun + step).min(1.0)
+        } else {
+            (sun - step).max(0.0)
+        };
+        self.fun.sun = (sun, t);
+        let any = sun > 0.0
+            || !self.fun.fx.is_empty()
             || self.fun.carry.is_some()
             || in_pond
             || fire
@@ -1023,6 +1041,9 @@ impl Pet {
             Transform::identity(),
             None,
         );
+        if sun > 0.0 && !fire {
+            props::sunlit(canvas, sun);
+        }
         if let Some(pond) = self.fun.pond.now {
             // The pond's front over the lower body, matching the pond's
             // own window behind it: swimming, the waterline a little in
