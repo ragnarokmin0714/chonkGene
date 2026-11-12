@@ -22,7 +22,7 @@ use crate::skin::{
     SPEED_UP, STILL_GOING, SULK_BACK, SULK_YAW, Skeleton, SleepPose, Spring, TURN_HZ, WALK_YAW,
     Walk, bite, peck, tempo_split,
 };
-use crate::skin::{JIGGLE, JIGGLE_MOST, drift, hold};
+use crate::skin::{JIGGLE, JIGGLE_MOST, Travel, drift, hold};
 
 /// The pace the pet's window moves at, world units a second (60 px/s at
 /// 100%): a planted foot slides back at this speed.
@@ -200,6 +200,15 @@ impl Mover {
         }
     }
 
+    /// Sliding on its belly, gliding, or (a four-legged pet) carried up by
+    /// a balloon or a bamboo-copter (see [`Travel`]).
+    pub fn travel(&mut self, how: Travel) {
+        match self {
+            Self::Quad(w) => w.travel = how,
+            Self::Biped(w) => w.travel = how,
+        }
+    }
+
     /// Swim (birds only).
     pub fn swim(&mut self, on: bool) {
         if let Self::Biped(w) = self {
@@ -290,6 +299,9 @@ pub struct Waddle {
     gesture: Option<Gesture>,
     /// Its part in a hug, for [`Act::Hug`].
     pub(crate) hug: Hug,
+    /// Sliding or gliding (see [`Travel`]), and how far into it, eased.
+    pub(crate) travel: Travel,
+    travel_w: [Spring; 3],
     tempo: f32,
     /// Seconds since a finger last had its attention.
     untouched: f32,
@@ -367,6 +379,8 @@ impl Waddle {
             swim: Spring::default(),
             gesture: None,
             hug: Hug::ByYou,
+            travel: Travel::None,
+            travel_w: Default::default(),
             tempo: 1.0,
             untouched: SETTLE_SECS,
             look: Spring::default(),
@@ -490,7 +504,7 @@ impl Waddle {
             .is_some_and(|g| g.act == Act::Hug && self.hug != Hug::ByYou);
         let yaw = self.yaw.step(
             facing
-                * if going || self.flying {
+                * if going || self.flying || self.travel != Travel::None {
                     WALK_YAW
                 } else if hugging {
                     HUG_YAW
@@ -942,6 +956,47 @@ impl Waddle {
                 }
             }
             j[self.body].shift.y += 0.03 * fly * beat;
+        }
+        // Sliding on its belly like a penguin: tipped right forward, wings
+        // back along its sides, feet trailing; gliding: wings spread out
+        // still, feet tucked (Roger's eighteenth pass).
+        let goals = self.travel.weights();
+        let mut w3 = [0.0f32; 3];
+        for (k, w) in self.travel_w.iter_mut().enumerate() {
+            w3[k] = w.step(goals[k], 0.0, 3.0, 1.0, dt).clamp(0.0, 1.0);
+        }
+        let (slide, glide) = (w3[0], w3[1]);
+        if slide > 0.0 {
+            // Tipped forward about its feet it would sink through the
+            // floor: lifted so its belly is on it.
+            j[0].rot.x += 70.0 * slide;
+            j[0].shift.y += 0.5 * slide;
+            j[self.head].rot.x -= 50.0 * slide;
+            for &leg in &self.legs {
+                j[leg].rot.x += 70.0 * slide;
+            }
+            for (side, wing) in self.wings.iter().enumerate() {
+                if let Some(w) = *wing {
+                    let sign = if side == 0 { 1.0 } else { -1.0 };
+                    j[w].rot.z += sign * 12.0 * slide;
+                    j[w].rot.x += 30.0 * slide;
+                }
+            }
+        }
+        if glide > 0.0 {
+            let sway = (TAU * 0.6 * self.moods.clock()).sin();
+            j[self.body].rot.x += 12.0 * glide;
+            j[self.body].rot.z += 5.0 * glide * sway;
+            j[self.head].rot.x -= 12.0 * glide;
+            for &leg in &self.legs {
+                j[leg].rot.x += 50.0 * glide;
+            }
+            for (side, wing) in self.wings.iter().enumerate() {
+                if let Some(w) = *wing {
+                    let sign = if side == 0 { 1.0 } else { -1.0 };
+                    j[w].rot.z += sign * glide * (78.0 + 4.0 * sway);
+                }
+            }
         }
         // Swimming: sunk to the waterline (the water is drawn over the
         // rest), the feet paddling under it, bobbing gently.

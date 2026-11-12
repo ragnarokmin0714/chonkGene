@@ -199,6 +199,10 @@ pub enum Posture {
     Fly,
     /// Swimming: low in the water, paddling.
     Swim,
+    /// Sliding along on its belly (Roger's eighteenth pass: 滑行).
+    Slide,
+    /// Gliding down through the air, spread out.
+    Glide,
 }
 
 impl Act {

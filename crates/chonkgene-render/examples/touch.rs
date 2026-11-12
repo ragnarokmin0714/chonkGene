@@ -12,7 +12,7 @@
 use std::sync::Arc;
 
 use chonkgene_core::Zone;
-use chonkgene_core::anim::{Act, Animator, Expression, HOLD_SECS, Hug};
+use chonkgene_core::anim::{Act, Animator, Expression, HOLD_SECS, Hug, Posture};
 use chonkgene_core::species::Species;
 use chonkgene_render::MeshRenderer;
 use chonkgene_render::gpu::Gpu;
@@ -37,6 +37,8 @@ struct Scene {
     walk_first: bool,
     /// A hug in this part, from 0.3 s in.
     hug: Option<Hug>,
+    /// Held all through (sliding, gliding, flying).
+    posture: Option<Posture>,
 }
 
 fn scenes() -> Vec<Scene> {
@@ -48,6 +50,7 @@ fn scenes() -> Vec<Scene> {
         sleep: None,
         walk_first: matches!(zone, Zone::Tail | Zone::Bottom | Zone::Back),
         hug: None,
+        posture: None,
     };
     let feel = |name, expression, secs| Scene {
         name,
@@ -57,6 +60,7 @@ fn scenes() -> Vec<Scene> {
         sleep: None,
         walk_first: false,
         hug: None,
+        posture: None,
     };
     let sleep = |name, pose| Scene {
         name,
@@ -66,6 +70,7 @@ fn scenes() -> Vec<Scene> {
         sleep: Some(pose),
         walk_first: false,
         hug: None,
+        posture: None,
     };
     let hug = |name, role| Scene {
         name,
@@ -75,6 +80,17 @@ fn scenes() -> Vec<Scene> {
         sleep: None,
         walk_first: true,
         hug: Some(role),
+        posture: None,
+    };
+    let travel = |name, posture| Scene {
+        name,
+        secs: 2.0,
+        expression: Expression::Happy,
+        hold: None,
+        sleep: None,
+        walk_first: true,
+        hug: None,
+        posture: Some(posture),
     };
     vec![
         hug("hug-front", Hug::Cuddle { front: true }),
@@ -83,6 +99,9 @@ fn scenes() -> Vec<Scene> {
         hug("hug-squeezed", Hug::Squeezed),
         hug("hug-you", Hug::ByYou),
         hug("hug-carry", Hug::ByYou),
+        travel("slide", Posture::Slide),
+        travel("glide", Posture::Glide),
+        travel("fly", Posture::Fly),
         touch("poke", Zone::Belly, 0.5, 0.75, 2.5),
         touch("rub", Zone::Belly, 0.3, 3.3, 4.5),
         touch("chin", Zone::Chin, 0.3, 2.8, 3.8),
@@ -216,6 +235,9 @@ fn main() {
                 a.hug = role;
                 a.gesture(Act::Hug);
                 hugged = true;
+            }
+            if let Some(p) = scene.posture {
+                a.posture = p;
             }
             a.expression = expression;
             for _ in 0..4 {

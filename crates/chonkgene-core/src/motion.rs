@@ -6,7 +6,7 @@
 use crate::terrain::{Ledge, Support, Terrain};
 
 const GRAVITY: f32 = 2400.0;
-const WALK_SPEED: f32 = 60.0;
+pub const WALK_SPEED: f32 = 60.0;
 /// Seconds a walk takes to get going or to come to a stop at the usual
 /// pace (quicker at a faster one). The legs ramp the same way (chonkgene-
 /// render), so a planted paw stays put while the pet slows down.
@@ -50,6 +50,12 @@ pub enum Motion {
     /// Flying somewhere (a bird to its perch and back down): see
     /// [`Body::fly_to`].
     Fly,
+    /// Sliding along on its belly after a run, slowing to a stop (see
+    /// [`Body::slide`]).
+    Slide,
+    /// Gliding down through the air, spread out, instead of falling (see
+    /// [`Body::glide`]).
+    Glide,
 }
 
 /// A flight from one place to another: the feet from `from` to `to`
@@ -65,6 +71,15 @@ pub struct Flight {
 
 /// Flying, pixels a second (wings beating, not falling).
 const FLY_SPEED: f32 = 320.0;
+/// Sliding on its belly, it slows by this much a second, pixels a second
+/// (Roger's eighteenth pass: 滑行).
+const SLIDE_FRICTION: f32 = 240.0;
+/// Below this speed a slide is over, pixels a second.
+const SLIDE_STOP: f32 = 18.0;
+/// Gliding, it sinks at this speed and goes forward at this one, pixels a
+/// second; it settles into them over about a quarter of a second.
+const GLIDE_SINK: f32 = 120.0;
+const GLIDE_FORWARD: f32 = 180.0;
 
 /// Where a walk toward a spot stands (see [`Body::head_for`]).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -226,6 +241,42 @@ impl Body {
         self.on = None;
     }
 
+    /// Flop onto its belly and slide on the way it faces at `speed` pixels
+    /// a second, slowing to a stop (after a run).
+    pub fn slide(&mut self, speed: f32) {
+        if !matches!(self.motion, Motion::Idle | Motion::Walk) {
+            return;
+        }
+        self.vel = (self.facing * speed.max(0.0), 0.0);
+        self.motion = Motion::Slide;
+        self.speed = 0.0;
+    }
+
+    /// Falling: spread out and glide down the way it faces instead.
+    pub fn glide(&mut self) {
+        if self.motion != Motion::Fall {
+            return;
+        }
+        if self.vel.0.abs() > 1.0 {
+            self.facing = self.vel.0.signum();
+        }
+        self.motion = Motion::Glide;
+    }
+
+    /// How far it would fall from here before something catches it,
+    /// pixels (`None` past everything).
+    pub fn drop_below(&self, terrain: &Terrain) -> Option<f32> {
+        let (x, y) = self.feet();
+        terrain
+            .floor_under(x)
+            .map(|l| (l.y - y).max(0.0))
+            .map(|floor| {
+                terrain
+                    .landing(x, y, y + floor)
+                    .map_or(floor, |l| (l.y - y).max(0.0))
+            })
+    }
+
     /// Walking or slowing to a stop: the window is still going.
     pub fn moving_on(&self) -> bool {
         matches!(self.motion, Motion::Idle | Motion::Walk) && self.speed > 0.0
@@ -355,6 +406,68 @@ impl Body {
                         None
                     }
                 }
+            }
+            Motion::Slide => {
+                let vx = self.vel.0;
+                let slower = (vx.abs() - SLIDE_FRICTION * dt).max(0.0);
+                self.vel.0 = slower * vx.signum();
+                let was = self.pos.0;
+                self.pos.0 += self.vel.0 * dt;
+                let walled = self.pos.0 <= left
+                    || self.pos.0 >= right
+                    || !terrain.over_screen(self.feet().0);
+                if walled {
+                    self.pos.0 = was.clamp(left, right);
+                    self.vel.0 = 0.0;
+                }
+                let (x, y) = self.feet();
+                let under = self
+                    .on
+                    .and_then(|s| terrain.ledge_on(s, x))
+                    .filter(|l| (l.y - y).abs() <= STAY_ON)
+                    .or_else(|| terrain.ledge_level(x, y));
+                match under {
+                    Some(l) => self.stand(&l),
+                    None => {
+                        // Slid off the end: over the edge it goes.
+                        self.motion = Motion::Fall;
+                        self.on = None;
+                        return None;
+                    }
+                }
+                if self.vel.0.abs() < SLIDE_STOP {
+                    self.vel = (0.0, 0.0);
+                    self.motion = Motion::Idle;
+                }
+                None
+            }
+            Motion::Glide => {
+                let (_, y0) = self.feet();
+                let k = (4.0 * dt).min(1.0);
+                self.vel.0 += (self.facing * GLIDE_FORWARD - self.vel.0) * k;
+                self.vel.1 += (GLIDE_SINK - self.vel.1) * k;
+                self.pos.0 += self.vel.0 * dt;
+                self.pos.1 += self.vel.1 * dt;
+                if self.pos.0 < left || self.pos.0 > right {
+                    // At the edge of the screens it turns and glides on.
+                    self.pos.0 = self.pos.0.clamp(left, right);
+                    self.facing = -self.facing;
+                    self.vel.0 = -self.vel.0;
+                }
+                let (x, y1) = self.feet();
+                let landing = if self.vel.1 > 0.0 {
+                    terrain
+                        .landing(x, y0, y1)
+                        .or_else(|| terrain.floor_under(x).filter(|l| y1 > l.y))
+                } else {
+                    None
+                };
+                let l = landing?;
+                self.stand(&l);
+                let speed = self.vel.1;
+                self.vel = (0.0, 0.0);
+                self.motion = Motion::Idle;
+                Some(Landing { speed })
             }
             Motion::Idle | Motion::Walk => {
                 // Getting going and slowing down take a moment (quicker at
@@ -574,6 +687,78 @@ mod tests {
         run(&mut b, &t, 3.0);
         assert_eq!(b.on, Some(Support::Window(7)));
         assert_eq!(b.feet().1, 600.0);
+    }
+
+    /// Roger's eighteenth pass, 滑行 on the ground: after a run it slides
+    /// on, slowing, and stops by itself further along.
+    #[test]
+    fn a_belly_slide_goes_on_a_way_and_stops() {
+        let t = flat();
+        let mut b = Body::on_ground(&t, 300.0, SIZE, FOOT);
+        let x0 = b.feet().0;
+        b.facing = 1.0;
+        b.slide(200.0);
+        assert_eq!(b.motion, Motion::Slide);
+        run(&mut b, &t, 0.5);
+        assert_eq!(b.motion, Motion::Slide, "stopped at once");
+        run(&mut b, &t, 2.0);
+        assert_eq!(b.motion, Motion::Idle);
+        let went = b.feet().0 - x0;
+        assert!((60.0..140.0).contains(&went), "slid {went:.0} px");
+        assert_eq!(b.on, Some(Support::Floor(0)));
+    }
+
+    /// 滑行 through the air: stepping off a window it glides down, slower
+    /// and further out than a fall, and lands softly.
+    #[test]
+    fn a_glide_comes_down_slower_and_further_than_a_fall() {
+        let win = Win {
+            id: 7,
+            x: 600.0,
+            y: 500.0,
+            w: 400.0,
+            h: 300.0,
+        };
+        let t = Terrain::new(vec![AREA], &[win], 200.0);
+        let start = |b: &mut Body| {
+            b.hold_at((850.0, 100.0), 0.0);
+            b.release();
+            run(b, &t, 2.0);
+            assert_eq!(b.on, Some(Support::Window(7)));
+            b.pos.0 = 1000.0 - b.size.0 / 2.0 + 2.0;
+            b.motion = Motion::Fall;
+            b.vel = (60.0, 0.0);
+            b.facing = 1.0;
+            b.on = None;
+        };
+        let mut fall = Body::on_ground(&t, 700.0, SIZE, FOOT);
+        start(&mut fall);
+        let drop = fall.drop_below(&t).unwrap();
+        assert!(drop > 400.0, "{drop}");
+        let mut glide = fall;
+        glide.glide();
+        assert_eq!(glide.motion, Motion::Glide);
+        let secs = |b: &mut Body| {
+            let mut n = 0;
+            let mut speed = 0.0;
+            while !matches!(b.motion, Motion::Idle) {
+                if let Some(l) = b.step(1.0 / 60.0, &t) {
+                    speed = l.speed;
+                }
+                n += 1;
+                assert!(n < 60 * 20, "never landed");
+            }
+            (n as f32 / 60.0, speed)
+        };
+        let x0 = fall.feet().0;
+        let (fall_secs, _) = secs(&mut fall);
+        let (glide_secs, glide_speed) = secs(&mut glide);
+        assert!(
+            glide_secs > 2.5 * fall_secs,
+            "{glide_secs:.2} s vs {fall_secs:.2} s"
+        );
+        assert!(glide.feet().0 - x0 > 2.0 * (fall.feet().0 - x0));
+        assert!(glide_speed < BOUNCE_MIN, "landed at {glide_speed:.0} px/s");
     }
 
     #[test]

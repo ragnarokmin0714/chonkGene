@@ -31,7 +31,7 @@ use crate::gpu::{Ask, Gpu};
 use crate::mesh::{Mesh, bake};
 use crate::mesh_gpu::MeshCanvas;
 use crate::raymarch::PPU;
-use crate::skin::{Affine, Feel, Gesture, Mood, Skeleton, SleepPose, Spring, bite};
+use crate::skin::{Affine, Feel, Gesture, Mood, Skeleton, SleepPose, Spring, Travel, bite};
 use crate::waddle::Mover;
 use crate::{dirt_overlay, key_for, sleep_overlay, snack_overlay};
 
@@ -561,6 +561,14 @@ impl MeshRenderer {
                     || params.posture == Posture::Sit),
         );
         self.walk.fly(params.posture == Posture::Fly);
+        // Sliding, gliding; a four-legged pet flying hangs under its
+        // balloon or bamboo-copter (birds flap: `fly` above).
+        self.walk.travel(match params.posture {
+            Posture::Slide => Travel::Slide,
+            Posture::Glide => Travel::Glide,
+            Posture::Fly => Travel::Fly,
+            _ => Travel::None,
+        });
         self.walk.swim(params.posture == Posture::Swim);
         self.sleep_pose(asleep, params.clock);
         if resting {
@@ -596,7 +604,10 @@ impl MeshRenderer {
             self.walk.lick();
         }
         // In the water or the air there is no floor under it to shade.
-        self.floor_shadow = !matches!(params.posture, Posture::Swim | Posture::Fly);
+        self.floor_shadow = !matches!(
+            params.posture,
+            Posture::Swim | Posture::Fly | Posture::Glide
+        );
         self.glow = params.glow;
         // A poke jiggles the animator's belly: jolt the mesh's.
         if params.belly > 0.15 && self.belly <= 0.15 {

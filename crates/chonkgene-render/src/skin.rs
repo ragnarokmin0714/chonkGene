@@ -198,6 +198,31 @@ pub struct Gesture {
     pub t: f32,
 }
 
+/// Getting about other than on foot (Roger's eighteenth pass): sliding
+/// along on its belly, gliding down spread out, or, a four-legged pet,
+/// hanging under a balloon or a bamboo-copter.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Travel {
+    #[default]
+    None,
+    Slide,
+    Glide,
+    Fly,
+}
+
+impl Travel {
+    /// How much of each of slide, glide and fly it is: the goals the poses
+    /// ease toward.
+    pub(crate) fn weights(self) -> [f32; 3] {
+        match self {
+            Travel::None => [0.0; 3],
+            Travel::Slide => [1.0, 0.0, 0.0],
+            Travel::Glide => [0.0, 1.0, 0.0],
+            Travel::Fly => [0.0, 0.0, 1.0],
+        }
+    }
+}
+
 /// A feeling the whole body shows (the face shows it too).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Mood {
@@ -813,6 +838,9 @@ pub struct Walk {
     gesture: Option<Gesture>,
     /// Its part in a hug, for [`Act::Hug`](chonkgene_core::anim::Act::Hug).
     pub(crate) hug: Hug,
+    /// Sliding, gliding or flying (see [`Travel`]), eased.
+    pub(crate) travel: Travel,
+    travel_w: [Spring; 3],
     /// Walking speed against the usual (see [`Walk::set_pace`]).
     tempo: f32,
     /// Leg swing either way at full pace, degrees: [`SWING`] for the legs
@@ -937,6 +965,8 @@ impl Walk {
             legs,
             gesture: None,
             hug: Hug::ByYou,
+            travel: Travel::None,
+            travel_w: Default::default(),
             tempo: 1.0,
             swing,
             leg_len,
@@ -1164,7 +1194,7 @@ impl Walk {
             .is_some_and(|g| g.act == chonkgene_core::anim::Act::Hug && self.hug != Hug::ByYou);
         let yaw = self.yaw.step(
             facing
-                * if going {
+                * if going || self.travel != Travel::None {
                     WALK_YAW
                 } else if hugging {
                     HUG_YAW
@@ -1227,8 +1257,14 @@ impl Walk {
         // Legs: on the floor, a straight sweep back (the foot stays put
         // while the body passes over it); off it, an eased swing forward
         // with the foot lifted.
-        for &(leg, offset, _) in &self.legs {
-            let psi = (ph + offset).fract();
+        // Running (Roger's eighteenth pass: 奔跑), the walk turns into a
+        // bound: the front paws together and the hind ones together, the
+        // back flexing and stretching, the whole body bouncing.
+        let run = chonkgene_rig::math::smoothstep(1.7, 2.5, self.tempo) * s;
+        for &(leg, offset, front) in &self.legs {
+            let side = if offset < 0.5 { 0.0 } else { 0.07 };
+            let bound = if front { side } else { 0.5 + side };
+            let psi = (ph + offset + run * (bound - offset)).fract();
             let (fwd, lift) = if psi < DUTY {
                 (1.0 - 2.0 * psi / DUTY, 0.0)
             } else {
@@ -1244,10 +1280,11 @@ impl Walk {
 
         // The spine: the chest rises over each planted leg and rolls onto
         // it, the hips roll and twist the other way.
-        let bob = -BOB * s * (2.0 * TAU * ph).cos();
-        let roll = ROLL * s * (TAU * ph).sin();
+        let bob =
+            -BOB * s * (2.0 * TAU * ph).cos() * (1.0 - run) - 3.5 * BOB * run * (TAU * ph).cos();
+        let roll = ROLL * s * (TAU * ph).sin() * (1.0 - 0.6 * run);
         j[0] = Joint {
-            rot: v3(0.0, yaw, 0.0),
+            rot: v3(9.0 * run * (TAU * ph).sin(), yaw, 0.0),
             shift: v3(0.0, bob, 0.0),
         };
         j[b.body] = Joint {
@@ -2304,6 +2341,57 @@ impl Walk {
                 }
             }
             j[b.body].rot.x -= 10.0 * lv.rub.min(1.0);
+        }
+        // Getting about (Roger's eighteenth pass): sliding on its belly
+        // after a run, flat out, front paws reaching forward, hind legs
+        // trailing, chin up, ears back; gliding spread out like a flying
+        // squirrel; under a balloon or a bamboo-copter, legs dangling and
+        // paddling.
+        let goals = self.travel.weights();
+        let mut tw = [0.0f32; 3];
+        for (k, w) in self.travel_w.iter_mut().enumerate() {
+            tw[k] = w.step(goals[k], 0.0, 3.0, 1.0, dt).clamp(0.0, 1.0);
+        }
+        let [slide, glide, fly] = tw;
+        if slide > 0.0 {
+            j[0].shift.y -= 1.05 * LIE_DROP * self.leg_len * slide;
+            for &(leg, offset, front) in &self.legs {
+                j[leg].rot.x += if front { -85.0 } else { 75.0 } * slide;
+                let out = if offset < 0.5 { 1.0 } else { -1.0 };
+                j[leg].rot.z += out * 12.0 * slide;
+            }
+            j[b.head].rot.x -= 18.0 * slide;
+            for ear in b.ears.into_iter().flatten() {
+                j[ear].rot.x += 35.0 * slide * self.ear_k;
+            }
+            self.ground = self.ground.max(slide);
+            self.flatten = self.flatten.max(0.08 * slide);
+        }
+        if glide > 0.0 {
+            let sway = (TAU * 0.6 * t).sin();
+            // Up off the bottom of its picture: the legs reach out below.
+            j[0].shift.y += 0.28 * glide;
+            j[b.body].rot.z += 4.0 * glide * sway;
+            for &(leg, offset, front) in &self.legs {
+                let out = if offset < 0.5 { 1.0 } else { -1.0 };
+                j[leg].rot.z += out * 55.0 * glide;
+                j[leg].rot.x += if front { -45.0 } else { 40.0 } * glide;
+            }
+            j[b.head].rot.x -= 10.0 * glide;
+            for ear in b.ears.into_iter().flatten() {
+                j[ear].rot.x += 40.0 * glide * self.ear_k;
+            }
+        }
+        if fly > 0.0 {
+            j[0].shift.y += 0.18 * fly;
+            let mut k = 0.0;
+            for &(leg, _, front) in &self.legs {
+                let paddle = (TAU * 1.6 * t + std::f32::consts::PI * k).sin();
+                j[leg].rot.x += fly * (if front { -10.0 } else { 15.0 } + 18.0 * paddle);
+                k += 1.0;
+            }
+            j[b.body].rot.z += 5.0 * fly * (TAU * 0.5 * t).sin();
+            j[b.head].rot.x -= 12.0 * fly;
         }
         // Melted flat (厭世): the belly on the floor, legs splayed out
         // front and back, chin down, flattened.

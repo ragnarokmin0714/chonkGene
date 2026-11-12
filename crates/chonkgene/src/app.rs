@@ -59,6 +59,44 @@ const HAPPY_SECS: f64 = 3.0;
 const DISLIKE_SECS: f32 = 0.35;
 /// The belly trap lasts this long, seconds.
 const TRAP_SECS: f32 = 1.8;
+/// Running, a pet goes this many times its walking pace; a run ends in a
+/// belly slide this often (Roger's eighteenth pass: 奔跑, 滑行).
+const RUN_PACE: f32 = 2.6;
+const SLIDE_CHANCE: f32 = 0.5;
+
+/// How likely a pet setting off is to fly somewhere instead: the birds
+/// most, the fox on her magic, the rest (balloons, bamboo-copters) now and
+/// then.
+fn fly_chance(species: Species) -> f32 {
+    if move_test() {
+        return 0.5;
+    }
+    match species {
+        Species::Owl => 0.08,
+        Species::Chick | Species::Duck => 0.05,
+        Species::Fox => 0.05,
+        _ => 0.025,
+    }
+}
+
+/// `CHONKGENE_STAGE=move`: running, sliding and flying much more often,
+/// for trying them out (and their frames dumped with `CHONKGENE_DUMP`).
+fn move_test() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| std::env::var("CHONKGENE_STAGE").is_ok_and(|v| v == "move"))
+}
+
+/// How likely a pet falling from high up is to glide down instead: a bird
+/// nearly always, the fox with her tails fanned mostly, the rest (legs out
+/// like a flying squirrel) half the time.
+fn glide_chance(species: Species) -> f32 {
+    match species {
+        Species::Owl | Species::Chick | Species::Duck => 0.9,
+        Species::Fox => 0.8,
+        _ => 0.5,
+    }
+}
+
 /// Two clicks on a pet this close together are a hug.
 const DOUBLE_CLICK: Duration = Duration::from_millis(450);
 /// Held on a spot it loves: hearts from this long on, seconds, and again
@@ -247,6 +285,10 @@ struct Pet {
     /// That click's poke, waiting until then in case a second click comes
     /// (see [`Pet::poke_now`]).
     poke_due: Option<(Instant, Zone)>,
+    /// Running (not walking) until then (Roger's eighteenth pass: 奔跑).
+    dash_until: f64,
+    /// This fall has been looked at for a glide.
+    glide_checked: bool,
     /// When its picture last changed, and whether the log has noted it
     /// standing still since (see [`FROZEN`]).
     shown_at: Instant,
@@ -2160,6 +2202,8 @@ fn spawn(
         love_at: 0.0,
         clicked_at: None,
         poke_due: None,
+        dash_until: 0.0,
+        glide_checked: false,
         shown_at: now,
         frozen: false,
         draw_gap: Duration::ZERO,
@@ -2327,6 +2371,24 @@ impl Pet {
     /// How high this pet's voice is (see [`voice_pitch`]).
     fn pitch(&self) -> f32 {
         voice_pitch(self.save.size, self.save.chonk)
+    }
+
+    /// Somewhere to fly to: a spot on a floor at least 400 px away (at
+    /// 100%), anywhere across the screens.
+    fn flight_spot(&mut self, terrain: &Terrain) -> Option<(f32, f32)> {
+        let (fx, _) = self.body.feet();
+        let (left, right) = terrain.bounds();
+        let half = self.body.size.0 / 2.0;
+        for _ in 0..8 {
+            let x = left + half + self.rng.f32() * (right - left - 2.0 * half).max(0.0);
+            if (x - fx).abs() < 400.0 * self.fun.scale {
+                continue;
+            }
+            if let Some(l) = terrain.floor_under(x) {
+                return Some((x, l.y));
+            }
+        }
+        None
     }
 
     /// A quick click's poke, once no second click came: a start, hopping
@@ -2742,9 +2804,30 @@ impl Pet {
                     }
                 }
             }
+            // Falling from high up, it may spread out and glide down
+            // instead (滑行 through the air), once per fall.
+            if self.body.motion == Motion::Fall {
+                if !self.glide_checked && self.body.vel.1 > 0.0 && self.press.is_none() {
+                    self.glide_checked = true;
+                    let high = 160.0 * self.fun.scale;
+                    if self.body.drop_below(ctx.terrain).is_some_and(|d| d > high)
+                        && self.rng.f32() < glide_chance(self.species)
+                    {
+                        self.body.glide();
+                        diag!("{}: glides down", self.save.name);
+                    }
+                }
+            } else {
+                self.glide_checked = false;
+            }
             let busy = self.fun.busy(t);
             let free = !self.mind.asleep() && self.act.is_none() && !self.in_skit && !busy;
-            if !self.in_skit && self.act.is_none() && !busy && self.body.pace != 1.0 {
+            if !self.in_skit
+                && self.act.is_none()
+                && !busy
+                && t >= self.dash_until
+                && self.body.pace != 1.0
+            {
                 self.body.pace = 1.0;
             }
             if self.mind.asleep() && self.body.motion == Motion::Walk && !busy {
@@ -2771,18 +2854,44 @@ impl Pet {
                 let above = (self.body.motion == Motion::Idle && self.rng.f32() < 0.35)
                     .then(|| ctx.terrain.ledge_above(fx, fy, 0.25 * h, 1.6 * h, 1.5 * w))
                     .flatten();
+                let energy = self.mind.personality.energy;
+                let flight = (self.body.motion == Motion::Idle
+                    && above.is_none()
+                    && self.rng.f32() < fly_chance(self.species))
+                .then(|| self.flight_spot(ctx.terrain))
+                .flatten();
                 if let Some((ledge, x)) = above {
                     self.body.leap(x, ledge.y);
                     self.anim.land(500.0);
+                } else if let Some((x, y)) = flight {
+                    // Off through the air instead (Roger's eighteenth
+                    // pass: everyone flies, the four-legged ones under a
+                    // balloon or a bamboo-copter).
+                    diag!("{}: flies to ({x:.0}, {y:.0})", self.save.name);
+                    self.body.fly_to(x, y);
                 } else if self.body.motion == Motion::Idle {
                     // Off for a walk, either way. (Not on stopping: it
-                    // slows down going the way it went.)
+                    // slows down going the way it went.) Sometimes a run.
                     self.body.motion = Motion::Walk;
                     if self.rng.bool() {
                         self.body.facing = -self.body.facing;
                     }
+                    if move_test() || self.rng.f32() < 0.15 + 0.35 * energy {
+                        self.body.pace = RUN_PACE;
+                        diag!("{}: runs", self.save.name);
+                    }
+                } else if self.body.pace >= RUN_PACE - 0.1
+                    && (move_test() || self.rng.f32() < SLIDE_CHANCE)
+                {
+                    // At the end of a run, a belly slide (滑行).
+                    let speed = chonkgene_core::motion::WALK_SPEED * self.body.pace * 1.2;
+                    self.body.slide(speed);
+                    self.fun.effect(Fx::Dust, t);
+                    self.dash_until = 0.0;
+                    diag!("{}: slides", self.save.name);
                 } else {
                     self.body.motion = Motion::Idle;
+                    self.dash_until = 0.0;
                 }
                 // Walks of 3–7 s; rests a little longer (4–11 s), long
                 // enough to sit down and look about.
@@ -2791,6 +2900,10 @@ impl Pet {
                 } else {
                     4.0 + f64::from(self.rng.f32()) * 7.0
                 };
+                // A run lasts the walk (and a moment to choose a slide).
+                if self.body.motion == Motion::Walk && self.body.pace == RUN_PACE {
+                    self.dash_until = self.switch_at + 0.5;
+                }
             }
         }
 
@@ -2909,7 +3022,9 @@ impl Pet {
             eprintln!("present failed: {e}");
         }
         if crate::diag::dumping()
-            && (self.fun.pond.lately(t) || self.anim.doing() == Some(Act::Hug))
+            && (self.fun.pond.lately(t)
+                || self.anim.doing() == Some(Act::Hug)
+                || move_test())
         {
             let wading = if self.fun.pond.now.is_some() { "w" } else { "" };
             let what = format_args!("pet{}{wading}", self.save.id);

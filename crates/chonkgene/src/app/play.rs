@@ -1132,10 +1132,16 @@ impl Pet {
         let wet = wet.min(self.fun.pond_left);
         self.fun.wet = (wet, t);
         let in_pond = self.fun.pond.now.is_some() && wet > 0.0;
+        // Flying (Roger's eighteenth pass): the fox on her fox-fire, the
+        // four-legged ones under balloons or a bamboo-copter; birds flap.
+        let flying = self.body.motion == Motion::Fly;
+        let bird = matches!(self.species, Species::Owl | Species::Chick | Species::Duck);
         let fire = self
             .fun
             .scene
-            .is_some_and(|r| r.scene == Scene::Foxfire && r.phase == 1);
+            .is_some_and(|r| r.scene == Scene::Foxfire && r.phase == 1)
+            || (flying && self.species == Species::Fox);
+        let lifted = flying && !bird && self.species != Species::Fox;
         let hide = self.fun.hide;
         let vanished = t < self.fun.vanish_until || hide.is_some_and(|h| h.base.is_none());
         // Lying in the sunbeam, lit by it: in over a second and a half,
@@ -1161,6 +1167,7 @@ impl Pet {
             self.fun.hug_arms = None;
         }
         let any = sun > 0.0
+            || lifted
             || self.fun.hug_arms.is_some()
             || !self.fun.fx.is_empty()
             || self.fun.carry.is_some()
@@ -1225,6 +1232,17 @@ impl Pet {
             };
             let line = floor + (full - floor) * wet;
             props::pond_front(canvas, at, w / 2.0, line, s, t as f32);
+        }
+        if lifted {
+            let head = self.renderer.anchor();
+            // The strings are tied at its shoulders, behind the head.
+            let back = (w / 2.0 - 0.15 * w * self.anim.facing, head.1 + 0.5 * h);
+            if self.species == Species::Fold {
+                props::copter(canvas, head, s, t as f32);
+            } else {
+                let hue = (self.save.id % 3) as u8;
+                props::balloon(canvas, head, back, hue, s, t as f32);
+            }
         }
         if let Some((since, bounds, hold)) = self.fun.hug_arms {
             props::hug_arms(canvas, bounds, hold, s, (t - since) as f32, hug_secs as f32);
@@ -1445,9 +1463,11 @@ pub(super) fn tick(
         // In a pond: the duckling swims as soon as its feet are over the
         // water, anyone else wades; a splash going in.
         let under = match p.body.motion {
-            Motion::Idle | Motion::Walk => ground.pond_under(p.body.feet(), p.fun.pond.now),
+            Motion::Idle | Motion::Walk | Motion::Slide => {
+                ground.pond_under(p.body.feet(), p.fun.pond.now)
+            }
             // A hop or a flutter keeps it in for the hold; picked up, out.
-            Motion::Fall | Motion::Fly => None,
+            Motion::Fall | Motion::Fly | Motion::Glide => None,
             Motion::Held => {
                 p.fun.pond.now = None;
                 None
@@ -1467,6 +1487,10 @@ pub(super) fn tick(
         // How the body is held this frame.
         p.anim.posture = if p.body.motion == Motion::Fly {
             Posture::Fly
+        } else if p.body.motion == Motion::Slide {
+            Posture::Slide
+        } else if p.body.motion == Motion::Glide {
+            Posture::Glide
         } else if pond.is_some() && p.species == Species::Duck {
             Posture::Swim
         } else if now < p.fun.hold_until || now < p.fun.lounge_until || now < p.fun.cower_until {

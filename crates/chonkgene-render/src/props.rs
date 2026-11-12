@@ -1631,6 +1631,104 @@ fn baby_arm(
     }
 }
 
+/// A bunch of three balloons a four-legged pet hangs from, flying
+/// (Roger's eighteenth pass: everyone flies): small and shiny, bobbing and
+/// swaying just above `head` (pixels: the top of its head; the window has
+/// little room above it), their strings gathered down to `back`; `hue`
+/// turns the colours round.
+pub fn balloon(pm: &mut Pixmap, head: (f32, f32), back: (f32, f32), hue: u8, s: f32, t: f32) {
+    let colours = [
+        ([0xFF, 0x8F, 0xA8, 255], [0xE8, 0x5E, 0x84, 255]),
+        ([0x8F, 0xC8, 0xFF, 255], [0x5E, 0x9C, 0xE8, 255]),
+        ([0xFF, 0xD4, 0x6A, 255], [0xF0, 0xA8, 0x3C, 255]),
+    ];
+    let id = Transform::identity();
+    let sway = (TAU * 0.45 * t).sin();
+    let r = 11.0 * s;
+    let tie = (back.0, back.1);
+    let spots = [(-13.0, -24.0), (12.0, -27.0), (0.0, -40.0)];
+    for (k, (dx, dy)) in spots.iter().enumerate() {
+        let bob = 2.0 * s * (TAU * 0.8 * t + k as f32).sin();
+        let (bx, by) = (
+            head.0 + dx * s + 6.0 * s * sway,
+            (head.1 + dy * s + bob).max(r + 1.0),
+        );
+        let (fill, rim) = colours[(usize::from(hue) + k) % colours.len()];
+        let knot = (bx, by + 1.15 * r + 2.0 * s);
+        let mut pb = PathBuilder::new();
+        pb.move_to(knot.0, knot.1);
+        pb.quad_to(
+            (knot.0 + tie.0) / 2.0 - 6.0 * s * sway,
+            (knot.1 + tie.1) / 2.0,
+            tie.0,
+            tie.1,
+        );
+        if let Some(path) = pb.finish() {
+            let st = Stroke {
+                width: 1.2 * s,
+                line_cap: LineCap::Round,
+                ..Stroke::default()
+            };
+            pm.stroke_path(&path, &paint([0x8A, 0x70, 0x68, 220]), &st, id, None);
+        }
+        oval(pm, bx, by, r + 1.2 * s, 1.15 * r + 1.2 * s, rim, id);
+        oval(pm, bx, by, r, 1.15 * r, fill, id);
+        oval(
+            pm,
+            bx - 0.35 * r,
+            by - 0.45 * r,
+            0.28 * r,
+            0.4 * r,
+            [255, 255, 255, 170],
+            id,
+        );
+        oval(pm, knot.0, knot.1 - 1.0 * s, 2.6 * s, 2.0 * s, rim, id);
+    }
+}
+
+/// A bamboo-copter on top of a four-legged pet's head, flying: a little
+/// stick at `head` (the top of its head, pixels) and two blades spinning,
+/// seen from the side so they flatten and widen as they turn.
+pub fn copter(pm: &mut Pixmap, head: (f32, f32), s: f32, t: f32) {
+    let id = Transform::identity();
+    let (x, y) = (head.0, head.1 + 2.0 * s);
+    let top = y - 16.0 * s;
+    // The stick.
+    let mut pb = PathBuilder::new();
+    pb.move_to(x, y);
+    pb.line_to(x, top);
+    if let Some(path) = pb.finish() {
+        let st = Stroke {
+            width: 3.0 * s,
+            line_cap: LineCap::Round,
+            ..Stroke::default()
+        };
+        pm.stroke_path(&path, &paint([0xC8, 0x9A, 0x5E, 255]), &st, id, None);
+    }
+    // The blades: one spin every 0.12 s, drawn as each blade's ellipse,
+    // its near tip swinging toward you and away.
+    for k in 0..2 {
+        let a = TAU * t / 0.12 + std::f32::consts::PI * k as f32;
+        let reach = 26.0 * s * a.cos();
+        let depth = a.sin();
+        let c = if depth > 0.0 {
+            [0x7C, 0xC8, 0x8E, 255]
+        } else {
+            [0x5E, 0xA8, 0x72, 255]
+        };
+        oval(
+            pm,
+            x + reach / 2.0,
+            top,
+            reach.abs() / 2.0 + 2.0 * s,
+            3.2 * s,
+            c,
+            id,
+        );
+    }
+    oval(pm, x, top, 3.6 * s, 3.0 * s, [0xF0, 0x6A, 0x5E, 255], id);
+}
+
 /// How far a pet held up in front (前抱) is lifted, pixels, `t` seconds
 /// into a hug `secs` long: up as the arms come in, a little bounce, down as
 /// they let go. Nothing for the other holds.
