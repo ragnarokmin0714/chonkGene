@@ -16,7 +16,8 @@ use serde::{Deserialize, Serialize};
 
 pub const PORTABLE_DIR: &str = "chonkGene-data";
 const MAX_FILE: u64 = 1024 * 1024;
-const FORMAT: u32 = 1;
+/// 2: the default desktop limit went from 6 to 7 (`Settings::upgrade`).
+const FORMAT: u32 = 2;
 
 /// Where data lives and whether that is the portable folder.
 #[derive(Clone, Debug)]
@@ -110,9 +111,26 @@ impl Default for Settings {
             hide_in_fullscreen: true,
             react_to_input: true,
             start_at_login: false,
-            on_desktop: 6,
+            on_desktop: 7,
             welcomed: false,
         }
+    }
+}
+
+impl Settings {
+    /// Bring a file written by an older version up to date; true if it
+    /// changed. Format 1 defaulted to six pets on the desktop; a 6 still
+    /// there is that old default (Roger: seven by default), so it becomes
+    /// 7. Any other number was chosen and is kept.
+    pub fn upgrade(&mut self) -> bool {
+        if self.format >= FORMAT {
+            return false;
+        }
+        if self.format < 2 && self.on_desktop == 6 {
+            self.on_desktop = 7;
+        }
+        self.format = FORMAT;
+        true
     }
 }
 
@@ -387,7 +405,34 @@ mod tests {
         fs::write(&path, "(sound: false)").unwrap();
         let s = load::<Settings>(&path).unwrap().unwrap();
         assert!(!s.sound);
-        assert_eq!(s.on_desktop, 6);
+        assert_eq!(s.on_desktop, 7);
+    }
+
+    /// Roger: seven on the desktop by default. A format-1 file still on the
+    /// old default of six moves to seven; a number chosen by hand stays.
+    #[test]
+    fn the_old_default_of_six_becomes_seven() {
+        let mut old = Settings {
+            format: 1,
+            on_desktop: 6,
+            ..Settings::default()
+        };
+        assert!(old.upgrade());
+        assert_eq!((old.format, old.on_desktop), (FORMAT, 7));
+        assert!(!old.upgrade());
+        let mut chosen = Settings {
+            format: 1,
+            on_desktop: 3,
+            ..Settings::default()
+        };
+        assert!(chosen.upgrade());
+        assert_eq!(chosen.on_desktop, 3);
+        let mut new = Settings {
+            on_desktop: 6,
+            ..Settings::default()
+        };
+        assert!(!new.upgrade());
+        assert_eq!(new.on_desktop, 6);
     }
 
     #[test]

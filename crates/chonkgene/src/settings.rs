@@ -7,7 +7,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::rc::Rc;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use chonkgene_core::anim::Animator;
 use chonkgene_core::mind::XP_PER_LEVEL;
@@ -27,7 +27,12 @@ use crate::store::{self, DataDir, PetSave, Pets, Settings};
 
 slint::include_modules!();
 
-const PREVIEW_FPS: u64 = 10;
+/// The preview's timer ticks this often; a frame is drawn when the pet
+/// needs one, at [`PREVIEW_FPS`] or as fast as its renderer asks (up to
+/// 60). It was a fixed 10 fps stepping a fixed tenth of a second, a frame
+/// late (Roger's sixteenth pass, item 2: the motion lagged).
+const PREVIEW_TICK: Duration = Duration::from_micros(16_667);
+const PREVIEW_FPS: u32 = 30;
 const SEND_EVERY: Duration = Duration::from_millis(150);
 
 fn coat_label(coat: &str) -> &'static str {
@@ -163,6 +168,9 @@ struct Preview {
     pet: u64,
     renderer: Renderer,
     anim: Animator,
+    /// When the last frame was drawn: the animator steps by the time
+    /// really passed since.
+    drawn: Instant,
 }
 
 struct State {
@@ -307,7 +315,7 @@ fn show_pet(ui: &SettingsWindow, st: &mut State) {
     ui.set_confirm_release(false);
     let kind = &st.kinds[&species];
     let coat = kind.model.coat(&p.coat).unwrap_or(0);
-    if let Some(renderer) = Renderer::new(
+    if let Some(mut renderer) = Renderer::new(
         Arc::clone(&kind.model),
         kind.quad.clone(),
         1.0,
@@ -316,8 +324,12 @@ fn show_pet(ui: &SettingsWindow, st: &mut State) {
     ) {
         // Pops hide cuts between sprites; GPU frames blend instead.
         let pops = !renderer.is_gpu();
+        // The only pet in this window: each frame shows in the tick that
+        // asks for it.
+        renderer.set_eager(true);
         st.preview = Some(Preview {
             pet: p.id,
+            drawn: Instant::now(),
             renderer,
             anim: Animator::new(p.id, p.chonk, species.waddle())
                 .with_habits(species.habits())
@@ -331,7 +343,15 @@ fn tick_preview(ui: &SettingsWindow, st: &mut State) {
     let Some(pv) = &mut st.preview else {
         return;
     };
-    pv.anim.step(1.0 / PREVIEW_FPS as f32);
+    let fps = pv.renderer.min_fps().clamp(PREVIEW_FPS, 60);
+    let now = Instant::now();
+    let since = now.saturating_duration_since(pv.drawn);
+    // A little early is fine: the timer's ticks are not exact.
+    if since.as_secs_f32() < 0.9 / fps as f32 {
+        return;
+    }
+    pv.drawn = now;
+    pv.anim.step(since.as_secs_f32().min(0.25));
     pv.renderer.poll();
     let frame = pv.renderer.render(&pv.anim.params(), pv.anim.expression);
     ui.set_preview(image(frame));
@@ -368,10 +388,13 @@ fn setup(
     data: DataDir,
     pet: Option<u64>,
 ) -> Result<(Rc<RefCell<State>>, [Timer; 2]), String> {
-    let settings = store::load::<Settings>(&data.settings())
+    let mut settings = store::load::<Settings>(&data.settings())
         .ok()
         .flatten()
         .unwrap_or_default();
+    // The pet process upgrades and saves it first; this only covers a
+    // settings window opened on its own.
+    settings.upgrade();
     let mut pets = store::load::<Pets>(&data.pets())
         .ok()
         .flatten()
@@ -620,15 +643,11 @@ fn setup(
     {
         let weak = ui.as_weak();
         let st = st.clone();
-        preview_timer.start(
-            TimerMode::Repeated,
-            Duration::from_millis(1000 / PREVIEW_FPS),
-            move || {
-                if let Some(ui) = weak.upgrade() {
-                    tick_preview(&ui, &mut st.borrow_mut());
-                }
-            },
-        );
+        preview_timer.start(TimerMode::Repeated, PREVIEW_TICK, move || {
+            if let Some(ui) = weak.upgrade() {
+                tick_preview(&ui, &mut st.borrow_mut());
+            }
+        });
     }
     let send_timer = Timer::default();
     {

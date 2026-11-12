@@ -170,6 +170,17 @@ impl Renderer {
         }
     }
 
+    /// Wait for each GPU frame in the render call that sends it, past the
+    /// budget, instead of a call later: for a window that shows one pet
+    /// and nothing else to keep smooth (the settings preview).
+    pub fn set_eager(&mut self, eager: bool) {
+        match self {
+            Self::Sprites(_) => {}
+            Self::Gpu(r) => r.set_eager(eager),
+            Self::Mesh(r) => r.set_eager(eager),
+        }
+    }
+
     /// Take in sprites finished in the background. True if any arrived, so
     /// the caller can redraw.
     pub fn poll(&mut self) -> bool {

@@ -51,3 +51,35 @@ macro_rules! diag {
     };
 }
 pub(crate) use diag;
+
+/// Development only: with `CHONKGENE_DUMP` set to a folder, frames shown
+/// are written there as `<ms>-<what>-<x>_<y>.png` (ms since start, the
+/// window's position), to put the desktop together frame by frame where
+/// there is no compositor to watch (PLAN §8, Roger's sixteenth pass,
+/// item 3). The callers choose which frames; at most [`DUMP_MOST`].
+pub fn dump(what: std::fmt::Arguments, at: (i32, i32), pm: &tiny_skia::Pixmap) {
+    use std::sync::atomic::{AtomicU32, Ordering};
+    static DIR: OnceLock<Option<std::path::PathBuf>> = OnceLock::new();
+    static COUNT: AtomicU32 = AtomicU32::new(0);
+    let Some(dir) = DIR
+        .get_or_init(|| std::env::var_os("CHONKGENE_DUMP").map(Into::into))
+        .as_ref()
+    else {
+        return;
+    };
+    if COUNT.fetch_add(1, Ordering::Relaxed) >= DUMP_MOST {
+        return;
+    }
+    let ms = START.get_or_init(Instant::now).elapsed().as_millis();
+    let path = dir.join(format!("{ms:07}-{what}-{}_{}.png", at.0, at.1));
+    if let Err(e) = pm.save_png(&path) {
+        eprintln!("dump {}: {e}", path.display());
+    }
+}
+
+/// Whether [`dump`] writes anything (so callers skip working out what).
+pub fn dumping() -> bool {
+    std::env::var_os("CHONKGENE_DUMP").is_some()
+}
+
+const DUMP_MOST: u32 = 20_000;

@@ -747,6 +747,29 @@ fn mesh_frames_wait_for_the_gpu_budget_but_never_starve() {
     assert!(longest < 0.6, "no new picture for {longest:.2} s");
 }
 
+/// The settings preview (Roger's sixteenth pass, item 2: its motion
+/// lagged): an eager renderer shows every frame in the call that asks for
+/// it, a budget of nothing notwithstanding, so what shows is never a call
+/// behind.
+#[test]
+fn an_eager_mesh_renderer_shows_each_frame_in_the_call_that_asks() {
+    use chonkgene_core::anim::{Expression, PoseParams};
+    let Some(mut r) = lone_renderer("shiba", 0.0) else {
+        eprintln!("skipped: no GPU");
+        return;
+    };
+    r.finish();
+    r.set_eager(true);
+    for f in 1..=40 {
+        let params = PoseParams {
+            clock: f as f32 / 30.0,
+            ..Default::default()
+        };
+        r.render(&params, Expression::Neutral);
+        assert!(r.changed(), "frame {f} did not show in its own call");
+    }
+}
+
 /// Screen x (pixels at 100%) of a bird's left foot over a steady waddle,
 /// as the window carries it along, and its height.
 fn foot_track(id: &str) -> Vec<(f32, f32)> {

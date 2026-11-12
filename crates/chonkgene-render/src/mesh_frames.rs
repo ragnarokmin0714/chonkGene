@@ -149,6 +149,9 @@ pub struct MeshRenderer {
     sent_at: Option<Instant>,
     /// Touched just now: its frames do not wait for the budget.
     urgent: bool,
+    /// Wait for each frame in the call that sends it (see
+    /// [`MeshRenderer::set_eager`]).
+    eager: bool,
     /// Counted since the app last asked (see [`FrameStats`]).
     stats: FrameStats,
     /// The canvas's GPU seconds and frames when the app last asked.
@@ -227,6 +230,7 @@ impl MeshRenderer {
             unsent_since: None,
             sent_at: None,
             urgent: false,
+            eager: false,
             stats: FrameStats::default(),
             gpu_seen: (0.0, 0),
             clock: None,
@@ -375,6 +379,15 @@ impl MeshRenderer {
         };
         // However it is moving: fast enough that it does not jerk.
         base.max(self.smooth_fps.ceil() as u32)
+    }
+
+    /// Wait for each frame in the render call that sends it instead of
+    /// picking it up on the next (one frame late), and send every frame
+    /// whatever the budget: for a window that shows one pet and nothing
+    /// else to keep smooth (the settings preview, PLAN §8 "Roger's
+    /// sixteenth pass", item 2).
+    pub fn set_eager(&mut self, eager: bool) {
+        self.eager = eager;
     }
 
     /// Wait for the bake and for the frame on its way (tests, screenshots),
@@ -644,6 +657,9 @@ impl MeshRenderer {
         if self.live.is_some() && !pending(self) {
             self.send(keep_up);
         }
+        if self.eager && pending(self) {
+            arrived |= self.collect(true);
+        }
         arrived
     }
 
@@ -654,7 +670,8 @@ impl MeshRenderer {
         // Held back too long (others took the budget, or it is far too
         // small): this one goes anyway, so no pet ever stands still on the
         // screen for long.
-        let starved = self.urgent || self.unsent_since.is_some_and(|t| t.elapsed() >= STARVED);
+        let starved =
+            self.urgent || self.eager || self.unsent_since.is_some_and(|t| t.elapsed() >= STARVED);
         let how = if starved {
             Ask::Now
         } else if keep_up {

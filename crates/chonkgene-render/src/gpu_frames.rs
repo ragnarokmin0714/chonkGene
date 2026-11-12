@@ -141,6 +141,9 @@ pub struct GpuRenderer {
     tail_bone: Option<usize>,
     /// Frames sent to the GPU so far (the rest came from the cache).
     sent: u64,
+    /// Wait for each frame in the call that sends it (see
+    /// [`GpuRenderer::set_eager`]).
+    eager: bool,
 }
 
 impl GpuRenderer {
@@ -177,6 +180,7 @@ impl GpuRenderer {
             cache: Vec::new(),
             changed: true,
             sent: 0,
+            eager: false,
         })
     }
 
@@ -408,7 +412,10 @@ impl GpuRenderer {
             self.wanted = Some((drawn, key));
         }
         if self.unsent && self.pending.is_none() {
-            self.send(false);
+            self.send(self.eager);
+        }
+        if self.eager {
+            self.collect(true);
         }
         self.want_breath = breath;
         self.sync_breath();
@@ -517,6 +524,13 @@ impl GpuRenderer {
                 self.pending = None;
             }
         }
+    }
+
+    /// Wait for each frame in the render call that sends it instead of
+    /// picking it up on the next, past the budget: for a window that
+    /// shows one pet and nothing else (the settings preview).
+    pub fn set_eager(&mut self, eager: bool) {
+        self.eager = eager;
     }
 
     /// Wait until the wanted picture is shown (tests, screenshots).

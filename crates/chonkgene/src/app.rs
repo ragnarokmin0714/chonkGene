@@ -501,12 +501,16 @@ impl App {
             );
         }
         let mut notes = Vec::new();
-        let settings = store::load::<Settings>(&data.settings())
+        let mut settings = store::load::<Settings>(&data.settings())
             .unwrap_or_else(|e| {
                 notes.push(e);
                 None
             })
             .unwrap_or_default();
+        let upgraded = settings.upgrade();
+        if upgraded && let Err(e) = store::save(&data.settings(), &settings) {
+            notes.push(e);
+        }
         let mut pets = store::load::<Pets>(&data.pets())
             .unwrap_or_else(|e| {
                 notes.push(e);
@@ -514,8 +518,11 @@ impl App {
             })
             .unwrap_or_default();
         pets.sanitise();
-        // Saves from before the limit moved pets (more out than it allows).
-        let fitted = pets.out() > settings.on_desktop as usize && pets.fit_to(settings.on_desktop);
+        // Saves from before the limit moved pets (more out than it allows),
+        // and an upgrade that raised the limit (as changing it in settings
+        // would, a pet resting only for the old limit comes out).
+        let fitted = (upgraded || pets.out() > settings.on_desktop as usize)
+            && pets.fit_to(settings.on_desktop);
         for note in notes {
             eprintln!("{note}");
         }
@@ -2661,6 +2668,11 @@ impl Pet {
         if let Err(e) = self.presenter.present(shared, pixmap) {
             eprintln!("present failed: {e}");
         }
+        if crate::diag::dumping() && self.fun.pond.lately(t) {
+            let wading = if self.fun.pond.now.is_some() { "w" } else { "" };
+            let what = format_args!("pet{}{wading}", self.save.id);
+            crate::diag::dump(what, self.placed, pixmap);
+        }
         self.repaint = false;
         self.fun.had_overlay = overlay;
         started.elapsed()
@@ -3048,6 +3060,9 @@ impl ApplicationHandler<UserEvent> for App {
                     };
                     if let Err(e) = p.presenter.present(shared, shown) {
                         eprintln!("present failed: {e}");
+                    }
+                    if crate::diag::dumping() && p.fun.pond.now.is_some() {
+                        crate::diag::dump(format_args!("pet{}redraw", p.save.id), p.placed, shown);
                     }
                 }
             }

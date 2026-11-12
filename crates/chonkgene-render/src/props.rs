@@ -1679,6 +1679,44 @@ fn oval_path(cx: f32, cy: f32, rx: f32, ry: f32) -> Option<Path> {
     pb.finish()
 }
 
+/// Below the pond's near edge nothing of a pet in it shows: legs there
+/// would poke out under the water. Wiped from the waterline `line` down,
+/// only under the near half of `oval` (beside the pond's ends, and behind
+/// it, the body is out of the water and stays), and less toward the ends,
+/// gone at them, as the pond itself fades out there. It used to wipe the
+/// whole strip between the pond's ends outside the water: a pet stepping
+/// out past an end had a square bitten out of it (Roger's sixteenth
+/// pass, item 3: 「方塊殘影」).
+pub fn clear_under_rim(pm: &mut Pixmap, oval: (f32, f32, f32, f32), line: f32) {
+    use chonkgene_rig::math::smoothstep;
+    let (cx, cy, rx, ry) = oval;
+    let (w, h) = (pm.width() as usize, pm.height() as usize);
+    let x0 = (cx - rx).floor().max(0.0) as usize;
+    let x1 = ((cx + rx).ceil().max(0.0) as usize).min(w);
+    let y0 = line.max(cy).ceil().max(0.0) as usize;
+    let data = pm.data_mut();
+    for px in x0..x1 {
+        let u = ((px as f32 + 0.5 - cx) / rx).abs();
+        if u >= 1.0 {
+            continue;
+        }
+        let rim = cy + ry * (1.0 - u * u).sqrt();
+        let wipe = 1.0 - smoothstep(0.7, 1.0, u);
+        for py in y0..h {
+            // A pixel's worth of soft edge along the rim itself.
+            let under = (py as f32 + 0.5 - rim).clamp(0.0, 1.0);
+            let keep = 1.0 - wipe * under;
+            if keep >= 1.0 {
+                continue;
+            }
+            let i = (py * w + px) * 4;
+            for c in &mut data[i..i + 4] {
+                *c = (f32::from(*c) * keep).round() as u8;
+            }
+        }
+    }
+}
+
 /// The pond's water over a duckling swimming in it (PLAN §8 "Roger's
 /// tenth pass", item 2): from the waterline `line` down, the pond's own
 /// blues clipped to the pond's oval, so the body under the water shows
@@ -1689,25 +1727,7 @@ fn oval_path(cx: f32, cy: f32, rx: f32, ry: f32) -> Option<Path> {
 /// for the rings spreading from it.
 pub fn pond_front(pm: &mut Pixmap, pond: (f32, f32), x: f32, line: f32, s: f32, t: f32) {
     let (cx, cy, rx, ry) = pond_oval(pond, s);
-    let (w, h) = (pm.width() as f32, pm.height() as f32);
-    // Below the pond's near edge, nothing of the body shows (on the
-    // desktop either side of the pond, the legs do): cleared between the
-    // pond's ends, from the waterline down, wherever the water is not.
-    if let Some(strip) = Rect::from_ltrb((cx - rx).max(0.0), line.max(0.0), (cx + rx).min(w), h)
-        && let (Some(water), Some(mut outside)) = (
-            oval_path(cx, cy, rx, ry),
-            Mask::new(pm.width(), pm.height()),
-        )
-    {
-        let id = Transform::identity();
-        outside.fill_path(&water, FillRule::Winding, true, id);
-        outside.invert();
-        let clear = Paint {
-            blend_mode: BlendMode::Clear,
-            ..Paint::default()
-        };
-        pm.fill_rect(strip, &clear, id, Some(&outside));
-    }
+    clear_under_rim(pm, (cx, cy, rx, ry), line);
     // The water over the body from the waterline down: deep, a little of
     // the body showing through.
     water(pm, (cx, cy, rx, ry), t, Some((line, 0.22)));
@@ -1799,6 +1819,36 @@ mod tests {
         let d = pm.data();
         let a = |x: u32, y: u32| d[((y * w + x) * 4 + 3) as usize];
         (0..h).all(|y| a(0, y) == 0 && a(w - 1, y) == 0) && (0..w).all(|x| a(x, 0) == 0)
+    }
+
+    /// Roger's sixteenth pass, item 3: a pet stepping out past the pond's
+    /// end had a square bitten out of it. Only what hangs under the near
+    /// rim goes, and less toward the ends, with no hard edge anywhere.
+    #[test]
+    fn only_what_hangs_under_the_near_rim_is_wiped_and_softly() {
+        let mut pm = Pixmap::new(300, 120).unwrap();
+        pm.fill(Color::from_rgba8(200, 120, 60, 255));
+        let oval = (150.0, 60.0, 100.0, 20.0);
+        clear_under_rim(&mut pm, oval, 40.0);
+        let a = |x: u32, y: u32| pm.data()[((y * 300 + x) * 4 + 3) as usize];
+        // Under the rim in the middle: gone.
+        assert_eq!(a(150, 100), 0);
+        // In the water (over the rim), behind it, and beside the ends:
+        // kept.
+        assert_eq!(a(150, 70), 255);
+        assert_eq!(a(150, 45), 255);
+        assert_eq!(a(40, 100), 255);
+        assert_eq!(a(260, 100), 255);
+        // Beside an end, below the waterline, outside the water: kept (the
+        // strip there was wiped).
+        assert_eq!(a(55, 50), 255);
+        // Toward the ends it fades out: no column jumps far from the next.
+        for y in [80, 100, 119] {
+            for x in 40..260 {
+                let jump = i32::from(a(x + 1, y)) - i32::from(a(x, y));
+                assert!(jump.abs() < 40, "a hard edge at ({x}, {y}): {jump}");
+            }
+        }
     }
 
     #[test]

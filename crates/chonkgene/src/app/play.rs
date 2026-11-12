@@ -53,6 +53,13 @@ const POND_PADDLE: f32 = 0.16;
 /// Wading in a pond, the water comes this share of the picture's height
 /// up its legs (Roger: deeper water; was 0.07, the paws only).
 const WADE: f32 = 0.18;
+/// The water rises up the legs over this long going in, seconds, and
+/// sinks as fast with the feet out (within [`POND_HOLD`]): it jumped
+/// in one frame (Roger's sixteenth pass, item 3).
+const WADE_EASE: f64 = 0.3;
+/// A pond fades out over its last this many seconds, and the water on
+/// the pets in it sinks with it.
+const POND_FADE: f64 = 1.0;
 
 /// Thrown with the mouse, a toy goes at most this fast (pixels a second
 /// at 100%); let go slower than this, it just drops.
@@ -169,6 +176,10 @@ impl PropWin {
             Thing::Catnip => ((now - self.born) / CATNIP_SECS).clamp(0.0, 1.0) as f32,
             // A spotlight goes out over its last second.
             Thing::Spotlight => (1.0 - (self.until - now)).clamp(0.0, 1.0) as f32,
+            // A pond dries up over its last moments (it was there one
+            // frame and gone the next, the water on the pets in it left
+            // behind as boxes: Roger's sixteenth pass, item 3).
+            Thing::Pond => (1.0 - (self.until - now) / POND_FADE).clamp(0.0, 1.0) as f32,
             Thing::Seeds | Thing::Sunbeam => {
                 let span = (self.until - self.born).max(1.0);
                 let left = (self.until - now) / span;
@@ -257,8 +268,19 @@ impl PropWin {
                 .collect();
             props::pond_stirs(&mut self.pixmap, self.foot, &xs, self.prop.scale, look.t);
         }
+        if self.prop.thing == Thing::Pond {
+            let left = 1.0 - look.used;
+            if left < 1.0 {
+                for v in self.pixmap.data_mut() {
+                    *v = (f32::from(*v) * left) as u8;
+                }
+            }
+        }
         if let Err(e) = self.presenter.present(shared, &self.pixmap) {
             eprintln!("present failed: {e}");
+        }
+        if self.prop.thing == Thing::Pond {
+            crate::diag::dump(format_args!("pond{}", self.id), self.placed, &self.pixmap);
         }
         self.drawn = Some((now, self.prop.pos, self.prop.spin, grounded));
     }
@@ -501,16 +523,28 @@ fn in_water(pos: (f32, f32), scale: f32, feet: (f32, f32), inside: bool) -> bool
 /// A pet's time in a pond, steadied: in at once, out only after
 /// [`POND_HOLD`] out of the water, and one splash a visit.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
-struct Wade {
+pub(super) struct Wade {
     /// The pond it is in, by the middle of its bottom (screen pixels).
-    now: Option<(f32, f32)>,
+    pub now: Option<(f32, f32)>,
     /// Out of the water since then, still counted in.
-    out_since: Option<f64>,
+    pub out_since: Option<f64>,
     /// Left a pond then.
     left_at: Option<f64>,
 }
 
 impl Wade {
+    /// Out of the pond at once: it is gone.
+    fn leave(&mut self, now: f64) {
+        self.now = None;
+        self.out_since = None;
+        self.left_at = Some(now);
+    }
+
+    /// In a pond, or out of one less than two seconds ago (frame dumps).
+    pub(super) fn lately(&self, now: f64) -> bool {
+        self.now.is_some() || self.left_at.is_some_and(|t| now - t < 2.0)
+    }
+
     /// The pond the feet are over this frame, if any: whether it splashes.
     fn step(&mut self, under: Option<(f32, f32)>, now: f64) -> bool {
         if let Some(pond) = under {
@@ -555,7 +589,7 @@ pub(super) struct Fun {
     next_scene: f64,
     /// In a pond (swimming, or wading): the pond's front is drawn over the
     /// pet.
-    pond: Wade,
+    pub pond: Wade,
     nip: Option<(Nip, f64, u8)>,
     /// Not back to the catnip before this (it has just been; one that
     /// does not care for it, not to this sprig again).
@@ -586,6 +620,11 @@ pub(super) struct Fun {
     /// How brightly the sunbeam lights it, 0 … 1, easing in and out, and
     /// the clock when that was last worked out.
     sun: (f32, f64),
+    /// How far up it the pond's water comes, 0 … 1 of the way to the
+    /// waterline (see [`WADE_EASE`]), and the clock then.
+    wet: (f32, f64),
+    /// How much is left of the pond it is in, 1 … 0 as it dries up.
+    pond_left: f32,
     /// When it last finished a 肉肉舞 (it does not dance again at once).
     pub danced: f64,
     /// When it last went into a pond to join the others.
@@ -701,6 +740,15 @@ impl Playground {
             .find(|p| Some(p.pos) == now_in && in_water(p.pos, p.scale, feet, true))
             .or_else(|| ponds().find(|p| in_water(p.pos, p.scale, feet, false)))
             .map(|p| p.pos)
+    }
+
+    /// How much is left of the pond at `pos` (1 … 0 as it dries up); none
+    /// if it is gone.
+    fn pond_left(&self, pos: (f32, f32), now: f64) -> Option<f32> {
+        self.things
+            .iter()
+            .find(|w| w.prop.thing == Thing::Pond && w.prop.pos == pos)
+            .map(|w| 1.0 - w.used(now))
     }
 
     fn roll(&mut self) -> f32 {
@@ -1023,7 +1071,19 @@ impl Pet {
             .fx
             .retain(|(fx, since)| t - since < f64::from(fx.secs()));
         let swimming = self.anim.posture == Posture::Swim;
-        let in_pond = self.fun.pond.now.is_some();
+        // Into the water at once, but the waterline rises over a moment,
+        // and sinks once the feet are out; picked up, or the hold over,
+        // it is dry at once.
+        let (wet, last) = self.fun.wet;
+        let step = ((t - last).clamp(0.0, 0.1) / WADE_EASE) as f32;
+        let wet = match self.fun.pond.now {
+            None => 0.0,
+            Some(_) if swimming || self.fun.pond.out_since.is_none() => (wet + step).min(1.0),
+            Some(_) => (wet - step).max(0.0),
+        };
+        let wet = wet.min(self.fun.pond_left);
+        self.fun.wet = (wet, t);
+        let in_pond = self.fun.pond.now.is_some() && wet > 0.0;
         let fire = self
             .fun
             .scene
@@ -1094,17 +1154,19 @@ impl Pet {
         if sun > 0.0 && !fire {
             props::sunlit(canvas, sun);
         }
-        if let Some(pond) = self.fun.pond.now {
+        if let Some(pond) = self.fun.pond.now.filter(|_| in_pond) {
             // The pond's front over the lower body, matching the pond's
             // own window behind it: swimming, the waterline a little in
-            // front of the pond's middle; wading, over the lower legs.
+            // front of the pond's middle; wading, over the lower legs;
+            // part of the way there as it gets in or out.
             let at = (pond.0 - self.placed.0 as f32, pond.1 - self.placed.1 as f32);
             let (_, cy, _, ry) = props::pond_oval(at, s);
-            let line = if swimming {
+            let full = if swimming {
                 cy - 0.05 * ry
             } else {
                 floor - WADE * h
             };
+            let line = floor + (full - floor) * wet;
             props::pond_front(canvas, at, w / 2.0, line, s, t as f32);
         }
         if let Some(thing) = self.fun.carry {
@@ -1331,6 +1393,13 @@ pub(super) fn tick(
         };
         if p.fun.pond.step(under, now) {
             p.fun.effect(Fx::Splash, now);
+        }
+        // Its pond drying up, the water on it goes too; gone, it is out.
+        if let Some(pos) = p.fun.pond.now {
+            match ground.pond_left(pos, now) {
+                Some(left) => p.fun.pond_left = left,
+                None => p.fun.pond.leave(now),
+            }
         }
         let pond = p.fun.pond.now;
         // How the body is held this frame.
