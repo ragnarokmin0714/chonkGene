@@ -1252,6 +1252,17 @@ Roger's notes, and what was done the same day (all checked here; each owes a loo
 
 `inbox/belly.gif` shows items 4 and 5 (two pets asleep on their backs, four poked).
 
+### Roger's eighteenth pass (2026-11-12)
+
+Roger's notes, with his answers to three questions the same day:
+
+1. **Running, sliding and flying** (「寵物可以加入奔跑、滑行、飛行模式」). Sliding is both kinds: along the ground on its belly (after a run, like a penguin; kicking up sand on the beach) and gliding through the air (wings or tails spread, down from a window top). Flying is for everyone: the birds flap, the fox floats by magic, the four-legged ones go up in a funny way (a balloon, a bamboo-copter).
+2. **Hugs are hard to set off.** A double-click: the first click is a poke, the pet hops away and the second click misses. Roger's pick: fix the double-click (the first click waits a moment before it counts as a poke; a looser time between clicks).
+3. **The hugging arms look odd and ugly**: make them a baby's arms and hands.
+4. **The hug itself does not work well**: try it as a small baby hugs a plush toy: arms right round it (環抱), held up in front (前抱), and so on.
+5. **The sunbeam bigger.**
+6. **A golden sand beach beside the pond** for pets to walk and run on.
+
 ### Phase 1: Shiba prototype (feel) — `v0.1.0`
 
 - The art pipeline (§3.3) works end to end for one Shiba, with placeholder art.
