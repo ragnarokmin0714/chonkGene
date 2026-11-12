@@ -2876,7 +2876,14 @@ impl Pet {
                     if self.rng.bool() {
                         self.body.facing = -self.body.facing;
                     }
-                    if move_test() || self.rng.f32() < 0.15 + 0.35 * energy {
+                    // On the sand it runs about more (Roger's eighteenth
+                    // pass: a beach to walk and run on).
+                    let run = if self.fun.on_sand {
+                        0.7
+                    } else {
+                        0.15 + 0.35 * energy
+                    };
+                    if move_test() || self.rng.f32() < run {
                         self.body.pace = RUN_PACE;
                         diag!("{}: runs", self.save.name);
                     }
@@ -2886,12 +2893,21 @@ impl Pet {
                     // At the end of a run, a belly slide (滑行).
                     let speed = chonkgene_core::motion::WALK_SPEED * self.body.pace * 1.2;
                     self.body.slide(speed);
-                    self.fun.effect(Fx::Dust, t);
+                    let fx = if self.fun.on_sand { Fx::Sand } else { Fx::Dust };
+                    self.fun.effect(fx, t);
                     self.dash_until = 0.0;
                     diag!("{}: slides", self.save.name);
                 } else {
                     self.body.motion = Motion::Idle;
                     self.dash_until = 0.0;
+                    // Stopping on the sand, a four-legged one may dig in it.
+                    let digs =
+                        !matches!(self.species, Species::Owl | Species::Chick | Species::Duck);
+                    if self.fun.on_sand && digs && self.rng.f32() < 0.3 {
+                        self.anim.walking = false;
+                        self.anim.gesture(Act::Dig);
+                        self.fun.effect(Fx::Sand, t);
+                    }
                 }
                 // Walks of 3–7 s; rests a little longer (4–11 s), long
                 // enough to sit down and look about.
@@ -3022,9 +3038,7 @@ impl Pet {
             eprintln!("present failed: {e}");
         }
         if crate::diag::dumping()
-            && (self.fun.pond.lately(t)
-                || self.anim.doing() == Some(Act::Hug)
-                || move_test())
+            && (self.fun.pond.lately(t) || self.anim.doing() == Some(Act::Hug) || move_test())
         {
             let wading = if self.fun.pond.now.is_some() { "w" } else { "" };
             let what = format_args!("pet{}{wading}", self.save.id);

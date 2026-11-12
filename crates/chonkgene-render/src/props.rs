@@ -462,6 +462,12 @@ pub fn draw(pm: &mut Pixmap, thing: Thing, at: (f32, f32), s: f32, look: Look) {
                 splash_arc(pm, (at.0 + spray.0, cy), (at.0 + spray.1, cy), spray.2, s);
             }
         }
+        Thing::Beach => {
+            // Golden sand round the pond, fading out into the desktop,
+            // damp and darker along the water; shells and a starfish.
+            let fade = (look.t / 1.0).min(1.0) * (1.0 - look.used).clamp(0.0, 1.0);
+            beach(pm, (x, y), s, fade);
+        }
         Thing::Sunbeam => {
             // A warm slanting shaft of light down to the floor, a bright
             // pool where it lands, motes glowing in it (Roger's fifteenth
@@ -563,10 +569,13 @@ pub enum Fx {
     /// Music notes floating up, swaying (dancing); `at` is the top of the
     /// head.
     Notes,
+    /// Golden sand kicked up (sliding, running on the beach); `at` is the
+    /// feet.
+    Sand,
 }
 
 impl Fx {
-    pub const ALL: [Fx; 10] = [
+    pub const ALL: [Fx; 11] = [
         Fx::Hearts,
         Fx::Sparkles,
         Fx::Dust,
@@ -577,6 +586,7 @@ impl Fx {
         Fx::Fright,
         Fx::Dream,
         Fx::Notes,
+        Fx::Sand,
     ];
 
     /// How long it shows, seconds.
@@ -584,7 +594,7 @@ impl Fx {
         match self {
             Fx::Hearts => 1.6,
             Fx::Sparkles => 0.9,
-            Fx::Dust => 0.7,
+            Fx::Dust | Fx::Sand => 0.7,
             Fx::Splash => 0.8,
             Fx::Bubble | Fx::Dream => 3.6,
             Fx::Spell => 1.8,
@@ -635,7 +645,12 @@ pub fn effect(pm: &mut Pixmap, fx: Fx, at: (f32, f32), s: f32, t: f32) {
                 );
             }
         }
-        Fx::Dust => {
+        Fx::Dust | Fx::Sand => {
+            let c = if fx == Fx::Sand {
+                [0xEC, 0xC6, 0x6E, 200]
+            } else {
+                [0xD9, 0xCE, 0xC0, 170]
+            };
             for side in [-1.0f32, 1.0] {
                 for k in 0..3 {
                     let d = (6.0 + 10.0 * k as f32) * s * (0.4 + u);
@@ -645,7 +660,23 @@ pub fn effect(pm: &mut Pixmap, fx: Fx, at: (f32, f32), s: f32, t: f32) {
                         x + side * d,
                         y - r * 0.6 - 3.0 * s * u,
                         r,
-                        with_alpha([0xD9, 0xCE, 0xC0, 170], fade),
+                        with_alpha(c, fade),
+                    );
+                }
+            }
+            // Sand flies up in grains too.
+            if fx == Fx::Sand {
+                for k in 0..8 {
+                    let a = 0.4 + 0.3 * k as f32;
+                    let d = (10.0 + 30.0 * u) * s * (0.6 + 0.1 * k as f32);
+                    let up = (24.0 * u - 30.0 * u * u) * s * (0.7 + 0.08 * k as f32);
+                    let side = if k % 2 == 0 { -1.0 } else { 1.0 };
+                    circle(
+                        pm,
+                        x + side * d * a.cos(),
+                        y - 4.0 * s - up,
+                        1.4 * s,
+                        with_alpha([0xE0, 0xB2, 0x58, 230], fade),
                     );
                 }
             }
@@ -924,6 +955,108 @@ fn sunbeam_corners(at: (f32, f32), size: (f32, f32)) -> [(f32, f32); 4] {
 fn smooth(a: f32, b: f32, v: f32) -> f32 {
     let k = ((v - a) / (b - a)).clamp(0.0, 1.0);
     k * k * (3.0 - 2.0 * k)
+}
+
+/// The beach (see [`Thing::Beach`]): an oval of golden sand lying on the
+/// floor with its bottom middle at `at`, worked out pixel by pixel: warm
+/// gold, grains speckled in it (the same every frame), fading out over its
+/// outer fifth (a third read as a haze), damp and darker in a band round
+/// the pond's water; two
+/// shells and a starfish on it. `fade` 0 … 1.
+fn beach(pm: &mut Pixmap, at: (f32, f32), s: f32, fade: f32) {
+    if fade <= 0.0 {
+        return;
+    }
+    let (w, h) = Thing::Beach.size();
+    let (cx, cy) = (at.0, at.1 - 0.45 * h * s);
+    let (rx, ry) = (0.48 * w * s, 0.4 * h * s);
+    let (px0, py0, prx, pry) = pond_oval(at, s);
+    let (pw, ph) = (pm.width() as usize, pm.height() as usize);
+    let x0 = (cx - rx).floor().max(0.0) as usize;
+    let x1 = ((cx + rx).ceil().max(0.0) as usize).min(pw);
+    let y0 = (cy - ry).floor().max(0.0) as usize;
+    let y1 = ((cy + ry).ceil().max(0.0) as usize).min(ph);
+    let data = pm.data_mut();
+    for py in y0..y1 {
+        let fy = (py as f32 + 0.5 - cy) / ry;
+        for px in x0..x1 {
+            let fx = (px as f32 + 0.5 - cx) / rx;
+            let d = (fx * fx + fy * fy).sqrt();
+            if d >= 1.0 {
+                continue;
+            }
+            // A grain here or not, and how light: the same every frame.
+            let hash = ((px as u32).wrapping_mul(73_856_093)
+                ^ (py as u32).wrapping_mul(19_349_663))
+            .wrapping_mul(2_654_435_761)
+                >> 24;
+            let grain = (hash as f32 / 255.0 - 0.5) * 0.22;
+            // Damp by the water: within a little of the pond's edge.
+            let qx = (px as f32 + 0.5 - px0) / (1.12 * prx);
+            let qy = (py as f32 + 0.5 - py0) / (1.25 * pry);
+            let damp = smooth(1.0, 0.86, (qx * qx + qy * qy).sqrt());
+            let light = 1.0 + grain - 0.18 * damp + 0.06 * (-fy).max(0.0);
+            let base = [0xF6 as f32, 0xD9 as f32, 0x8E as f32];
+            let a = 0.97 * smooth(1.0, 0.78, d) * fade;
+            let i = 4 * (py * pw + px);
+            for k in 0..3 {
+                let c = (base[k] * light).clamp(0.0, 255.0) * a;
+                data[i + k] = (c + f32::from(data[i + k]) * (1.0 - a)).min(255.0) as u8;
+            }
+            data[i + 3] = (255.0 * a + f32::from(data[i + 3]) * (1.0 - a)).min(255.0) as u8;
+        }
+    }
+    // Shells and a starfish on the sand, out beyond the water.
+    let id = Transform::identity();
+    let fade_c = |c: [u8; 4]| with_alpha(c, fade);
+    for (u, v, k) in [(-0.78, 0.15, 0.0f32), (0.7, 0.35, 1.0)] {
+        let (x, y) = (cx + u * rx, cy + v * ry);
+        let r = 6.5 * s;
+        let mut pb = PathBuilder::new();
+        pb.move_to(x - r, y + 0.2 * r);
+        pb.quad_to(x, y - 1.6 * r, x + r, y + 0.2 * r);
+        pb.quad_to(x, y + 0.9 * r, x - r, y + 0.2 * r);
+        if let Some(p) = pb.finish() {
+            let c = if k == 0.0 {
+                [0xFF, 0xC8, 0xC8, 240]
+            } else {
+                [0xFF, 0xF0, 0xE0, 240]
+            };
+            pm.fill_path(&p, &paint(fade_c(c)), FillRule::Winding, id, None);
+            pm.stroke_path(
+                &p,
+                &paint(fade_c([0xD8, 0x98, 0x8C, 220])),
+                &Stroke {
+                    width: 0.9 * s,
+                    ..Stroke::default()
+                },
+                id,
+                None,
+            );
+        }
+    }
+    let (sx, sy) = (cx + 0.86 * rx * 0.88, cy - 0.05 * ry);
+    let mut pb = PathBuilder::new();
+    for k in 0..10 {
+        let a = -std::f32::consts::FRAC_PI_2 + k as f32 * std::f32::consts::PI / 5.0;
+        let r = if k % 2 == 0 { 8.5 * s } else { 3.6 * s };
+        let (x, y) = (sx + r * a.cos(), sy + 0.75 * r * a.sin());
+        if k == 0 {
+            pb.move_to(x, y);
+        } else {
+            pb.line_to(x, y);
+        }
+    }
+    pb.close();
+    if let Some(p) = pb.finish() {
+        pm.fill_path(
+            &p,
+            &paint(fade_c([0xFF, 0x9A, 0x5E, 245])),
+            FillRule::Winding,
+            id,
+            None,
+        );
+    }
 }
 
 /// The sunbeam (see [`Thing::Sunbeam`]): its shaft worked out pixel by
@@ -2066,7 +2199,7 @@ pub fn foxfire(pm: &mut Pixmap, at: (f32, f32), reach: (f32, f32), s: f32, t: f3
 mod tests {
     use super::*;
 
-    const ALL: [Thing; 9] = [
+    const ALL: [Thing; 10] = [
         Thing::Ball,
         Thing::Frisbee,
         Thing::Catnip,
@@ -2076,6 +2209,7 @@ mod tests {
         Thing::Pond,
         Thing::Sunbeam,
         Thing::Butterfly,
+        Thing::Beach,
     ];
 
     fn edges_clear(pm: &Pixmap) -> bool {
@@ -2138,7 +2272,7 @@ mod tests {
                             .filter(|p| p[3] > 0)
                             .count();
                         // (A sunbeam fades in from nothing.)
-                        let fading_in = thing == Thing::Sunbeam && t == 0.0;
+                        let fading_in = matches!(thing, Thing::Sunbeam | Thing::Beach) && t == 0.0;
                         assert!(drawn > 40 || fading_in, "{thing:?} drew {drawn} pixels");
                         assert!(
                             edges_clear(&pm),

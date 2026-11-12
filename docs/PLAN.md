@@ -1278,6 +1278,12 @@ Roger's notes, with his answers to three questions the same day:
 - While sliding, gliding or flying a pet stays side-on to the way it goes (it had turned to face you, the poses unreadable); the glide and flying poses are lifted off the bottom of the picture (the spread legs were cut off).
 - **Seen**: `CHONKGENE_STAGE=move` makes runs, slides and flights much more common and (with `CHONKGENE_DUMP`) dumps every frame; under Xvfb in 30 s every pet ran, slid and flew. `inbox/moves.gif` is the desktop put together from those frames; `examples/touch.rs` scenes `slide`, `glide`, `fly` show the poses. Tests: `a_belly_slide_goes_on_a_way_and_stops`, `a_glide_comes_down_slower_and_further_than_a_fall`. Gliding could not be seen in the app here (no windows under Xvfb to step off).
 
+#### Eighteenth pass, item 6 built (2026-11-12): a golden beach
+
+- **`Thing::Beach`** (1180 × 150 at 100%): when a pond comes out, an oval of golden sand is laid under it first (`start_scene`), coming and going with it (the same end, fading out over the pond's last second, `used`; fading in over a second). Drawn pixel by pixel (`props::beach`): warm gold with grains speckled in it, the same every frame, fading into the desktop over its outer fifth (a third read as a haze round the pond), damp and darker in a band round the water; two shells and an orange starfish out on the sand. It lets every click through, and redraws only while fading in or out.
+- **On the sand** (`Fun::on_sand`, `Playground::on_beach`): a pet setting off runs 70% of the time; a run's belly slide kicks up golden sand (`Fx::Sand`: puffs and flying grains) instead of grey dust; stopping there, a four-legged one digs now and then (`Act::Dig`, sand flying).
+- `inbox/beach.png`: a frame of the pond scene under Xvfb, put together from the windows (`CHONKGENE_DUMP` now writes the beach's window too). Not done: footprints in the sand, a sandcastle.
+
 ### Phase 1: Shiba prototype (feel) — `v0.1.0`
 
 - The art pipeline (§3.3) works end to end for one Shiba, with placeholder art.

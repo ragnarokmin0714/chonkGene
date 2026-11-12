@@ -179,7 +179,9 @@ impl PropWin {
             // A pond dries up over its last moments (it was there one
             // frame and gone the next, the water on the pets in it left
             // behind as boxes: Roger's sixteenth pass, item 3).
-            Thing::Pond => (1.0 - (self.until - now) / POND_FADE).clamp(0.0, 1.0) as f32,
+            Thing::Pond | Thing::Beach => {
+                (1.0 - (self.until - now) / POND_FADE).clamp(0.0, 1.0) as f32
+            }
             Thing::Seeds | Thing::Sunbeam => {
                 let span = (self.until - self.born).max(1.0);
                 let left = (self.until - now) / span;
@@ -212,15 +214,19 @@ impl PropWin {
                 .set_outer_position(PhysicalPosition::new(pos.0, pos.1));
             self.placed = pos;
         }
-        let alive = matches!(
-            self.prop.thing,
-            Thing::Catnip
-                | Thing::Pond
-                | Thing::Sunbeam
-                | Thing::Butterfly
-                | Thing::Branch
-                | Thing::Spotlight
-        );
+        // The beach is still, but for fading in and out.
+        let fading =
+            self.prop.thing == Thing::Beach && (now - self.born < 1.2 || self.used(now) > 0.0);
+        let alive = fading
+            || matches!(
+                self.prop.thing,
+                Thing::Catnip
+                    | Thing::Pond
+                    | Thing::Sunbeam
+                    | Thing::Butterfly
+                    | Thing::Branch
+                    | Thing::Spotlight
+            );
         let grounded = self.prop.resting || (self.prop.vel.1 == 0.0 && self.prop.thing.falls());
         // Water flying about: drawn at twice the rate.
         self.sprays.retain(|s| now - s.2 < SPRAY_SECS);
@@ -279,8 +285,13 @@ impl PropWin {
         if let Err(e) = self.presenter.present(shared, &self.pixmap) {
             eprintln!("present failed: {e}");
         }
-        if self.prop.thing == Thing::Pond {
-            crate::diag::dump(format_args!("pond{}", self.id), self.placed, &self.pixmap);
+        if matches!(self.prop.thing, Thing::Pond | Thing::Beach) {
+            let what = if self.prop.thing == Thing::Pond {
+                "pond"
+            } else {
+                "beach"
+            };
+            crate::diag::dump(format_args!("{what}{}", self.id), self.placed, &self.pixmap);
         }
         self.drawn = Some((now, self.prop.pos, self.prop.spin, grounded));
     }
@@ -667,6 +678,8 @@ pub(super) struct Fun {
     wet: (f32, f64),
     /// How much is left of the pond it is in, 1 … 0 as it dries up.
     pond_left: f32,
+    /// Its feet are on a beach (see [`Playground::on_beach`]).
+    pub on_sand: bool,
     /// How far into the pond it stands, as a share of the pond's height up
     /// from its near edge (see [`Fun::pond_lift`]); 0 for the default.
     pond_deep: f32,
@@ -788,6 +801,15 @@ impl Playground {
             .find(|p| Some(p.pos) == now_in && in_water(p.pos, p.scale, feet, true))
             .or_else(|| ponds().find(|p| in_water(p.pos, p.scale, feet, false)))
             .map(|p| p.pos)
+    }
+
+    /// Feet at `feet` (screen pixels) stand on a beach's sand.
+    fn on_beach(&self, feet: (f32, f32)) -> bool {
+        self.things.iter().any(|w| {
+            w.prop.thing == Thing::Beach
+                && (feet.1 - w.prop.pos.1).abs() < 30.0 * w.prop.scale
+                && (feet.0 - w.prop.pos.0).abs() < 0.44 * Thing::Beach.size().0 * w.prop.scale
+        })
     }
 
     /// How much is left of the pond at `pos` (1 … 0 as it dries up); none
@@ -1279,7 +1301,7 @@ impl Pet {
             let at = match fx {
                 Fx::Hearts | Fx::Fright | Fx::Notes => head,
                 Fx::Sparkles => mouth,
-                Fx::Dust => (w / 2.0, floor),
+                Fx::Dust | Fx::Sand => (w / 2.0, floor),
                 Fx::Splash => (w / 2.0, floor - 0.13 * PPU * s),
                 Fx::Spell => (w / 2.0, floor),
                 Fx::Bubble | Fx::Dream | Fx::Brawl => (w / 2.0, floor - 0.95 * PPU * s),
@@ -1476,6 +1498,7 @@ pub(super) fn tick(
         if p.fun.pond.step(under, now) {
             p.fun.effect(Fx::Splash, now);
         }
+        p.fun.on_sand = ground.on_beach(p.body.feet());
         // Its pond drying up, the water on it goes too; gone, it is out.
         if let Some(pos) = p.fun.pond.now {
             match ground.pond_left(pos, now) {
@@ -2146,6 +2169,13 @@ pub(super) fn start_scene(
         let mut put = Prop::put(thing, at, s);
         put.resting = true;
         let until = now + scene.secs() + 1.0;
+        // A pond comes with golden sand round it, laid first so it lies
+        // under the water (Roger's eighteenth pass).
+        if thing == Thing::Pond {
+            let mut sand = Prop::put(Thing::Beach, at, s);
+            sand.resting = true;
+            ground.add(ctx.el, ctx.shared, sand, now, until);
+        }
         let Some(id) = ground.add(ctx.el, ctx.shared, put, now, until) else {
             return false;
         };

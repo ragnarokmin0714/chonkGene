@@ -53,6 +53,9 @@ pub enum Thing {
     Butterfly,
     /// A stage spotlight: whoever is in its pool dances the 肉肉舞.
     Spotlight,
+    /// Golden sand round a pond, to walk and run on (Roger's eighteenth
+    /// pass): it comes and goes with the pond, lying under it.
+    Beach,
 }
 
 impl Thing {
@@ -67,6 +70,7 @@ impl Thing {
             Thing::Seeds => (70.0, 14.0),
             Thing::Branch => (260.0, 60.0),
             Thing::Pond => (640.0, 136.0),
+            Thing::Beach => (1180.0, 150.0),
             Thing::Sunbeam => (400.0, 420.0),
             Thing::Butterfly => (28.0, 24.0),
             Thing::Spotlight => (240.0, 380.0),
