@@ -1263,6 +1263,12 @@ Roger's notes, with his answers to three questions the same day:
 5. **The sunbeam bigger.**
 6. **A golden sand beach beside the pond** for pets to walk and run on.
 
+#### Eighteenth pass, items 2–5 built (2026-11-12)
+
+- **2. The double-click** (`Pet::poke_due`, `poke_now`): a quick click no longer hops the pet away at once; its poke waits 0.45 s (`DOUBLE_CLICK`, was 0.4) and is dropped if a second click comes, which hugs. A slow press, a rub, a drag are as before. Under Xvfb driven by XTest (libXtst through ctypes): a double-click on 芋圓 hugged it ("hugged (in arms)" 0.21 s after the first press), a single click on 阿柴 poked it 0.5 s later.
+- **3, 4. A baby's arms, as a baby hugs a plush toy** (`props::baby_arm`, `hug_arms` with `HugHold`): chubby arms, thickest at the upper arm with a dip at the elbow, a crease at the wrist, a soft pink outline and a light along the top, pudgy fists with a thumb and rosy knuckles (the cursor's dark ink and straight bar are gone). Two holds, one picked at random for each hug: **環抱** (`Wrap`), round its middle from both sides, the hands meeting on its belly, squeezing; **前抱** (`Carry`), up its front from below with the hands under its arms, the pet held up (`hug_lift`: its window rises up to 25 px, bobbing, and comes down as the arms let go). `inbox/baby-hugs.gif` (`examples/touch.rs` scenes `hug-you`, `hug-carry`).
+- **5. The sunbeam** 400 × 420 at 100% (was 260 × 300).
+
 ### Phase 1: Shiba prototype (feel) — `v0.1.0`
 
 - The art pipeline (§3.3) works end to end for one Shiba, with placeholder art.

@@ -60,7 +60,7 @@ const DISLIKE_SECS: f32 = 0.35;
 /// The belly trap lasts this long, seconds.
 const TRAP_SECS: f32 = 1.8;
 /// Two clicks on a pet this close together are a hug.
-const DOUBLE_CLICK: Duration = Duration::from_millis(400);
+const DOUBLE_CLICK: Duration = Duration::from_millis(450);
 /// Held on a spot it loves: hearts from this long on, seconds, and again
 /// this often.
 const LOVE_HEARTS_AFTER: f32 = 0.8;
@@ -244,6 +244,9 @@ struct Pet {
     love_at: f64,
     /// A quick click let go then: a second one soon after is a hug.
     clicked_at: Option<Instant>,
+    /// That click's poke, waiting until then in case a second click comes
+    /// (see [`Pet::poke_now`]).
+    poke_due: Option<(Instant, Zone)>,
     /// When its picture last changed, and whether the log has noted it
     /// standing still since (see [`FROZEN`]).
     shown_at: Instant,
@@ -2156,6 +2159,7 @@ fn spawn(
         purr_at: 0.0,
         love_at: 0.0,
         clicked_at: None,
+        poke_due: None,
         shown_at: now,
         frozen: false,
         draw_gap: Duration::ZERO,
@@ -2325,6 +2329,30 @@ impl Pet {
         voice_pitch(self.save.size, self.save.chonk)
     }
 
+    /// A quick click's poke, once no second click came: a start, hopping
+    /// back from where the finger was (still facing the same way), and
+    /// what it makes of it.
+    fn poke_now(&mut self, ctx: &mut Ctx, zone: Zone) {
+        if !self.mind.asleep() && matches!(self.body.motion, Motion::Idle | Motion::Walk) {
+            let (w, s) = (self.body.size.0, self.fun.scale);
+            let away = if self.cursor.0 < 0.5 * w { 1.0 } else { -1.0 };
+            let facing = self.body.facing;
+            self.body
+                .spring(self.body.feet().0 + away * 0.06 * w, 14.0 * s);
+            self.body.facing = facing;
+        }
+        let mut rng = self.rng.clone();
+        let out = self.mind.poke(&ctx.world, zone, &mut rng);
+        self.rng = rng;
+        diag!(
+            "{}: a poke: {:?} {:?}",
+            self.save.name,
+            out.line,
+            out.expression
+        );
+        self.apply(ctx, out);
+    }
+
     /// 抱抱 (the menu, or a double-click): it says how it takes it, and if
     /// it is awake and free your arms go round it and it snuggles in.
     fn hug_you(&mut self, ctx: &mut Ctx) {
@@ -2338,8 +2366,15 @@ impl Pet {
         if free {
             self.body.motion = Motion::Idle;
             self.anim.hug(Hug::ByYou);
+            // Wrapped round, or held up in front: either, as a baby hugs a
+            // plush toy (Roger's eighteenth pass).
+            let hold = if self.rng.bool() {
+                props::HugHold::Wrap
+            } else {
+                props::HugHold::Carry
+            };
             self.fun.hug_arms =
-                props::opaque_bounds(self.renderer.pixmap()).map(|bounds| (now, bounds));
+                props::opaque_bounds(self.renderer.pixmap()).map(|bounds| (now, bounds, hold));
         }
         diag!(
             "{}: hugged ({})",
@@ -2630,6 +2665,12 @@ impl Pet {
         let t = ctx.world.now;
         self.fidget_sound(ctx);
         self.touch_step(ctx);
+        if let Some((due, zone)) = self.poke_due
+            && now >= due
+        {
+            self.poke_due = None;
+            self.poke_now(ctx, zone);
+        }
         if let Some(at) = self.hello_at
             && t >= at
         {
@@ -2813,7 +2854,7 @@ impl Pet {
         // In a pond it stands in the water, further in than its feet.
         let placed = (
             self.body.pos.0.round() as i32,
-            (self.body.pos.1 - self.fun.pond_lift()).round() as i32,
+            (self.body.pos.1 - self.fun.pond_lift() - self.fun.hug_lift(t)).round() as i32,
         );
         if placed != self.placed {
             self.window
@@ -3088,11 +3129,15 @@ impl ApplicationHandler<UserEvent> for App {
                             p.next = now;
                             return;
                         }
-                        // A double-click: a hug (Roger's sixteenth pass).
+                        // A double-click: a hug (Roger's sixteenth pass); the
+                        // first click's poke, still waiting, is dropped.
                         let double = p
                             .clicked_at
                             .take()
                             .is_some_and(|at| now - at <= DOUBLE_CLICK);
+                        if double {
+                            p.poke_due = None;
+                        }
                         if double {
                             let App {
                                 pets,
@@ -3237,19 +3282,19 @@ impl ApplicationHandler<UserEvent> for App {
                             // the finger (still facing the same way).
                             let quick =
                                 p.anim.held_secs() < 0.3 && p.anim.params().touch.scratch < 0.2;
-                            if quick
-                                && !rub
-                                && !p.mind.asleep()
-                                && matches!(p.body.motion, Motion::Idle | Motion::Walk)
-                            {
-                                let (w, s) = (p.body.size.0, p.fun.scale);
-                                let away = if p.cursor.0 < 0.5 * w { 1.0 } else { -1.0 };
-                                let facing = p.body.facing;
-                                p.body.spring(p.body.feet().0 + away * 0.06 * w, 14.0 * s);
-                                p.body.facing = facing;
-                            }
                             let held = p.anim.held_secs();
                             p.anim.poke(zone);
+                            // A quick click may be the first of a double-click
+                            // (a hug): what it does as a poke waits a moment,
+                            // so the pet is still there for the second
+                            // (Roger's eighteenth pass: hugs were hard to set
+                            // off, the first click sent it hopping away).
+                            if quick && !rub {
+                                p.poke_due = Some((now + DOUBLE_CLICK, zone));
+                                p.next = now;
+                                self.dirty = true;
+                                return;
+                            }
                             let out = if rub {
                                 p.mind.pat(&world, zone)
                             } else {

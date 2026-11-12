@@ -1530,63 +1530,168 @@ fn water(pm: &mut Pixmap, oval: (f32, f32, f32, f32), t: f32, over: Option<(f32,
     }
 }
 
-/// Your arms round a pet you hug (PLAN §8, Roger's sixteenth pass): two
-/// short arms in the hand cursor's colours coming in from either side of
-/// its body `bounds` (left, top, right, bottom, pixels) at belly height,
-/// mitten hands meeting over its middle, squeezing gently; `t` seconds in,
-/// over `secs`, in at the start and out at the end.
-pub fn hug_arms(pm: &mut Pixmap, bounds: (f32, f32, f32, f32), s: f32, t: f32, secs: f32) {
-    const SKIN: [u8; 4] = [0xFF, 0xE6, 0xD2, 255];
-    const INK: [u8; 4] = [0x5A, 0x40, 0x38, 255];
-    const CUFF: [u8; 4] = [0xF7, 0xA8, 0xBC, 255];
-    let (l, top, r, bottom) = bounds;
-    let reach = smooth(0.0, 0.35, t) * smooth(secs, secs - 0.35, t);
-    if reach <= 0.0 {
-        return;
-    }
-    let squeeze = 0.5 + 0.5 * (TAU * 1.1 * t).sin();
-    // Round its body, not its tails: the middle of the picture (the pet
-    // stands in the middle of its window), at most a third of it each way.
-    let mid = pm.width() as f32 / 2.0;
-    let half = (0.5 * (r - l)).min(0.3 * pm.width() as f32);
-    let y = top + 0.66 * (bottom - top);
-    let thick = 15.0 * s;
+/// How your arms hold a pet you hug (Roger's eighteenth pass: as a small
+/// baby hugs a plush toy).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum HugHold {
+    /// 環抱: arms round its middle from both sides, the little hands
+    /// overlapping on its belly, squeezing.
+    Wrap,
+    /// 前抱: hands up under its arms from below, holding it up in front.
+    Carry,
+}
+
+/// A baby's arm: a chubby sausage from `from` (the shoulder, off the
+/// pet) to `hand`, bowing out through `ctrl`, thick `r` at the shoulder and
+/// a little less at the wrist; a crease at the wrist, a soft pink outline
+/// and a light along its top, then a pudgy hand with a thumb (`thumb`:
+/// which way it points, ±1) and rosy knuckles.
+fn baby_arm(
+    pm: &mut Pixmap,
+    from: (f32, f32),
+    ctrl: (f32, f32),
+    hand: (f32, f32),
+    r: f32,
+    thumb: f32,
+    s: f32,
+) {
+    const SKIN: [u8; 4] = [0xFF, 0xE3, 0xD3, 255];
+    const SHADE: [u8; 4] = [0xF4, 0xBF, 0xAA, 255];
+    const LIGHT: [u8; 4] = [0xFF, 0xF3, 0xEA, 255];
+    const LINE: [u8; 4] = [0xE0, 0x9A, 0x86, 255];
+    const ROSY: [u8; 4] = [0xFF, 0xA8, 0xA8, 170];
     let id = Transform::identity();
-    for side in [-1.0f32, 1.0] {
-        // From low outside the body, bulging out round its side and in
-        // over its front, the hands meeting in the middle.
-        let from = (mid + side * (half + 6.0 * s), y + 20.0 * s);
-        let hand = (
-            mid + side * (0.14 * half + (1.0 - reach) * 0.9 * half - 3.0 * s * squeeze),
-            y - 2.0 * s,
-        );
-        let ctrl = (mid + side * (1.15 * half), y - 26.0 * s);
-        let mut pb = PathBuilder::new();
-        pb.move_to(from.0, from.1);
-        pb.quad_to(ctrl.0, ctrl.1, hand.0, hand.1);
-        let Some(arm) = pb.finish() else {
-            continue;
-        };
-        let stroke = |w: f32| Stroke {
-            width: w,
+    let at = |u: f32| {
+        let v = 1.0 - u;
+        (
+            v * v * from.0 + 2.0 * v * u * ctrl.0 + u * u * hand.0,
+            v * v * from.1 + 2.0 * v * u * ctrl.1 + u * u * hand.1,
+        )
+    };
+    // Plump: thickest at the upper arm, a dip at the elbow, the forearm
+    // round again, narrowing to the wrist.
+    let radius = |u: f32| r * (1.0 - 0.18 * u + 0.08 * (u * 6.0).sin().max(0.0) * (1.0 - u));
+    let dot = |pm: &mut Pixmap, x: f32, y: f32, rr: f32, c: [u8; 4]| {
+        if let Some(p) = PathBuilder::from_circle(x, y, rr.max(0.3)) {
+            pm.fill_path(&p, &paint(c), FillRule::Winding, id, None);
+        }
+    };
+    let n = 28;
+    for k in 0..=n {
+        let u = k as f32 / n as f32;
+        let (x, y) = at(u);
+        dot(pm, x, y, radius(u) + 1.3 * s, LINE);
+    }
+    for k in 0..=n {
+        let u = k as f32 / n as f32;
+        let (x, y) = at(u);
+        dot(pm, x, y, radius(u), SHADE);
+    }
+    for k in 0..=n {
+        let u = k as f32 / n as f32;
+        let (x, y) = at(u);
+        dot(pm, x, y - 0.18 * radius(u), 0.82 * radius(u), SKIN);
+    }
+    for k in 2..n - 2 {
+        let u = k as f32 / n as f32;
+        let (x, y) = at(u);
+        dot(pm, x, y - 0.45 * radius(u), 0.3 * radius(u), LIGHT);
+    }
+    // The crease at the wrist.
+    let (wx, wy) = at(0.9);
+    let (dx, dy) = {
+        let (ax, ay) = at(0.86);
+        (wx - ax, wy - ay)
+    };
+    let len = dx.hypot(dy).max(1e-3);
+    let (nx, ny) = (-dy / len, dx / len);
+    let rw = 0.75 * radius(0.9);
+    let mut pb = PathBuilder::new();
+    pb.move_to(wx + nx * rw, wy + ny * rw);
+    pb.quad_to(wx + 2.0 * dx, wy + 2.0 * dy, wx - nx * rw, wy - ny * rw);
+    if let Some(path) = pb.finish() {
+        let st = Stroke {
+            width: 1.1 * s,
             line_cap: LineCap::Round,
             ..Stroke::default()
         };
-        pm.stroke_path(&arm, &paint(INK), &stroke(thick + 2.4 * s), id, None);
-        pm.stroke_path(&arm, &paint(SKIN), &stroke(thick), id, None);
-        // A pink cuff where the arm comes in.
-        if let Some(c) = PathBuilder::from_circle(from.0, from.1, 0.62 * thick) {
-            pm.fill_path(&c, &paint(INK), FillRule::Winding, id, None);
+        pm.stroke_path(&path, &paint(LINE), &st, id, None);
+    }
+    // The hand: a round little fist, a thumb on top, rosy knuckles.
+    let hr = 0.95 * r;
+    let (tx, ty) = (hand.0 + thumb * 0.55 * hr, hand.1 - 0.62 * hr);
+    dot(pm, hand.0, hand.1, hr + 1.3 * s, LINE);
+    dot(pm, tx, ty, 0.42 * hr + 1.3 * s, LINE);
+    dot(pm, hand.0, hand.1, hr, SKIN);
+    dot(pm, tx, ty, 0.42 * hr, SKIN);
+    dot(pm, hand.0 - 0.25 * hr, hand.1 - 0.3 * hr, 0.35 * hr, LIGHT);
+    for k in 0..3 {
+        let kx = hand.0 - thumb * (0.15 + 0.3 * k as f32) * hr;
+        dot(pm, kx, hand.1 + 0.45 * hr, 0.16 * hr, ROSY);
+    }
+}
+
+/// How far a pet held up in front (前抱) is lifted, pixels, `t` seconds
+/// into a hug `secs` long: up as the arms come in, a little bounce, down as
+/// they let go. Nothing for the other holds.
+pub fn hug_lift(hold: HugHold, s: f32, t: f32, secs: f32) -> f32 {
+    if hold != HugHold::Carry {
+        return 0.0;
+    }
+    let up = smooth(0.15, 0.6, t) * smooth(secs, secs - 0.5, t);
+    up * (22.0 + 3.0 * (TAU * 1.2 * t).sin()) * s
+}
+
+/// Your arms round a pet you hug (PLAN §8; Roger's eighteenth pass: a
+/// small baby's arms and hands, as a baby hugs a plush toy): `hold`, round
+/// its body `bounds` (left, top, right, bottom, pixels), `t` seconds in over
+/// `secs`, coming in at the start, squeezing gently, letting go at the end.
+pub fn hug_arms(
+    pm: &mut Pixmap,
+    bounds: (f32, f32, f32, f32),
+    hold: HugHold,
+    s: f32,
+    t: f32,
+    secs: f32,
+) {
+    let (l, top, r, bottom) = bounds;
+    let reach = smooth(0.0, 0.4, t) * smooth(secs, secs - 0.4, t);
+    if reach <= 0.0 {
+        return;
+    }
+    let squeeze = 0.5 + 0.5 * (TAU * 0.9 * t).sin();
+    // Round its body, not its tails: the middle of the picture, at most a
+    // third of it each way.
+    let mid = pm.width() as f32 / 2.0;
+    let half = (0.5 * (r - l)).min(0.3 * pm.width() as f32);
+    let tall = bottom - top;
+    let thick = 13.0 * s;
+    match hold {
+        HugHold::Wrap => {
+            // From behind its sides at the belly, round the front, the
+            // little hands meeting (one over the other) on its belly.
+            let y = top + 0.62 * tall;
+            for side in [1.0f32, -1.0] {
+                let from = (mid + side * (half + 4.0 * s), y - 10.0 * s);
+                let inward = (1.0 - reach) * 0.8 * half;
+                let hand = (
+                    mid + side * (0.12 * half + inward - 4.0 * s * squeeze),
+                    y + 6.0 * s + side * 3.0 * s,
+                );
+                let ctrl = (mid + side * (half + 10.0 * s), y + 18.0 * s);
+                baby_arm(pm, from, ctrl, hand, thick, -side, s);
+            }
         }
-        if let Some(c) = PathBuilder::from_circle(from.0, from.1, 0.62 * thick - 1.2 * s) {
-            pm.fill_path(&c, &paint(CUFF), FillRule::Winding, id, None);
-        }
-        // A round mitten of a hand.
-        if let Some(c) = PathBuilder::from_circle(hand.0, hand.1, 0.8 * thick) {
-            pm.fill_path(&c, &paint(INK), FillRule::Winding, id, None);
-        }
-        if let Some(c) = PathBuilder::from_circle(hand.0, hand.1, 0.8 * thick - 1.2 * s) {
-            pm.fill_path(&c, &paint(SKIN), FillRule::Winding, id, None);
+        HugHold::Carry => {
+            // From below, up its front, the hands under its arms.
+            let y = top + 0.5 * tall;
+            for side in [1.0f32, -1.0] {
+                let from = (mid + side * 0.5 * half, bottom + 4.0 * s);
+                let up = (1.0 - reach) * 0.5 * tall;
+                let hand = (mid + side * (0.62 * half - 2.0 * s * squeeze), y + up);
+                let ctrl = (mid + side * 0.9 * half, bottom - 0.1 * tall + 0.5 * up);
+                baby_arm(pm, from, ctrl, hand, thick, -side, s);
+            }
         }
     }
 }

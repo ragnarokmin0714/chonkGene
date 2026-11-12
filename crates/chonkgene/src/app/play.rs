@@ -574,6 +574,15 @@ impl Fun {
     /// How far up its window goes while it is in a pond, pixels: its feet
     /// into the water rather than on the near edge, eased in and out with
     /// the water (`wet`).
+    /// How far up its window goes while you hold it up in front (前抱),
+    /// pixels, at `t`.
+    pub fn hug_lift(&self, t: f64) -> f32 {
+        self.hug_arms.map_or(0.0, |(since, _, hold)| {
+            let secs = chonkgene_core::anim::HUG_SECS;
+            props::hug_lift(hold, self.scale, (t - since) as f32, secs)
+        })
+    }
+
     pub fn pond_lift(&self) -> f32 {
         if self.pond.now.is_none() {
             return 0.0;
@@ -586,6 +595,9 @@ impl Fun {
         self.wet.0 * deep * Thing::Pond.size().1 * self.scale
     }
 }
+
+/// A picture's opaque part: left, top, right, bottom, pixels.
+pub type Bounds = (f32, f32, f32, f32);
 
 /// What a pet is up to besides its ordinary life.
 #[derive(Default)]
@@ -658,9 +670,9 @@ pub(super) struct Fun {
     /// How far into the pond it stands, as a share of the pond's height up
     /// from its near edge (see [`Fun::pond_lift`]); 0 for the default.
     pond_deep: f32,
-    /// Hugged by you: since when, and the body your arms go round (its
-    /// picture's bounds then).
-    pub hug_arms: Option<(f64, (f32, f32, f32, f32))>,
+    /// Hugged by you: since when, the body your arms go round (its
+    /// picture's bounds then), and how they hold it.
+    pub hug_arms: Option<(f64, Bounds, props::HugHold)>,
     /// When it last finished a 肉肉舞 (it does not dance again at once).
     pub danced: f64,
     /// When it last went into a pond to join the others.
@@ -1144,7 +1156,7 @@ impl Pet {
         if self
             .fun
             .hug_arms
-            .is_some_and(|(since, _)| t - since >= hug_secs)
+            .is_some_and(|(since, ..)| t - since >= hug_secs)
         {
             self.fun.hug_arms = None;
         }
@@ -1214,8 +1226,8 @@ impl Pet {
             let line = floor + (full - floor) * wet;
             props::pond_front(canvas, at, w / 2.0, line, s, t as f32);
         }
-        if let Some((since, bounds)) = self.fun.hug_arms {
-            props::hug_arms(canvas, bounds, s, (t - since) as f32, hug_secs as f32);
+        if let Some((since, bounds, hold)) = self.fun.hug_arms {
+            props::hug_arms(canvas, bounds, hold, s, (t - since) as f32, hug_secs as f32);
         }
         if let Some(thing) = self.fun.carry {
             let at = self.renderer.mouth(self.anim.facing);

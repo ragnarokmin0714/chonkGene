@@ -82,6 +82,7 @@ fn scenes() -> Vec<Scene> {
         hug("hug-bear", Hug::Bear),
         hug("hug-squeezed", Hug::Squeezed),
         hug("hug-you", Hug::ByYou),
+        hug("hug-carry", Hug::ByYou),
         touch("poke", Zone::Belly, 0.5, 0.75, 2.5),
         touch("rub", Zone::Belly, 0.3, 3.3, 4.5),
         touch("chin", Zone::Chin, 0.3, 2.8, 3.8),
@@ -231,10 +232,27 @@ fn main() {
             }
             let path = format!("{out}/{}-{f:03}.png", scene.name);
             if scene.hug == Some(Hug::ByYou) && t >= 0.3 {
-                // Your arms round it, as the app draws them.
-                let mut pm = r.pixmap().clone();
-                if let Some(b) = chonkgene_render::props::opaque_bounds(&pm) {
-                    chonkgene_render::props::hug_arms(&mut pm, b, 1.0, t - 0.3, 3.2);
+                // Your arms round it, as the app draws them; held up in
+                // front, it is lifted too (the app moves its window).
+                use chonkgene_render::props::{HugHold, hug_arms, hug_lift, opaque_bounds};
+                let hold = if scene.name == "hug-carry" {
+                    HugHold::Carry
+                } else {
+                    HugHold::Wrap
+                };
+                let src = r.pixmap().clone();
+                let lift = hug_lift(hold, 1.0, t - 0.3, 3.2).round() as i32;
+                let mut pm = tiny_skia::Pixmap::new(src.width(), src.height()).unwrap();
+                pm.draw_pixmap(
+                    0,
+                    -lift,
+                    src.as_ref(),
+                    &tiny_skia::PixmapPaint::default(),
+                    tiny_skia::Transform::identity(),
+                    None,
+                );
+                if let Some(b) = opaque_bounds(&pm) {
+                    hug_arms(&mut pm, b, hold, 1.0, t - 0.3, 3.2);
                 }
                 pm.save_png(&path).expect("write frame");
                 continue;
