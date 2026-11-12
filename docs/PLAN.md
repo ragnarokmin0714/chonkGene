@@ -1204,6 +1204,7 @@ Roger's notes after the fifteenth pass, to do next time:
   - **You hug it**: 「抱抱」 at the top of the menu and a **double-click** on the pet (double-click is unused). The hand becomes two short arms round it; it shuts its eyes, nuzzles, hearts, squashed a little; 親密度 up.
   - **They hug each other**: with 非理性模式 on, two that get on hug now and then by themselves, and after a squabble or a tussle they make up with one; and 「叫牠… › 去抱抱…」 picks whom.
   - **How it looks**: face to face, cheek to cheek, swaying together, the one in front with a paw or wing over the other's shoulder; hearts, a nuzzle each after. **The fox instead stands up for a bear hug**: Roger is shaping her as a **霸道姊姊** (a bossy big sister): she pulls the other into a hug whether it wants one or not.
+- **The fox's persona from now on** (Roger, 2026-11-12: 「這就當作以後九尾的人設」): **bossy big sister to the other pets, 傲嬌 to you.** To them she calls herself 姊姊, gives orders (「站好，不准動！」, 「小的們，集合！」) and hugs them whether they want it or not, with a soft core (a pat on the head after, nobody truly afraid of her). To you she is 傲嬌: 「哼」, says no while her tails say yes (「哼……就讓你摸一下。」, 「才不喜歡{you}呢。」). Every fox line was rewritten in this voice (`assets/lines/zh-TW.ron`, the header there says it); the playful 「嘻嘻」 trickster is gone. She no longer names herself 小九 in lines (a renamed fox said the wrong name).
 
 ### Phase 1: Shiba prototype (feel) — `v0.1.0`
 
