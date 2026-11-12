@@ -1196,6 +1196,15 @@ Roger's notes after the fifteenth pass, to do next time:
 
    Reactions: **loves**: eyes shut in bliss, louder purr or contented sound, hearts, pushes into the hand, held on it rolls over for more or kneads (cats), kicks a hind leg (the Shiba at its tail base), fluffs up (birds); more 親密度. **Likes**: leans into the hand, tail or wings going, a small heart. **Does not mind**: as now. **Dislikes**: a flinch, a look back, ears flat, a step away; kept at it, the grudges there are now. Personality still shifts it (a 厭世 one loves less loudly). Model work it needs: the models give `head`, `belly`, `paw`, `bottom` (and the fox `cheek`); chin and tail come from the bones. A `back` zone apart from `bottom`, `wing` apart from `paw` on the birds, and cheeks on all would have to be added to the model files.
 
+#### Roger's answers on item 4, and hugs (2026-11-12)
+
+- **The table above as proposed**, with: the 曼赤肯's belly loved but **a trap after a while** (about 3 s of rubbing: it hugs the hand with its front paws and bunny-kicks, lets go and looks up pleased; play, not a grudge, 親密度 as for a loved spot); the 折耳貓 simply loves it.
+- **Zones from the bones, not the model files** (as chin and tail already are, `mesh::refine_zone`): `wing` (skin moving with `wing_l`/`wing_r`) apart from `paw` on the birds; `back` (the top of the body between `chest` and `butt`) apart from `bottom`; `cheek` on every species (head skin beside the nose, below the eyes). A picture of every pet coloured by zone goes to Roger before the reactions are built.
+- **Hugs, new** (Roger: 「再加個抱的動作，除了我可以抱，動物也可以互相抱」):
+  - **You hug it**: 「抱抱」 at the top of the menu and a **double-click** on the pet (double-click is unused). The hand becomes two short arms round it; it shuts its eyes, nuzzles, hearts, squashed a little; 親密度 up.
+  - **They hug each other**: with 非理性模式 on, two that get on hug now and then by themselves, and after a squabble or a tussle they make up with one; and 「叫牠… › 去抱抱…」 picks whom.
+  - **How it looks**: face to face, cheek to cheek, swaying together, the one in front with a paw or wing over the other's shoulder; hearts, a nuzzle each after. **The fox instead stands up for a bear hug**: Roger is shaping her as a **霸道姊姊** (a bossy big sister): she pulls the other into a hug whether it wants one or not.
+
 ### Phase 1: Shiba prototype (feel) — `v0.1.0`
 
 - The art pipeline (§3.3) works end to end for one Shiba, with placeholder art.
