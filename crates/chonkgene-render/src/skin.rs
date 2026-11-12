@@ -6,6 +6,7 @@
 //! belly, bottom and chin wobble on springs of their own.
 
 use chonkgene_core::Zone;
+use chonkgene_core::species::Fondness;
 use chonkgene_rig::math::{M3, V3, v3};
 use chonkgene_rig::{FLOOR, Model, builtin};
 
@@ -257,6 +258,12 @@ pub struct Feel {
     pub poked: Option<(Zone, Option<usize>, f32)>,
     /// Being scratched, 0 … 1 (see [`chonkgene_core::anim::Touch::scratch`]).
     pub scratch: f32,
+    /// How it likes the spot held or last touched (see
+    /// [`chonkgene_core::anim::Touch::fond`]).
+    pub fond: Option<Fondness>,
+    /// The 曼赤肯's belly trap, 0 … 1 (see
+    /// [`chonkgene_core::anim::Touch::trap`]).
+    pub trap: f32,
 }
 
 impl Feel {
@@ -312,6 +319,15 @@ pub(crate) struct Levels {
     pub kick: f32,
     /// Being scratched (eased), 0 … 1: leaning into it, a cat kneading.
     pub scratch: f32,
+    /// A hand on a spot it loves, held a moment (eased), 0 … 1: leaning
+    /// into it as into a scratch, a cat kneading, eyes shut.
+    pub bliss: f32,
+    /// A hand on a spot it does not like (eased, fading after), 0 … 1:
+    /// ears back, head turned away, leaning off.
+    pub shy: f32,
+    /// The belly trap (see [`Feel::trap`]): front paws clutching, hind
+    /// legs bunny-kicking.
+    pub trap: f32,
     /// Startled by a poke just now, 0 … 1, fading.
     pub startle: f32,
     /// Seconds on the walk's own clock.
@@ -329,6 +345,8 @@ pub(crate) struct Moods {
     sulk: Spring,
     content: Spring,
     rub: Spring,
+    bliss: Spring,
+    shy: Spring,
     back: Spring,
     head: Spring,
     chin: Spring,
@@ -408,12 +426,19 @@ impl Moods {
             .rub
             .step(held(Zone::Belly), 0.0, 1.3, 0.8, dt)
             .clamp(0.0, 1.2);
-        let back_goal = held(Zone::Tail)
-            .max(held(Zone::Bottom))
-            .max(held(Zone::Back))
-            .max(long(Zone::Tail))
-            .max(long(Zone::Bottom))
-            .max(long(Zone::Back));
+        // Looking back at a hand behind it, unless it is a spot it loves:
+        // then it enjoys it facing you, eyes shut.
+        let loved = feel.fond == Some(Fondness::Loves);
+        let back_goal = if loved {
+            0.0
+        } else {
+            held(Zone::Tail)
+                .max(held(Zone::Bottom))
+                .max(held(Zone::Back))
+                .max(long(Zone::Tail))
+                .max(long(Zone::Bottom))
+                .max(long(Zone::Back))
+        };
         let back = self.back.step(back_goal, 0.0, 2.2, 0.9, dt);
         let head = self.head.step(held(Zone::Head), 0.0, 2.0, 0.8, dt);
         let chin = self.chin.step(held(Zone::Chin), 0.0, 2.0, 0.8, dt);
@@ -426,7 +451,9 @@ impl Moods {
             dt,
         );
         let flinch = short(Zone::Head);
+        // A paw (or wing) it does not like touched stays tucked in.
         let paw = match (feel.held, feel.poked) {
+            _ if feel.fond == Some(Fondness::Dislikes) => None,
             // A bird's wing lifts as a paw does.
             (Some((Zone::Paw | Zone::Wing, bone, secs)), _) => bone.map(|b| (b, ramp(secs))),
             (None, Some((z @ (Zone::Paw | Zone::Wing), bone, _))) => bone.map(|b| (b, short(z))),
@@ -436,9 +463,36 @@ impl Moods {
             .scratch
             .step(feel.scratch, 0.0, 3.5, 0.9, dt)
             .clamp(0.0, 1.0);
+        // A spot it loves, held: bliss after a moment. One it does not
+        // like: shy at once, and for a while after the hand goes.
+        let love_held = match (feel.held, feel.fond) {
+            (Some((.., secs)), Some(Fondness::Loves)) => {
+                chonkgene_rig::math::smoothstep(0.3, 0.9, secs)
+            }
+            _ => 0.0,
+        };
+        let bliss = self
+            .bliss
+            .step(love_held, 0.0, 2.0, 0.9, dt)
+            .clamp(0.0, 1.0);
+        let shy_goal = match (feel.fond, feel.held, feel.poked) {
+            (Some(Fondness::Dislikes), Some(_), _) => 1.0,
+            (Some(Fondness::Dislikes), None, Some((.., ago))) => (1.0 - ago / 1.2).max(0.0),
+            _ => 0.0,
+        };
+        let shy = self.shy.step(shy_goal, 0.0, 3.0, 0.9, dt).clamp(0.0, 1.0);
         // A good scratch under the chin or on the belly, or a finger rubbing
-        // about anywhere, sets a hind leg going.
-        let kick = held(Zone::Chin).max(held(Zone::Belly)).max(scratch)
+        // about anywhere, sets a hind leg going; so does a loved bottom held
+        // (the Shiba scratched at the base of its tail).
+        let loved_bottom = if feel.fond == Some(Fondness::Loves) {
+            held(Zone::Bottom).max(held(Zone::Back))
+        } else {
+            0.0
+        };
+        let kick = held(Zone::Chin)
+            .max(held(Zone::Belly))
+            .max(loved_bottom)
+            .max(scratch)
             * (0.5 + 0.5 * (TAU * 0.5 * self.t).sin().abs());
         // A quick poke anywhere: a start, over in about half a second.
         let startle = feel
@@ -462,6 +516,9 @@ impl Moods {
             flick,
             kick,
             scratch,
+            bliss,
+            shy,
+            trap: feel.trap.clamp(0.0, 1.0),
             startle,
             t: self.t,
         }
@@ -2221,6 +2278,55 @@ impl Walk {
             for ear in b.ears.into_iter().flatten() {
                 j[ear].rot.x -= 18.0 * lv.startle * self.ear_k;
             }
+        }
+        // A loved spot: leaning into the hand as into a scratch, a cat's
+        // front paws treading.
+        if lv.bliss > lv.scratch {
+            let lean = lv.bliss - lv.scratch;
+            let toward = if lv.gaze.0 < 0.0 { -1.0 } else { 1.0 };
+            let sway = (TAU * 0.5 * t).sin();
+            j[b.body].rot.z -= toward * lean * (5.0 + 2.0 * sway);
+            j[b.head].rot.z -= toward * lean * (12.0 + 4.0 * sway);
+            if self.kneads {
+                let mut k = 0.0;
+                for &(leg, _, front) in &self.legs {
+                    if front {
+                        let tread = (TAU * 1.3 * t + std::f32::consts::PI * k).sin().max(0.0);
+                        j[leg].rot.x -= lean * 20.0 * tread;
+                        j[leg].shift.y += lean * 0.04 * tread;
+                        k += 1.0;
+                    }
+                }
+            }
+        }
+        // A spot it does not like: ears back, the head turned away from
+        // the hand, the body leaning off it.
+        if lv.shy > 0.0 {
+            let toward = if lv.gaze.0 < 0.0 { -1.0 } else { 1.0 };
+            for ear in b.ears.into_iter().flatten() {
+                j[ear].rot.x += 30.0 * lv.shy * self.ear_k;
+            }
+            j[b.head].rot.y += toward * 28.0 * lv.shy;
+            j[b.head].rot.x += 8.0 * lv.shy;
+            j[b.body].rot.z += toward * 6.0 * lv.shy;
+        }
+        // The belly trap: on its back, the front paws clutch the hand and
+        // both hind legs kick away at it, fast.
+        if lv.trap > 0.0 {
+            let mut k = 0.0;
+            for &(leg, _, front) in &self.legs {
+                if front {
+                    j[leg].rot.x -= lv.trap * 70.0;
+                } else {
+                    let kick = (TAU * 5.0 * t + std::f32::consts::PI * k).sin();
+                    j[leg].rot.x -= lv.trap * (50.0 + 45.0 * kick);
+                    j[leg].shift.y += 0.07 * lv.trap * kick.max(0.0);
+                    k += 1.0;
+                }
+            }
+            // Wriggling about with it, curled round the hand.
+            j[0].rot.z += lv.trap * 9.0 * (TAU * 2.5 * t).sin();
+            j[b.head].rot.x += lv.trap * 18.0;
         }
         // A dog scratched just right: a hind leg kicks away.
         if self.kicks && lv.kick > 0.0 {

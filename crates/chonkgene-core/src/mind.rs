@@ -5,7 +5,7 @@
 //! it (lines in bubbles, expressions, actions, sounds).
 
 use crate::anim::Expression;
-use crate::species::{Grumpiness, Species, in_hours};
+use crate::species::{Fondness, Grumpiness, Species, in_hours};
 use crate::tickle::{Reaction, Tickle};
 use crate::{Personality, Zone};
 
@@ -97,10 +97,16 @@ pub enum Line {
     Splash,
     /// Splashed in a water fight.
     Splashed,
+    /// A pat on a spot it loves (PLAN §8, Roger's sixteenth pass, item 4).
+    PatLove,
+    /// A hand on a spot it does not like.
+    Dislike,
+    /// The 曼赤肯's belly rubbed too long: it grabs the hand.
+    Trap,
 }
 
 impl Line {
-    pub const ALL: [Line; 48] = [
+    pub const ALL: [Line; 51] = [
         Line::Hello,
         Line::WelcomeBack,
         Line::PokeSmall,
@@ -149,6 +155,9 @@ impl Line {
         Line::DanceEnd,
         Line::Splash,
         Line::Splashed,
+        Line::PatLove,
+        Line::Dislike,
+        Line::Trap,
     ];
 
     /// Key in the line tables.
@@ -202,6 +211,17 @@ impl Line {
             Line::DanceEnd => "dance_end",
             Line::Splash => "splash",
             Line::Splashed => "splashed",
+            Line::PatLove => "pat_love",
+            Line::Dislike => "dislike",
+            Line::Trap => "trap",
+        }
+    }
+
+    /// The one species that says it, for a line only one has.
+    pub fn only_for(self) -> Option<Species> {
+        match self {
+            Line::Trap => Some(Species::Munchkin),
+            _ => None,
         }
     }
 }
@@ -214,6 +234,8 @@ pub struct Out {
     /// Start a species grumpiness act (zoomies, swat, …).
     pub act: Option<Grumpiness>,
     pub level_up: bool,
+    /// Pleased beyond a pat: more hearts (a spot it loves).
+    pub bliss: bool,
 }
 
 impl Out {
@@ -372,6 +394,7 @@ impl Mind {
     }
 
     pub fn poke(&mut self, w: &World, zone: Zone, rng: &mut fastrand::Rng) -> Out {
+        let fond = self.species.fondness(zone);
         self.last_touch = w.now;
         let quick = w.now - self.last_poke < WAKE_POKE_GAP;
         self.last_poke = w.now;
@@ -396,6 +419,8 @@ impl Mind {
             Reaction::FedUp => (Line::FedUp, Some(Expression::FedUp)),
             Reaction::Overdone => (Line::Overdone, Some(Expression::Sulk)),
             Reaction::Ignored => (Line::StillOverdone, None),
+            // A poke where it does not like to be touched: it says so.
+            _ if fond == Fondness::Dislikes => (Line::Dislike, None),
             _ => (Line::PokeSmall, None),
         };
         out.line = Some(line);
@@ -403,7 +428,9 @@ impl Mind {
         out
     }
 
-    pub fn pat(&mut self, w: &World) -> Out {
+    /// A hand held a while on `zone` (a rub, a scratch): by how much it
+    /// likes it there. A spot it dislikes is not a pat ([`Mind::dislike`]).
+    pub fn pat(&mut self, w: &World, zone: Zone) -> Out {
         self.last_touch = w.now;
         if self.sleep.is_some() {
             return Out::say(Line::TurnOver);
@@ -413,8 +440,34 @@ impl Mind {
             self.gain(&mut out, 2, w.day);
             return out;
         }
-        let mut out = Out::say(Line::Pat).with(Expression::Happy);
-        self.gain(&mut out, 10, w.day);
+        let (line, xp) = match self.species.fondness(zone) {
+            Fondness::Loves => (Line::PatLove, 16),
+            Fondness::Likes => (Line::Pat, 10),
+            Fondness::Fine | Fondness::Dislikes => (Line::Pat, 6),
+        };
+        let mut out = Out::say(line).with(Expression::Happy);
+        out.bliss = line == Line::PatLove;
+        self.gain(&mut out, xp, w.day);
+        out
+    }
+
+    /// A hand held on a spot it does not like: it pulls away and says so,
+    /// and it counts as a poke there (kept at, a grudge, as pokes do).
+    pub fn dislike(&mut self, w: &World, zone: Zone, rng: &mut fastrand::Rng) -> Out {
+        let mut out = self.poke(w, zone, rng);
+        if out.line == Some(Line::PokeSmall) {
+            out.line = Some(Line::Dislike);
+        }
+        out
+    }
+
+    /// The 曼赤肯's belly trap sprung: it grabs the hand and kicks, all in
+    /// play (no grudge, 親密度 as for a loved spot).
+    pub fn trap(&mut self, w: &World) -> Out {
+        self.last_touch = w.now;
+        let mut out = Out::say(Line::Trap).with(Expression::Happy);
+        out.bliss = true;
+        self.gain(&mut out, 16, w.day);
         out
     }
 
@@ -472,6 +525,7 @@ impl Mind {
             expression: Some(Expression::FedUp),
             act: Some(self.species.grumpiness()),
             level_up: false,
+            bliss: false,
         }
     }
 
@@ -548,6 +602,83 @@ mod tests {
         fastrand::Rng::with_seed(9)
     }
 
+    fn of(s: Species) -> Mind {
+        Mind::new(s, s.personality(), Affinity::default())
+    }
+
+    /// Roger's table (PLAN §8, sixteenth pass, item 4), his own examples
+    /// first: a cat's chin and belly excite it.
+    #[test]
+    fn each_species_has_spots_it_loves_and_ones_it_does_not() {
+        use crate::species::Fondness::*;
+        for cat in [Species::Munchkin, Species::Fold] {
+            assert_eq!(cat.fondness(Zone::Chin), Loves);
+            assert_eq!(cat.fondness(Zone::Belly), Loves);
+            assert_eq!(cat.fondness(Zone::Tail), Dislikes);
+        }
+        assert_eq!(Species::Shiba.fondness(Zone::Bottom), Loves);
+        assert_eq!(Species::Shiba.fondness(Zone::Paw), Dislikes);
+        assert_eq!(Species::Owl.fondness(Zone::Cheek), Loves);
+        assert_eq!(Species::Chick.fondness(Zone::Back), Loves);
+        assert_eq!(Species::Duck.fondness(Zone::Wing), Dislikes);
+        assert_eq!(Species::Fox.fondness(Zone::Tail), Loves);
+        assert_eq!(Species::Munchkin.belly_trap(), Some(3.0));
+        assert_eq!(Species::Fold.belly_trap(), None);
+        for s in Species::ALL {
+            let zones = [
+                Zone::Head,
+                Zone::Chin,
+                Zone::Cheek,
+                Zone::Belly,
+                Zone::Paw,
+                Zone::Wing,
+                Zone::Back,
+                Zone::Bottom,
+                Zone::Tail,
+            ];
+            assert!(
+                zones.iter().any(|&z| s.fondness(z) == Loves),
+                "{s:?} loves nothing"
+            );
+            assert!(
+                zones.iter().any(|&z| s.fondness(z) == Dislikes),
+                "{s:?} minds nothing"
+            );
+        }
+    }
+
+    #[test]
+    fn a_loved_spot_pleases_more_than_a_pat_and_a_disliked_one_is_said() {
+        let (w, mut r) = (world(10.0), rng());
+        let mut m = of(Species::Fold);
+        let loved = m.pat(&w, Zone::Chin);
+        assert_eq!(loved.line, Some(Line::PatLove));
+        assert!(loved.bliss);
+        let xp = m.affinity.xp;
+        let liked = m.pat(&world(20.0), Zone::Cheek);
+        assert_eq!(liked.line, Some(Line::Pat));
+        assert!(!liked.bliss);
+        assert!(xp >= 16 && m.affinity.xp - xp == 10);
+        let mut m = of(Species::Shiba);
+        assert_eq!(
+            m.dislike(&world(30.0), Zone::Paw, &mut r).line,
+            Some(Line::Dislike)
+        );
+        assert_eq!(
+            m.poke(&world(60.0), Zone::Tail, &mut r).line,
+            Some(Line::Dislike)
+        );
+        assert_eq!(
+            m.poke(&world(90.0), Zone::Head, &mut r).line,
+            Some(Line::PokeSmall)
+        );
+        // The 曼赤肯's trap is play: pleased, no grudge.
+        let mut m = of(Species::Munchkin);
+        let out = m.trap(&world(100.0));
+        assert_eq!((out.line, out.bliss), (Some(Line::Trap), true));
+        assert!(!m.grumpy());
+    }
+
     #[test]
     fn one_poke_rolls_a_sleeper_over_and_two_wake_it() {
         let (mut m, mut r) = (mind(), rng());
@@ -572,7 +703,7 @@ mod tests {
         assert_eq!(out.act, Some(Grumpiness::Zoomies));
         assert!(m.grumpy());
         assert_eq!(m.tick(&world(9.0), &mut r).line, Some(Line::AfterGrumpy));
-        assert_eq!(m.pat(&world(10.0)).line, Some(Line::GrudgePat));
+        assert_eq!(m.pat(&world(10.0), Zone::Head).line, Some(Line::GrudgePat));
         let mut forgiven = false;
         for t in 11..400 {
             if m.tick(&world(f64::from(t)), &mut r).line == Some(Line::Forgive) {
@@ -632,7 +763,7 @@ mod tests {
                     m.poke(&w, Zone::Belly, &mut r);
                 }
                 1 => {
-                    m.pat(&w);
+                    m.pat(&w, Zone::Head);
                 }
                 2 => {
                     m.feed(&w);

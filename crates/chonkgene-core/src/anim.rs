@@ -3,6 +3,7 @@
 //! to a few numbers every renderer understands.
 
 use crate::Zone;
+use crate::species::Fondness;
 use crate::spring::Spring;
 
 const BREATH_PERIOD: f32 = 3.2;
@@ -279,6 +280,11 @@ pub struct Touch {
     /// How hard it is being scratched, 0 … 1: the finger rubbing about
     /// while held, fading once it stops.
     pub scratch: f32,
+    /// How it likes the spot held, or last touched (see
+    /// [`crate::species::Species::fondness`]).
+    pub fond: Option<Fondness>,
+    /// The 曼赤肯's belly trap: clutching the hand and bunny-kicking, 0 … 1.
+    pub trap: f32,
 }
 
 impl Touch {
@@ -439,6 +445,10 @@ pub struct Animator {
     watch: Option<(f32, f32)>,
     /// See [`Touch::scratch`].
     scratch: f32,
+    /// See [`Touch::fond`]; set by the app with each press.
+    pub fond: Option<Fondness>,
+    /// The belly trap springs until then (the animator's clock).
+    trap_until: f32,
     /// See [`PoseParams::licks`].
     licks: u32,
     /// The gesture under way, when it started and when it ends.
@@ -496,6 +506,8 @@ impl Animator {
             hop_vel: 0.0,
             hops_left: 0,
             pressed: false,
+            fond: None,
+            trap_until: 0.0,
             held: None,
             last_touch: None,
             scratch: 0.0,
@@ -559,6 +571,11 @@ impl Animator {
             h.1 = at;
             self.scratch = (self.scratch + moved / SCRATCH_PX).min(1.0);
         }
+    }
+
+    /// The belly trap: it grabs the hand and bunny-kicks for `secs`.
+    pub fn spring_trap(&mut self, secs: f32) {
+        self.trap_until = self.t + secs;
     }
 
     /// How long the finger has been down, seconds (0 if it is not).
@@ -1055,6 +1072,14 @@ impl Animator {
                     .filter(|&(.., ago)| ago < TOUCH_SHOWS_SECS),
                 watch: self.watch,
                 scratch: self.scratch,
+                fond: self.fond.filter(|_| {
+                    self.held.is_some() || self.last_touch.is_some_and(|l| self.t - l.2 < 1.5)
+                }),
+                trap: {
+                    let left = self.trap_until - self.t;
+                    // In fast, out over its last quarter second.
+                    (left / 0.25).clamp(0.0, 1.0)
+                },
             },
             posture: self.posture,
             lively: match self.expression {

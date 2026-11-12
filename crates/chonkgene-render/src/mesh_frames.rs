@@ -21,6 +21,7 @@ use chonkgene_core::Zone;
 use chonkgene_core::anim::{
     Act, BITE_SECS, EAT_SECS, Expression, HOLD_SECS, PoseParams, Posture, Touch, gesture_secs,
 };
+use chonkgene_core::species::Fondness;
 use chonkgene_rig::math::{M3, V3, v3};
 use chonkgene_rig::{FLOOR, Layer, Look, Model, Pose, Scene, ZONES};
 use tiny_skia::{Pixmap, Transform};
@@ -583,7 +584,12 @@ impl MeshRenderer {
         }));
         self.walk.set_pace(params.pace);
         self.walk.breathe(params.breath);
-        self.walk.set_mood(params.lively, params.puffed);
+        // A bird held on a spot it loves fluffs up, pleased.
+        let bird = matches!(self.model.species.as_str(), "owl" | "chick" | "duck");
+        let fluffed = bird
+            && params.touch.fond == Some(Fondness::Loves)
+            && params.touch.held.is_some_and(|(.., secs)| secs > 0.5);
+        self.walk.set_mood(params.lively, params.puffed || fluffed);
         if params.licks != self.licks {
             self.licks = params.licks;
             self.walk.lick();
@@ -858,6 +864,8 @@ impl MeshRenderer {
             held: touch.held.map(|(z, _, secs)| (z, bone, secs)),
             poked: touch.last.map(|(z, _, ago)| (z, bone, ago)),
             scratch: touch.scratch,
+            fond: touch.fond,
+            trap: touch.trap,
         }
     }
 
@@ -1064,6 +1072,18 @@ fn dent_for(zone: Zone) -> (f32, f32) {
 /// or cheek (or a long belly rub), eyes shut in bliss for a scratch (a dog
 /// with its tongue out), a squint for a poke on the head.
 fn touched_look(touch: &Touch, dog: bool) -> Option<Look> {
+    // The belly trap: laughing as it kicks.
+    if touch.trap > 0.2 {
+        return Some(Look::Laugh);
+    }
+    // A spot it does not like: eyes squeezed, a little frown.
+    if touch.fond == Some(Fondness::Dislikes) && touch.held.is_some_and(|(.., secs)| secs > 0.12) {
+        return Some(Look::Pout);
+    }
+    // A spot it loves: eyes shut in bliss (a dog panting) once held a moment.
+    if touch.fond == Some(Fondness::Loves) && touch.held.is_some_and(|(.., secs)| secs > 0.3) {
+        return Some(if dog { Look::Pant } else { Look::Happy });
+    }
     if touch.scratch > 0.35 {
         return Some(if dog { Look::Pant } else { Look::Happy });
     }

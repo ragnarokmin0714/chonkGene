@@ -1215,6 +1215,16 @@ Roger's notes after the fifteenth pass, to do next time:
 - Until the reactions are built, back and wing touches go as before: back like the bottom (the head turns to look, a flick), a back held a while counts as a pat (as head, chin, belly, cheek do); a wing like a paw.
 - `examples/zones.rs` draws every pet sitting and walking with each pixel tinted by the zone a click there finds (`inbox/zones.png` for Roger). Test `every_mesh_pet_has_a_back_a_rump_and_birds_have_wings`.
 
+#### Touch by zone built 2026-11-12
+
+- **The table** is `Species::fondness(zone) -> Fondness` (`Dislikes`, `Fine`, `Likes`, `Loves`), Roger's rows as approved; `Species::belly_trap()` is 3 s for the 曼赤肯 only.
+- **Held a while** (`HOLD_SECS`) anywhere it does not dislike, it is a pat (`Mind::pat(w, zone)`): loved, the line `pat_love`, 16 親密度 and `Out::bliss` (more hearts); liked, `pat` and 10; fine, `pat` and 6. Before, only head, chin, belly and cheek counted.
+- **Held on a loved spot** (`App::touch_step`): eyes shut in bliss (a dog panting, `touched_look`), leaning into the hand and a cat treading (`Levels::bliss`), a dog's hind leg going at its loved bottom (the Shiba's tail base), a bird fluffing up, no looking back at a hand on its back or bottom; hearts every 1.6 s from 0.8 s on, a cat purring, a dog panting.
+- **A spot it dislikes**: at once ears back, the head turned away, leaning off, eyes squeezed (`Levels::shy`, `Look::Pout`), a paw or wing held tucked instead of given; held 0.35 s (`DISLIKE_SECS`) it hops out from under the finger and says `dislike` (`Mind::dislike`, counted as a poke there, so kept at it builds the grudge as pokes do). A quick poke there says `dislike` too.
+- **The 曼赤肯's belly trap**: rubbed 3 s, `Mind::trap` (line `trap`, 「抓到你了！喵！」, a laugh, hearts, 親密度 as a loved spot, no grudge) and `Animator::spring_trap` for 1.8 s (`Touch::trap`): on its back, front paws clutched in, hind legs kicking fast, wriggling, laughing.
+- New lines `pat_love` and `dislike` for every species in its own voice, `trap` for the 曼赤肯 (`Line::only_for`).
+- Seen: `examples/touch.rs` scenes `back`, `wing`, `trap` (and every scene now takes the species' fondness); `inbox/touch-zones.gif` for Roger. Tests: `each_species_has_spots_it_loves_and_ones_it_does_not`, `a_loved_spot_pleases_more_than_a_pat_and_a_disliked_one_is_said`. Still owed: Roger's look and feel on Windows; the trap reads weakly on the 曼赤肯's short legs in stills.
+
 ### Phase 1: Shiba prototype (feel) — `v0.1.0`
 
 - The art pipeline (§3.3) works end to end for one Shiba, with placeholder art.

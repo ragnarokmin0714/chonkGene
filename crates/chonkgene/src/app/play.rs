@@ -405,7 +405,7 @@ impl Pet {
         if h.found {
             // Found: as pleased as with a pat.
             self.come_out(ctx, Line::HideFound);
-            let mut out = self.mind.pat(&ctx.world);
+            let mut out = self.mind.pat(&ctx.world, chonkgene_core::Zone::Head);
             out.line = None;
             self.apply(ctx, out);
             return false;

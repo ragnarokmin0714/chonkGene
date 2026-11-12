@@ -1,7 +1,7 @@
 //! The six species and their defaults (PLAN §1.1, §1.6, §1.12).
 
-use crate::Personality;
 use crate::anim::{Act, Habits};
+use crate::{Personality, Zone};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Species {
@@ -40,7 +40,53 @@ pub enum Grumpiness {
     Spin,
 }
 
+/// How much a species likes a hand on a zone (PLAN §8, Roger's sixteenth
+/// pass, item 4: 「摸動物不同部位時，會有其他反應」).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub enum Fondness {
+    /// A flinch, a look back, a step away; kept at, a grudge.
+    Dislikes,
+    /// As any touch was before.
+    Fine,
+    /// Leans into the hand, a small heart.
+    Likes,
+    /// Eyes shut in bliss, hearts, purring, kneading, a hind leg going.
+    Loves,
+}
+
 impl Species {
+    /// How it takes a hand on `zone`: Roger's table (PLAN §8). Paws and
+    /// wings share a column, as do the back and the bottom.
+    pub fn fondness(self, zone: Zone) -> Fondness {
+        use Fondness::{Dislikes as No, Fine as Ok, Likes as Yes, Loves as Love};
+        use Zone::*;
+        // Head, chin, cheek, belly, paw or wing, back or bottom, tail.
+        let row = match self {
+            Species::Shiba => [Yes, Love, Yes, Love, No, Love, No],
+            Species::Munchkin => [Love, Love, Love, Love, No, Yes, No],
+            Species::Fold => [Love, Love, Yes, Love, No, Yes, No],
+            Species::Owl => [Love, Yes, Love, Ok, No, Ok, No],
+            Species::Chick => [Love, Yes, Yes, Ok, No, Love, Ok],
+            Species::Duck => [Love, Yes, Ok, Ok, No, Love, Yes],
+            Species::Fox => [Love, Yes, Yes, Ok, No, Ok, Love],
+        };
+        row[match zone {
+            Head => 0,
+            Chin => 1,
+            Cheek => 2,
+            Belly => 3,
+            Paw | Wing => 4,
+            Back | Bottom => 5,
+            Tail => 6,
+        }]
+    }
+
+    /// Its belly loved, but rubbed this long it grabs the hand and bunny
+    /// kicks (Roger: the 曼赤肯 only), seconds.
+    pub fn belly_trap(self) -> Option<f32> {
+        (self == Species::Munchkin).then_some(3.0)
+    }
+
     pub const ALL: [Species; 7] = [
         Species::Shiba,
         Species::Munchkin,

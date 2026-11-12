@@ -15,7 +15,7 @@ use chonkgene_core::play::{Command as Ask, Scene, Thing};
 use chonkgene_core::shake::ShakeDetector;
 use chonkgene_core::skit::{Actor, Awe, Cmd, Director, Spell};
 use chonkgene_core::sound::{Class, Sound, TAKES};
-use chonkgene_core::species::{Grumpiness, Play, Species};
+use chonkgene_core::species::{Fondness, Grumpiness, Play, Species};
 use chonkgene_core::terrain::{Terrain, Win};
 use chonkgene_platform::tray::{Tray, TrayCommand};
 use chonkgene_platform::{Presenter, Shared, autostart, hotkey};
@@ -54,6 +54,15 @@ const TERRAIN_BUSY_EVERY: Duration = Duration::from_millis(100);
 const LIFT_UP: f32 = 12.0;
 const LIFT_ANY: f32 = 36.0;
 const HAPPY_SECS: f64 = 3.0;
+/// A hand on a spot it does not like: it pulls away after this long held,
+/// seconds (a quick poke there is just a poke).
+const DISLIKE_SECS: f32 = 0.35;
+/// The belly trap lasts this long, seconds.
+const TRAP_SECS: f32 = 1.8;
+/// Held on a spot it loves: hearts from this long on, seconds, and again
+/// this often.
+const LOVE_HEARTS_AFTER: f32 = 0.8;
+const LOVE_HEARTS_EVERY: f64 = 1.6;
 /// A giggle the app or the director starts lasts this long.
 const GIGGLE_SECS: f64 = 3.0;
 /// The log notes the program held up for longer than this, and a pet's
@@ -136,6 +145,10 @@ struct Press {
     grab: (f32, f32),
     moved: bool,
     last: Instant,
+    /// The touch has had its answer already, held: pulled away from a spot
+    /// it does not like, or the belly trap sprung (PLAN §8, Roger's
+    /// sixteenth pass, item 4).
+    answered: bool,
 }
 
 struct Bubble {
@@ -225,6 +238,8 @@ struct Pet {
     pounce_at: Option<f64>,
     /// Scratched: when a cat may purr (or a dog pant) again.
     purr_at: f64,
+    /// Held on a spot it loves: when the next hearts rise.
+    love_at: f64,
     /// When its picture last changed, and whether the log has noted it
     /// standing still since (see [`FROZEN`]).
     shown_at: Instant,
@@ -400,7 +415,12 @@ fn voice_pitch(size: f32, chonk: f32) -> f32 {
 /// Which sound goes with a line: a patted cat purrs.
 fn line_sound(line: Line, species: Species) -> Sound {
     match line {
-        Line::Pat if matches!(species, Species::Munchkin | Species::Fold) => Sound::Purr,
+        Line::Pat | Line::PatLove if matches!(species, Species::Munchkin | Species::Fold) => {
+            Sound::Purr
+        }
+        Line::PatLove => Sound::Greet,
+        Line::Dislike => Sound::Grumpy,
+        Line::Trap => Sound::Laugh,
         Line::Hello | Line::WelcomeBack | Line::MadeUp | Line::Forgive | Line::LevelUp => {
             Sound::Greet
         }
@@ -1574,7 +1594,7 @@ impl App {
             world,
         };
         let out = match action {
-            Action::Pat => p.mind.pat(&world),
+            Action::Pat => p.mind.pat(&world, Zone::Head),
             Action::Feed => p.mind.feed(&world),
             Action::Sleep => {
                 let mut rng = p.rng.clone();
@@ -2067,6 +2087,7 @@ fn spawn(
         play_at: 0.0,
         pounce_at: None,
         purr_at: 0.0,
+        love_at: 0.0,
         shown_at: now,
         frozen: false,
         draw_gap: Duration::ZERO,
@@ -2234,6 +2255,85 @@ impl Pet {
     /// How high this pet's voice is (see [`voice_pitch`]).
     fn pitch(&self) -> f32 {
         voice_pitch(self.save.size, self.save.chonk)
+    }
+
+    /// A finger held on it, every frame: by the spot (PLAN §8, Roger's
+    /// sixteenth pass, item 4). One it does not like: it pulls away at once
+    /// and says so. One it loves: hearts and purring (a dog panting) while
+    /// it lasts. The 曼赤肯's belly rubbed long: the trap.
+    fn touch_step(&mut self, ctx: &mut Ctx) {
+        let t = ctx.world.now;
+        let Some((zone, _, held)) = self.anim.params().touch.held else {
+            return;
+        };
+        if self.press.as_ref().is_none_or(|p| p.moved || p.answered)
+            || self.mind.asleep()
+            || self.in_skit
+        {
+            return;
+        }
+        let fond = self.species.fondness(zone);
+        if fond == Fondness::Dislikes && held >= DISLIKE_SECS {
+            if let Some(p) = &mut self.press {
+                p.answered = true;
+            }
+            // Out from under the finger: a hop away, and a word.
+            if matches!(self.body.motion, Motion::Idle | Motion::Walk) {
+                let (w, s) = (self.body.size.0, self.fun.scale);
+                let away = if self.cursor.0 < 0.5 * w { 1.0 } else { -1.0 };
+                let facing = self.body.facing;
+                self.body
+                    .spring(self.body.feet().0 + away * 0.08 * w, 16.0 * s);
+                self.body.facing = facing;
+            }
+            self.anim.poke(zone);
+            let mut rng = self.rng.clone();
+            let out = self.mind.dislike(&ctx.world, zone, &mut rng);
+            self.rng = rng;
+            diag!(
+                "{}: pulled away from a hand on its {zone:?}",
+                self.save.name
+            );
+            self.apply(ctx, out);
+            return;
+        }
+        if zone == Zone::Belly
+            && let Some(after) = self.species.belly_trap()
+            && held >= after
+        {
+            if let Some(p) = &mut self.press {
+                p.answered = true;
+            }
+            self.anim.spring_trap(TRAP_SECS);
+            let out = self.mind.trap(&ctx.world);
+            diag!("{}: the belly trap", self.save.name);
+            self.apply(ctx, out);
+            return;
+        }
+        if fond == Fondness::Loves && held >= LOVE_HEARTS_AFTER && t >= self.love_at {
+            self.love_at = t + LOVE_HEARTS_EVERY;
+            self.fun
+                .effect(chonkgene_render::props::Fx::Hearts, ctx.world.now);
+            let sound = match self.species {
+                Species::Munchkin | Species::Fold => Some(Sound::Purr),
+                Species::Shiba | Species::Fox => Some(Sound::Pant),
+                _ => None,
+            };
+            if let Some(sound) = sound
+                && ctx.sound_on
+                && t >= self.purr_at
+            {
+                self.purr_at = t + 2.6;
+                ctx.sounds.play(
+                    self.save.id,
+                    self.species,
+                    sound,
+                    t,
+                    ctx.volume,
+                    self.pitch(),
+                );
+            }
+        }
     }
 
     /// The sound of a fidget that just began: the Shiba panting, the fox's
@@ -2411,6 +2511,11 @@ impl Pet {
                 _ => {}
             }
         }
+        // A spot it loves: hearts whether or not it was happy already.
+        if out.bliss {
+            self.fun
+                .effect(chonkgene_render::props::Fx::Hearts, ctx.world.now);
+        }
         if out.level_up {
             self.fun
                 .effect(chonkgene_render::props::Fx::Sparkles, ctx.world.now);
@@ -2432,6 +2537,7 @@ impl Pet {
     ) {
         let t = ctx.world.now;
         self.fidget_sound(ctx);
+        self.touch_step(ctx);
         if let Some(at) = self.hello_at
             && t >= at
         {
@@ -2892,6 +2998,7 @@ impl ApplicationHandler<UserEvent> for App {
                             grab: p.cursor,
                             moved: false,
                             last: now,
+                            answered: false,
                         });
                         p.shake = ShakeDetector::default();
                         // It squishes in under the finger at once, where
@@ -2902,6 +3009,7 @@ impl ApplicationHandler<UserEvent> for App {
                             .and_then(Zone::from_name)
                             .unwrap_or(Zone::Belly);
                         p.anim.press(zone, p.cursor);
+                        p.anim.fond = Some(p.species.fondness(zone));
                         diag!(
                             "{}: pressed on {zone:?} at ({:.0}, {:.0}): {:?}, {:?}, motion {:?}, skit {}, asleep {}, frame waiting {}",
                             p.save.name,
@@ -2983,18 +3091,11 @@ impl ApplicationHandler<UserEvent> for App {
                                 .touch
                                 .held
                                 .map_or(Zone::Belly, |(zone, ..)| zone);
-                            // Held a while on a nice spot, it was a rub or a
-                            // scratch (a pat), not a poke (a back stroked
-                            // too); a tail or a bottom held is still a poke.
+                            // Held a while anywhere it does not mind, it was
+                            // a rub or a scratch (a pat), not a poke; how
+                            // pleased it is goes by the spot.
                             let rub = p.anim.held_secs() >= HOLD_SECS
-                                && matches!(
-                                    zone,
-                                    Zone::Head
-                                        | Zone::Chin
-                                        | Zone::Belly
-                                        | Zone::Cheek
-                                        | Zone::Back
-                                );
+                                && p.species.fondness(zone) != Fondness::Dislikes;
                             // A quick poke: a start, hopping back from
                             // the finger (still facing the same way).
                             let quick =
@@ -3013,7 +3114,7 @@ impl ApplicationHandler<UserEvent> for App {
                             let held = p.anim.held_secs();
                             p.anim.poke(zone);
                             let out = if rub {
-                                p.mind.pat(&world)
+                                p.mind.pat(&world, zone)
                             } else {
                                 let mut rng = p.rng.clone();
                                 let out = p.mind.poke(&world, zone, &mut rng);

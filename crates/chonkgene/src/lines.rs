@@ -46,6 +46,9 @@ mod tests {
         let lines = Lines::zh_tw().unwrap();
         for s in Species::ALL {
             for l in Line::ALL {
+                if l.only_for().is_some_and(|only| only != s) {
+                    continue;
+                }
                 let choices = lines.table.get(s.id()).and_then(|t| t.get(l.key()));
                 assert!(
                     choices.is_some_and(|c| !c.is_empty()),

@@ -4,7 +4,8 @@
 //! `cargo run --release -p chonkgene-render --example touch -- <species> <out dir> [scene]`
 //! writes `<scene>-<frame>.png` at 15 fps. Scenes: `poke` (a quick poke in
 //! the belly), `rub` (a long belly rub), `chin`, `head`, `cheek`, `tail`,
-//! `paw`, `bottom` (each held, then let go), `scratch` (held on the head
+//! `paw`, `bottom`, `back`, `wing` (each held, then let go), `trap` (the
+//! 曼赤肯's belly rubbed into its trap), `scratch` (held on the head
 //! and rubbed about), `laugh`, `fedup`, `sulk`, and
 //! `sleep-chin`, `sleep-curl`, `sleep-side`, `sleep-up`.
 
@@ -43,7 +44,7 @@ fn scenes() -> Vec<Scene> {
         expression: Expression::Neutral,
         hold: Some(Hold { zone, from, to }),
         sleep: None,
-        walk_first: matches!(zone, Zone::Tail | Zone::Bottom),
+        walk_first: matches!(zone, Zone::Tail | Zone::Bottom | Zone::Back),
     };
     let feel = |name, expression, secs| Scene {
         name,
@@ -69,7 +70,11 @@ fn scenes() -> Vec<Scene> {
         touch("cheek", Zone::Cheek, 0.3, 2.3, 3.2),
         touch("tail", Zone::Tail, 0.3, 1.8, 3.2),
         touch("paw", Zone::Paw, 0.3, 2.3, 3.2),
-        touch("bottom", Zone::Bottom, 0.3, 0.5, 2.6),
+        touch("bottom", Zone::Bottom, 0.3, 2.3, 3.2),
+        touch("back", Zone::Back, 0.3, 2.3, 3.2),
+        touch("wing", Zone::Wing, 0.3, 2.3, 3.2),
+        // The 曼赤肯's belly rubbed long enough to spring its trap.
+        touch("trap", Zone::Belly, 0.3, 5.5, 6.5),
         touch("scratch", Zone::Head, 0.3, 3.0, 4.0),
         feel("laugh", Expression::Giggle, 3.0),
         feel("fedup", Expression::FedUp, 3.0),
@@ -146,6 +151,7 @@ fn main() {
                         break;
                     };
                     a.press(h.zone, at);
+                    a.fond = Some(species.fondness(h.zone));
                     pressed = Some((h.zone, at));
                 }
                 // A scratch: the finger rubbing to and fro.
@@ -155,12 +161,23 @@ fn main() {
                     let wiggle = 10.0 * (std::f32::consts::TAU * 3.0 * t).sin();
                     a.knead((at.0 + wiggle, at.1));
                 }
+                // The app springs the trap once the belly has been rubbed
+                // long enough.
+                if let Some((Zone::Belly, _)) = pressed
+                    && let Some(after) = species.belly_trap()
+                    && a.held_secs() >= after
+                    && a.params().touch.trap == 0.0
+                    && a.held_secs() < after + 0.1
+                {
+                    a.spring_trap(1.8);
+                }
                 if let Some((zone, _)) = pressed
                     && t >= h.to
                 {
-                    // A long rub on a nice spot pleases it (the app's pat).
+                    // A long rub anywhere it does not mind pleases it (the
+                    // app's pat).
                     let rub = a.held_secs() >= HOLD_SECS
-                        && matches!(zone, Zone::Head | Zone::Chin | Zone::Belly | Zone::Cheek);
+                        && species.fondness(zone) != chonkgene_core::species::Fondness::Dislikes;
                     a.poke(zone);
                     pressed = None;
                     if rub {
