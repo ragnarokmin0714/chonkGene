@@ -609,6 +609,14 @@ pub(super) struct Fun {
     next_habit: f64,
     next_tap: f64,
     next_tilt: f64,
+    /// Watching the cursor (cursor curiosity, PLAN §1.3): since when, and
+    /// until when it keeps watching where the cursor last was; not again
+    /// before `curious_rest`; the cursor last seen, for how fast it moves;
+    /// when it may pounce at it again.
+    curious: Option<(f64, f64)>,
+    curious_rest: f64,
+    cursor_was: Option<(f32, f32)>,
+    cursor_pounce: f64,
     /// Curled up by you for this stretch of typing; dozed off to it.
     curled: bool,
     dozed: bool,
@@ -1384,6 +1392,8 @@ pub(super) fn tick(
             start_scene = false;
         }
         scene(ground, p, ctx);
+        // Every frame, busy or not: it also stops watching when busy.
+        curious(p, ctx, activity, cursor, dt);
         if !p.fun.busy(now) || now < p.fun.lounge_until {
             react_to(p, ctx, activity, typing_for, cursor, dt);
         }
@@ -2759,6 +2769,115 @@ impl Playground {
 /// What you are doing, as the pets see it: read with the mouse still and
 /// they lie about and see to an itch; type and they tap along, tip their
 /// heads at a burst, a cat curls up by you and the Shiba nods off.
+/// The cursor comes near this close to its head (pixels at 100%): it may
+/// look; this close and moving this fast, a lively one may pounce at it.
+const NOTICE_PX: f32 = 260.0;
+const POUNCE_PX: f32 = 130.0;
+const POUNCE_SPEED: f32 = 900.0;
+/// Watching the cursor goes on this long at most (then it looks away and
+/// leaves it a while), and this long after the cursor has gone.
+const CURIOUS_SECS: (f64, f64) = (6.0, 3.0);
+const CURIOUS_LINGER: f64 = 1.5;
+
+/// How likely a pet is to notice the cursor coming near, each time it does
+/// (PLAN §1.3 cursor curiosity; Roger's fourth pass, item 6: they hardly
+/// ever looked at him): cats most, the owl stares at anything, the lively
+/// more than the calm.
+fn curiosity(species: Species, energy: f32) -> f32 {
+    let base = match species {
+        Species::Munchkin | Species::Fold => 0.75,
+        Species::Owl => 0.8,
+        Species::Fox | Species::Shiba => 0.6,
+        Species::Chick | Species::Duck => 0.5,
+    };
+    (base + 0.3 * (energy - 0.5)).clamp(0.2, 0.95)
+}
+
+/// Cursor curiosity (PLAN §1.3): with the mouse moving near it, a pet at
+/// rest may turn to look at the cursor, its head following it, for a few
+/// seconds; a lively one sometimes pounces as it darts past (the owl and
+/// the duckling only look). It looks away when the cursor goes, or tires
+/// of it and leaves it a while.
+fn curious(p: &mut Pet, ctx: &Ctx, activity: Activity, cursor: Option<(i32, i32)>, dt: f32) {
+    let now = ctx.world.now;
+    let s = p.fun.scale.max(0.1);
+    let head = p.renderer.anchor();
+    let at = cursor.map(|c| {
+        (
+            c.0 as f32 - p.placed.0 as f32,
+            c.1 as f32 - p.placed.1 as f32,
+        )
+    });
+    let speed = match (at, p.fun.cursor_was) {
+        (Some(a), Some(b)) => (a.0 - b.0).hypot(a.1 - b.1) / dt.max(1e-3),
+        _ => 0.0,
+    };
+    p.fun.cursor_was = at;
+    let near = at.filter(|a| (a.0 - head.0).hypot(a.1 - head.1) < NOTICE_PX * s);
+    let free = !p.mind.asleep()
+        && !p.in_skit
+        && p.act.is_none()
+        && p.press.is_none()
+        && !p.playing
+        && !p.fun.busy(now)
+        && p.body.motion == Motion::Idle
+        && matches!(activity, Activity::Busy);
+    let Some((since, until)) = p.fun.curious else {
+        // Noticed, now and then: once per second of the cursor near.
+        if free
+            && near.is_some()
+            && now >= p.fun.curious_rest
+            && p.rng.f32() < curiosity(p.species, p.mind.personality.energy) * dt
+        {
+            p.fun.curious = Some((now, now + CURIOUS_LINGER));
+            diag!("{}: looks at the cursor", p.save.name);
+        }
+        return;
+    };
+    let tired =
+        now - since > CURIOUS_SECS.0 + CURIOUS_SECS.1 * f64::from(p.mind.personality.energy);
+    if !free || tired || (near.is_none() && now >= until) {
+        diag!(
+            "{}: stops watching the cursor ({})",
+            p.save.name,
+            if tired {
+                "tired of it"
+            } else if free {
+                "gone"
+            } else {
+                "busy"
+            }
+        );
+        p.fun.curious = None;
+        p.fun.curious_rest = now + 8.0 + 8.0 * f64::from(p.rng.f32());
+        p.anim.watch(None);
+        return;
+    }
+    if let Some(a) = near {
+        p.fun.curious = Some((since, now + CURIOUS_LINGER));
+        // Not off on a walk of its own while it watches.
+        p.switch_at = p.switch_at.max(now + 1.0);
+        let off = (
+            p.body.pos.0 - p.placed.0 as f32,
+            p.body.pos.1 - p.placed.1 as f32,
+        );
+        p.anim.watch(Some((a.0 - off.0, a.1 - off.1)));
+        // Darting past close by: a lively one pounces at it.
+        let pounces = !matches!(p.species, Species::Owl | Species::Duck);
+        let close = (a.0 - head.0).hypot(a.1 - head.1) < POUNCE_PX * s;
+        if pounces
+            && close
+            && speed > POUNCE_SPEED * s
+            && now >= p.fun.cursor_pounce
+            && p.rng.f32() < p.mind.personality.energy
+        {
+            p.fun.cursor_pounce = now + 6.0;
+            p.anim.pounce();
+            diag!("{}: pounces at the cursor", p.save.name);
+        }
+    }
+}
+
 fn react_to(
     p: &mut Pet,
     ctx: &mut Ctx,
@@ -2840,6 +2959,21 @@ fn react_to(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Cats and the owl are the most curious about the cursor, the lively
+    /// more than the calm, and none never or always.
+    #[test]
+    fn curiosity_goes_by_species_and_liveliness() {
+        assert!(curiosity(Species::Fold, 0.5) > curiosity(Species::Chick, 0.5));
+        assert!(curiosity(Species::Owl, 0.5) > curiosity(Species::Shiba, 0.5));
+        assert!(curiosity(Species::Shiba, 0.9) > curiosity(Species::Shiba, 0.1));
+        for s in Species::ALL {
+            for e in [0.0, 1.0] {
+                let c = curiosity(s, e);
+                assert!((0.2..=0.95).contains(&c), "{s:?} {e}: {c}");
+            }
+        }
+    }
 
     /// A pond comes out where nobody stands: further out, the other side,
     /// or not at all (Roger's clip: an owl asleep on its near rim).

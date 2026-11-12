@@ -1471,6 +1471,20 @@ mod tests {
         assert_ne!(b.doing(), Some(Act::Dance));
     }
 
+    /// Cursor curiosity (PLAN §1.3): something watched turns it to you and
+    /// its head to the spot, as a finger does, and letting it go ends that.
+    #[test]
+    fn a_watched_spot_draws_its_look_like_a_finger() {
+        let mut a = Animator::new(9, 0.33, 0.35);
+        assert!(!a.params().touch.attending());
+        a.watch(Some((40.0, 10.0)));
+        let touch = a.params().touch;
+        assert!(touch.attending());
+        assert_eq!(touch.at(), Some((40.0, 10.0)));
+        a.watch(None);
+        assert!(!a.params().touch.attending());
+    }
+
     /// A hug outlasts the happy hops that come with it (they cut every
     /// other gesture short), and a walk or a press ends it.
     #[test]

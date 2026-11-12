@@ -1816,7 +1816,9 @@ impl Walk {
                             }
                         }
                         // In your arms: rocked side to side, nuzzling,
-                        // front paws up hugging you back.
+                        // front paws up hugging you back; the fox wraps
+                        // her tails round to the front, round you (傲嬌:
+                        // she says no, her tails say yes).
                         Hug::ByYou => {
                             j[0].rot.z += e * 6.0 * sway;
                             j[b.head].rot.z += e * 10.0 * (TAU * 1.1 * g.t).sin();
@@ -1824,6 +1826,19 @@ impl Walk {
                             for &(leg, _, front) in &self.legs {
                                 if front {
                                     j[leg].rot.x -= e * (35.0 + 8.0 * squeeze);
+                                }
+                            }
+                            if self.tails.len() > 1 {
+                                let n = self.tails.len() as f32;
+                                for (k, tail) in self.tails.iter().enumerate() {
+                                    let side = (k as f32 + 0.5) / n * 2.0 - 1.0;
+                                    if let Some(&root) = tail.bones.first() {
+                                        j[root].rot.y += e * side * 85.0;
+                                        j[root].rot.x -= e * (25.0 + 6.0 * squeeze);
+                                    }
+                                    for &seg in tail.bones.iter().skip(1) {
+                                        j[seg].rot.y += e * side * 18.0;
+                                    }
                                 }
                             }
                         }

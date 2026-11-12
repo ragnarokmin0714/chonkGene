@@ -429,7 +429,9 @@ fn line_sound(line: Line, species: Species) -> Sound {
         Line::Pat | Line::PatLove if matches!(species, Species::Munchkin | Species::Fold) => {
             Sound::Purr
         }
-        Line::PatLove => Sound::Greet,
+        Line::Hugged if matches!(species, Species::Munchkin | Species::Fold) => Sound::Purr,
+        Line::PatLove | Line::Hug | Line::Hugged => Sound::Greet,
+        Line::BearHugged => Sound::Laugh,
         Line::Dislike => Sound::Grumpy,
         Line::Trap => Sound::Laugh,
         Line::Hello | Line::WelcomeBack | Line::MadeUp | Line::Forgive | Line::LevelUp => {
