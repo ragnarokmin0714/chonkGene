@@ -325,6 +325,8 @@ enum Page {
     Spells,
     /// Whom to go and hug (叫牠… › 去抱抱…).
     HugWho,
+    /// 大家的大小: every pet's size at once.
+    Sizes,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -362,6 +364,10 @@ enum Action {
     /// The page of whom it could go and hug, and one of them.
     HugWho,
     HugWith(u64),
+    /// The page of sizes for every pet at once, and one of them.
+    Sizes,
+    /// Percent.
+    SizeAll(u16),
 }
 
 struct Menu {
@@ -878,6 +884,46 @@ impl App {
         }
     }
 
+    /// Every pet `size` at once (Roger's nineteenth pass: 一鍵式調整寵物大
+    /// 小): those out on the desktop change where they stand, facing the
+    /// way they faced, without coming in and saying hello again; those
+    /// resting in 寵物窩 take the size for when they come out.
+    fn size_all(&mut self, el: &ActiveEventLoop, size: f32) {
+        self.collect_affinity();
+        let size = size.clamp(0.5, 2.0);
+        let mut was: Vec<(u64, f32, f32)> = Vec::new();
+        for save in &mut self.store.pets {
+            if (save.size - size).abs() < 1e-3 {
+                continue;
+            }
+            save.size = size;
+            if let Some(p) = self.pets.iter().find(|p| p.save.id == save.id) {
+                was.push((save.id, p.body.feet().0, p.body.facing));
+            }
+        }
+        if was.is_empty() {
+            return;
+        }
+        diag!("size of every pet: {:.0}%", size * 100.0);
+        self.dirty = true;
+        self.pets.retain(|p| !was.iter().any(|w| w.0 == p.save.id));
+        self.menu = None;
+        self.sync_desktop(el);
+        for (id, x, facing) in was {
+            let Some(p) = self.pets.iter_mut().find(|p| p.save.id == id) else {
+                continue;
+            };
+            let (w, _) = p.body.size;
+            let foot = p.body.foot;
+            p.body = Body::on_ground(&self.terrain, x - w / 2.0, p.body.size, foot);
+            p.body.facing = facing;
+            p.hello_at = None;
+            // A little bounce as it grows or shrinks.
+            p.anim.cheer();
+        }
+        self.save_now();
+    }
+
     /// Make the login entry match the setting, and repair it if the folder moved.
     fn sync_autostart(&self) {
         let Ok(exe) = std::env::current_exe() else {
@@ -894,6 +940,7 @@ impl App {
 
     fn command(&mut self, el: &ActiveEventLoop, command: TrayCommand) {
         match command {
+            TrayCommand::Size(pct) => self.size_all(el, f32::from(pct) / 100.0),
             TrayCommand::Toggle => {
                 self.hidden = !self.hidden;
                 self.set_visible();
@@ -1196,6 +1243,7 @@ impl App {
                 self.dirty = true;
                 self.sync_desktop(el);
             }
+            Msg::SizeAll(size) => self.size_all(el, size),
             Msg::Release(id) => {
                 self.store.pets.retain(|p| p.id != id);
                 self.dirty = true;
@@ -1248,6 +1296,24 @@ impl App {
                 .map(|&(label, icon, _)| item(label, None, icon, false))
                 .collect();
             let mut actions: Vec<Action> = spells.iter().map(|&(.., m)| Action::Magic(m)).collect();
+            items.push(item("返回", None, Icon::Back, true));
+            actions.push(Action::Back);
+            return self.show_menu(el, i, items, actions, at);
+        }
+        if page == Page::Sizes {
+            let now = p.save.size;
+            let mut items = Vec::new();
+            let mut actions = Vec::new();
+            // 大家的大小 (Roger's nineteenth pass: one go for every pet).
+            for (label, pct) in chonkgene_platform::tray::SIZES {
+                let hint = if (now * 100.0 - f32::from(pct)).abs() < 1.0 {
+                    "目前".to_string()
+                } else {
+                    format!("{pct}%")
+                };
+                items.push(item(label, Some(hint), Icon::Size, false));
+                actions.push(Action::SizeAll(pct));
+            }
             items.push(item("返回", None, Icon::Back, true));
             actions.push(Action::Back);
             return self.show_menu(el, i, items, actions, at);
@@ -1360,6 +1426,8 @@ impl App {
             false,
         ));
         actions.push(Action::Stage);
+        items.push(item("大家的大小…", None, Icon::Size, false));
+        actions.push(Action::Sizes);
         items.push(item("說再見…", None, Icon::Bye, false));
         actions.push(Action::Bye);
         items.push(item(
@@ -1468,11 +1536,12 @@ impl App {
         let now = Instant::now();
         let world = self.world(now);
         match action {
-            Action::Commands | Action::Spells | Action::Back | Action::HugWho => {
+            Action::Commands | Action::Spells | Action::Back | Action::HugWho | Action::Sizes => {
                 let page = match action {
                     Action::Commands => Page::Commands,
                     Action::Spells => Page::Spells,
                     Action::HugWho => Page::HugWho,
+                    Action::Sizes => Page::Sizes,
                     _ => Page::Main,
                 };
                 if let Some(i) = self.pets.iter().position(|p| p.save.id == pet) {
@@ -1577,6 +1646,7 @@ impl App {
                 direct(pets, &mut ctx, cmds);
                 return;
             }
+            Action::SizeAll(pct) => return self.size_all(el, f32::from(pct) / 100.0),
             Action::Throw(thing) => return self.throw(el, thing),
             Action::Catnip => return self.catnip(el),
             Action::Hide => {

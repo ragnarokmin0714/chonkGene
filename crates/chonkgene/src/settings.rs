@@ -241,6 +241,10 @@ impl State {
                 self.pets.pets.retain(|p| p.id != id);
                 let _ = store::save(&self.data.pets(), &self.pets);
             }
+            // The sizes are already ours (`on_size_all_picked`).
+            Msg::SizeAll(_) => {
+                let _ = store::save(&self.data.pets(), &self.pets);
+            }
             _ => {}
         }
     }
@@ -357,6 +361,13 @@ fn tick_preview(ui: &SettingsWindow, st: &mut State) {
     ui.set_preview(image(frame));
 }
 
+/// The size every pet has, percent, for 大家的大小; 0 when they differ.
+fn common_size(pets: &Pets) -> i32 {
+    let mut sizes = pets.pets.iter().map(|p| (p.size * 100.0).round() as i32);
+    let first = sizes.next().unwrap_or(0);
+    if sizes.all(|s| s == first) { first } else { 0 }
+}
+
 /// Apply an edit to the selected pet: update the preview and mark it for sending.
 fn edit(ui: &SettingsWindow, st: &mut State, f: impl FnOnce(&mut PetSave)) {
     let Some(p) = st.pet_mut() else {
@@ -440,6 +451,7 @@ fn setup(
         ui.set_react_input(s.react_to_input);
         ui.set_start_login(s.start_at_login);
         ui.set_desktop_limit(s.on_desktop.min(i32::MAX as u32) as i32);
+        ui.set_size_all(common_size(&st.pets));
         let where_ = if st.data.portable {
             "可攜模式："
         } else {
@@ -546,6 +558,7 @@ fn setup(
         let v = (v * 10.0).round() / 10.0;
         ui.set_size(v);
         edit(&ui, st, |p| p.size = v);
+        ui.set_size_all(common_size(&st.pets));
     });
     on!(on_trait_changed, |ui, st, which: i32, v: f32| {
         match which {
@@ -621,6 +634,17 @@ fn setup(
         }
         st.send_settings();
     });
+    on!(on_size_all_picked, |ui, st, pct: i32| {
+        let size = pct as f32 / 100.0;
+        for p in &mut st.pets.pets {
+            p.size = size;
+        }
+        ui.set_size_all(pct);
+        if st.pet().is_some() {
+            ui.set_size(size);
+        }
+        st.send(Msg::SizeAll(size));
+    });
     on!(on_open_folder, |_ui, st| {
         open_folder(&st.data.path);
     });
@@ -684,6 +708,25 @@ fn setup(
                         st.selected = newest;
                     }
                     show_pet(&ui, &mut st);
+                } else if !st.pet_dirty {
+                    // Sizes changed for everyone at once (「大家的大小」 from
+                    // the menu or the tray): take them, unless an edit of
+                    // ours is still on its way.
+                    let mut changed = false;
+                    for p in &mut st.pets.pets {
+                        if let Some(f) = fresh.pets.iter().find(|f| f.id == p.id)
+                            && (f.size - p.size).abs() > 1e-3
+                        {
+                            p.size = f.size;
+                            changed = true;
+                        }
+                    }
+                    if changed {
+                        if let Some(size) = st.pet().map(|p| p.size) {
+                            ui.set_size(size);
+                        }
+                        ui.set_size_all(common_size(&st.pets));
+                    }
                 }
             }
         });

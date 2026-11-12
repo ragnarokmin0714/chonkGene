@@ -1284,6 +1284,11 @@ Roger's notes, with his answers to three questions the same day:
 - **On the sand** (`Fun::on_sand`, `Playground::on_beach`): a pet setting off runs 70% of the time; a run's belly slide kicks up golden sand (`Fx::Sand`: puffs and flying grains) instead of grey dust; stopping there, a four-legged one digs now and then (`Act::Dig`, sand flying).
 - `inbox/beach.png`: a frame of the pond scene under Xvfb, put together from the windows (`CHONKGENE_DUMP` now writes the beach's window too). Not done: footprints in the sand, a sandcastle.
 
+### Roger's nineteenth pass (2026-11-12)
+
+1. **Is the README a good place for the pets' everyday looks?** Answered in the conversation: yes (a short GIF at the top, a strip of all seven, a few moments); not built until Roger picks how (real Windows recordings or clean renders).
+2. **One go for every pet's size** (「希望加入一鍵式調整寵物大小」), built: 大家的大小 with four choices, 小 70%, 中 100%, 大 130%, 特大 160% (`chonkgene_platform::tray::SIZES`, the one list), in three places: the pet's menu (「大家的大小…」, a page with the current one marked 「目前」), the tray (a submenu), and settings 一般 (a row of four buttons, the current one filled; none when the pets differ). `Msg::SizeAll`, `App::size_all`: every pet takes the size; those out on the desktop change where they stand, facing the same way, with a little hop, and without coming in and saying hello again (a single pet's size change still comes in afresh); resting ones keep it for when they come out. An open settings window takes sizes changed elsewhere unless an edit of its own is on its way. The Windows tray code was checked with clippy for the Windows target (stub C compiler); not run there.
+
 ### Phase 1: Shiba prototype (feel) — `v0.1.0`
 
 - The art pipeline (§3.3) works end to end for one Shiba, with placeholder art.

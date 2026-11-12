@@ -46,6 +46,8 @@ pub enum Icon {
     Spotlight,
     /// A small heart with two arms round it: 抱抱.
     Hug,
+    /// A little paw beside a big one: 大家的大小.
+    Size,
 }
 
 #[derive(Clone, Debug)]
@@ -593,6 +595,17 @@ fn icon(pm: &mut Pixmap, icon: Icon, ts: Transform, bg: [u8; 4]) {
                     ('C', &[14.0, 5.5, 18.5, 7.0, 17.0, 12.0]),
                 ],
             );
+        }
+        Icon::Size => {
+            // A small paw pad and a big one.
+            ring(pm, 7.0, 15.5, 2.6);
+            ring(pm, 16.0, 12.0, 4.6);
+            for (x, y) in [(5.0, 10.8), (8.6, 10.6)] {
+                ring(pm, x, y, 1.0);
+            }
+            for (x, y) in [(12.6, 5.2), (16.0, 4.4), (19.4, 5.2)] {
+                ring(pm, x, y, 1.5);
+            }
         }
         Icon::Hug => {
             // A small heart held in two arms curving round it.

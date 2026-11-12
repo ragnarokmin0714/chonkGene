@@ -30,6 +30,8 @@ pub enum Msg {
     },
     /// Say goodbye to a pet for good.
     Release(u64),
+    /// Every pet this size at once (「大家的大小」, Roger: 一鍵式調整).
+    SizeAll(f32),
     /// Remove start-at-login and menu entries (「移除所有痕跡」).
     RemoveTraces,
     Quit,

@@ -369,6 +369,10 @@ export component SettingsWindow inherits Window {
     in property <string> version;
     callback start-login-toggled(bool);
     callback desktop-limit-changed(int);
+    // 大家的大小: every pet's size at once, percent; the one they all have
+    // now (0 when they differ).
+    in property <int> size-all;
+    callback size-all-picked(int);
     callback open-folder();
     callback remove-traces();
 
@@ -852,6 +856,22 @@ export component SettingsWindow inherits Window {
                                     CuteButton { text: "－"; primary: false; enabled: root.desktop-limit > 1; clicked => { root.desktop-limit-changed(root.desktop-limit - 1); } }
                                     Text { text: root.desktop-limit + " 隻"; color: Theme.ink; font-size: 15px; vertical-alignment: center; min-width: 44px; horizontal-alignment: center; }
                                     CuteButton { text: "＋"; primary: false; clicked => { root.desktop-limit-changed(root.desktop-limit + 1); } }
+                                }
+                            }
+                            Row {
+                                VerticalLayout {
+                                    alignment: center;
+                                    spacing: 4px;
+                                    Label { text: "大家的大小"; }
+                                    Hint { text: "一次調整所有寵物的大小。"; }
+                                }
+                                HorizontalLayout {
+                                    spacing: 6px;
+                                    for choice in [{ label: "小", pct: 70 }, { label: "中", pct: 100 }, { label: "大", pct: 130 }, { label: "特大", pct: 160 }]: CuteButton {
+                                        text: choice.label;
+                                        primary: root.size-all == choice.pct;
+                                        clicked => { root.size-all-picked(choice.pct); }
+                                    }
                                 }
                             }
                             Row {

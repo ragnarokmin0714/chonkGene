@@ -13,6 +13,8 @@ pub enum TrayCommand {
     Frisbee,
     /// Put down a sprig of catnip.
     Catnip,
+    /// Every pet this size at once, percent (大家的大小).
+    Size(u16),
     Settings,
     Quit,
 }
@@ -27,6 +29,13 @@ const LABELS: [(&str, TrayCommand); 7] = [
     ("設定…", TrayCommand::Settings),
     ("結束肉肉賴桌", TrayCommand::Quit),
 ];
+
+/// The 大家的大小 submenu, after the things to play with: label and percent
+/// (the pet menu and settings offer the same).
+const SIZE_MENU: &str = "大家的大小";
+pub const SIZES: [(&str, u16); 4] = [("小", 70), ("中", 100), ("大", 130), ("特大", 160)];
+/// The submenu goes before this entry of [`LABELS`] (設定…).
+const SIZES_BEFORE: usize = 5;
 
 /// Keeps the tray icon alive; dropping it removes the icon.
 pub struct Tray {
@@ -50,10 +59,10 @@ pub fn create(
 
 #[cfg(windows)]
 mod imp {
-    use tray_icon::menu::{Menu, MenuEvent, MenuItem, PredefinedMenuItem};
+    use tray_icon::menu::{Menu, MenuEvent, MenuItem, PredefinedMenuItem, Submenu};
     use tray_icon::{Icon, MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 
-    use super::{LABELS, TOOLTIP, Tray, TrayCommand};
+    use super::{LABELS, SIZE_MENU, SIZES, SIZES_BEFORE, TOOLTIP, Tray, TrayCommand};
 
     pub fn create(
         icons: Vec<(Vec<u8>, u32)>,
@@ -62,6 +71,15 @@ mod imp {
         let menu = Menu::new();
         let mut ids = Vec::new();
         for (i, (label, command)) in LABELS.iter().enumerate() {
+            if i == SIZES_BEFORE {
+                let sub = Submenu::new(SIZE_MENU, true);
+                for (label, pct) in SIZES {
+                    let item = MenuItem::new(label, true, None);
+                    ids.push((item.id().clone(), TrayCommand::Size(pct)));
+                    sub.append(&item).map_err(|e| e.to_string())?;
+                }
+                menu.append(&sub).map_err(|e| e.to_string())?;
+            }
             if i == LABELS.len() - 1 {
                 menu.append(&PredefinedMenuItem::separator())
                     .map_err(|e| e.to_string())?;
@@ -126,6 +144,29 @@ impl ksni::Tray for Sni {
     fn menu(&self) -> Vec<ksni::MenuItem<Self>> {
         let mut items = Vec::new();
         for (i, (label, command)) in LABELS.iter().enumerate() {
+            if i == SIZES_BEFORE {
+                let submenu = SIZES
+                    .iter()
+                    .map(|&(label, pct)| {
+                        ksni::menu::StandardItem {
+                            label: label.into(),
+                            activate: Box::new(move |this: &mut Self| {
+                                (this.on)(TrayCommand::Size(pct))
+                            }),
+                            ..Default::default()
+                        }
+                        .into()
+                    })
+                    .collect();
+                items.push(
+                    ksni::menu::SubMenu {
+                        label: SIZE_MENU.into(),
+                        submenu,
+                        ..Default::default()
+                    }
+                    .into(),
+                );
+            }
             if i == LABELS.len() - 1 {
                 items.push(ksni::MenuItem::Separator);
             }
