@@ -260,10 +260,10 @@ pub struct Feel {
 }
 
 impl Feel {
-    /// The touch is on its tail or bottom.
+    /// The touch is on its tail, bottom or back.
     pub fn behind(&self) -> bool {
         let zone = self.held.map(|h| h.0).or(self.poked.map(|p| p.0));
-        matches!(zone, Some(Zone::Tail | Zone::Bottom))
+        matches!(zone, Some(Zone::Tail | Zone::Bottom | Zone::Back))
     }
 }
 
@@ -377,7 +377,7 @@ impl Moods {
         let flick = new_poke
             && feel
                 .poked
-                .is_some_and(|(z, ..)| matches!(z, Zone::Tail | Zone::Bottom));
+                .is_some_and(|(z, ..)| matches!(z, Zone::Tail | Zone::Bottom | Zone::Back));
         let mood = |m: Mood| if feel.mood == m { 1.0 } else { 0.0 };
         let attend_hz = if self.soft_gaze && feel.gaze.is_none() {
             1.0
@@ -410,8 +410,10 @@ impl Moods {
             .clamp(0.0, 1.2);
         let back_goal = held(Zone::Tail)
             .max(held(Zone::Bottom))
+            .max(held(Zone::Back))
             .max(long(Zone::Tail))
-            .max(long(Zone::Bottom));
+            .max(long(Zone::Bottom))
+            .max(long(Zone::Back));
         let back = self.back.step(back_goal, 0.0, 2.2, 0.9, dt);
         let head = self.head.step(held(Zone::Head), 0.0, 2.0, 0.8, dt);
         let chin = self.chin.step(held(Zone::Chin), 0.0, 2.0, 0.8, dt);
@@ -425,8 +427,9 @@ impl Moods {
         );
         let flinch = short(Zone::Head);
         let paw = match (feel.held, feel.poked) {
-            (Some((Zone::Paw, bone, secs)), _) => bone.map(|b| (b, ramp(secs))),
-            (None, Some((Zone::Paw, bone, _))) => bone.map(|b| (b, short(Zone::Paw))),
+            // A bird's wing lifts as a paw does.
+            (Some((Zone::Paw | Zone::Wing, bone, secs)), _) => bone.map(|b| (b, ramp(secs))),
+            (None, Some((z @ (Zone::Paw | Zone::Wing), bone, _))) => bone.map(|b| (b, short(z))),
             _ => None,
         };
         let scratch = self

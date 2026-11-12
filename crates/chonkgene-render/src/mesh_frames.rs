@@ -1055,6 +1055,8 @@ fn dent_for(zone: Zone) -> (f32, f32) {
         Zone::Head => (0.06, 0.24),
         Zone::Paw => (0.05, 0.16),
         Zone::Tail => (0.06, 0.14),
+        Zone::Back => (0.08, 0.28),
+        Zone::Wing => (0.05, 0.18),
     }
 }
 

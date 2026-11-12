@@ -2984,12 +2984,16 @@ impl ApplicationHandler<UserEvent> for App {
                                 .held
                                 .map_or(Zone::Belly, |(zone, ..)| zone);
                             // Held a while on a nice spot, it was a rub or a
-                            // scratch (a pat), not a poke; a tail or a bottom
-                            // held is still a poke.
+                            // scratch (a pat), not a poke (a back stroked
+                            // too); a tail or a bottom held is still a poke.
                             let rub = p.anim.held_secs() >= HOLD_SECS
                                 && matches!(
                                     zone,
-                                    Zone::Head | Zone::Chin | Zone::Belly | Zone::Cheek
+                                    Zone::Head
+                                        | Zone::Chin
+                                        | Zone::Belly
+                                        | Zone::Cheek
+                                        | Zone::Back
                                 );
                             // A quick poke: a start, hopping back from
                             // the finger (still facing the same way).

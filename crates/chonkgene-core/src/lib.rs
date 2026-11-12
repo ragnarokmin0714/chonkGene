@@ -27,6 +27,11 @@ pub enum Zone {
     /// Under the chin (Roger, 2026-11-03: chin scratches).
     Chin,
     Tail,
+    /// The top of the body (a bird's back too), apart from the bottom
+    /// (PLAN §8, Roger's sixteenth pass, item 4).
+    Back,
+    /// A bird's wing, apart from its feet.
+    Wing,
 }
 
 impl Zone {
@@ -39,6 +44,8 @@ impl Zone {
             "head" => Self::Head,
             "chin" => Self::Chin,
             "tail" => Self::Tail,
+            "back" => Self::Back,
+            "wing" => Self::Wing,
             _ => return None,
         })
     }

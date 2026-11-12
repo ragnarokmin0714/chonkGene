@@ -1324,6 +1324,54 @@ fn every_mesh_pet_has_a_chin_and_a_tail_to_touch() {
     }
 }
 
+/// Roger's sixteenth pass, item 4: each zone gets its own reaction, so
+/// every mesh pet has a back apart from its bottom, a belly, and the birds
+/// wings apart from their feet; the bottom is the rump, not the body.
+#[test]
+fn every_mesh_pet_has_a_back_a_rump_and_birds_have_wings() {
+    let zone = |name: &str| {
+        chonkgene_rig::ZONES
+            .iter()
+            .position(|z| *z == name)
+            .unwrap() as u8
+    };
+    for id in QUAD_SPECIES.iter().chain(&BIPED_SPECIES) {
+        let (model, sk) = mesh_model(id).unwrap();
+        let mesh = bake(&model, &sk, 0, 0.33, model.bake_cell).unwrap();
+        let count = |z: &str| mesh.zones.iter().filter(|&&v| v == zone(z)).count();
+        let (back, bottom, belly, wing) = (
+            count("back"),
+            count("bottom"),
+            count("belly"),
+            count("wing"),
+        );
+        assert!(back >= 200, "{id}: {back} back vertices");
+        assert!(bottom >= 50, "{id}: {bottom} bottom vertices");
+        assert!(belly >= 200, "{id}: {belly} belly vertices");
+        assert!(
+            bottom < back,
+            "{id}: the bottom ({bottom}) is bigger than the back ({back})"
+        );
+        let bird = BIPED_SPECIES.contains(id);
+        assert_eq!(wing > 100, bird, "{id}: {wing} wing vertices");
+        // The back faces up, the belly down, on average.
+        let mean_up = |z: &str| {
+            let v: Vec<f32> = mesh
+                .vertices
+                .iter()
+                .zip(&mesh.zones)
+                .filter(|(_, k)| **k == zone(z))
+                .map(|(v, _)| v.normal[1])
+                .collect();
+            v.iter().sum::<f32>() / v.len().max(1) as f32
+        };
+        assert!(
+            mean_up("back") > mean_up("belly"),
+            "{id}: the back faces lower than the belly"
+        );
+    }
+}
+
 fn feel(mood: chonkgene_render::skin::Mood) -> chonkgene_render::skin::Feel {
     chonkgene_render::skin::Feel {
         mood,

@@ -176,7 +176,9 @@ pub fn bake(
             let nrm = scene.normal(p);
             let s = scene.coat_at(p);
             let (bones, weights) = weigh(&parts, skeleton, p);
-            zones.push(refine_zone(skeleton, s.zone, p, &bones, &weights, nose_y));
+            zones.push(refine_zone(
+                skeleton, s.zone, p, nrm, &bones, &weights, nose_y,
+            ));
             Vertex {
                 pos: [p.x, p.y, p.z, occlusion(&scene, p, nrm)],
                 normal: [nrm.x, nrm.y, nrm.z, s.gloss],
@@ -240,12 +242,15 @@ fn sample(scene: &Scene, n: usize, at: &(dyn Fn(usize, usize, usize) -> V3 + Syn
 /// blend, so a seam bends smoothly and nothing past it follows; tips and
 /// jiggles then take their share.
 /// The hit zones the model's parts cannot give: the tail (skin that moves
-/// mostly with a `tail…` bone) and under the chin (head skin that wobbles
-/// with the `chin` soft spot, below the nose). The rest keep their part's.
+/// mostly with a `tail…` bone), a bird's wings (with a `wing…` bone),
+/// under the chin (head skin that wobbles with the `chin` soft spot, below
+/// the nose), and the body's skin away from the `butt` soft spot split
+/// into back and belly. The rest keep their part's.
 fn refine_zone(
     sk: &Skeleton,
     zone: u8,
     p: V3,
+    normal: V3,
     bones: &[u32; 4],
     weights: &[f32; 4],
     nose_y: Option<f32>,
@@ -266,12 +271,35 @@ fn refine_zone(
     if share(&tail) > 0.5 || (tail(name(bones[0])) && weights[0] > 0.35) {
         return index("tail").unwrap_or(zone);
     }
+    if share(&|n| n.starts_with("wing")) > 0.5 {
+        return index("wing").unwrap_or(zone);
+    }
     let chin = share(&|n| n == "chin");
     let on_head = [index("head"), index("cheek")].contains(&Some(zone));
     if on_head && chin > 0.25 && nose_y.is_some_and(|y| p.y < y - 0.02) {
         return index("chin").unwrap_or(zone);
     }
-    zone
+    // The body (forward is +z, up +y): the rump, round the `butt` soft
+    // spot, is the bottom; the rest of the body's skin is its back where
+    // it faces up (a bird's, standing upright, wherever it does not face
+    // forward or down) and its belly elsewhere. The
+    // model's own belly patch stays the belly.
+    // The rump: round the soft spot, or a four-legged pet's hindquarters
+    // facing back.
+    let rump =
+        share(&|n| n == "butt") >= 0.2 || (share(&|n| n == "hips") > 0.5 && normal.z < -0.35);
+    if zone != index("bottom").unwrap_or(u8::MAX) || rump {
+        return zone;
+    }
+    let bird = sk.names.iter().any(|n| n.starts_with("wing"));
+    let back = if bird {
+        // Upright: the front and the underside are its belly, the rest
+        // (sides, top, back) its back.
+        normal.z <= 0.2 && normal.y > -0.3
+    } else {
+        normal.y > -0.15
+    };
+    index(if back { "back" } else { "belly" }).unwrap_or(zone)
 }
 
 fn weigh(parts: &[chonkgene_rig::PartView], sk: &Skeleton, p: V3) -> ([u32; 4], [f32; 4]) {

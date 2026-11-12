@@ -1206,6 +1206,15 @@ Roger's notes after the fifteenth pass, to do next time:
   - **How it looks**: face to face, cheek to cheek, swaying together, the one in front with a paw or wing over the other's shoulder; hearts, a nuzzle each after. **The fox instead stands up for a bear hug**: Roger is shaping her as a **霸道姊姊** (a bossy big sister): she pulls the other into a hug whether it wants one or not.
 - **The fox's persona from now on** (Roger, 2026-11-12: 「這就當作以後九尾的人設」): **bossy big sister to the other pets, 傲嬌 to you.** To them she calls herself 姊姊, gives orders (「站好，不准動！」, 「小的們，集合！」) and hugs them whether they want it or not, with a soft core (a pat on the head after, nobody truly afraid of her). To you she is 傲嬌: 「哼」, says no while her tails say yes (「哼……就讓你摸一下。」, 「才不喜歡{you}呢。」). Every fox line was rewritten in this voice (`assets/lines/zh-TW.ron`, the header there says it); the playful 「嘻嘻」 trickster is gone. She no longer names herself 小九 in lines (a renamed fox said the wrong name).
 
+#### Zones built 2026-11-12 (picture to Roger)
+
+`ZONES` gained `back` and `wing` (`Zone::Back`, `Zone::Wing`), worked out at bake time in `mesh::refine_zone` from the bones and the surface normal (forward +z, up +y), no model file touched:
+- **wing**: skin moving mostly with a `wing…` bone (the birds); it lifts when held, as a paw does.
+- **The body** (the model's `bottom` skin): the **rump** stays `bottom` (round the `butt` soft spot, or a four-legged pet's hindquarters facing back); the rest is **back** where it faces up (a four-legged pet's: up to a little below the side's middle; an upright bird's: everywhere but the front and the underside) and **belly** elsewhere. Before, the whole body of a bird was `bottom`, and a four-legged pet's sides were too.
+- **cheek** was already on every species (marks on the face; the fox's cheek tufts).
+- Until the reactions are built, back and wing touches go as before: back like the bottom (the head turns to look, a flick), a back held a while counts as a pat (as head, chin, belly, cheek do); a wing like a paw.
+- `examples/zones.rs` draws every pet sitting and walking with each pixel tinted by the zone a click there finds (`inbox/zones.png` for Roger). Test `every_mesh_pet_has_a_back_a_rump_and_birds_have_wings`.
+
 ### Phase 1: Shiba prototype (feel) — `v0.1.0`
 
 - The art pipeline (§3.3) works end to end for one Shiba, with placeholder art.
