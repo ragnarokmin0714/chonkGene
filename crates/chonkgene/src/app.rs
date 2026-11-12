@@ -2810,9 +2810,10 @@ impl Pet {
             self.anim.step(dt);
         }
 
+        // In a pond it stands in the water, further in than its feet.
         let placed = (
             self.body.pos.0.round() as i32,
-            self.body.pos.1.round() as i32,
+            (self.body.pos.1 - self.fun.pond_lift()).round() as i32,
         );
         if placed != self.placed {
             self.window

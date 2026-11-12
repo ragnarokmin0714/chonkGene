@@ -565,6 +565,28 @@ impl Wade {
     }
 }
 
+/// A pet in a pond stands this far into it by default, as a share of the
+/// pond's height up from its near edge (its feet were on the near edge:
+/// Roger's seventeenth pass, item 3, they looked to stand above the water).
+const POND_DEEP: f32 = 0.30;
+
+impl Fun {
+    /// How far up its window goes while it is in a pond, pixels: its feet
+    /// into the water rather than on the near edge, eased in and out with
+    /// the water (`wet`).
+    pub fn pond_lift(&self) -> f32 {
+        if self.pond.now.is_none() {
+            return 0.0;
+        }
+        let deep = if self.pond_deep > 0.0 {
+            self.pond_deep
+        } else {
+            POND_DEEP
+        };
+        self.wet.0 * deep * Thing::Pond.size().1 * self.scale
+    }
+}
+
 /// What a pet is up to besides its ordinary life.
 #[derive(Default)]
 pub(super) struct Fun {
@@ -633,6 +655,9 @@ pub(super) struct Fun {
     wet: (f32, f64),
     /// How much is left of the pond it is in, 1 … 0 as it dries up.
     pond_left: f32,
+    /// How far into the pond it stands, as a share of the pond's height up
+    /// from its near edge (see [`Fun::pond_lift`]); 0 for the default.
+    pond_deep: f32,
     /// Hugged by you: since when, and the body your arms go round (its
     /// picture's bounds then).
     pub hug_arms: Option<(f64, (f32, f32, f32, f32))>,
@@ -2406,8 +2431,9 @@ impl Playground {
                 if self.roll() >= 0.25 * dt {
                     continue;
                 }
-                // Places along the water, apart.
-                let slot = [-0.3, 0.3, -0.15, 0.15, 0.0][inside % 5] * width;
+                // Places along the water, apart, some further in.
+                let slot = [-0.36, 0.36, -0.18, 0.18, 0.0][inside % 5] * width;
+                p.fun.pond_deep = [0.30, 0.36, 0.24, 0.40, 0.33][inside % 5];
                 diag!("{}: gets in the pond", p.save.name);
                 p.fun.bathed = now;
                 p.fun.scene = Some(Run {

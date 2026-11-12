@@ -1240,6 +1240,18 @@ Roger's notes after the fifteenth pass, to do next time:
 - **The fox's tails round you**: hugged by you she sweeps her nine tails out to both sides and round to the front, one curling under your arms (傲嬌: she says no, her tails say yes).
 - **Sounds for the hug lines**: hugged, a cat purrs and the rest greet you; a hug offered is a greeting; caught in the fox's bear hug, a laugh.
 
+### Roger's seventeenth pass (2026-11-12)
+
+Roger's notes, and what was done the same day (all checked here; each owes a look on Windows):
+
+1. **「我的寵物」 minimised and restored shows only the pet.** The software renderer redraws only what changed; the preview moves, so only it came back. The note in the code that Slint redraws everything on a restore was wrong on Windows. Now `repaint_when_restored` watches the window four times a second (`is_minimized`, and any change of size as a fallback) and repaints the whole of it at once and twice more as it settles (the `repaint` property, as `repaint_when_shown` does on opening).
+2. **When the page opens, 「說再見」 should be in sight.** It was 280 px below the fold (the window opened at 620 px, the page is about 900). The 「在桌面上」 switch and 「說再見…」 (with its confirmation) moved under the pet's card in the left column, which was empty there, and the window opens 700 px tall (`preferred-height`; `min-height` stays 560): everything shows at once (Xvfb screenshot). The switch's hint is now 「關掉就在寵物窩休息。」 (the old one broke 寵/物 in the narrower card).
+3. **The pond a bit bigger; after a while the pets are on top of it, not in the middle.** Seen under Xvfb: with five or six in, their bodies stood above a thin strip of water. Their feet were on the floor line, which is the pond's near edge, and 460 × 96 had no room for them. Now the pond is 640 × 136 (`Thing::Pond.size`) and a pet in it stands further in: its window goes up by a share of the pond's height (`Fun::pond_lift`, 0.24–0.40 by its place, `POND_DEEP` 0.30 by default), eased in and out with the water (`wet`), so its feet are in the water and the waterline at its belly; the places along the water are further apart (±0.36 and ±0.18 of the width). `inbox/pond.png` is a frame of it put together from the windows.
+4. **Asleep on its back, the belly's breathing is too small.** `BELLY_UP_BREATH` 0.11 → 0.24: the belly swells 1.6 times as far as before (0.28 brought its top to a point). A measure of the silhouette was swamped by the 「z」 and the snot bubble; frames compared by eye at the top and bottom of a breath show it.
+5. **Except the fox, every pet's belly jiggle could show more.** `JIGGLE` 1.6: the belly takes 1.6 times the push from the body's moves and from pokes and may go 0.18 instead of 0.12 (`JIGGLE_MOST`), on four-legged pets (`Walk::jiggle`, 1.0 for the fox) and birds alike.
+
+`inbox/belly.gif` shows items 4 and 5 (two pets asleep on their backs, four poked).
+
 ### Phase 1: Shiba prototype (feel) — `v0.1.0`
 
 - The art pipeline (§3.3) works end to end for one Shiba, with placeholder art.

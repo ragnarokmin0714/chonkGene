@@ -292,7 +292,7 @@ export component SettingsWindow inherits Window {
     in property <image> window-icon;
     icon: window-icon;
     preferred-width: 880px;
-    preferred-height: 620px;
+    preferred-height: 700px;
     min-width: 760px;
     min-height: 560px;
     background: Theme.bg;
@@ -548,30 +548,80 @@ export component SettingsWindow inherits Window {
                     if !root.adopting && root.selected-pet != "": HorizontalLayout {
                         spacing: 20px;
                         alignment: start;
-                        Rectangle {
+                        // The pet, and under it whether it is out and saying
+                        // goodbye (Roger's seventeenth pass: 說再見 was below
+                        // the fold when the page opened).
+                        VerticalLayout {
+                            spacing: 14px;
+                            alignment: start;
                             width: 240px;
-                            height: 420px;
-                            border-radius: 26px;
-                            background: root.preview-tint;
-                            VerticalLayout {
-                                padding: 16px;
-                                spacing: 8px;
-                                alignment: end;
-                                Rectangle {
-                                    height: bubble-text.preferred-height + 18px;
-                                    border-radius: 18px;
-                                    background: white;
-                                    bubble-text := Text {
-                                        text: root.preview-line;
-                                        color: Theme.ink;
-                                        font-size: 17px;
-                                        horizontal-alignment: center;
-                                        vertical-alignment: center;
+                            Rectangle {
+                                width: 240px;
+                                height: 420px;
+                                border-radius: 26px;
+                                background: root.preview-tint;
+                                VerticalLayout {
+                                    padding: 16px;
+                                    spacing: 8px;
+                                    alignment: end;
+                                    Rectangle {
+                                        height: bubble-text.preferred-height + 18px;
+                                        border-radius: 18px;
+                                        background: white;
+                                        bubble-text := Text {
+                                            text: root.preview-line;
+                                            color: Theme.ink;
+                                            font-size: 17px;
+                                            horizontal-alignment: center;
+                                            vertical-alignment: center;
+                                        }
+                                    }
+                                    Image { source: root.preview; height: 220px; image-fit: contain; }
+                                    Text { text: root.pet-name; color: Theme.ink; font-size: 22px; horizontal-alignment: center; }
+                                    Text { text: root.species-label + "・" + root.level-text; color: Theme.muted; font-size: 13px; horizontal-alignment: center; }
+                                }
+                            }
+                            Section {
+                                height: 76px;
+                                Row {
+                                    padding-left: 18px;
+                                    padding-right: 18px;
+                                    VerticalLayout {
+                                        alignment: center;
+                                        spacing: 4px;
+                                        Label { text: "在桌面上"; }
+                                        Hint { text: "關掉就在寵物窩休息。"; }
+                                    }
+                                    PawSwitch {
+                                        checked <=> root.on-desktop;
+                                        toggled(v) => { root.desktop-toggled(v); }
                                     }
                                 }
-                                Image { source: root.preview; height: 220px; image-fit: contain; }
-                                Text { text: root.pet-name; color: Theme.ink; font-size: 22px; horizontal-alignment: center; }
-                                Text { text: root.species-label + "・" + root.level-text; color: Theme.muted; font-size: 13px; horizontal-alignment: center; }
+                            }
+
+                            if !root.confirm-release: HorizontalLayout {
+                                alignment: end;
+                                CuteButton {
+                                    text: "說再見…";
+                                    primary: false;
+                                    danger: true;
+                                    clicked => { root.confirm-release = true; }
+                                }
+                            }
+                            if root.confirm-release: Section {
+                                height: 120px;
+                                VerticalLayout {
+                                    padding: 16px;
+                                    spacing: 10px;
+                                    Label { text: "確定要和" + root.pet-name + "說再見嗎？"; }
+                                    Hint { text: "牠的名字和親密度會一起消失。"; }
+                                    HorizontalLayout {
+                                        alignment: end;
+                                        spacing: 10px;
+                                        CuteButton { text: "再想想"; primary: false; clicked => { root.confirm-release = false; } }
+                                        CuteButton { text: "說再見"; primary: false; danger: true; clicked => { root.release(); } }
+                                    }
+                                }
                             }
                         }
                         VerticalLayout {
@@ -672,48 +722,6 @@ export component SettingsWindow inherits Window {
                             }
                             Hint { text: "會影響被戳的時候，是翻肚爆笑還是一臉厭世。"; }
 
-                            Section {
-                                height: 76px;
-                                Row {
-                                    padding-left: 18px;
-                                    padding-right: 18px;
-                                    VerticalLayout {
-                                        alignment: center;
-                                        spacing: 4px;
-                                        Label { text: "在桌面上"; }
-                                        Hint { text: "關掉的話，牠會在寵物窩休息。"; }
-                                    }
-                                    PawSwitch {
-                                        checked <=> root.on-desktop;
-                                        toggled(v) => { root.desktop-toggled(v); }
-                                    }
-                                }
-                            }
-
-                            if !root.confirm-release: HorizontalLayout {
-                                alignment: end;
-                                CuteButton {
-                                    text: "說再見…";
-                                    primary: false;
-                                    danger: true;
-                                    clicked => { root.confirm-release = true; }
-                                }
-                            }
-                            if root.confirm-release: Section {
-                                height: 120px;
-                                VerticalLayout {
-                                    padding: 16px;
-                                    spacing: 10px;
-                                    Label { text: "確定要和" + root.pet-name + "說再見嗎？"; }
-                                    Hint { text: "牠的名字和親密度會一起消失。"; }
-                                    HorizontalLayout {
-                                        alignment: end;
-                                        spacing: 10px;
-                                        CuteButton { text: "再想想"; primary: false; clicked => { root.confirm-release = false; } }
-                                        CuteButton { text: "說再見"; primary: false; danger: true; clicked => { root.release(); } }
-                                    }
-                                }
-                            }
                         }
                     }
                 }

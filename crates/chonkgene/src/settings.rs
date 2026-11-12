@@ -697,6 +697,7 @@ pub fn run(data: Option<PathBuf>, pet: Option<u64>) -> Result<(), String> {
     let ui = SettingsWindow::new().map_err(|e| e.to_string())?;
     let (st, _timers) = setup(&ui, data, pet)?;
     let _repaints = repaint_when_shown(&ui);
+    let _restored = repaint_when_restored(&ui);
     let _front = come_forward_when_asked(&ui, &st);
     let _icon = use_program_icon(&ui);
     ui.run().map_err(|e| e.to_string())?;
@@ -756,8 +757,8 @@ fn come_forward_when_asked(ui: &SettingsWindow, st: &Rc<RefCell<State>>) -> Time
 /// Repaint the whole window a few times just after it opens. On Windows the
 /// software renderer only redraws what changed, and the first frame can be
 /// drawn before the window is on screen and lost, leaving it black until
-/// something scrolled. (A resize or a restore after minimising already gets
-/// a full redraw from Slint.)
+/// something scrolled. (A restore after minimising does not get one either
+/// on Windows: see `repaint_when_restored`.)
 fn repaint_when_shown(ui: &SettingsWindow) -> [Timer; 3] {
     [100, 600, 1500].map(|ms| {
         let ui = ui.as_weak();
@@ -773,6 +774,41 @@ fn repaint_when_shown(ui: &SettingsWindow) -> [Timer; 3] {
         );
         t
     })
+}
+
+/// Repaint the whole window after it comes back from being minimised
+/// (Roger's seventeenth pass, item 1: on Windows only the preview, which
+/// moves, was drawn again; everything else stayed blank). Watched four
+/// times a second, with any change of size as well; repainted at once and
+/// twice more as it settles.
+fn repaint_when_restored(ui: &SettingsWindow) -> Timer {
+    let timer = Timer::default();
+    let weak = ui.as_weak();
+    let mut was_minimized = false;
+    let mut was_size = None;
+    let mut pending: Vec<std::time::Instant> = Vec::new();
+    timer.start(TimerMode::Repeated, Duration::from_millis(250), move || {
+        let Some(ui) = weak.upgrade() else { return };
+        let minimized = ui.window().is_minimized();
+        let size = ui.window().size();
+        let now = std::time::Instant::now();
+        // Restored, or resized (if the backend did not say it was
+        // minimised, its size still changed, to nothing and back).
+        let resized = was_size.is_some_and(|s| s != size);
+        was_size = Some(size);
+        if (was_minimized && !minimized) || resized {
+            pending = [0, 300, 900]
+                .map(|ms| now + Duration::from_millis(ms))
+                .to_vec();
+        }
+        was_minimized = minimized;
+        let due = pending.iter().filter(|t| **t <= now).count();
+        if due > 0 {
+            pending.retain(|t| *t > now);
+            ui.set_repaint(ui.get_repaint().wrapping_add(1));
+        }
+    });
+    timer
 }
 
 /// The window's icon (PLAN §1.9, "Program icon"). Windows loads the exe's

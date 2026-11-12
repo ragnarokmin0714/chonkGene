@@ -672,7 +672,14 @@ const CURL_TAIL_DOWN: f32 = 70.0;
 const CURL_TAIL_WRAP: f32 = 110.0;
 /// Asleep on its back, the belly swells and sinks this much more with each
 /// breath (world units along the belly bone).
-const BELLY_UP_BREATH: f32 = 0.11;
+/// Roger's seventeenth pass: still too small to see (was 0.11; with the
+/// rest, 1.6 times the old swell; at 0.28 its top came to a point).
+const BELLY_UP_BREATH: f32 = 0.24;
+/// How much more a belly wobbles than it used to, when the body moves or
+/// is poked, and how far it may go (Roger's seventeenth pass: more to see
+/// on every pet but the fox, whose fur hides it anyway).
+pub(crate) const JIGGLE: f32 = 1.6;
+pub(crate) const JIGGLE_MOST: f32 = 0.18;
 /// Dancing, how far a front paw goes out to the side, degrees (the first
 /// front leg's way; the other's the opposite).
 const DANCE_OUT: f32 = 45.0;
@@ -778,6 +785,8 @@ pub struct Walk {
     swish: f32,
     tails: Vec<Tail>,
     belly: Spring,
+    /// How much its belly wobbles (see [`JIGGLE`]).
+    jiggle: f32,
     butt: Spring,
     butt_z: Spring,
     butt_x: Spring,
@@ -909,6 +918,7 @@ impl Walk {
             swish: 0.0,
             tails,
             belly: Spring::default(),
+            jiggle: 1.0,
             butt: Spring::default(),
             butt_z: Spring::default(),
             butt_x: Spring::default(),
@@ -974,6 +984,7 @@ impl Walk {
     /// own fidgets.
     pub fn set_species(&mut self, id: &str) {
         self.kicks = matches!(id, "shiba" | "fox");
+        self.jiggle = if id == "fox" { 1.0 } else { JIGGLE };
         self.kneads = matches!(id, "fold" | "munchkin");
         self.fidgets = Fidgets::new(id, 1);
         self.ear_k = if id == "fold" { 0.45 } else { 1.0 };
@@ -1041,7 +1052,7 @@ impl Walk {
     /// Jolt the soft parts (a poke in the belly), in world units a second:
     /// the belly most, the bottom and the chin wobbling along.
     pub fn poke(&mut self, kick: f32) {
-        self.belly.v += kick;
+        self.belly.v += kick * self.jiggle;
         self.butt.v += kick * 0.7;
         self.chin.v += kick * 0.6;
     }
@@ -1379,8 +1390,11 @@ impl Walk {
             // breathing; his fifteenth pass: in every sleeping pose).
             let back = lie * chonkgene_rig::math::smoothstep(90.0, 150.0, self.roll.x);
             let amp = 0.05 + LYING_BREATH * lie + BELLY_UP_BREATH * back;
-            let y = self.belly.step(-amp * self.breath, -acc, 3.6, 0.16, dt);
-            let most = 0.12 + LYING_BREATH * lie + BELLY_UP_BREATH * back;
+            let y = self
+                .belly
+                .step(-amp * self.breath, -acc * self.jiggle, 3.6, 0.16, dt);
+            let jiggle_most = if self.jiggle > 1.0 { JIGGLE_MOST } else { 0.12 };
+            let most = jiggle_most + LYING_BREATH * lie + BELLY_UP_BREATH * back;
             j[i].shift = v3(0.0, y.clamp(-most, most), 0.0);
         }
         if let Some(i) = b.butt {

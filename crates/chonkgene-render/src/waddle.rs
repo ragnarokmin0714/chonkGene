@@ -22,7 +22,7 @@ use crate::skin::{
     SPEED_UP, STILL_GOING, SULK_BACK, SULK_YAW, Skeleton, SleepPose, Spring, TURN_HZ, WALK_YAW,
     Walk, bite, peck, tempo_split,
 };
-use crate::skin::{drift, hold};
+use crate::skin::{JIGGLE, JIGGLE_MOST, drift, hold};
 
 /// The pace the pet's window moves at, world units a second (60 px/s at
 /// 100%): a planted foot slides back at this speed.
@@ -412,7 +412,7 @@ impl Waddle {
 
     /// Jolt the soft parts (a poke in the belly), world units a second.
     pub fn poke(&mut self, kick: f32) {
-        self.belly.v += kick;
+        self.belly.v += kick * JIGGLE;
         self.butt.v += kick * 0.7;
         self.chin.v += kick * 0.6;
     }
@@ -633,8 +633,11 @@ impl Waddle {
             // The belly rises and falls with each breath, more settled
             // down asleep (Roger's fifteenth pass).
             let amp = 0.03 + 0.04 * lie;
-            let y = self.belly.step(-amp * self.breath, -acc, 3.6, 0.16, dt);
-            j[i].shift = v3(0.0, y.clamp(-0.12, 0.12), 0.0);
+            // Wobbling more than it used to (Roger's seventeenth pass).
+            let y = self
+                .belly
+                .step(-amp * self.breath, -acc * JIGGLE, 3.6, 0.16, dt);
+            j[i].shift = v3(0.0, y.clamp(-JIGGLE_MOST, JIGGLE_MOST), 0.0);
         }
         if let Some(i) = self.soft[1] {
             let y = self.butt.step(0.0, -acc, 3.2, 0.16, dt);
