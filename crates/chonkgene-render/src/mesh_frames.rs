@@ -583,6 +583,7 @@ impl MeshRenderer {
             })
         }));
         self.walk.set_pace(params.pace);
+        self.walk.set_hug(params.hug);
         self.walk.breathe(params.breath);
         // A bird held on a spot it loves fluffs up, pleased.
         let bird = matches!(self.model.species.as_str(), "owl" | "chick" | "duck");

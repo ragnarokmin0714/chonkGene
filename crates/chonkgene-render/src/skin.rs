@@ -6,6 +6,7 @@
 //! belly, bottom and chin wobble on springs of their own.
 
 use chonkgene_core::Zone;
+use chonkgene_core::anim::Hug;
 use chonkgene_core::species::Fondness;
 use chonkgene_rig::math::{M3, V3, v3};
 use chonkgene_rig::{FLOOR, Model, builtin};
@@ -629,6 +630,9 @@ pub(crate) const REST_YAW: f32 = 28.0;
 /// Sitting, it turns almost to face you, so the tails fanned out behind it
 /// show on both sides of its head.
 pub(crate) const SIT_YAW: f32 = 8.0;
+/// Hugging another pet it turns this far toward it, degrees: face to face
+/// across the desktop, still showing its face.
+pub(crate) const HUG_YAW: f32 = 58.0;
 
 /// Sitting: the body tips back this far (degrees) about the front paws,
 /// which brings the bottom down onto the floor; the hind legs fold
@@ -798,6 +802,8 @@ pub struct Walk {
     sit: Spring,
     legs: [(usize, f32, bool); 4],
     gesture: Option<Gesture>,
+    /// Its part in a hug, for [`Act::Hug`](chonkgene_core::anim::Act::Hug).
+    pub(crate) hug: Hug,
     /// Walking speed against the usual (see [`Walk::set_pace`]).
     tempo: f32,
     /// Leg swing either way at full pace, degrees: [`SWING`] for the legs
@@ -920,6 +926,7 @@ impl Walk {
             sit: Spring::default(),
             legs,
             gesture: None,
+            hug: Hug::ByYou,
             tempo: 1.0,
             swing,
             leg_len,
@@ -1141,10 +1148,15 @@ impl Walk {
         let many_tails = self.tails.len() > 1;
         let rolled_over = !many_tails && (self.feel.mood == Mood::Laugh || lv.rub > 0.3);
         let sits_up = many_tails && (self.feel.mood == Mood::Laugh || lv.rub > 0.3);
+        let hugging = self
+            .gesture
+            .is_some_and(|g| g.act == chonkgene_core::anim::Act::Hug && self.hug != Hug::ByYou);
         let yaw = self.yaw.step(
             facing
                 * if going {
                     WALK_YAW
+                } else if hugging {
+                    HUG_YAW
                 } else if self.feel.mood == Mood::Sulk {
                     SULK_YAW
                 } else if rolled_over
@@ -1751,6 +1763,69 @@ impl Walk {
                             j[leg].rot.y += e * 10.0 * if k == 0.0 { 1.0 } else { -1.0 };
                             j[leg].shift.y += e * 0.04 * grip.max(0.0);
                             k += 1.0;
+                        }
+                    }
+                }
+                // A hug (PLAN §8, Roger's sixteenth pass), sitting.
+                Act::Hug => {
+                    let sway = (TAU * 0.55 * g.t).sin();
+                    let squeeze = (TAU * 1.1 * g.t).sin().max(0.0);
+                    let near = self.legs.iter().find(|l| l.1 == 0.25).map(|l| l.0);
+                    match self.hug {
+                        // Face to face with the other: leaning into it,
+                        // the head tipped against its cheek, swaying
+                        // together; in front, a paw over its shoulder.
+                        Hug::Cuddle { front } => {
+                            j[b.body].rot.x += e * 12.0;
+                            j[b.body].rot.z += e * 5.0 * sway;
+                            j[b.head].rot.x -= e * 8.0;
+                            j[b.head].rot.z += facing * e * (16.0 + 3.0 * sway);
+                            if front && let Some(leg) = near {
+                                j[leg].rot.x -= e * (85.0 + 6.0 * squeeze);
+                                j[leg].shift.y += e * 0.1;
+                            }
+                        }
+                        // The fox up on its hind legs, both front paws
+                        // round the other, squeezing, chin on its head.
+                        Hug::Bear => {
+                            j[b.body].rot.x -= e * 38.0;
+                            j[0].shift.y += e * 0.12 * self.leg_len;
+                            j[b.head].rot.x += e * 30.0;
+                            j[b.body].rot.z += e * 4.0 * sway;
+                            for &(leg, _, front) in &self.legs {
+                                if front {
+                                    j[leg].rot.x -= e * (70.0 + 10.0 * squeeze);
+                                    j[leg].shift.y += e * 0.12;
+                                }
+                            }
+                        }
+                        // Squeezed in a bear hug: paws up, pushed back a
+                        // little, hind legs paddling.
+                        Hug::Squeezed => {
+                            j[b.body].rot.x -= e * (8.0 + 4.0 * squeeze);
+                            j[b.head].rot.z += facing * e * 10.0;
+                            let mut k = 0.0;
+                            for &(leg, _, front) in &self.legs {
+                                if front {
+                                    j[leg].rot.x -= e * 40.0;
+                                } else {
+                                    let kick = (TAU * 3.0 * g.t + PI * k).sin();
+                                    j[leg].rot.x -= e * 12.0 * kick;
+                                    k += 1.0;
+                                }
+                            }
+                        }
+                        // In your arms: rocked side to side, nuzzling,
+                        // front paws up hugging you back.
+                        Hug::ByYou => {
+                            j[0].rot.z += e * 6.0 * sway;
+                            j[b.head].rot.z += e * 10.0 * (TAU * 1.1 * g.t).sin();
+                            j[b.head].rot.x -= e * 6.0;
+                            for &(leg, _, front) in &self.legs {
+                                if front {
+                                    j[leg].rot.x -= e * (35.0 + 8.0 * squeeze);
+                                }
+                            }
                         }
                     }
                 }

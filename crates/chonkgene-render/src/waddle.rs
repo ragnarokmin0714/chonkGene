@@ -9,7 +9,7 @@
 
 use std::f32::consts::{PI, TAU};
 
-use chonkgene_core::anim::Act;
+use chonkgene_core::anim::{Act, Hug};
 
 use chonkgene_rig::math::v3;
 use chonkgene_rig::{FLOOR, Model};
@@ -18,9 +18,9 @@ use chonkgene_core::Zone;
 
 use crate::fidget::{Fidgets, Kind, Out};
 use crate::skin::{
-    ATTEND_YAW, Feel, Gesture, Joint, Levels, MAX_SWING, Mood, Moods, REST_YAW, SIT_YAW, SPEED_UP,
-    STILL_GOING, SULK_BACK, SULK_YAW, Skeleton, SleepPose, Spring, TURN_HZ, WALK_YAW, Walk, bite,
-    peck, tempo_split,
+    ATTEND_YAW, Feel, Gesture, HUG_YAW, Joint, Levels, MAX_SWING, Mood, Moods, REST_YAW, SIT_YAW,
+    SPEED_UP, STILL_GOING, SULK_BACK, SULK_YAW, Skeleton, SleepPose, Spring, TURN_HZ, WALK_YAW,
+    Walk, bite, peck, tempo_split,
 };
 use crate::skin::{drift, hold};
 
@@ -230,6 +230,14 @@ impl Mover {
         }
     }
 
+    /// Its part in a hug (see [`chonkgene_core::anim::Act::Hug`]).
+    pub fn set_hug(&mut self, hug: Hug) {
+        match self {
+            Self::Quad(w) => w.hug = hug,
+            Self::Biped(w) => w.hug = hug,
+        }
+    }
+
     /// 0 standing … 1 full pace.
     pub fn speed(&self) -> f32 {
         match self {
@@ -280,6 +288,8 @@ pub struct Waddle {
     swimming: bool,
     swim: Spring,
     gesture: Option<Gesture>,
+    /// Its part in a hug, for [`Act::Hug`].
+    pub(crate) hug: Hug,
     tempo: f32,
     /// Seconds since a finger last had its attention.
     untouched: f32,
@@ -356,6 +366,7 @@ impl Waddle {
             swimming: false,
             swim: Spring::default(),
             gesture: None,
+            hug: Hug::ByYou,
             tempo: 1.0,
             untouched: SETTLE_SECS,
             look: Spring::default(),
@@ -474,10 +485,15 @@ impl Waddle {
         // looks back over its shoulder (turning round would hide them).
         let touched = self.feel.gaze.is_some() && !self.feel.behind();
         self.untouched = if touched { 0.0 } else { self.untouched + dt };
+        let hugging = self
+            .gesture
+            .is_some_and(|g| g.act == Act::Hug && self.hug != Hug::ByYou);
         let yaw = self.yaw.step(
             facing
                 * if going || self.flying {
                     WALK_YAW
+                } else if hugging {
+                    HUG_YAW
                 } else if self.feel.mood == Mood::Sulk {
                     SULK_YAW
                 } else if touched {
@@ -689,6 +705,35 @@ impl Waddle {
                     let k = if side > 0.0 { 0 } else { 1 };
                     if let Some(w) = self.wings[k] {
                         j[w].rot.z += side * 22.0 * e;
+                    }
+                }
+                // A hug (PLAN §8, Roger's sixteenth pass): wings out and
+                // round the other (or you), swaying; held in the fox's bear
+                // hug, lifted off its feet, feet paddling.
+                Act::Hug => {
+                    let sway = (TAU * 0.55 * g.t).sin();
+                    let (lean, tilt, wings, lift) = match self.hug {
+                        Hug::Cuddle { front } => (10.0, 14.0, if front { 55.0 } else { 30.0 }, 0.0),
+                        Hug::Squeezed => (-6.0, 8.0, 20.0, 0.32),
+                        Hug::Bear | Hug::ByYou => (2.0, 6.0, 35.0, 0.0),
+                    };
+                    j[self.body].rot.x += e * lean;
+                    j[self.body].rot.z += e * 5.0 * sway;
+                    j[self.head].rot.z += facing * e * (tilt + 3.0 * sway)
+                        + e * 8.0 * (TAU * 1.1 * g.t).sin() * f32::from(self.hug == Hug::ByYou);
+                    for (side, wing) in self.wings.iter().enumerate() {
+                        if let Some(w) = *wing {
+                            let sign = if side == 0 { 1.0 } else { -1.0 };
+                            j[w].rot.z += sign * e * wings;
+                            j[w].rot.x -= e * 0.5 * wings;
+                        }
+                    }
+                    if lift > 0.0 {
+                        j[0].shift.y += e * lift;
+                        for (k, &leg) in self.legs.iter().enumerate() {
+                            let kick = (TAU * 3.2 * g.t + PI * k as f32).sin();
+                            j[leg].rot.x -= e * 22.0 * kick;
+                        }
                     }
                 }
                 // Flapping: both wings beat quickly, the body rising onto

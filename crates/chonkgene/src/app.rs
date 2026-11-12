@@ -8,7 +8,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use chonkgene_core::Zone;
-use chonkgene_core::anim::{Act, Animator, Expression, HOLD_SECS};
+use chonkgene_core::anim::{Act, Animator, Expression, HOLD_SECS, HUG_SECS, Hug};
 use chonkgene_core::mind::{Line, Mind, Out, World, XP_PER_LEVEL};
 use chonkgene_core::motion::{Area, Body, Heading, Motion};
 use chonkgene_core::play::{Command as Ask, Scene, Thing};
@@ -59,6 +59,8 @@ const HAPPY_SECS: f64 = 3.0;
 const DISLIKE_SECS: f32 = 0.35;
 /// The belly trap lasts this long, seconds.
 const TRAP_SECS: f32 = 1.8;
+/// Two clicks on a pet this close together are a hug.
+const DOUBLE_CLICK: Duration = Duration::from_millis(400);
 /// Held on a spot it loves: hearts from this long on, seconds, and again
 /// this often.
 const LOVE_HEARTS_AFTER: f32 = 0.8;
@@ -240,6 +242,8 @@ struct Pet {
     purr_at: f64,
     /// Held on a spot it loves: when the next hearts rise.
     love_at: f64,
+    /// A quick click let go then: a second one soon after is a hug.
+    clicked_at: Option<Instant>,
     /// When its picture last changed, and whether the log has noted it
     /// standing still since (see [`FROZEN`]).
     shown_at: Instant,
@@ -274,6 +278,8 @@ enum Page {
     Main,
     Commands,
     Spells,
+    /// Whom to go and hug (叫牠… › 去抱抱…).
+    HugWho,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -306,6 +312,11 @@ enum Action {
     Dance,
     /// 放聚光燈: a spotlight put down beside it (or taken away).
     Stage,
+    /// 抱抱: you hug it (a double-click does too).
+    Hug,
+    /// The page of whom it could go and hug, and one of them.
+    HugWho,
+    HugWith(u64),
 }
 
 struct Menu {
@@ -1194,6 +1205,17 @@ impl App {
             actions.push(Action::Back);
             return self.show_menu(el, i, items, actions, at);
         }
+        if page == Page::HugWho {
+            let mut items = Vec::new();
+            let mut actions = Vec::new();
+            for q in self.pets.iter().filter(|q| q.save.id != p.save.id) {
+                items.push(item(&q.save.name, None, Icon::Hug, false));
+                actions.push(Action::HugWith(q.save.id));
+            }
+            items.push(item("返回", None, Icon::Back, true));
+            actions.push(Action::Commands);
+            return self.show_menu(el, i, items, actions, at);
+        }
         if page == Page::Commands {
             let mut items: Vec<Item> = ["坐下", "趴下", "過來", "轉圈", "握手"]
                 .iter()
@@ -1202,11 +1224,17 @@ impl App {
             let mut actions: Vec<Action> = Ask::ALL.iter().map(|&c| Action::Command(c)).collect();
             items.push(item("跳舞", None, Icon::Note, false));
             actions.push(Action::Dance);
+            // Someone else on the desktop to go and hug.
+            if self.pets.iter().any(|q| q.save.id != p.save.id) {
+                items.push(item("去抱抱…", None, Icon::Hug, false));
+                actions.push(Action::HugWho);
+            }
             items.push(item("返回", None, Icon::Back, true));
             actions.push(Action::Back);
             return self.show_menu(el, i, items, actions, at);
         }
         let mut items = vec![
+            item("抱抱", None, Icon::Hug, false),
             item("摸摸頭", None, Icon::Heart, false),
             item(
                 "餵零食",
@@ -1221,7 +1249,13 @@ impl App {
             item("改名字…", None, Icon::Pencil, false),
             item("幫牠換造型…", None, Icon::Palette, false),
         ];
-        let mut actions = vec![Action::Pat, Action::Feed, Action::Edit, Action::Edit];
+        let mut actions = vec![
+            Action::Hug,
+            Action::Pat,
+            Action::Feed,
+            Action::Edit,
+            Action::Edit,
+        ];
         if asleep {
             items.push(item("輕輕叫醒牠", None, Icon::Sun, false));
             actions.push(Action::Wake);
@@ -1387,10 +1421,11 @@ impl App {
         let now = Instant::now();
         let world = self.world(now);
         match action {
-            Action::Commands | Action::Spells | Action::Back => {
+            Action::Commands | Action::Spells | Action::Back | Action::HugWho => {
                 let page = match action {
                     Action::Commands => Page::Commands,
                     Action::Spells => Page::Spells,
+                    Action::HugWho => Page::HugWho,
                     _ => Page::Main,
                 };
                 if let Some(i) = self.pets.iter().position(|p| p.save.id == pet) {
@@ -1452,9 +1487,15 @@ impl App {
                 p.next = now;
                 return;
             }
-            Action::Magic(Magic::Spell(spell)) => {
+            Action::HugWith(_) | Action::Magic(Magic::Spell(_)) => {
                 let cast = actors(&self.pets, world.now);
-                let cmds = self.director.cast(pet, spell, world.now, &cast);
+                let cmds = match action {
+                    Action::HugWith(whom) => self.director.hug(pet, whom, world.now, &cast),
+                    Action::Magic(Magic::Spell(spell)) => {
+                        self.director.cast(pet, spell, world.now, &cast)
+                    }
+                    _ => Vec::new(),
+                };
                 if cmds.is_empty() {
                     return;
                 }
@@ -1603,6 +1644,12 @@ impl App {
                 out
             }
             Action::Wake => p.mind.wake(&world),
+            Action::Hug => {
+                p.hug_you(&mut ctx);
+                p.next = now;
+                *dirty = true;
+                return;
+            }
             _ => Out::default(),
         };
         p.apply(&mut ctx, out);
@@ -1932,6 +1979,24 @@ fn direct(pets: &mut [Pet], ctx: &mut Ctx, cmds: Vec<Cmd>) {
                     }
                 }
             }
+            Cmd::Hug { role, .. } => {
+                // Face to face (turned by the Face before it), sitting
+                // into the hug; the one in front over the other.
+                if p.body.motion == Motion::Walk {
+                    p.body.motion = Motion::Idle;
+                }
+                p.anim.hug(role);
+                if p.anim.expression != Expression::Happy {
+                    p.anim.cheer();
+                }
+                p.anim.expression = Expression::Happy;
+                p.happy_until = ctx.world.now + f64::from(HUG_SECS) + HAPPY_SECS;
+                p.fun.effect(Fx::Hearts, ctx.world.now);
+                if matches!(role, Hug::Cuddle { front: true } | Hug::Squeezed) {
+                    p.raise(ctx.shared);
+                }
+                diag!("{}: hugs as {role:?}", p.save.name);
+            }
             Cmd::Bless { .. } => {
                 let now = ctx.world.now;
                 p.fun.effect(Fx::Hearts, now);
@@ -2088,6 +2153,7 @@ fn spawn(
         pounce_at: None,
         purr_at: 0.0,
         love_at: 0.0,
+        clicked_at: None,
         shown_at: now,
         frozen: false,
         draw_gap: Duration::ZERO,
@@ -2255,6 +2321,30 @@ impl Pet {
     /// How high this pet's voice is (see [`voice_pitch`]).
     fn pitch(&self) -> f32 {
         voice_pitch(self.save.size, self.save.chonk)
+    }
+
+    /// 抱抱 (the menu, or a double-click): it says how it takes it, and if
+    /// it is awake and free your arms go round it and it snuggles in.
+    fn hug_you(&mut self, ctx: &mut Ctx) {
+        let now = ctx.world.now;
+        let out = self.mind.hug(&ctx.world);
+        let free = out.line == Some(Line::Hugged)
+            && !self.in_skit
+            && self.press.as_ref().is_none_or(|p| !p.moved)
+            && matches!(self.body.motion, Motion::Idle | Motion::Walk)
+            && !self.fun.busy(now);
+        if free {
+            self.body.motion = Motion::Idle;
+            self.anim.hug(Hug::ByYou);
+            self.fun.hug_arms =
+                props::opaque_bounds(self.renderer.pixmap()).map(|bounds| (now, bounds));
+        }
+        diag!(
+            "{}: hugged ({})",
+            self.save.name,
+            if free { "in arms" } else { "not now" }
+        );
+        self.apply(ctx, out);
     }
 
     /// A finger held on it, every frame: by the spot (PLAN §8, Roger's
@@ -2774,7 +2864,9 @@ impl Pet {
         if let Err(e) = self.presenter.present(shared, pixmap) {
             eprintln!("present failed: {e}");
         }
-        if crate::diag::dumping() && self.fun.pond.lately(t) {
+        if crate::diag::dumping()
+            && (self.fun.pond.lately(t) || self.anim.doing() == Some(Act::Hug))
+        {
             let wading = if self.fun.pond.now.is_some() { "w" } else { "" };
             let what = format_args!("pet{}{wading}", self.save.id);
             crate::diag::dump(what, self.placed, pixmap);
@@ -2993,6 +3085,46 @@ impl ApplicationHandler<UserEvent> for App {
                             p.next = now;
                             return;
                         }
+                        // A double-click: a hug (Roger's sixteenth pass).
+                        let double = p
+                            .clicked_at
+                            .take()
+                            .is_some_and(|at| now - at <= DOUBLE_CLICK);
+                        if double {
+                            let App {
+                                pets,
+                                shared,
+                                lines,
+                                bubble_face,
+                                sounds,
+                                settings,
+                                area,
+                                terrain,
+                                ui_scale,
+                                ..
+                            } = self;
+                            let Some(shared) = shared.as_ref() else {
+                                return;
+                            };
+                            let mut ctx = Ctx {
+                                el,
+                                shared,
+                                lines,
+                                face: bubble_face,
+                                sounds,
+                                sound_on: settings.sound,
+                                volume: f32::from(settings.volume) / 100.0,
+                                area: *area,
+                                terrain,
+                                ui_scale: *ui_scale,
+                                world,
+                            };
+                            let p = &mut pets[i];
+                            p.hug_you(&mut ctx);
+                            p.next = now;
+                            self.dirty = true;
+                            return;
+                        }
                         p.window.set_cursor(hand(Hand::Poke));
                         p.press = Some(Press {
                             grab: p.cursor,
@@ -3081,6 +3213,8 @@ impl ApplicationHandler<UserEvent> for App {
                             return;
                         };
                         p.window.set_cursor(hand(Hand::Open));
+                        // A quick click may be the first of a double-click.
+                        p.clicked_at = (!press.moved && p.anim.held_secs() < 0.3).then_some(now);
                         if press.moved {
                             diag!("{}: put down", p.save.name);
                             p.body.release();

@@ -1530,6 +1530,67 @@ fn water(pm: &mut Pixmap, oval: (f32, f32, f32, f32), t: f32, over: Option<(f32,
     }
 }
 
+/// Your arms round a pet you hug (PLAN §8, Roger's sixteenth pass): two
+/// short arms in the hand cursor's colours coming in from either side of
+/// its body `bounds` (left, top, right, bottom, pixels) at belly height,
+/// mitten hands meeting over its middle, squeezing gently; `t` seconds in,
+/// over `secs`, in at the start and out at the end.
+pub fn hug_arms(pm: &mut Pixmap, bounds: (f32, f32, f32, f32), s: f32, t: f32, secs: f32) {
+    const SKIN: [u8; 4] = [0xFF, 0xE6, 0xD2, 255];
+    const INK: [u8; 4] = [0x5A, 0x40, 0x38, 255];
+    const CUFF: [u8; 4] = [0xF7, 0xA8, 0xBC, 255];
+    let (l, top, r, bottom) = bounds;
+    let reach = smooth(0.0, 0.35, t) * smooth(secs, secs - 0.35, t);
+    if reach <= 0.0 {
+        return;
+    }
+    let squeeze = 0.5 + 0.5 * (TAU * 1.1 * t).sin();
+    // Round its body, not its tails: the middle of the picture (the pet
+    // stands in the middle of its window), at most a third of it each way.
+    let mid = pm.width() as f32 / 2.0;
+    let half = (0.5 * (r - l)).min(0.3 * pm.width() as f32);
+    let y = top + 0.66 * (bottom - top);
+    let thick = 15.0 * s;
+    let id = Transform::identity();
+    for side in [-1.0f32, 1.0] {
+        // From low outside the body, bulging out round its side and in
+        // over its front, the hands meeting in the middle.
+        let from = (mid + side * (half + 6.0 * s), y + 20.0 * s);
+        let hand = (
+            mid + side * (0.14 * half + (1.0 - reach) * 0.9 * half - 3.0 * s * squeeze),
+            y - 2.0 * s,
+        );
+        let ctrl = (mid + side * (1.15 * half), y - 26.0 * s);
+        let mut pb = PathBuilder::new();
+        pb.move_to(from.0, from.1);
+        pb.quad_to(ctrl.0, ctrl.1, hand.0, hand.1);
+        let Some(arm) = pb.finish() else {
+            continue;
+        };
+        let stroke = |w: f32| Stroke {
+            width: w,
+            line_cap: LineCap::Round,
+            ..Stroke::default()
+        };
+        pm.stroke_path(&arm, &paint(INK), &stroke(thick + 2.4 * s), id, None);
+        pm.stroke_path(&arm, &paint(SKIN), &stroke(thick), id, None);
+        // A pink cuff where the arm comes in.
+        if let Some(c) = PathBuilder::from_circle(from.0, from.1, 0.62 * thick) {
+            pm.fill_path(&c, &paint(INK), FillRule::Winding, id, None);
+        }
+        if let Some(c) = PathBuilder::from_circle(from.0, from.1, 0.62 * thick - 1.2 * s) {
+            pm.fill_path(&c, &paint(CUFF), FillRule::Winding, id, None);
+        }
+        // A round mitten of a hand.
+        if let Some(c) = PathBuilder::from_circle(hand.0, hand.1, 0.8 * thick) {
+            pm.fill_path(&c, &paint(INK), FillRule::Winding, id, None);
+        }
+        if let Some(c) = PathBuilder::from_circle(hand.0, hand.1, 0.8 * thick - 1.2 * s) {
+            pm.fill_path(&c, &paint(SKIN), FillRule::Winding, id, None);
+        }
+    }
+}
+
 /// Water thrown from `from` to `to` (both on the water, pixels), `p` of
 /// the way (0 … 1): a sheet of drops flying up in an arc and coming down
 /// on the other one.

@@ -104,7 +104,30 @@ pub enum Act {
     Nudge,
     /// 肉肉舞 in a spotlight (see [`dance_at`]).
     Dance,
+    /// A hug (PLAN §8, Roger's sixteenth pass): how depends on its
+    /// [`Hug`] role.
+    Hug,
 }
+
+/// Its part in a hug (see [`Act::Hug`]).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Hug {
+    /// Face to face with another, cheek to cheek, swaying together; the
+    /// one in front (`front`) has a paw or wing over the other's shoulder.
+    Cuddle { front: bool },
+    /// The fox, up on its hind legs, front paws round the other (Roger:
+    /// 霸道姊姊, a bear hug whether it wants one or not).
+    Bear,
+    /// Held in the fox's bear hug: squeezed, a small one lifted off its
+    /// feet, legs dangling.
+    Squeezed,
+    /// Hugged by you: squeezed in your arms, nuzzling.
+    #[default]
+    ByYou,
+}
+
+/// How long a hug lasts, seconds.
+pub const HUG_SECS: f32 = 3.2;
 
 /// How long the 肉肉舞 lasts, seconds, and its beat (120 a minute).
 pub const DANCE_SECS: f32 = 7.0;
@@ -193,6 +216,7 @@ impl Act {
                 | Act::Tap
                 | Act::Tilt
                 | Act::Chew
+                | Act::Hug
         )
     }
 }
@@ -261,6 +285,7 @@ pub fn gesture_secs(act: Act) -> Option<f32> {
         Act::Swish => Some(1.2),
         Act::Nudge => Some(0.8),
         Act::Dance => Some(DANCE_SECS),
+        Act::Hug => Some(HUG_SECS),
         _ => None,
     }
 }
@@ -367,6 +392,8 @@ pub struct PoseParams {
     /// The fox casting: its forehead and eyes glow and seal lines grow over
     /// its face, 0 … 1 (Roger's thirteenth pass). Set by the app.
     pub glow: f32,
+    /// Its part in a hug under way (see [`Act::Hug`]).
+    pub hug: Hug,
 }
 
 impl Default for PoseParams {
@@ -393,6 +420,7 @@ impl Default for PoseParams {
             licks: 0,
             travelling: false,
             glow: 0.0,
+            hug: Hug::ByYou,
         }
     }
 }
@@ -445,6 +473,9 @@ pub struct Animator {
     watch: Option<(f32, f32)>,
     /// See [`Touch::scratch`].
     scratch: f32,
+    /// Its part in the hug it is giving or getting (see [`Act::Hug`]); set
+    /// by the app with the gesture.
+    pub hug: Hug,
     /// See [`Touch::fond`]; set by the app with each press.
     pub fond: Option<Fondness>,
     /// The belly trap springs until then (the animator's clock).
@@ -507,6 +538,7 @@ impl Animator {
             hops_left: 0,
             pressed: false,
             fond: None,
+            hug: Hug::ByYou,
             trap_until: 0.0,
             held: None,
             last_touch: None,
@@ -692,6 +724,17 @@ impl Animator {
         if self.free() && self.doing() != Some(Act::Dance) {
             self.start(act);
         }
+    }
+
+    /// Hug (or be hugged) as `role` now, whatever it was doing, unless a
+    /// finger is down on it: the hug's other half is waiting.
+    pub fn hug(&mut self, role: Hug) {
+        if self.pressed {
+            return;
+        }
+        self.walking = false;
+        self.hug = role;
+        self.start(Act::Hug);
     }
 
     /// Free for an idle gesture: sitting about with nothing else going on.
@@ -899,8 +942,9 @@ impl Animator {
         }
         self.was_happy = happy;
         if let Some((act, _, until)) = self.gesture {
-            // The 肉肉舞 hops on its own beat: only a press or a walk stops it.
-            let dancing = act == Act::Dance && !self.walking && !self.pressed;
+            // The 肉肉舞 hops on its own beat, and a hug outlasts the happy
+            // hops it starts with: only a press or a walk stops them.
+            let dancing = matches!(act, Act::Dance | Act::Hug) && !self.walking && !self.pressed;
             if !(self.free() || dancing) || self.t >= until {
                 self.gesture = None;
                 self.body.target = if self.pressed { PRESS_SQUASH } else { 0.0 };
@@ -1091,6 +1135,7 @@ impl Animator {
             licks: self.licks,
             travelling: false,
             glow: 0.0,
+            hug: self.hug,
         }
     }
 }
@@ -1424,6 +1469,26 @@ mod tests {
         b.press(Zone::Belly, (10.0, 10.0));
         b.step(1.0 / 60.0);
         assert_ne!(b.doing(), Some(Act::Dance));
+    }
+
+    /// A hug outlasts the happy hops that come with it (they cut every
+    /// other gesture short), and a walk or a press ends it.
+    #[test]
+    fn a_hug_lasts_through_its_cheer_and_ends_on_its_own() {
+        let mut a = Animator::new(9, 0.33, 0.35);
+        a.hug(Hug::Cuddle { front: true });
+        a.cheer();
+        a.expression = Expression::Happy;
+        run(&mut a, HUG_SECS - 0.2, |a| {
+            assert_eq!(a.doing(), Some(Act::Hug), "cut short");
+            assert_eq!(a.params().hug, Hug::Cuddle { front: true });
+        });
+        run(&mut a, 0.5, |_| {});
+        assert_ne!(a.doing(), Some(Act::Hug));
+        a.hug(Hug::ByYou);
+        a.walking = true;
+        run(&mut a, 0.1, |_| {});
+        assert_ne!(a.doing(), Some(Act::Hug));
     }
 
     #[test]

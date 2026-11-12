@@ -12,7 +12,7 @@
 use std::sync::Arc;
 
 use chonkgene_core::Zone;
-use chonkgene_core::anim::{Animator, Expression, HOLD_SECS};
+use chonkgene_core::anim::{Act, Animator, Expression, HOLD_SECS, Hug};
 use chonkgene_core::species::Species;
 use chonkgene_render::MeshRenderer;
 use chonkgene_render::gpu::Gpu;
@@ -35,6 +35,8 @@ struct Scene {
     sleep: Option<SleepPose>,
     /// Walk a little first, so it stands side-on (a tail shows).
     walk_first: bool,
+    /// A hug in this part, from 0.3 s in.
+    hug: Option<Hug>,
 }
 
 fn scenes() -> Vec<Scene> {
@@ -45,6 +47,7 @@ fn scenes() -> Vec<Scene> {
         hold: Some(Hold { zone, from, to }),
         sleep: None,
         walk_first: matches!(zone, Zone::Tail | Zone::Bottom | Zone::Back),
+        hug: None,
     };
     let feel = |name, expression, secs| Scene {
         name,
@@ -53,6 +56,7 @@ fn scenes() -> Vec<Scene> {
         hold: None,
         sleep: None,
         walk_first: false,
+        hug: None,
     };
     let sleep = |name, pose| Scene {
         name,
@@ -61,8 +65,23 @@ fn scenes() -> Vec<Scene> {
         hold: None,
         sleep: Some(pose),
         walk_first: false,
+        hug: None,
+    };
+    let hug = |name, role| Scene {
+        name,
+        secs: 3.8,
+        expression: Expression::Happy,
+        hold: None,
+        sleep: None,
+        walk_first: true,
+        hug: Some(role),
     };
     vec![
+        hug("hug-front", Hug::Cuddle { front: true }),
+        hug("hug-back", Hug::Cuddle { front: false }),
+        hug("hug-bear", Hug::Bear),
+        hug("hug-squeezed", Hug::Squeezed),
+        hug("hug-you", Hug::ByYou),
         touch("poke", Zone::Belly, 0.5, 0.75, 2.5),
         touch("rub", Zone::Belly, 0.3, 3.3, 4.5),
         touch("chin", Zone::Chin, 0.3, 2.8, 3.8),
@@ -140,6 +159,7 @@ fn main() {
             r.finish();
         }
         let mut pressed = None;
+        let mut hugged = false;
         let frames = (scene.secs * FPS).round() as u32;
         for f in 0..frames {
             let t = f as f32 / FPS;
@@ -188,6 +208,14 @@ fn main() {
                     expression = Expression::Happy;
                 }
             }
+            if let Some(role) = scene.hug
+                && !hugged
+                && t >= 0.3
+            {
+                a.hug = role;
+                a.gesture(Act::Hug);
+                hugged = true;
+            }
             a.expression = expression;
             for _ in 0..4 {
                 a.step(0.25 / FPS);
@@ -202,6 +230,15 @@ fn main() {
                 r.finish();
             }
             let path = format!("{out}/{}-{f:03}.png", scene.name);
+            if scene.hug == Some(Hug::ByYou) && t >= 0.3 {
+                // Your arms round it, as the app draws them.
+                let mut pm = r.pixmap().clone();
+                if let Some(b) = chonkgene_render::props::opaque_bounds(&pm) {
+                    chonkgene_render::props::hug_arms(&mut pm, b, 1.0, t - 0.3, 3.2);
+                }
+                pm.save_png(&path).expect("write frame");
+                continue;
+            }
             r.pixmap().save_png(&path).expect("write frame");
         }
         println!("{}: {frames} frames", scene.name);

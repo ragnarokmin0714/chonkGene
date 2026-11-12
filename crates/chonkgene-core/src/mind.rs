@@ -103,10 +103,16 @@ pub enum Line {
     Dislike,
     /// The 曼赤肯's belly rubbed too long: it grabs the hand.
     Trap,
+    /// Going to hug another pet (the fox: a bossy bear hug).
+    Hug,
+    /// Hugged by you.
+    Hugged,
+    /// Caught in the fox's bear hug.
+    BearHugged,
 }
 
 impl Line {
-    pub const ALL: [Line; 51] = [
+    pub const ALL: [Line; 54] = [
         Line::Hello,
         Line::WelcomeBack,
         Line::PokeSmall,
@@ -158,6 +164,9 @@ impl Line {
         Line::PatLove,
         Line::Dislike,
         Line::Trap,
+        Line::Hug,
+        Line::Hugged,
+        Line::BearHugged,
     ];
 
     /// Key in the line tables.
@@ -214,6 +223,9 @@ impl Line {
             Line::PatLove => "pat_love",
             Line::Dislike => "dislike",
             Line::Trap => "trap",
+            Line::Hug => "hug",
+            Line::Hugged => "hugged",
+            Line::BearHugged => "bear_hugged",
         }
     }
 
@@ -461,6 +473,24 @@ impl Mind {
         out
     }
 
+    /// Hugged by you (「抱抱」, or a double-click): pleased as with a loved
+    /// spot. Asleep it only stirs; with a grudge it will not have it.
+    pub fn hug(&mut self, w: &World) -> Out {
+        self.last_touch = w.now;
+        if self.sleep.is_some() {
+            return Out::say(Line::TurnOver);
+        }
+        if self.grumpy() {
+            let mut out = Out::say(Line::GrudgePat);
+            self.gain(&mut out, 2, w.day);
+            return out;
+        }
+        let mut out = Out::say(Line::Hugged).with(Expression::Happy);
+        out.bliss = true;
+        self.gain(&mut out, 14, w.day);
+        out
+    }
+
     /// The 曼赤肯's belly trap sprung: it grabs the hand and kicks, all in
     /// play (no grudge, 親密度 as for a loved spot).
     pub fn trap(&mut self, w: &World) -> Out {
@@ -672,6 +702,12 @@ mod tests {
             m.poke(&world(90.0), Zone::Head, &mut r).line,
             Some(Line::PokeSmall)
         );
+        // Hugged by you: as pleased as a loved spot; asleep, it only stirs.
+        let mut m = of(Species::Owl);
+        let out = m.hug(&world(95.0));
+        assert_eq!((out.line, out.bliss), (Some(Line::Hugged), true));
+        m.put_to_sleep(&world(96.0), &mut r);
+        assert_eq!(m.hug(&world(97.0)).line, Some(Line::TurnOver));
         // The 曼赤肯's trap is play: pleased, no grudge.
         let mut m = of(Species::Munchkin);
         let out = m.trap(&world(100.0));

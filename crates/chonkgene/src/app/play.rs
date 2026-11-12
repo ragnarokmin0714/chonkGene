@@ -625,6 +625,9 @@ pub(super) struct Fun {
     wet: (f32, f64),
     /// How much is left of the pond it is in, 1 … 0 as it dries up.
     pond_left: f32,
+    /// Hugged by you: since when, and the body your arms go round (its
+    /// picture's bounds then).
+    pub hug_arms: Option<(f64, (f32, f32, f32, f32))>,
     /// When it last finished a 肉肉舞 (it does not dance again at once).
     pub danced: f64,
     /// When it last went into a pond to join the others.
@@ -1104,7 +1107,16 @@ impl Pet {
             (sun - step).max(0.0)
         };
         self.fun.sun = (sun, t);
+        let hug_secs = f64::from(chonkgene_core::anim::HUG_SECS);
+        if self
+            .fun
+            .hug_arms
+            .is_some_and(|(since, _)| t - since >= hug_secs)
+        {
+            self.fun.hug_arms = None;
+        }
         let any = sun > 0.0
+            || self.fun.hug_arms.is_some()
             || !self.fun.fx.is_empty()
             || self.fun.carry.is_some()
             || in_pond
@@ -1168,6 +1180,9 @@ impl Pet {
             };
             let line = floor + (full - floor) * wet;
             props::pond_front(canvas, at, w / 2.0, line, s, t as f32);
+        }
+        if let Some((since, bounds)) = self.fun.hug_arms {
+            props::hug_arms(canvas, bounds, s, (t - since) as f32, hug_secs as f32);
         }
         if let Some(thing) = self.fun.carry {
             let at = self.renderer.mouth(self.anim.facing);

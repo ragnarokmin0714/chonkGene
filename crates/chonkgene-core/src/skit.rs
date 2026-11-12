@@ -4,7 +4,7 @@
 
 use std::collections::HashMap;
 
-use crate::anim::{Act, Expression};
+use crate::anim::{Act, Expression, HUG_SECS, Hug};
 use crate::mind::Line;
 use crate::species::Species;
 
@@ -49,6 +49,14 @@ const SPELL_SHARE: f32 = 0.35;
 /// line up this far apart either side of it.
 const CALL_SECS: f64 = 5.0;
 const CALL_GAP: f32 = 80.0;
+/// Hugging, pets come this close (pixels between centres): face to face,
+/// cheek to cheek. Still this far apart when the time is up, they give it
+/// up.
+const HUG_CONTACT: f32 = 90.0;
+const HUG_TOO_FAR: f32 = 1.8 * HUG_CONTACT;
+/// Of skits started by themselves, this share are a hug (PLAN §8, Roger's
+/// sixteenth pass: 「動物也可以互相抱」).
+const HUG_SHARE: f32 = 0.25;
 /// Approaching, two pets still this far apart when the time is up give it
 /// up: across the screens they glared and huffed at no one (Roger: they
 /// seemed to squabble with themselves).
@@ -129,6 +137,13 @@ pub enum Cmd {
     Bless {
         id: u64,
     },
+    /// Hug `with`, face to face, as `role`; the one in front (or the one
+    /// in the fox's arms) has its window raised over the other's.
+    Hug {
+        id: u64,
+        with: u64,
+        role: Hug,
+    },
     /// Near the fox as it casts, it sees the fire go up (at `from`) and
     /// shows how it takes it.
     Awe {
@@ -153,7 +168,8 @@ impl Cmd {
             | Cmd::Freeze { id, .. }
             | Cmd::Scare { id, .. }
             | Cmd::Awe { id, .. }
-            | Cmd::Bless { id } => id,
+            | Cmd::Bless { id }
+            | Cmd::Hug { id, .. } => id,
         }
     }
 }
@@ -253,6 +269,9 @@ enum Kind {
     /// The fox's 定身術: every other pet held up in the air for a moment
     /// (the owl stares it back: the fox floats instead).
     Spell,
+    /// A hug: face to face, cheek to cheek (the fox: a bear hug); also how
+    /// a squabble ends.
+    Hug,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -283,6 +302,8 @@ enum Phase {
     Float,
     /// Pets running to the fox, called.
     Called,
+    /// Hugging.
+    Hugging,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -338,6 +359,7 @@ impl Director {
         self.forced = match kind {
             "spell" | "call" | "bless" => Some(Kind::Spell),
             "play" => Some(Kind::Play),
+            "hug" => Some(Kind::Hug),
             "squabble" => Some(Kind::GlareChase),
             _ => None,
         };
@@ -375,10 +397,13 @@ impl Director {
         self.involves(id) && self.skit.is_some_and(|s| s.kind == Kind::Play)
     }
 
-    /// 勸架 (PLAN §1.4): clicking either pet ends the skit in making up.
+    /// 勸架 (PLAN §1.4): clicking either pet ends the skit in making up (a
+    /// hug is left alone).
     pub fn interrupt(&mut self, id: u64, now: f64, actors: &[Actor]) -> Vec<Cmd> {
         match self.skit {
-            Some(s) if (s.a == id || s.b == id) && s.phase != Phase::MakeUp => {
+            Some(s)
+                if (s.a == id || s.b == id) && s.phase != Phase::MakeUp && s.kind != Kind::Hug =>
+            {
                 self.make_up(now, actors)
             }
             _ => Vec::new(),
@@ -441,7 +466,7 @@ impl Director {
         // but the skit goes on.
         let own_mood = matches!(s.phase, Phase::Argue(_) | Phase::Sulk | Phase::Sorry(_));
         if !own_mood
-            && !matches!(s.phase, Phase::MakeUp | Phase::Float)
+            && !matches!(s.phase, Phase::MakeUp | Phase::Float | Phase::Hugging)
             && (!a.available || !b.available)
         {
             return self.make_up(now, actors);
@@ -450,8 +475,17 @@ impl Director {
         let mut out = Vec::new();
         match s.phase {
             Phase::Approach => {
-                let meet = if s.kind == Kind::Play { CONTACT } else { MEET };
-                if now >= s.until && (a.x - b.x).abs() > TOO_FAR {
+                let meet = match s.kind {
+                    Kind::Play => CONTACT,
+                    Kind::Hug => HUG_CONTACT,
+                    _ => MEET,
+                };
+                let too_far = if s.kind == Kind::Hug {
+                    HUG_TOO_FAR
+                } else {
+                    TOO_FAR
+                };
+                if now >= s.until && (a.x - b.x).abs() > too_far {
                     // Could not get to each other (a gap, an edge, other
                     // screens): nothing comes of it.
                     self.rested.insert(pair(s.a, s.b), now);
@@ -488,21 +522,27 @@ impl Director {
                                 line: Line::SkitPlay,
                             });
                         }
+                        Kind::Hug => {
+                            s.phase = Phase::Hugging;
+                            s.until = now + f64::from(HUG_SECS) + 0.2;
+                            out.extend(hug(a, b));
+                        }
                         // A spell starts casting at once, never approaching.
                         Kind::Spell => {}
                     }
                 } else {
                     let mid = (a.x + b.x) / 2.0;
+                    let pace = if s.kind == Kind::Hug { 1.3 } else { 1.6 };
                     out.extend([
                         Cmd::Walk {
                             id: a.id,
                             x: mid,
-                            pace: 1.6,
+                            pace,
                         },
                         Cmd::Walk {
                             id: b.id,
                             x: mid,
-                            pace: 1.6,
+                            pace,
                         },
                     ]);
                 }
@@ -857,8 +897,41 @@ impl Director {
                 return self.make_up(now, actors);
             }
             Phase::MakeUp if now >= s.until => {
+                // Made up after a squabble: they hug it out (Roger: 「吵完架
+                // 或打鬧完會抱一下和好」), if both are still free.
+                if matches!(s.kind, Kind::GlareChase | Kind::TalkPast) && a.available && b.available
+                {
+                    s.kind = Kind::Hug;
+                    s.phase = Phase::Approach;
+                    s.until = now + APPROACH_SECS;
+                    self.skit = Some(s);
+                    return out;
+                }
                 self.rested.insert(pair(s.a, s.b), now);
                 self.skit = None;
+                return out;
+            }
+            Phase::Hugging if now >= s.until => {
+                // Let go, both pleased; caught in the fox's arms, it says
+                // how that was.
+                self.rested.insert(pair(s.a, s.b), now);
+                self.skit = None;
+                out.extend([
+                    Cmd::Express {
+                        id: a.id,
+                        expression: Expression::Happy,
+                    },
+                    Cmd::Express {
+                        id: b.id,
+                        expression: Expression::Happy,
+                    },
+                ]);
+                if let Some(held) = bear_held(a, b) {
+                    out.push(Cmd::Say {
+                        id: held.id,
+                        line: Line::BearHugged,
+                    });
+                }
                 return out;
             }
             _ => {}
@@ -997,6 +1070,10 @@ impl Director {
                 forced.unwrap_or(Kind::Play),
                 pairs[rng.usize(..pairs.len())],
             ),
+            _ if matches!(forced, Some(Kind::Hug)) => (Kind::Hug, pairs[rng.usize(..pairs.len())]),
+            _ if forced.is_none() && rng.f32() < HUG_SHARE => {
+                (Kind::Hug, pairs[rng.usize(..pairs.len())])
+            }
             Some(i) if rng.bool() => (Kind::TalkPast, pairs[i]),
             // Half the time they play instead of squabbling.
             _ if rng.bool() => (Kind::Play, pairs[rng.usize(..pairs.len())]),
@@ -1024,6 +1101,89 @@ impl Director {
             },
         ]
     }
+}
+
+impl Director {
+    /// 叫牠… › 去抱抱…: `who` goes to hug `whom` now; nothing if either is
+    /// not free or another skit is on.
+    pub fn hug(&mut self, who: u64, whom: u64, now: f64, actors: &[Actor]) -> Vec<Cmd> {
+        let find = |id| actors.iter().find(|p| p.id == id && p.available).copied();
+        let (Some(a), Some(b)) = (find(who), find(whom)) else {
+            return Vec::new();
+        };
+        if self.skit.is_some() || who == whom {
+            return Vec::new();
+        }
+        self.skit = Some(Skit {
+            kind: Kind::Hug,
+            a: a.id,
+            b: b.id,
+            phase: Phase::Approach,
+            until: now + APPROACH_SECS,
+            spell: Spell::Freeze,
+        });
+        vec![
+            Cmd::Say {
+                id: a.id,
+                line: Line::Hug,
+            },
+            Cmd::Walk {
+                id: a.id,
+                x: b.x,
+                pace: 1.4,
+            },
+            Cmd::Face { id: b.id, x: a.x },
+        ]
+    }
+}
+
+/// The one held in the fox's bear hug, if one of `a`, `b` is the fox (both
+/// foxes: `a` hugs).
+fn bear_held(a: Actor, b: Actor) -> Option<Actor> {
+    if a.species == Species::Fox {
+        Some(b)
+    } else if b.species == Species::Fox {
+        Some(a)
+    } else {
+        None
+    }
+}
+
+/// The hug itself: face to face; the fox (霸道姊姊) bear-hugs, the other
+/// in its arms and in front; otherwise `a`, who came over, is in front with
+/// a paw over the other's shoulder.
+fn hug(a: Actor, b: Actor) -> Vec<Cmd> {
+    let (front, back, front_role, back_role) = match bear_held(a, b) {
+        Some(held) => {
+            let fox = if held.id == a.id { b } else { a };
+            (held, fox, Hug::Squeezed, Hug::Bear)
+        }
+        None => (
+            a,
+            b,
+            Hug::Cuddle { front: true },
+            Hug::Cuddle { front: false },
+        ),
+    };
+    let speaker = if back_role == Hug::Bear { back } else { a };
+    vec![
+        Cmd::Face { id: a.id, x: b.x },
+        Cmd::Face { id: b.id, x: a.x },
+        Cmd::Hug {
+            id: back.id,
+            with: front.id,
+            role: back_role,
+        },
+        Cmd::Hug {
+            id: front.id,
+            with: back.id,
+            role: front_role,
+        },
+        Cmd::Say {
+            id: speaker.id,
+            line: Line::Hug,
+        },
+    ]
 }
 
 /// Called over by `fox` (招喚術): every other pet free runs to a place in a
@@ -1214,7 +1374,9 @@ mod tests {
         let (mut dir, t) = started_as(Kind::GlareChase, &cast);
         let lines = play(&mut dir, cast, t);
         assert_eq!(lines.first(), Some(&Line::SkitGlare));
-        assert_eq!(lines.last(), Some(&Line::SkitForgive));
+        // Forgiven, then they hug it out (Roger's sixteenth pass).
+        assert_eq!(lines.last(), Some(&Line::Hug));
+        assert!(lines.contains(&Line::SkitForgive));
         assert!(!dir.involves(1) && !dir.involves(2));
         // Ups and downs (Roger: making up at once made no sense): huffing,
         // the chase, sorry, turned down once, then forgiven.
@@ -1228,6 +1390,87 @@ mod tests {
             last_huff > at(Line::SkitSorry),
             "never turned down: {lines:?}"
         );
+    }
+
+    /// Every command of a skit run to its end, walkers moving 4 px a tick.
+    fn run_all(dir: &mut Director, mut cast: Vec<Actor>, start: f64) -> Vec<Cmd> {
+        let mut rng = fastrand::Rng::with_seed(3);
+        let mut all = Vec::new();
+        let mut t = start;
+        for _ in 0..3000 {
+            for cmd in dir.tick(t, true, 2, &cast, &mut rng) {
+                if let Cmd::Walk { id, x, .. } = cmd {
+                    let p = cast.iter_mut().find(|p| p.id == id).unwrap();
+                    p.x += (x - p.x).clamp(-4.0, 4.0);
+                }
+                all.push(cmd);
+            }
+            if !dir.involves(1) && !dir.involves(2) {
+                break;
+            }
+            t += 0.05;
+        }
+        all
+    }
+
+    fn roles(cmds: &[Cmd]) -> Vec<(u64, Hug)> {
+        cmds.iter()
+            .filter_map(|c| match *c {
+                Cmd::Hug { id, role, .. } => Some((id, role)),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// Roger's sixteenth pass: 「動物也可以互相抱」, face to face; the fox,
+    /// a bossy big sister, bear-hugs.
+    #[test]
+    fn two_pets_hug_face_to_face_and_the_fox_bear_hugs() {
+        let cast = actors([Species::Shiba, Species::Fold], [100.0, 700.0]);
+        let mut dir = Director::default();
+        assert!(dir.rush("hug"));
+        let t = started(&mut dir, &cast);
+        let cmds = run_all(&mut dir, cast, t);
+        let mut r = roles(&cmds);
+        r.sort_by_key(|x| x.0);
+        assert_eq!(
+            r,
+            [
+                (1, Hug::Cuddle { front: true }),
+                (2, Hug::Cuddle { front: false })
+            ]
+        );
+        assert!(!dir.involves(1) && !dir.involves(2));
+
+        let cast = actors([Species::Chick, Species::Fox], [100.0, 700.0]);
+        let mut dir = Director::default();
+        dir.rush("hug");
+        let t = started(&mut dir, &cast);
+        let cmds = run_all(&mut dir, cast, t);
+        let mut r = roles(&cmds);
+        r.sort_by_key(|x| x.0);
+        assert_eq!(r, [(1, Hug::Squeezed), (2, Hug::Bear)]);
+        let said = |id, line| cmds.contains(&Cmd::Say { id, line });
+        assert!(said(2, Line::Hug), "the fox says it: {cmds:?}");
+        assert!(said(1, Line::BearHugged));
+    }
+
+    #[test]
+    fn a_hug_asked_for_goes_over_and_hugs_unless_busy() {
+        let cast = actors([Species::Duck, Species::Owl], [100.0, 600.0]);
+        let mut dir = Director::default();
+        let first = dir.hug(1, 2, 0.0, &cast);
+        assert!(first.contains(&Cmd::Say {
+            id: 1,
+            line: Line::Hug
+        }));
+        assert!(dir.hug(2, 1, 0.0, &cast).is_empty(), "one at a time");
+        let cmds = run_all(&mut dir, cast.clone(), 0.0);
+        assert_eq!(roles(&cmds).len(), 2);
+        // Clicking a hugging pet does not turn it into making up.
+        let mut dir = Director::default();
+        dir.hug(1, 2, 0.0, &cast);
+        assert!(dir.interrupt(1, 0.5, &cast).is_empty());
     }
 
     #[test]
