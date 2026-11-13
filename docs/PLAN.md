@@ -33,7 +33,7 @@
 
 ### 1.1 Pets
 
-v1 has seven species (the 九尾狐 joined on 2026-10-28). Eight more are planned (Roger, 2026-11-13): see §8, "New species". A species only sets **default personality**; each individual rolls its own personality near those defaults when adopted, editable later in settings.
+v1 has seven species (the 九尾狐 joined on 2026-10-28). Eleven more are planned (Roger, 2026-11-13): see §8, "New species". A species only sets **default personality**; each individual rolls its own personality near those defaults when adopted, editable later in settings.
 
 | Species | Default name | Ticklish | Patience | Energy | Daily rhythm | Signature moves |
 |---|---|---|---|---|---|---|
@@ -45,7 +45,7 @@ v1 has seven species (the 九尾狐 joined on 2026-10-28). Eight more are planne
 | Duckling (小鴨) | 湯圓 | medium | high | low | daytime | waddles; lines up behind another pet and follows it; floats on the taskbar as if on water; "呱" when poked |
 | Nine-tailed fox (九尾狐) | 小九 | medium | medium | high | **late**: asleep 1:00–9:00 | spins when grumpy; its bell rings as it moves; plays with its tails (and with others using them, §1.4) |
 
-- **How many pets are on the desktop at once** is a setting: **7 by default (every species once; it was 6 until Roger's sixteenth pass), no upper limit**. Above 7 the setting shows a plain hint that CPU and memory use grow with each pet (§5); nothing stops the user.
+- **How many pets are on the desktop at once** is a setting: **7 by default (the original seven species once each; it was 6 until Roger's sixteenth pass, and stays 7 as more species come, Roger 2026-11-13), no upper limit**. Above 7 the setting shows a plain hint that CPU and memory use grow with each pet (§5); nothing stops the user.
 - Adopted pets beyond that number rest in the **pet house (寵物窩)** and can be swapped onto the desktop at any time. The same species can be adopted more than once.
 - First run shows an **adoption screen** (multi-select), with the start-at-login choice.
 - Chick morning call: the first wake of the day may crow (「啾啾啾——！」), subject to sound mode and quiet hours (§1.7).
@@ -1348,9 +1348,9 @@ Roger, 2026-11-13: 「只要做出儘可能做出符合寵物特性的活動，�
 - **Duckling**: dabbling (tipping bottom-up in the pond, tail in the air); ducklings in a row behind the duck if there are several (or behind the chick, mixed up); preening water off; waddling at speed to the pond the moment it appears.
 - **Together**: grooming each other (cats, the fox and a cat), a dog play-bowing to a cat that ignores it, the owl watching from up high and hooting at whoever squabbles, everyone piling up asleep in one heap when it is late.
 
-### New species: eight more pets (Roger, 2026-11-13; planned, none built)
+### New species: eleven more pets (Roger, 2026-11-13; planned, none built)
 
-Roger, 2026-11-13: 「這是 chonkGene 接下來要新增的寵物」, with a concept picture he made with Gemini (`inbox/Gemini_Generated_Image_1w2xeh1w2xeh1w2x.jpeg`, 「超萌動物大集合」; a reference for look only, nothing from it ships). It shows nine animals; the Munchkin is already in the cast, so eight are new. When they come relative to the open items above is Roger's call (his order of 2026-11-13 is to clear what is planned first).
+Roger, 2026-11-13: 「這是 chonkGene 接下來要新增的寵物」, with a concept picture he made with Gemini (`inbox/Gemini_Generated_Image_1w2xeh1w2xeh1w2x.jpeg`, 「超萌動物大集合」; a reference for look only, nothing from it ships). It shows nine animals; the Munchkin is already in the cast, so eight are new. Roger then added three not in the picture (same day: 「再加個 無尾熊 和 熊貓 台灣黑熊」): the koala, the giant panda and the Formosan black bear, eleven in all. When they come relative to the open items above is Roger's call (his order of 2026-11-13 is to clear what is planned first).
 
 Defaults in the form of §1.1 (personality rolls near them on adoption). Names follow the cast's food names; Roger may rename any.
 
@@ -1364,6 +1364,9 @@ Defaults in the form of §1.1 (personality rolls near them on adoption). Names f
 | Long-tailed tit, Hokkaido (銀喉長尾山雀) | 大福 | medium | low | high | **early riser** like the chick | tiny round white puff on a long tail; hops; hangs upside down from a window's edge; **huddles in a row** with others (several, or any small pets) on a ledge, pushing to the middle; 「啾哩哩」 |
 | Emperor penguin chick (帝王企鵝幼崽, grey-fluff stage) | 芝麻 | medium | high | medium | daytime | waddles, flippers out for balance; **tobogganing** (slides on its belly, §8 eighteenth pass, as its everyday way to go fast); falls over and cannot get up quickly; **huddles** with the others when it is cold or late; tufts of grey fluff come loose |
 | Sand cat (沙漠貓) | 沙琪瑪 | low | low | high at night | **nocturnal** (as the owl) | digs in the beach's sand and naps in the hole; ears flatten wide and low; a **bark-like call** (sand cats really do), startling from something so small; looks fierce, is tiny; walks with soft, padded big feet |
+| Koala (無尾熊) | 芋泥 (its lavender grey) | low | medium | **very low** | sleeps most of the day (real koalas sleep 18–20 h), awake a little in the evening | **clings** to the side of a window as to a tree trunk, arms and legs round it, and dozes there; chews a eucalyptus leaf very slowly; clings to another pet the same way (the capybara most of all, which does not mind); a surprisingly deep, loud bellow for its size |
+| Giant panda (熊貓) | 竹筍 | high | high | low | daytime, long naps after eating | **sits with its legs splayed out** eating bamboo, held in both paws; tumbles: rolls over clumsily, somersaults, slides off a window's edge and lands in a heap unbothered; lies on its back, paws in the air; bleats softly (pandas do, not a roar) |
+| Formosan black bear (台灣黑熊) | 黑糖 | medium | medium | high | daytime; eats much more in autumn (the system clock's season, as real ones fatten on acorns) | the **white V on its chest** (月牙): **stands up on its hind legs** to look about and sniff, showing it; climbs to a window's top edge; swims and swats at the pond's water as if after a fish; a huffing snort and jaw pop when cross |
 
 How each is built, by what is nearest (`assets/species/<id>/model.ron` plus `quad.ron` or `biped.ron`, `Species`, `Build` in `props.rs` for the hands of the hugs):
 
@@ -1374,12 +1377,14 @@ How each is built, by what is nearest (`assets/species/<id>/model.ron` plus `qua
 - **Sea otter**: four-legged on land; a floating-on-its-back pose for the pond (the cradle's roll-over, §8 twenty-first pass item 2, held in the water), paws on its chest. Its home is the pond: it goes there more than anyone.
 - **Long-tailed tit**: a bird (`Build::Bird`), the chick's biped with a long two-feather tail; smaller than any pet so far.
 - **Penguin chick**: a bird, upright, flippers in place of wings (they flap but do not fly: it hangs under balloons like the Shiba when it flies); the belly slide is already there.
+- **Panda, Formosan black bear**: a new bear build (`Build::Bear`: round and heavy, short legs, a stub tail, round ears; held round the middle like the capybara, too heavy to lift by the armpits), the dog's skeleton widened. The panda sits splayed (a new sitting pose); the black bear's standing up is the red panda's pose on its hind legs at a bigger size, so the two share it.
+- **Koala**: the bear build's skeleton with a big round nose, fluffy round ears and no tail; its clinging pose is new (arms and legs round the upright side of a window, as the owl's `Scene::Perch` sits on a top edge).
 
-Each gets its own lines in `assets/lines/zh-TW.ron` (§1.11), sounds, `fondness` by zone (Roger's table), `habits`, `plays_like`, `Grumpiness` (guinea pig: freezes; rabbit: thumps; red panda: the threat pose; capybara: does not wake grumpy; otter: rolls over and away; tit and penguin: `PuffUp`; sand cat: `Swat`), and a place on the adoption screen.
+Each gets its own lines in `assets/lines/zh-TW.ron` (§1.11), sounds, `fondness` by zone (Roger's table), `habits`, `plays_like`, `Grumpiness` (guinea pig: freezes; rabbit: thumps; red panda: the threat pose; capybara: does not wake grumpy; otter: rolls over and away; tit and penguin: `PuffUp`; sand cat: `Swat`; koala: does not wake, only grumbles; panda: rolls over, back to sleep; black bear: the huffing snort), and a place on the adoption screen.
 
 Open for Roger before building:
-1. **How many on the desktop by default**: §1.1 says every species once (now 7). With 15 that is heavy (the GPU budget is shared, §8 twentieth pass item 1). Proposal: keep 7 as the default count and let the new ones rest in the pet house until swapped in; the adoption screen lets one pick any.
-2. **Which first**: proposal sand cat → red panda → penguin chick → long-tailed tit (all near a build that exists), then guinea pig and capybara (the new low build together), then rabbit (the hop) and sea otter (floating).
+1. ~~How many on the desktop by default~~ **Settled (Roger, 2026-11-13: 「我覺得桌面7隻就夠了」)**: the default count stays 7 (§1.1), no longer "every species once" now that there are 18. The new ones rest in the pet house until swapped in; the adoption screen lets one pick any. Which seven come out by default on first run is the original cast unless the adoption screen picks others.
+2. **Which first**: proposal sand cat → red panda → penguin chick → long-tailed tit (all near a build that exists), then guinea pig and capybara (the new low build together), then panda and Formosan black bear (the bear build together), koala (on the bear build, plus the cling), then rabbit (the hop) and sea otter (floating).
 3. The names.
 
 ### Phase 1: Shiba prototype (feel) — `v0.1.0`
