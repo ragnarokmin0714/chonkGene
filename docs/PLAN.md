@@ -1302,6 +1302,18 @@ Roger's notes, with his answers to three questions the same day:
    - **Swimming zoomies**: now and then one in the pond suddenly paddles round it at full speed, a wake and splashes behind it, then stops as if nothing happened.
    - Ideas to offer Roger with it: shaking off water over whoever is near when it gets out, a dog rolling in the sand after a swim (and coming out sandy), footprints that fade, a little sandcastle the chick pecks down.
 
+#### Activities true to each animal (standing list)
+
+Roger, 2026-11-13: 「只要做出儘可能做出符合寵物特性的活動，你可以自由新增到 plan」. Activities that real animals of each kind do and the pets do not yet, added here as they come to mind (none built; each goes to Roger's table of what next when its turn comes). What they already do (`Species::habits`): looking about, stretching, yawning, waving, digging and scratching (dogs, fox), washing (cats, fox), shaking, pecking and preening (birds), kneading, the scenes of §8.
+
+- **Shiba**: the 柴犬 "Shiba scream" when something is not to its liking (a quick protest, dramatic, then fine); refusing to walk on (planting all four feet, 柴犬拒走) when a walk is not its idea; chasing its own tail in circles; the zoomies after a bath; carrying a toy about to show it off; sleeping with its legs straight up in the air; sneezing when excited (a play sneeze).
+- **Cats (Munchkin, Fold)**: knocking a small thing off a window's top edge, looking at you while doing it; loafing (the "bread loaf", paws tucked in); slow blinks at you (built) answered by a head bonk on the cursor; sitting in a box that appears; making biscuits on a soft spot; the Munchkin sitting up on its haunches like a meerkat (Munchkins are known for it); the Fold sitting in the "Buddha" pose, legs out, belly up (Scottish Folds are known for it); chattering at a butterfly or the cursor through the window.
+- **Fox**: pouncing nose first into the sand or snow after something heard (the mousing leap), head buried, tail up; caching a snack (burying it, nosing sand over it) and digging it up later; grooming her tails one by one; as the 霸道姊姊, herding the small ones back together when they wander off.
+- **Owl**: turning its head right round (far, slowly) and bobbing it side to side to judge distance; puffing up big when startled; sleeping on one foot; hooting at dusk (the clock's evening); swallowing a snack whole with a gulp.
+- **Chick**: following whoever is nearest in a line (imprinting), the chick hurrying after; dust bathing in the beach's sand, wriggling and fluffing; falling asleep standing and nodding off forward; peeping louder when left alone.
+- **Duckling**: dabbling (tipping bottom-up in the pond, tail in the air); ducklings in a row behind the duck if there are several (or behind the chick, mixed up); preening water off; waddling at speed to the pond the moment it appears.
+- **Together**: grooming each other (cats, the fox and a cat), a dog play-bowing to a cat that ignores it, the owl watching from up high and hooting at whoever squabbles, everyone piling up asleep in one heap when it is late.
+
 ### Phase 1: Shiba prototype (feel) — `v0.1.0`
 
 - The art pipeline (§3.3) works end to end for one Shiba, with placeholder art.
