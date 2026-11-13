@@ -1484,7 +1484,10 @@ fn a_belly_up_sleeper_swells_round_with_each_breath() {
                 most = most.max(swell);
             }
             if pose == SleepPose::BellyUp {
-                assert!(most > 0.2 && least < 0.05, "{id}: swells {least:.2} … {most:.2}");
+                assert!(
+                    most > 0.2 && least < 0.05,
+                    "{id}: swells {least:.2} … {most:.2}"
+                );
             } else {
                 assert!(most.abs() < 1e-6, "{id} {pose:?}: swells {most:.2}");
             }
