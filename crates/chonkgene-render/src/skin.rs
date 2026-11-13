@@ -643,6 +643,28 @@ const LEGS: [(&str, f32, bool); 4] = [
     ("leg_br", 0.5, false),
     ("leg_fr", 0.75, true),
 ];
+/// Where each leg (in [`LEGS`]' order) is in the step cycle running: a
+/// gallop, as a dog or a cat runs: the hind paws land a beat apart, then
+/// the front paws the same way half a step on (a phase further on lands
+/// sooner: hind right, hind left, front right, front left). Placed against the
+/// walk so that no leg moves its phase by more than a third of a step, and
+/// the mix of the two never brings the legs of one side together (a pace,
+/// 同手同腳: Roger's twentieth pass, item 4).
+const GALLOP: [f32; 4] = [0.075, 0.575, 0.175, 0.675];
+/// How much of each step a foot is on the floor, galloping (walking it is
+/// [`DUTY`]): less, so there are moments with all four off it.
+const RUN_DUTY: f32 = 0.45;
+/// Running, the walk turns into a gallop between these paces.
+const RUN_PACES: (f32, f32) = (1.3, 2.0);
+
+/// Where a leg is in its step, `run` (0 walking … 1 galloping) of the way
+/// from its place in the walk to its place in the gallop, the short way
+/// round.
+fn leg_phase(ph: f32, walk: f32, gallop: f32, run: f32) -> f32 {
+    let d = (gallop - walk + 0.5).rem_euclid(1.0) - 0.5;
+    (ph + walk + run * d).rem_euclid(1.0)
+}
+
 /// Scoops a second, each front paw, digging.
 const DIG_HZ: f32 = 2.6;
 /// The chest's rise and fall, world units; twice a step cycle.
@@ -1258,33 +1280,36 @@ impl Walk {
         // while the body passes over it); off it, an eased swing forward
         // with the foot lifted.
         // Running (Roger's eighteenth pass: 奔跑), the walk turns into a
-        // bound: the front paws together and the hind ones together, the
-        // back flexing and stretching, the whole body bouncing.
-        let run = chonkgene_rig::math::smoothstep(1.7, 2.5, self.tempo) * s;
-        for &(leg, offset, front) in &self.legs {
-            let side = if offset < 0.5 { 0.0 } else { 0.07 };
-            let bound = if front { side } else { 0.5 + side };
-            let psi = (ph + offset + run * (bound - offset)).fract();
-            let (fwd, lift) = if psi < DUTY {
-                (1.0 - 2.0 * psi / DUTY, 0.0)
+        // gallop (see [`GALLOP`]): the back flexing and stretching, the
+        // whole body bouncing, the feet down for less of each step and
+        // lifted higher.
+        let run = chonkgene_rig::math::smoothstep(RUN_PACES.0, RUN_PACES.1, self.tempo) * s;
+        let duty = DUTY + (RUN_DUTY - DUTY) * run;
+        for (&(leg, offset, _), gallop) in self.legs.iter().zip(GALLOP) {
+            let psi = leg_phase(ph, offset, gallop, run);
+            let (fwd, lift) = if psi < duty {
+                (1.0 - 2.0 * psi / duty, 0.0)
             } else {
-                let t = (psi - DUTY) / (1.0 - DUTY);
+                let t = (psi - duty) / (1.0 - duty);
                 let e = t * t * (3.0 - 2.0 * t);
                 (-1.0 + 2.0 * e, (PI * t).sin())
             };
             j[leg] = Joint {
                 rot: v3(-(self.swing * longer).min(MAX_SWING) * s * fwd, 0.0, 0.0),
-                shift: v3(0.0, LIFT * s * lift, 0.0),
+                shift: v3(0.0, LIFT * s * lift * (1.0 + 0.6 * run), 0.0),
             };
         }
+        // The run's bounce and the back's flex keep time with the front
+        // left paw: lowest as the front paws have landed.
+        let gph = leg_phase(ph, LEGS[1].1, GALLOP[1], run);
 
         // The spine: the chest rises over each planted leg and rolls onto
         // it, the hips roll and twist the other way.
         let bob =
-            -BOB * s * (2.0 * TAU * ph).cos() * (1.0 - run) - 3.5 * BOB * run * (TAU * ph).cos();
+            -BOB * s * (2.0 * TAU * ph).cos() * (1.0 - run) - 3.5 * BOB * run * (TAU * gph).cos();
         let roll = ROLL * s * (TAU * ph).sin() * (1.0 - 0.6 * run);
         j[0] = Joint {
-            rot: v3(9.0 * run * (TAU * ph).sin(), yaw, 0.0),
+            rot: v3(9.0 * run * (TAU * gph).sin(), yaw, 0.0),
             shift: v3(0.0, bob, 0.0),
         };
         j[b.body] = Joint {
@@ -2644,6 +2669,69 @@ fn rodrigues(k: V3, sin: f32, cos: f32) -> V3 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn walking_and_running_legs_of_a_side_swing_apart() {
+        // The legs' swing, recorded at a walk, half into a gallop and a full
+        // one: the two legs of a side never swing together (a pace would
+        // correlate near +1).
+        fn corr(a: &[f32], b: &[f32]) -> f32 {
+            let n = a.len() as f32;
+            let (ma, mb) = (a.iter().sum::<f32>() / n, b.iter().sum::<f32>() / n);
+            let cov: f32 = a.iter().zip(b).map(|(x, y)| (x - ma) * (y - mb)).sum();
+            let va: f32 = a.iter().map(|x| (x - ma).powi(2)).sum();
+            let vb: f32 = b.iter().map(|y| (y - mb).powi(2)).sum();
+            cov / (va * vb).sqrt()
+        }
+        for id in QUAD_SPECIES {
+            let (_, sk) = quad(id).unwrap();
+            for pace in [1.0, 1.5, 1.6, 1.8, 1.9, 2.0, 2.1, 2.2, 3.0] {
+                let mut w = Walk::new(&sk, 1.0).unwrap();
+                w.set_pace(pace);
+                let mut swing = [vec![], vec![], vec![], vec![]];
+                for k in 0..300 {
+                    let j = w.step(1.0 / 60.0, true, 1.0);
+                    if k >= 180 {
+                        for (l, &(leg, ..)) in w.legs.iter().enumerate() {
+                            swing[l].push(j[leg].rot.x);
+                        }
+                    }
+                }
+                for (front, hind) in [(1, 0), (3, 2)] {
+                    let c = corr(&swing[front], &swing[hind]);
+                    assert!(
+                        c < 0.4,
+                        "{id} at pace {pace}: legs {front} and {hind} correlate {c}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn running_never_moves_the_legs_of_a_side_together() {
+        // The legs of a side a quarter of a step apart walking, half a step
+        // galloping, and in between at every mix: never together (a pace).
+        let ahead = |a: usize, b: usize, run: f32| {
+            (leg_phase(0.0, LEGS[a].1, GALLOP[a], run) - leg_phase(0.0, LEGS[b].1, GALLOP[b], run))
+                .rem_euclid(1.0)
+        };
+        for k in 0..=20 {
+            let run = k as f32 / 20.0;
+            for (front, hind) in [(1, 0), (3, 2)] {
+                let gap = ahead(front, hind, run);
+                assert!(
+                    (0.249..=0.501).contains(&gap),
+                    "run {run}: front {front} {gap} ahead of hind {hind}"
+                );
+            }
+        }
+        // Galloping: the hind paws a beat apart, then the front paws the
+        // same way half a step on.
+        assert!((ahead(2, 0, 1.0) - 0.1).abs() < 1e-4);
+        assert!((ahead(1, 0, 1.0) - 0.5).abs() < 1e-4);
+        assert!((ahead(3, 1, 1.0) - 0.1).abs() < 1e-4);
+    }
 
     #[test]
     fn aim_turns_any_direction_onto_any_other() {

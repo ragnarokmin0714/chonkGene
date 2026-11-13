@@ -2,11 +2,13 @@
 //! way the app draws them (animator → mesh renderer), for tuning without a
 //! desktop:
 //! `cargo run --release -p chonkgene-render --example touch -- <species> <out dir> [scene]`
-//! writes `<scene>-<frame>.png` at 15 fps. Scenes: `poke` (a quick poke in
+//! writes `<scene>-<frame>.png` at 15 fps (`SLOW=4` in the environment:
+//! four times slower, to check a gait frame by frame). Scenes: `poke` (a quick poke in
 //! the belly), `rub` (a long belly rub), `chin`, `head`, `cheek`, `tail`,
 //! `paw`, `bottom`, `back`, `wing` (each held, then let go), `trap` (the
 //! 曼赤肯's belly rubbed into its trap), `scratch` (held on the head
-//! and rubbed about), `laugh`, `fedup`, `sulk`, and
+//! and rubbed about), `laugh`, `fedup`, `sulk`, `jog` and `run` (running
+//! at pace 1.6, half way into a gallop, and 2.2, a full one), and
 //! `sleep-chin`, `sleep-curl`, `sleep-side`, `sleep-up`.
 
 use std::sync::Arc;
@@ -39,6 +41,8 @@ struct Scene {
     hug: Option<Hug>,
     /// Held all through (sliding, gliding, flying).
     posture: Option<Posture>,
+    /// Walking all through at this pace (running).
+    pace: Option<f32>,
 }
 
 fn scenes() -> Vec<Scene> {
@@ -51,6 +55,7 @@ fn scenes() -> Vec<Scene> {
         walk_first: matches!(zone, Zone::Tail | Zone::Bottom | Zone::Back),
         hug: None,
         posture: None,
+        pace: None,
     };
     let feel = |name, expression, secs| Scene {
         name,
@@ -61,6 +66,7 @@ fn scenes() -> Vec<Scene> {
         walk_first: false,
         hug: None,
         posture: None,
+        pace: None,
     };
     let sleep = |name, pose| Scene {
         name,
@@ -71,6 +77,7 @@ fn scenes() -> Vec<Scene> {
         walk_first: false,
         hug: None,
         posture: None,
+        pace: None,
     };
     let hug = |name, role| Scene {
         name,
@@ -81,6 +88,7 @@ fn scenes() -> Vec<Scene> {
         walk_first: true,
         hug: Some(role),
         posture: None,
+        pace: None,
     };
     let travel = |name, posture| Scene {
         name,
@@ -91,8 +99,22 @@ fn scenes() -> Vec<Scene> {
         walk_first: true,
         hug: None,
         posture: Some(posture),
+        pace: None,
+    };
+    let run = |name, pace| Scene {
+        name,
+        secs: 2.0,
+        expression: Expression::Happy,
+        hold: None,
+        sleep: None,
+        walk_first: true,
+        hug: None,
+        posture: None,
+        pace: Some(pace),
     };
     vec![
+        run("jog", 1.6),
+        run("run", 2.2),
         hug("hug-front", Hug::Cuddle { front: true }),
         hug("hug-back", Hug::Cuddle { front: false }),
         hug("hug-bear", Hug::Bear),
@@ -155,6 +177,11 @@ fn main() {
         std::process::exit(2);
     };
     let only = args.get(2);
+    let slow: f32 = std::env::var("SLOW")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(1.0f32)
+        .max(1.0);
     let species = Species::from_id(id).unwrap_or_else(|| panic!("no species {id:?}"));
     let gpu: &'static Gpu = Box::leak(Box::new(Gpu::new().expect("a GPU")));
     gpu.set_budget(1.0);
@@ -180,9 +207,9 @@ fn main() {
         }
         let mut pressed = None;
         let mut hugged = false;
-        let frames = (scene.secs * FPS).round() as u32;
+        let frames = (scene.secs * FPS * slow).round() as u32;
         for f in 0..frames {
-            let t = f as f32 / FPS;
+            let t = f as f32 / FPS / slow;
             let mut expression = scene.expression;
             if let Some(h) = &scene.hold {
                 if pressed.is_none() && t >= h.from && t < h.to {
@@ -239,9 +266,13 @@ fn main() {
             if let Some(p) = scene.posture {
                 a.posture = p;
             }
+            if let Some(pace) = scene.pace {
+                a.pace = pace;
+                a.walking = true;
+            }
             a.expression = expression;
             for _ in 0..4 {
-                a.step(0.25 / FPS);
+                a.step(0.25 / FPS / slow);
             }
             let params = a.params();
             if expression == Expression::Asleep {
