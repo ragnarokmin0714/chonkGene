@@ -588,7 +588,7 @@ impl Fun {
     /// How far up its window goes while you hold it up in front (前抱),
     /// pixels, at `t`.
     pub fn hug_lift(&self, t: f64) -> f32 {
-        self.hug_arms.map_or(0.0, |(since, _, hold)| {
+        self.hug_by_you.map_or(0.0, |(since, hold)| {
             let secs = chonkgene_core::anim::HUG_SECS;
             props::hug_lift(hold, self.scale, (t - since) as f32, secs)
         })
@@ -606,9 +606,6 @@ impl Fun {
         self.wet.0 * deep * Thing::Pond.size().1 * self.scale
     }
 }
-
-/// A picture's opaque part: left, top, right, bottom, pixels.
-pub type Bounds = (f32, f32, f32, f32);
 
 /// What a pet is up to besides its ordinary life.
 #[derive(Default)]
@@ -683,9 +680,11 @@ pub(super) struct Fun {
     /// How far into the pond it stands, as a share of the pond's height up
     /// from its near edge (see [`Fun::pond_lift`]); 0 for the default.
     pond_deep: f32,
-    /// Hugged by you: since when, the body your arms go round (its
-    /// picture's bounds then), and how they hold it.
-    pub hug_arms: Option<(f64, Bounds, props::HugHold)>,
+    /// Hugged by you: since when, and how your hands hold it; where they
+    /// are this frame (found on its picture each frame, see
+    /// `Renderer::hug_hands`).
+    pub hug_by_you: Option<(f64, props::HugHold)>,
+    pub hands: Option<props::HugHands>,
     /// When it last finished a 肉肉舞 (it does not dance again at once).
     pub danced: f64,
     /// When it last went into a pond to join the others.
@@ -1183,14 +1182,14 @@ impl Pet {
         let hug_secs = f64::from(chonkgene_core::anim::HUG_SECS);
         if self
             .fun
-            .hug_arms
+            .hug_by_you
             .is_some_and(|(since, ..)| t - since >= hug_secs)
         {
-            self.fun.hug_arms = None;
+            self.fun.hug_by_you = None;
         }
         let any = sun > 0.0
             || lifted
-            || self.fun.hug_arms.is_some()
+            || self.fun.hands.is_some()
             || !self.fun.fx.is_empty()
             || self.fun.carry.is_some()
             || in_pond
@@ -1266,8 +1265,9 @@ impl Pet {
                 props::balloon(canvas, head, back, hue, s, t as f32);
             }
         }
-        if let Some((since, bounds, hold)) = self.fun.hug_arms {
-            props::hug_arms(canvas, bounds, hold, s, (t - since) as f32, hug_secs as f32);
+        if let Some(hands) = &self.fun.hands {
+            let since = self.fun.hug_by_you.map_or(t, |(since, _)| since);
+            props::draw_hug_hands(canvas, hands, s, (t - since) as f32);
         }
         if let Some(thing) = self.fun.carry {
             let at = self.renderer.mouth(self.anim.facing);

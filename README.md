@@ -8,7 +8,7 @@ A gang of chubby desktop pets that lounge on your desktop all day being cute.
 
 - **Seven pets**: a Shiba Inu, a Munchkin cat, a Scottish Fold, a nine-tailed fox, an owl, a chick and a duckling, each with its own personality (the fox is a bossy big sister to the others, and tsundere to you).
 - **Touch them**: bellies squish and jiggle; every pet has spots it loves (a cat's chin and belly, the Shiba's tail base) and spots it would rather you left alone; keep poking and some roll over laughing while others look thoroughly fed up. The Munchkin's belly is a trap.
-- **Hugs**: double-click a pet (or 抱抱 in its menu) and a pair of chubby baby arms hugs it; the pets hug each other too, and the fox bear-hugs whoever it likes.
+- **Hugs**: double-click a pet (or 抱抱 in its menu) and a child's see-through hands hold it by its sides, pressing into its fur; the pets hug each other too, and the fox bear-hugs whoever it likes.
 - **They get about**: walking, running, sliding along on their bellies, gliding down from window tops, flying off under balloons or a bamboo-copter; they hop onto windows and ride along when you move them.
 - **Their own little scenes**: the duckling's pond with a golden beach (everyone wades in for a water fight), a sunbeam for the cats, a bone, seeds, a butterfly, the fox's spells, the 肉肉舞 in a spotlight.
 - **Irrational mode** (on by default): with two or more pets they squabble over small things and always make up with a hug; the chick and duckling talk past each other (雞同鴨講).
@@ -20,7 +20,7 @@ A gang of chubby desktop pets that lounge on your desktop all day being cute.
 
 <table>
 <tr><td><img src="docs/media/pond.gif" alt="Pets wading in the pond, golden sand round it"></td></tr>
-<tr><td><img src="docs/media/hugs.gif" alt="Hugs: two pets cheek to cheek, the fox's bear hug, baby arms round a pet, a chick held up"></td></tr>
+<tr><td><img src="docs/media/hugs.gif" alt="Hugs: two pets cheek to cheek, the fox's bear hug, a child's hands round a pet, a chick held up"></td></tr>
 <tr><td><img src="docs/media/touch.gif" alt="Touch: a cat's chin, the Shiba's tail base, a paw it does not want touched, the Munchkin's belly trap"></td></tr>
 </table>
 

@@ -29,7 +29,7 @@ use tiny_skia::{Pixmap, Transform};
 use crate::fidget::{Kind, Tongue};
 use crate::gpu::{Ask, Gpu};
 use crate::mesh::{Mesh, bake};
-use crate::mesh_gpu::MeshCanvas;
+use crate::mesh_gpu::{MeshCanvas, Press};
 use crate::raymarch::PPU;
 use crate::skin::{Affine, Feel, Gesture, Mood, Skeleton, SleepPose, Spring, Travel, bite};
 use crate::waddle::Mover;
@@ -42,6 +42,14 @@ const UNITS: (f32, f32) = (4.5, 3.3);
 /// The longest step the walk takes at once, seconds: its springs stay
 /// steady however slowly frames come.
 const MAX_STEP: f32 = 1.0 / 60.0;
+/// Your hands holding it in a hug (Roger's twentieth pass, item 2): how
+/// deep each presses in at the firmest squeeze (world units, more on a
+/// chubbier pet) and how wide its dent is (a palm, wider than a finger).
+const HAND_DENT: f32 = 0.12;
+const HAND_R: f32 = 0.36;
+/// Squeezed between your hands it gets this much narrower (half of it)
+/// and taller, at the firmest squeeze.
+const HAND_SQUEEZE: f32 = 0.09;
 /// A frame held back by the GPU budget this long goes anyway (PLAN §8,
 /// Roger's eleventh pass, item 5: pets stood frozen for seconds while
 /// others took the budget).
@@ -172,6 +180,14 @@ pub struct MeshRenderer {
     dent: Spring,
     dent_r: f32,
     press: Option<(V3, f32, f32)>,
+    /// Your hands holding it in a hug: where each presses (pixels of the
+    /// picture shown) and how firmly (0 … 1); the vertex under each and the
+    /// pixel it was found for; how deep they have pressed in; and the dents
+    /// sent with the next frame.
+    hands: Option<([(f32, f32); 2], f32)>,
+    hand_verts: [Option<(usize, (f32, f32))>; 2],
+    hand_dent: Spring,
+    hand_press: [Option<Press>; 2],
     /// Asleep: the pose, and when (the animator's clock) it may change.
     sleep: Option<(SleepPose, f32)>,
     /// For picking sleep poses; or the one pose to sleep in (tests, looks).
@@ -242,6 +258,10 @@ impl MeshRenderer {
             pressed: None,
             dent: Spring::default(),
             dent_r: 0.3,
+            hands: None,
+            hand_verts: [None; 2],
+            hand_dent: Spring::default(),
+            hand_press: [None; 2],
             press: None,
             sleep: None,
             seed,
@@ -373,7 +393,11 @@ impl MeshRenderer {
     /// fidgets (an ear flick, a sniff) move fast and need smooth frames;
     /// anything moving faster still, up to 60 (see [`SMOOTH_PX`]).
     pub fn min_fps(&self) -> u32 {
-        let base = if self.walk.busy() || self.dent.x.abs() > 0.002 || self.walk.fidget().quick() {
+        let base = if self.walk.busy()
+            || self.dent.x.abs() > 0.002
+            || self.hand_press.iter().any(Option::is_some)
+            || self.walk.fidget().quick()
+        {
             30
         } else {
             15
@@ -653,6 +677,7 @@ impl MeshRenderer {
         self.bones = bones;
         self.settle(params);
         self.dent(params, dt);
+        self.hand_dent(dt);
         self.look = look;
         self.changed = false;
         // A walking pet's picture must keep up with its window, which moves
@@ -705,6 +730,7 @@ impl MeshRenderer {
     /// Send the wanted frame to the GPU if the budget lets it go `how`.
     fn push(&mut self, how: Ask, keep_up: bool) {
         let starved = how == Ask::Now;
+        let fwd = self.canvas_forward();
         let Some(live) = self.live.as_mut() else {
             return;
         };
@@ -717,7 +743,21 @@ impl MeshRenderer {
             Layer::All,
         );
         let yaw = self.walk.yaw();
-        live.canvas.press = self.press;
+        // Your hands in a hug take both of the shader's presses; a
+        // finger otherwise.
+        live.canvas.press = if self.hand_press.iter().any(Option::is_some) {
+            self.hand_press
+        } else {
+            [
+                self.press.map(|(at, depth, radius)| Press {
+                    at,
+                    dir: fwd,
+                    depth,
+                    radius,
+                }),
+                None,
+            ]
+        };
         live.canvas.floor_shadow = self.floor_shadow;
         live.canvas.glow = self.glow;
         let sent = live
@@ -881,6 +921,73 @@ impl MeshRenderer {
         }
     }
 
+    /// Your hands holding it in a hug, from the picture shown: where each
+    /// presses in (pixels, just inside its outline) and how firmly (0 …
+    /// 1); none when nobody is hugging it. Its flesh dents under them and
+    /// it is squeezed a little narrower and taller between them.
+    pub fn hug_press(&mut self, hands: Option<([(f32, f32); 2], f32)>) {
+        self.hands = hands;
+    }
+
+    /// Where its body is in the picture shown, pixels: the middle of its
+    /// belly, and of its chest (under the front legs or the wings), for
+    /// your hands to hold it by in a hug. None until the bake has landed.
+    pub fn body_at(&self) -> Option<((f32, f32), (f32, f32))> {
+        self.live.as_ref()?;
+        let m = &self.model;
+        let body = m.part("body");
+        let belly = m.part("belly").or(body)?;
+        // A bird has no chest of its own: held up, under its wings, at the
+        // middle of its body.
+        let chest = m.part("chest").or(body).unwrap_or(belly);
+        Some((
+            self.project_on(Some(belly), V3::ZERO),
+            self.project_on(Some(chest), V3::ZERO),
+        ))
+    }
+
+    /// The edge of its body (and legs: sitting, its haunches are its
+    /// sides; not its head, tails or wings) on row `y` of the picture
+    /// shown, toward `side` (−1 left, +1 right), pixels: where your hands
+    /// rest in a hug.
+    pub fn body_edge(&self, y: f32, side: f32) -> Option<f32> {
+        self.edge_vertex(y, side).map(|(x, _)| x)
+    }
+
+    /// The vertex at [`MeshRenderer::body_edge`], and where it is.
+    fn edge_vertex(&self, y: f32, side: f32) -> Option<(f32, usize)> {
+        let live = self.live.as_ref()?;
+        let body = |z: &str| matches!(z, "belly" | "back" | "bottom" | "paw");
+        let near = 3.0 * self.scale;
+        let mut edge: Option<(f32, usize)> = None;
+        for i in 0..live.mesh.vertices.len() {
+            if !ZONES
+                .get(usize::from(live.mesh.zones[i]))
+                .is_some_and(|z| body(z))
+            {
+                continue;
+            }
+            let (x, py) = live.canvas.project(self.skinned(&live.mesh, i));
+            if (py - y).abs() > near {
+                continue;
+            }
+            if edge.is_none_or(|(e, _)| (x - e) * side > 0.0) {
+                edge = Some((x, i));
+            }
+        }
+        edge
+    }
+
+    /// How deep your hands have pressed in now (world units; 0 when not
+    /// hugged).
+    pub fn hands_in(&self) -> f32 {
+        self.hand_press
+            .iter()
+            .flatten()
+            .map(|p| p.depth)
+            .fold(0.0, f32::max)
+    }
+
     /// How deep a finger has the flesh pressed in now, world units
     /// (negative springing back out; 0 when nothing presses).
     pub fn pressed_in(&self) -> f32 {
@@ -942,8 +1049,10 @@ impl MeshRenderer {
     /// over or melted, settling it onto the floor: one move after the
     /// skeleton's, for every bone.
     fn settle(&mut self, params: &PoseParams) {
-        let sq =
-            (0.35 * params.squash + 0.15 * params.belly + self.walk.flatten()).clamp(-0.3, 0.3);
+        // Squeezed between your hands in a hug: narrower and taller.
+        let hug = HAND_SQUEEZE * (self.hand_dent.x / HAND_DENT).clamp(-0.5, 1.5);
+        let sq = (0.35 * params.squash + 0.15 * params.belly + self.walk.flatten() - hug)
+            .clamp(-0.3, 0.3);
         let breath = 0.03 * params.breath;
         let wide = 1.0 + 0.5 * sq;
         let feet = v3(0.0, FLOOR, crate::skin::ROOT_PIVOT.z);
@@ -1006,18 +1115,75 @@ impl MeshRenderer {
             }
             return;
         }
-        self.press = self.pressed.and_then(|(i, _)| {
-            let live = self.live.as_ref()?;
-            let v = &live.mesh.vertices[i];
-            let rest = v3(v.pos[0], v.pos[1], v.pos[2]);
-            let mut p = V3::ZERO;
-            for (b, w) in v.bones.iter().zip(v.weights) {
-                if w > 0.0 {
-                    p = p + self.bones[*b as usize].apply(rest) * w;
-                }
+        self.press = self
+            .pressed
+            .and_then(|(i, _)| Some((self.posed(i)?, x, radius)));
+    }
+
+    /// Where vertex `i` is in the pose being made (not the one shown).
+    fn posed(&self, i: usize) -> Option<V3> {
+        let live = self.live.as_ref()?;
+        let v = live.mesh.vertices.get(i)?;
+        let rest = v3(v.pos[0], v.pos[1], v.pos[2]);
+        let mut p = V3::ZERO;
+        for (b, w) in v.bones.iter().zip(v.weights) {
+            if w > 0.0 {
+                p = p + self.bones[*b as usize].apply(rest) * w;
             }
-            Some((p, x, radius))
-        });
+        }
+        Some(p)
+    }
+
+    /// Your hands in a hug pressing in from its sides (see
+    /// [`MeshRenderer::hug_press`]): the dents follow how firmly they
+    /// squeeze, and spring back out when they let go.
+    fn hand_dent(&mut self, dt: f32) {
+        let goal = self
+            .hands
+            .map_or(0.0, |(_, firm)| HAND_DENT * (0.8 + 0.4 * self.chonk) * firm);
+        let mut x = 0.0;
+        let steps = (dt / MAX_STEP).ceil().max(1.0);
+        for _ in 0..steps as usize {
+            x = self.hand_dent.step(goal, 0.0, 4.0, 0.35, dt / steps);
+        }
+        let Some((spots, _)) = self.hands else {
+            if x.abs() < 0.002 && self.hand_dent.v.abs() < 0.02 {
+                self.hand_dent = Spring::default();
+                self.hand_press = [None; 2];
+                self.hand_verts = [None; 2];
+                return;
+            }
+            // Let go: the dents spring back where they were.
+            for p in self.hand_press.iter_mut().flatten() {
+                p.depth = x;
+            }
+            return;
+        };
+        let mid = self.pixmap.width() as f32 / 2.0;
+        let fwd = self.canvas_forward();
+        for (k, at) in spots.into_iter().enumerate() {
+            // The dent's middle on its outline, at the side (the vertex
+            // nearest the camera there would be on its front, and dent
+            // the outline only a little); found again when the hand has
+            // moved a few pixels (the search goes through the whole mesh).
+            let side = if at.0 > mid { 1.0 } else { -1.0 };
+            let stale = self.hand_verts[k]
+                .is_none_or(|(_, was)| (was.0 - at.0).hypot(was.1 - at.1) > 2.0 * self.scale);
+            if stale && let Some((_, i)) = self.edge_vertex(at.1, side) {
+                self.hand_verts[k] = Some((i, at));
+            }
+            // In from its side, a little into the screen too (the palm
+            // wraps round it).
+            let dir = (v3(-side, 0.0, 0.0) * 0.85 + fwd * 0.45).normalize();
+            self.hand_press[k] = self.hand_verts[k].and_then(|(i, _)| {
+                Some(Press {
+                    at: self.posed(i)?,
+                    dir,
+                    depth: x,
+                    radius: HAND_R,
+                })
+            });
+        }
     }
 
     /// Into the screen, the way the camera looks.

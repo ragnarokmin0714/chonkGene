@@ -1674,96 +1674,6 @@ pub enum HugHold {
     Carry,
 }
 
-/// A baby's arm: a chubby sausage from `from` (the shoulder, off the
-/// pet) to `hand`, bowing out through `ctrl`, thick `r` at the shoulder and
-/// a little less at the wrist; a crease at the wrist, a soft pink outline
-/// and a light along its top, then a pudgy hand with a thumb (`thumb`:
-/// which way it points, ±1) and rosy knuckles.
-fn baby_arm(
-    pm: &mut Pixmap,
-    from: (f32, f32),
-    ctrl: (f32, f32),
-    hand: (f32, f32),
-    r: f32,
-    thumb: f32,
-    s: f32,
-) {
-    const SKIN: [u8; 4] = [0xFF, 0xE3, 0xD3, 255];
-    const SHADE: [u8; 4] = [0xF4, 0xBF, 0xAA, 255];
-    const LIGHT: [u8; 4] = [0xFF, 0xF3, 0xEA, 255];
-    const LINE: [u8; 4] = [0xE0, 0x9A, 0x86, 255];
-    const ROSY: [u8; 4] = [0xFF, 0xA8, 0xA8, 170];
-    let id = Transform::identity();
-    let at = |u: f32| {
-        let v = 1.0 - u;
-        (
-            v * v * from.0 + 2.0 * v * u * ctrl.0 + u * u * hand.0,
-            v * v * from.1 + 2.0 * v * u * ctrl.1 + u * u * hand.1,
-        )
-    };
-    // Plump: thickest at the upper arm, a dip at the elbow, the forearm
-    // round again, narrowing to the wrist.
-    let radius = |u: f32| r * (1.0 - 0.18 * u + 0.08 * (u * 6.0).sin().max(0.0) * (1.0 - u));
-    let dot = |pm: &mut Pixmap, x: f32, y: f32, rr: f32, c: [u8; 4]| {
-        if let Some(p) = PathBuilder::from_circle(x, y, rr.max(0.3)) {
-            pm.fill_path(&p, &paint(c), FillRule::Winding, id, None);
-        }
-    };
-    let n = 28;
-    for k in 0..=n {
-        let u = k as f32 / n as f32;
-        let (x, y) = at(u);
-        dot(pm, x, y, radius(u) + 1.3 * s, LINE);
-    }
-    for k in 0..=n {
-        let u = k as f32 / n as f32;
-        let (x, y) = at(u);
-        dot(pm, x, y, radius(u), SHADE);
-    }
-    for k in 0..=n {
-        let u = k as f32 / n as f32;
-        let (x, y) = at(u);
-        dot(pm, x, y - 0.18 * radius(u), 0.82 * radius(u), SKIN);
-    }
-    for k in 2..n - 2 {
-        let u = k as f32 / n as f32;
-        let (x, y) = at(u);
-        dot(pm, x, y - 0.45 * radius(u), 0.3 * radius(u), LIGHT);
-    }
-    // The crease at the wrist.
-    let (wx, wy) = at(0.9);
-    let (dx, dy) = {
-        let (ax, ay) = at(0.86);
-        (wx - ax, wy - ay)
-    };
-    let len = dx.hypot(dy).max(1e-3);
-    let (nx, ny) = (-dy / len, dx / len);
-    let rw = 0.75 * radius(0.9);
-    let mut pb = PathBuilder::new();
-    pb.move_to(wx + nx * rw, wy + ny * rw);
-    pb.quad_to(wx + 2.0 * dx, wy + 2.0 * dy, wx - nx * rw, wy - ny * rw);
-    if let Some(path) = pb.finish() {
-        let st = Stroke {
-            width: 1.1 * s,
-            line_cap: LineCap::Round,
-            ..Stroke::default()
-        };
-        pm.stroke_path(&path, &paint(LINE), &st, id, None);
-    }
-    // The hand: a round little fist, a thumb on top, rosy knuckles.
-    let hr = 0.95 * r;
-    let (tx, ty) = (hand.0 + thumb * 0.55 * hr, hand.1 - 0.62 * hr);
-    dot(pm, hand.0, hand.1, hr + 1.3 * s, LINE);
-    dot(pm, tx, ty, 0.42 * hr + 1.3 * s, LINE);
-    dot(pm, hand.0, hand.1, hr, SKIN);
-    dot(pm, tx, ty, 0.42 * hr, SKIN);
-    dot(pm, hand.0 - 0.25 * hr, hand.1 - 0.3 * hr, 0.35 * hr, LIGHT);
-    for k in 0..3 {
-        let kx = hand.0 - thumb * (0.15 + 0.3 * k as f32) * hr;
-        dot(pm, kx, hand.1 + 0.45 * hr, 0.16 * hr, ROSY);
-    }
-}
-
 /// A bunch of three balloons a four-legged pet hangs from, flying
 /// (Roger's eighteenth pass: everyone flies): small and shiny, bobbing and
 /// swaying just above `head` (pixels: the top of its head; the window has
@@ -1873,57 +1783,220 @@ pub fn hug_lift(hold: HugHold, s: f32, t: f32, secs: f32) -> f32 {
     up * (22.0 + 3.0 * (TAU * 1.2 * t).sin()) * s
 }
 
-/// Your arms round a pet you hug (PLAN §8; Roger's eighteenth pass: a
-/// small baby's arms and hands, as a baby hugs a plush toy): `hold`, round
-/// its body `bounds` (left, top, right, bottom, pixels), `t` seconds in over
-/// `secs`, coming in at the start, squeezing gently, letting go at the end.
-pub fn hug_arms(
-    pm: &mut Pixmap,
-    bounds: (f32, f32, f32, f32),
+/// Where your hands hold a pet you hug, this frame (Roger's twentieth
+/// pass, item 2: no arms, only a child's hands, see-through, resting on
+/// the pet and pressing in).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct HugHands {
+    /// The two hands, left one first.
+    pub hands: [HugHand; 2],
+    /// How far they have come in (0 … 1: fading in from off its sides).
+    pub reach: f32,
+    /// How firmly they squeeze now (0 … 1): gently, in slow pulses.
+    pub firm: f32,
+}
+
+/// One hand of a [`HugHands`].
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct HugHand {
+    /// Where the middle of the palm is, pixels: on the pet's outline.
+    pub at: (f32, f32),
+    /// Where it presses in, pixels: a little inside the outline, on the
+    /// pet (the dent's middle).
+    pub press: (f32, f32),
+    /// Which way the fingers point, radians on the screen (0: right, y
+    /// down): in over its body, up a little.
+    pub angle: f32,
+    /// Which side of the pet it is on: −1 left, +1 right.
+    pub side: f32,
+}
+
+/// How far in from its outline your hand presses (pixels at 100%), and
+/// how far off its side the hand starts, coming in.
+const HAND_IN: f32 = 3.0;
+const HAND_OFF: f32 = 34.0;
+
+/// Where your hands hold a pet you hug, from where its body is in its
+/// picture (`body`: the middle of its belly, and of its chest, pixels; see
+/// `MeshRenderer::body_at`) and the edge of its body on a row toward a
+/// side (`edge(y, side)`, see `MeshRenderer::body_edge`), `t` seconds into
+/// a hug `secs` long: on its sides, found again every frame so they follow
+/// its outline as it breathes, squirms and is squeezed; coming in at the
+/// start, stroking it a little up and down, letting go at the end. None
+/// when the hands are away (before, after) or its body is not found.
+pub fn hug_hands(
+    edge: impl Fn(f32, f32) -> Option<f32>,
+    body: ((f32, f32), (f32, f32)),
     hold: HugHold,
     s: f32,
     t: f32,
     secs: f32,
-) {
-    let (l, top, r, bottom) = bounds;
-    let reach = smooth(0.0, 0.4, t) * smooth(secs, secs - 0.4, t);
+) -> Option<HugHands> {
+    let reach = smooth(0.0, 0.45, t) * smooth(secs, secs - 0.45, t);
     if reach <= 0.0 {
-        return;
+        return None;
     }
-    let squeeze = 0.5 + 0.5 * (TAU * 0.9 * t).sin();
-    // Round its body, not its tails: the middle of the picture, at most a
-    // third of it each way.
-    let mid = pm.width() as f32 / 2.0;
-    let half = (0.5 * (r - l)).min(0.3 * pm.width() as f32);
-    let tall = bottom - top;
-    let thick = 13.0 * s;
-    match hold {
-        HugHold::Wrap => {
-            // From behind its sides at the belly, round the front, the
-            // little hands meeting (one over the other) on its belly.
-            let y = top + 0.62 * tall;
-            for side in [1.0f32, -1.0] {
-                let from = (mid + side * (half + 4.0 * s), y - 10.0 * s);
-                let inward = (1.0 - reach) * 0.8 * half;
-                let hand = (
-                    mid + side * (0.12 * half + inward - 4.0 * s * squeeze),
-                    y + 6.0 * s + side * 3.0 * s,
-                );
-                let ctrl = (mid + side * (half + 10.0 * s), y + 18.0 * s);
-                baby_arm(pm, from, ctrl, hand, thick, -side, s);
-            }
+    // Squeezing gently, in slow pulses, from the moment they arrive.
+    let firm = reach * (0.6 + 0.4 * (TAU * 0.8 * t).sin());
+    // Wrapped round, at its belly; held up in front, under its arms,
+    // the fingers pointing up more.
+    let ((_, y), rise) = match hold {
+        HugHold::Wrap => (body.0, 0.35),
+        HugHold::Carry => (body.1, 0.95),
+    };
+    let mut hands = [HugHand {
+        at: (0.0, 0.0),
+        press: (0.0, 0.0),
+        angle: 0.0,
+        side: 0.0,
+    }; 2];
+    for (k, side) in [-1.0f32, 1.0].into_iter().enumerate() {
+        // Stroking: each hand slides up and down its side a little, the
+        // two out of step.
+        let stroke = 3.0 * s * (TAU * 0.6 * t + 1.7 * k as f32).sin();
+        let y = y + stroke;
+        // The edge of its body on that row (a little higher or lower if
+        // that row misses it).
+        let edge = [0.0, -4.0, 4.0, -8.0, 8.0]
+            .iter()
+            .find_map(|dy| edge(y + dy * s, side))?;
+        let off = (1.0 - reach) * HAND_OFF * s;
+        hands[k] = HugHand {
+            at: (edge + side * (off - 2.0 * s * firm), y),
+            press: (edge - side * HAND_IN * s, y),
+            angle: if side > 0.0 { PI + rise } else { -rise },
+            side,
+        };
+    }
+    Some(HugHands { hands, reach, firm })
+}
+
+/// Your hands holding a pet in a hug (see [`hug_hands`]), drawn over its
+/// picture: a child's hands from the wrist, plump, the fingers a little
+/// apart, see-through so its fur shows under them, the wrist fading out;
+/// the fingers stroke it, one after another, `t` seconds in.
+pub fn draw_hug_hands(pm: &mut Pixmap, hands: &HugHands, s: f32, t: f32) {
+    let Some(mut layer) = Pixmap::new(pm.width(), pm.height()) else {
+        return;
+    };
+    for (k, hand) in hands.hands.iter().enumerate() {
+        child_hand(&mut layer, hand, s, t + 0.4 * k as f32);
+    }
+    // All of it at once at one opacity, so where the fingers overlap the
+    // palm it is no less see-through.
+    let paint = PixmapPaint {
+        opacity: 0.66 * hands.reach.min(1.0),
+        ..PixmapPaint::default()
+    };
+    pm.draw_pixmap(0, 0, layer.as_ref(), &paint, Transform::identity(), None);
+}
+
+/// A child's hand (see [`draw_hug_hands`]), opaque, into `pm`.
+fn child_hand(pm: &mut Pixmap, hand: &HugHand, s: f32, t: f32) {
+    const SKIN: [u8; 4] = [0xFF, 0xE2, 0xD2, 255];
+    const LIGHT: [u8; 4] = [0xFF, 0xF2, 0xEA, 255];
+    const LINE: [u8; 4] = [0xE6, 0xA4, 0x92, 255];
+    const SOFT: [u8; 4] = [0xE6, 0xA4, 0x92, 90];
+    const ROSY: [u8; 4] = [0xFF, 0xA6, 0xA6, 150];
+    // Length from the palm's middle to the tip of the longest finger.
+    let l = 26.0 * s;
+    // Drawn upright (fingers up, the thumb on the right), turned so the
+    // fingers point along `angle`; the left hand mirrored, so both thumbs
+    // are on top.
+    let (sin, cos) = (hand.angle + PI / 2.0).sin_cos();
+    let flip = hand.side.signum();
+    let ts = Transform::from_row(cos * flip, sin * flip, -sin, cos, hand.at.0, hand.at.1);
+    let blob = |pm: &mut Pixmap, x: f32, y: f32, rx: f32, ry: f32, c: [u8; 4]| {
+        if let Some(r) = Rect::from_xywh(x - rx, y - ry, 2.0 * rx, 2.0 * ry)
+            && let Some(p) = PathBuilder::from_oval(r)
+        {
+            pm.fill_path(&p, &paint(c), FillRule::Winding, ts, None);
         }
-        HugHold::Carry => {
-            // From below, up its front, the hands under its arms.
-            let y = top + 0.5 * tall;
-            for side in [1.0f32, -1.0] {
-                let from = (mid + side * 0.5 * half, bottom + 4.0 * s);
-                let up = (1.0 - reach) * 0.5 * tall;
-                let hand = (mid + side * (0.62 * half - 2.0 * s * squeeze), y + up);
-                let ctrl = (mid + side * 0.9 * half, bottom - 0.1 * tall + 0.5 * up);
-                baby_arm(pm, from, ctrl, hand, thick, -side, s);
-            }
+    };
+    let digit = |pm: &mut Pixmap, from: (f32, f32), to: (f32, f32), r: f32, c: [u8; 4]| {
+        let mut pb = PathBuilder::new();
+        pb.move_to(from.0, from.1);
+        pb.line_to(to.0, to.1);
+        if let Some(p) = pb.finish() {
+            let st = Stroke {
+                width: 2.0 * r,
+                line_cap: LineCap::Round,
+                ..Stroke::default()
+            };
+            pm.stroke_path(&p, &paint(c), &st, ts, None);
         }
+    };
+    // The fingers, little finger to index (the thumb on the right): where
+    // each starts on the palm, how it leans out (radians) and how long it
+    // is. Stroking, they curl in one after another, a wave across them.
+    let fingers: [(f32, f32, f32); 4] = [
+        (-0.21, -0.18, 0.28),
+        (-0.07, -0.06, 0.36),
+        (0.07, 0.05, 0.39),
+        (0.21, 0.16, 0.34),
+    ];
+    let tips: Vec<((f32, f32), (f32, f32))> = fingers
+        .iter()
+        .enumerate()
+        .map(|(k, &(x, lean, len))| {
+            let curl = 1.0 - 0.2 * (TAU * 1.3 * t - 0.9 * k as f32).sin().max(0.0);
+            let base = (x * l, -0.2 * l);
+            let len = len * l * curl;
+            (base, (base.0 + lean.sin() * len, base.1 - lean.cos() * len))
+        })
+        .collect();
+    let fr = 0.075 * l;
+    let thumb = ((0.27 * l, 0.02 * l), (0.47 * l, -0.2 * l));
+    let tr = 0.085 * l;
+    let edge = 1.2 * s;
+    // A soft halo, then the outline, then the skin, so the edge is soft.
+    for (grow, c) in [(edge + 1.6 * s, SOFT), (edge, LINE)] {
+        // The wrist, fading out: drawn only round the palm's end.
+        blob(pm, 0.0, 0.12 * l, 0.27 * l + grow, 0.18 * l + grow, c);
+        blob(pm, 0.0, -0.04 * l, 0.33 * l + grow, 0.27 * l + grow, c);
+        for &(a, b) in &tips {
+            digit(pm, a, b, fr + grow, c);
+        }
+        digit(pm, thumb.0, thumb.1, tr + grow, c);
+    }
+    blob(pm, 0.0, 0.12 * l, 0.27 * l, 0.18 * l, SKIN);
+    blob(pm, 0.0, -0.04 * l, 0.33 * l, 0.27 * l, SKIN);
+    for &(a, b) in &tips {
+        digit(pm, a, b, fr, SKIN);
+    }
+    digit(pm, thumb.0, thumb.1, tr, SKIN);
+    // A light on the palm's heel, rosy fingertips.
+    blob(pm, -0.08 * l, -0.02 * l, 0.12 * l, 0.09 * l, LIGHT);
+    for &(_, b) in &tips {
+        blob(pm, b.0, b.1, 0.6 * fr, 0.6 * fr, ROSY);
+    }
+    blob(pm, thumb.1.0, thumb.1.1, 0.6 * tr, 0.6 * tr, ROSY);
+    // The wrist fades away rather than ending: rubbed out below the palm.
+    let mut fade = PathBuilder::new();
+    fade.move_to(-0.5 * l, 0.2 * l);
+    fade.line_to(0.5 * l, 0.2 * l);
+    fade.line_to(0.5 * l, 0.45 * l);
+    fade.line_to(-0.5 * l, 0.45 * l);
+    fade.close();
+    if let Some(p) = fade.finish()
+        && let Some(grad) = tiny_skia::LinearGradient::new(
+            Point::from_xy(0.0, 0.12 * l),
+            Point::from_xy(0.0, 0.32 * l),
+            vec![
+                GradientStop::new(0.0, Color::from_rgba8(0, 0, 0, 0)),
+                GradientStop::new(1.0, Color::from_rgba8(0, 0, 0, 255)),
+            ],
+            SpreadMode::Pad,
+            Transform::identity(),
+        )
+    {
+        let erase = Paint {
+            shader: grad,
+            blend_mode: BlendMode::DestinationOut,
+            anti_alias: true,
+            ..Paint::default()
+        };
+        pm.fill_path(&p, &erase, FillRule::Winding, ts, None);
     }
 }
 

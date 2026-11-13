@@ -314,6 +314,27 @@ impl Renderer {
         }
     }
 
+    /// Hugged by you, held `hold`, `t` seconds into a hug `secs` long
+    /// (`s` the pet's scale): where your hands hold it this frame, found
+    /// on the picture shown, and pressing in on the next one drawn (see
+    /// [`props::hug_hands`]); none: not hugged (they let go). Only the mesh
+    /// pets are held by hands.
+    pub fn hug_hands(
+        &mut self,
+        hug: Option<(props::HugHold, f32, f32)>,
+        s: f32,
+    ) -> Option<props::HugHands> {
+        let Self::Mesh(r) = self else {
+            return None;
+        };
+        let hands = hug.and_then(|(hold, t, secs)| {
+            let body = r.body_at()?;
+            props::hug_hands(|y, side| r.body_edge(y, side), body, hold, s, t, secs)
+        });
+        r.hug_press(hands.map(|h| ([h.hands[0].press, h.hands[1].press], h.firm)));
+        hands
+    }
+
     /// The top of the head, in pixmap pixels.
     pub fn anchor(&self) -> (f32, f32) {
         match self {

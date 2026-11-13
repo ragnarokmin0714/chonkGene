@@ -58,9 +58,9 @@ pub struct MeshCanvas {
     /// GPU seconds measured so far, and frames drawn.
     pub measured: f64,
     pub frames: u32,
-    /// A finger pressing in: where (posed, world), how deep, how wide
-    /// (see mesh.wgsl); none when nothing presses.
-    pub press: Option<(V3, f32, f32)>,
+    /// Up to two things pressing in: a finger, or your two hands in a hug
+    /// (see mesh.wgsl).
+    pub press: [Option<Press>; 2],
     /// The soft shadow on the floor under the pet; off in the water or in
     /// the air, where there is no floor under it.
     pub floor_shadow: bool,
@@ -265,7 +265,7 @@ impl MeshCanvas {
             last_secs: None,
             measured: 0.0,
             frames: 0,
-            press: None,
+            press: [None; 2],
             floor_shadow: true,
             glow: 0.0,
         }
@@ -278,6 +278,11 @@ impl MeshCanvas {
     /// Where world point `p` lands on the canvas, in pixels.
     pub fn project(&self, p: V3) -> (f32, f32) {
         self.cam.project(p)
+    }
+
+    /// Into the screen, the way the camera looks (world).
+    pub fn forward(&self) -> V3 {
+        self.cam.fwd
     }
 
     /// Draw the mesh posed by `bones` (one per skeleton bone) into `out`
@@ -348,9 +353,16 @@ impl MeshCanvas {
         u.push(v4(self.eye_r, yaw.to_radians()));
         u.push(v4(self.mouth_r, 0.0));
         u.push([ROOT_PIVOT.x, ROOT_PIVOT.z, self.shadow_r.0, self.shadow_r.1]);
-        let (at, depth, radius) = self.press.unwrap_or((V3::ZERO, 0.0, 1.0));
-        u.push(v4(at, depth));
-        u.push([radius, 0.0, 0.0, 0.0]);
+        for p in &self.press {
+            let p = p.unwrap_or(Press {
+                at: V3::ZERO,
+                dir: V3::ZERO,
+                depth: 0.0,
+                radius: 1.0,
+            });
+            u.push(v4(p.at, p.depth));
+            u.push(v4(p.dir, p.radius));
+        }
         for i in 0..MAX_BONES {
             let rows = bones.get(i).unwrap_or(&Affine::IDENTITY).rows();
             u.extend(rows);
@@ -503,6 +515,21 @@ impl MeshCanvas {
     }
 }
 
-/// pet.wgsl's 13 + palette, then eye and mouth radii, the shadow, the
-/// press and three rows a bone.
-const UNIFORM_VECS: usize = 13 + 16 + 5 + 3 * MAX_BONES;
+/// pet.wgsl's 13 + palette, then eye and mouth radii, the shadow, two
+/// presses and three rows a bone.
+const UNIFORM_VECS: usize = 13 + 16 + 3 + 4 + 3 * MAX_BONES;
+
+/// Something pressing the skin in: a finger, or one of your hands holding
+/// it in a hug.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Press {
+    /// Where (posed, world).
+    pub at: V3,
+    /// Which way it pushes (a unit vector): into the screen for a finger,
+    /// in from the side for a hand.
+    pub dir: V3,
+    /// How deep, world units (negative springing back out).
+    pub depth: f32,
+    /// How wide the dent is, world units.
+    pub radius: f32,
+}

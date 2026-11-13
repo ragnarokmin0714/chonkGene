@@ -26,10 +26,10 @@ struct Uniforms {
     mouth_r: vec4<f32>,
     // The shadow: centre x and z on the floor, radii across and along the pet.
     shadow: vec4<f32>,
-    // A finger pressing in: xyz where (posed, world), w how deep (into the
-    // screen; negative springing back out); press_r.x: the dent's radius.
-    press: vec4<f32>,
-    press_r: vec4<f32>,
+    // Up to two things pressing in (a finger; your two hands in a hug), two
+    // rows each: xyz where (posed, world), w how deep (negative springing
+    // back out); xyz which way it pushes (unit), w the dent's radius.
+    press: array<vec4<f32>, 4>,
     // Three rows of [m | t] per bone.
     bones: array<vec4<f32>, 192>,
 }
@@ -102,18 +102,24 @@ fn vs_pet(v: In) -> Out {
             n += bone_dir(v.bones[k], v.normal.xyz) * w;
         }
     }
-    // The skin under the finger sinks away from you, most in the middle;
-    // the dent's walls tilt their normals in so it shades as a dent.
-    let depth = u.press.w;
-    if depth != 0.0 {
-        let r = u.press_r.x;
-        let rel = p - u.press.xyz;
-        let q = dot(rel, rel) / (r * r);
-        if q < 1.0 {
-            let f = (1.0 - q) * (1.0 - q);
-            p += u.fwd.xyz * depth * f;
-            let across = rel - u.fwd.xyz * dot(rel, u.fwd.xyz);
-            n += across * (-4.0 * depth * (1.0 - q) / (r * r)) * length(n);
+    // The skin under a finger (or a hand) sinks the way it pushes, most in
+    // the middle; the dent's walls tilt their normals in so it shades as a
+    // dent.
+    let size = length(n);
+    for (var k = 0; k < 2; k++) {
+        let at = u.press[2 * k];
+        let dir = u.press[2 * k + 1];
+        let depth = at.w;
+        if depth != 0.0 {
+            let r = dir.w;
+            let rel = p - at.xyz;
+            let q = dot(rel, rel) / (r * r);
+            if q < 1.0 {
+                let f = (1.0 - q) * (1.0 - q);
+                p += dir.xyz * depth * f;
+                let across = rel - dir.xyz * dot(rel, dir.xyz);
+                n += across * (-4.0 * depth * (1.0 - q) / (r * r)) * size;
+            }
         }
     }
     var o: Out;

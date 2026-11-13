@@ -1527,7 +1527,15 @@ fn a_finger_dents_the_flesh_under_it() {
         .unwrap();
     let p = mesh.vertices[front].pos;
     let at = v3(p[0], p[1], p[2]);
-    canvas.press = Some((at, 0.13, 0.32));
+    canvas.press = [
+        Some(chonkgene_render::mesh_gpu::Press {
+            at,
+            dir: canvas.forward(),
+            depth: 0.13,
+            radius: 0.32,
+        }),
+        None,
+    ];
     let dented = draw(&mut canvas);
     let (px, py) = canvas.project(at);
     let changed = |near: bool| {
@@ -2052,4 +2060,64 @@ fn every_action_asks_for_frames_enough_to_move_smoothly() {
         }
     }
     assert!(slow.is_empty(), "jerky:\n{}", slow.join("\n"));
+}
+
+/// Hugged, your hands press in on its sides: its body is narrower between
+/// them (dented and squeezed); let go, it springs back as it was.
+#[test]
+fn hug_hands_press_in_on_its_sides_and_let_go() {
+    use chonkgene_core::anim::{Animator, Expression};
+    let Some(mut r) = app_renderer("shiba") else {
+        eprintln!("skipped: no GPU");
+        return;
+    };
+    let mut a = Animator::new(1, 0.33, 0.35).with_pops(false);
+    let run = |r: &mut chonkgene_render::MeshRenderer, a: &mut Animator, secs: f32| {
+        for _ in 0..(secs * 30.0) as usize {
+            a.step(1.0 / 30.0);
+            r.render(&a.params(), Expression::Neutral);
+            r.finish();
+        }
+    };
+    // Its body's width on the belly's row: opaque pixels from the belly
+    // out to each side.
+    let width = |r: &chonkgene_render::MeshRenderer, (x, y): (f32, f32)| {
+        let pm = r.pixmap();
+        let solid = |x: i32| {
+            x >= 0
+                && (x as u32) < pm.width()
+                && pm
+                    .pixel(x as u32, y as u32)
+                    .is_some_and(|p| p.alpha() >= 128)
+        };
+        let (mut l, mut rt) = (x as i32, x as i32);
+        while solid(l - 1) {
+            l -= 1;
+        }
+        while solid(rt + 1) {
+            rt += 1;
+        }
+        rt - l
+    };
+    r.still();
+    run(&mut r, &mut a, 1.5);
+    let (belly, _) = r.body_at().expect("its body in the picture");
+    let before = width(&r, belly);
+    let left = r.body_edge(belly.1, -1.0).expect("its left side");
+    let right = r.body_edge(belly.1, 1.0).expect("its right side");
+    for _ in 0..30 {
+        r.hug_press(Some(([(left + 3.0, belly.1), (right - 3.0, belly.1)], 1.0)));
+        run(&mut r, &mut a, 1.0 / 30.0);
+    }
+    assert!(r.hands_in() > 0.05, "pressed in {}", r.hands_in());
+    let held = width(&r, belly);
+    assert!(held + 4 <= before, "hugged {held} px wide, {before} before");
+    r.hug_press(None);
+    run(&mut r, &mut a, 2.0);
+    assert_eq!(r.hands_in(), 0.0, "let go, the dents settle");
+    let after = width(&r, belly);
+    assert!(
+        after.abs_diff(before) <= 1,
+        "let go {after} px wide, {before} before"
+    );
 }

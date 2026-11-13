@@ -547,7 +547,8 @@ struct App {
     /// beside the first pet at this time.
     stage_at: Option<f64>,
     /// `CHONKGENE_STAGE=dance`: 跳舞 asked of the first pet instead;
-    /// `pond`: the duckling's pond scene started.
+    /// `pond`: the duckling's pond scene started; `hug`: the first pet
+    /// hugged by you (your hands, dumped with `CHONKGENE_DUMP`).
     stage_test: String,
     sounds: Sounds,
     tray: Option<Tray>,
@@ -2505,8 +2506,7 @@ impl Pet {
             } else {
                 props::HugHold::Carry
             };
-            self.fun.hug_arms =
-                props::opaque_bounds(self.renderer.pixmap()).map(|bounds| (now, bounds, hold));
+            self.fun.hug_by_you = Some((now, hold));
         }
         diag!(
             "{}: hugged ({})",
@@ -3087,6 +3087,13 @@ impl Pet {
         let mut params = self.anim.params();
         params.travelling = self.travelling();
         params.glow = self.glow_at(t);
+        // Your hands in a hug: found on its last picture, pressing in on
+        // this one, drawn over it (`compose`).
+        let hug = self
+            .fun
+            .hug_by_you
+            .map(|(since, hold)| (hold, (t - since) as f32, chonkgene_core::anim::HUG_SECS));
+        self.fun.hands = self.renderer.hug_hands(hug, self.fun.scale);
         if self.mind.asleep() {
             self.renderer
                 .render_asleep(&params, (t - self.asleep_since) as f32);
@@ -3742,6 +3749,9 @@ impl ApplicationHandler<UserEvent> for App {
             if self.stage_test == "dance" {
                 self.start_scene(el, pet, Scene::Dance, world, now);
                 diag!("CHONKGENE_STAGE=dance: asked to dance");
+            } else if self.stage_test == "hug" {
+                self.act(el, pet, Action::Hug);
+                diag!("CHONKGENE_STAGE=hug: hugged the first pet");
             } else if self.stage_test == "pond" {
                 let duck = self.pets.iter().find(|p| p.species == Species::Duck);
                 if let Some(duck) = duck.map(|p| p.save.id) {

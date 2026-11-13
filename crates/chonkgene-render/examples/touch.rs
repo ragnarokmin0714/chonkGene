@@ -274,6 +274,19 @@ fn main() {
             for _ in 0..4 {
                 a.step(0.25 / FPS / slow);
             }
+            // Your hands in a hug, found on its picture (the last one, as
+            // the app does) and pressing in before it is drawn.
+            use chonkgene_render::props::{HugHold, draw_hug_hands, hug_hands, hug_lift};
+            let hold = if scene.name == "hug-carry" {
+                HugHold::Carry
+            } else {
+                HugHold::Wrap
+            };
+            let by_you = scene.hug == Some(Hug::ByYou) && t >= 0.3;
+            let hands = r.body_at().filter(|_| by_you).and_then(|b| {
+                hug_hands(|y, side| r.body_edge(y, side), b, hold, 1.0, t - 0.3, 3.2)
+            });
+            r.hug_press(hands.map(|h| ([h.hands[0].press, h.hands[1].press], h.firm)));
             let params = a.params();
             if expression == Expression::Asleep {
                 r.render_asleep(&params, t);
@@ -284,16 +297,13 @@ fn main() {
                 r.finish();
             }
             let path = format!("{out}/{}-{f:03}.png", scene.name);
-            if scene.hug == Some(Hug::ByYou) && t >= 0.3 {
-                // Your arms round it, as the app draws them; held up in
-                // front, it is lifted too (the app moves its window).
-                use chonkgene_render::props::{HugHold, hug_arms, hug_lift, opaque_bounds};
-                let hold = if scene.name == "hug-carry" {
-                    HugHold::Carry
-                } else {
-                    HugHold::Wrap
-                };
-                let src = r.pixmap().clone();
+            if by_you {
+                // The hands over it; held up in front, it is lifted too (the
+                // app moves its window).
+                let mut src = r.pixmap().clone();
+                if let Some(h) = &hands {
+                    draw_hug_hands(&mut src, h, 1.0, t - 0.3);
+                }
                 let lift = hug_lift(hold, 1.0, t - 0.3, 3.2).round() as i32;
                 let mut pm = tiny_skia::Pixmap::new(src.width(), src.height()).unwrap();
                 pm.draw_pixmap(
@@ -304,9 +314,6 @@ fn main() {
                     tiny_skia::Transform::identity(),
                     None,
                 );
-                if let Some(b) = opaque_bounds(&pm) {
-                    hug_arms(&mut pm, b, hold, 1.0, t - 0.3, 3.2);
-                }
                 pm.save_png(&path).expect("write frame");
                 continue;
             }
