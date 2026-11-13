@@ -1461,6 +1461,37 @@ fn four_legged_pets_sleep_with_their_heads_down() {
     }
 }
 
+/// Asleep on its back, the belly swells round with each breath (Roger's
+/// twenty-first pass: pushed out along its bone it came to a point): its
+/// soft spot's bone grows and shrinks with the breath, by a good part of
+/// its size; curled up or lying chin down it does not grow at all.
+#[test]
+fn a_belly_up_sleeper_swells_round_with_each_breath() {
+    use chonkgene_render::skin::SleepPose;
+    for id in ["shiba", "munchkin"] {
+        let (model, sk) = mesh_model(id).unwrap();
+        let belly = sk.bone("belly").unwrap();
+        for pose in [SleepPose::BellyUp, SleepPose::Curl] {
+            let mut walk = Mover::new(&sk, 1.0, &model).unwrap();
+            walk.sleep_pose(pose);
+            walk.lie(true);
+            settle(&mut walk, 6.0);
+            let (mut least, mut most) = (f32::MAX, f32::MIN);
+            for k in 0..240 {
+                walk.breathe((k as f32 / 240.0 * std::f32::consts::TAU).sin());
+                let swell = walk.step(1.0 / 60.0, false, 1.0)[belly].swell;
+                least = least.min(swell);
+                most = most.max(swell);
+            }
+            if pose == SleepPose::BellyUp {
+                assert!(most > 0.3 && least < 0.05, "{id}: swells {least:.2} … {most:.2}");
+            } else {
+                assert!(most.abs() < 1e-6, "{id} {pose:?}: swells {most:.2}");
+            }
+        }
+    }
+}
+
 /// Laughing, a four-legged pet rolls onto its back, paws in the air; the
 /// fox, whose tails would prop it up, laughs sitting.
 #[test]

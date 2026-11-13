@@ -571,6 +571,7 @@ impl Waddle {
                     0.0,
                 ),
                 shift: v3(0.0, self.lift * s * up, 0.0),
+                swell: 0.0,
             };
         }
 
@@ -582,10 +583,12 @@ impl Waddle {
         j[0] = Joint {
             rot: v3(0.0, yaw, 0.0),
             shift: v3(0.0, -(SIT_DROP + TUCK_DROP * self.tuck * lie) * sit, 0.0),
+            swell: 0.0,
         };
         j[self.body] = Joint {
             rot: v3(3.0 * s, 0.0, roll),
             shift: v3(SLIDE * s * side, bob, 0.0),
+            swell: 0.0,
         };
         // The head stays steadier than the body, nodding a beat late, and
         // turns toward you, more so at rest. A bird with no neck to speak
@@ -605,6 +608,7 @@ impl Waddle {
                 -0.7 * roll + facing * TUCK_LEAN * tuck,
             ),
             shift: v3(0.0, -0.05 * lie - 0.1 * tuck, -0.04 * tuck),
+            swell: 0.0,
         };
 
         // Wings: out a little, more with each step, puffed up sitting.

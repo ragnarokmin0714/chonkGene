@@ -19,6 +19,9 @@ use crate::fidget::{Fidgets, Hold, Kind, Out, ear_flick};
 pub struct Joint {
     pub rot: V3,
     pub shift: V3,
+    /// Grown this much bigger about its pivot, all ways (0: as it is): a
+    /// belly swelling round with a breath.
+    pub swell: f32,
 }
 
 /// An affine map: `m · p + t`.
@@ -179,6 +182,12 @@ impl Skeleton {
             let j = joints.get(b).copied().unwrap_or_default();
             let pivot = self.pivots[b];
             let m = M3::euler(j.rot);
+            let m = if j.swell == 0.0 {
+                m
+            } else {
+                let k = 1.0 + j.swell;
+                m.mul(M3::diag(v3(k, k, k)))
+            };
             let local = Affine {
                 m,
                 t: pivot + j.shift - m.apply(pivot),
@@ -717,11 +726,13 @@ pub(crate) const CURL_YAW: f32 = 50.0;
 /// it is held) and bends this far in all round toward the front.
 const CURL_TAIL_DOWN: f32 = 70.0;
 const CURL_TAIL_WRAP: f32 = 110.0;
-/// Asleep on its back, the belly swells and sinks this much more with each
-/// breath (world units along the belly bone).
-/// Roger's seventeenth pass: still too small to see (was 0.11; with the
-/// rest, 1.6 times the old swell; at 0.28 its top came to a point).
-const BELLY_UP_BREATH: f32 = 0.24;
+/// Asleep on its back, the belly swells round with each breath: grown this
+/// much bigger at the top of a breath, about a middle this far inside the
+/// body beyond the belly's soft spot (world units), so it rises as a dome.
+/// Roger's seventeenth pass wanted it plain to see; his twenty-first:
+/// pushed out along the bone (0.24) its top came to a point, 「不夠圓滾滾」.
+const BELLY_UP_SWELL: f32 = 0.4;
+const BELLY_SWELL_DEPTH: f32 = 0.3;
 /// How much more a belly wobbles than it used to, when the body moves or
 /// is poked, and how far it may go (Roger's seventeenth pass: more to see
 /// on every pet but the fox, whose fur hides it anyway).
@@ -1319,6 +1330,7 @@ impl Walk {
             j[leg] = Joint {
                 rot: v3(-(self.swing * longer).min(MAX_SWING) * s * fwd, 0.0, 0.0),
                 shift: v3(0.0, LIFT * s * lift * (1.0 + 0.6 * run), 0.0),
+                swell: 0.0,
             };
         }
         // The run's bounce and the back's flex keep time with the front
@@ -1333,14 +1345,17 @@ impl Walk {
         j[0] = Joint {
             rot: v3(9.0 * run * (TAU * gph).sin(), yaw, 0.0),
             shift: v3(0.0, bob, 0.0),
+            swell: 0.0,
         };
         j[b.body] = Joint {
             rot: v3(0.0, -0.4 * TWIST * s * (TAU * ph).cos(), roll),
             shift: V3::ZERO,
+            swell: 0.0,
         };
         j[b.hips] = Joint {
             rot: v3(0.0, TWIST * s * (TAU * ph).cos(), -2.0 * roll),
             shift: V3::ZERO,
+            swell: 0.0,
         };
         // The head stays steadier than the body (a little nod, a beat
         // late) and turns toward you, more so at rest.
@@ -1353,6 +1368,7 @@ impl Walk {
                 -0.6 * roll,
             ),
             shift: V3::ZERO,
+            swell: 0.0,
         };
 
         // Shakes for the soft parts: the chest's vertical acceleration, the
@@ -1445,6 +1461,7 @@ impl Walk {
                         sw * tail.swish_axes.0,
                     ),
                     shift: V3::ZERO,
+                    swell: 0.0,
                 };
                 if k == 0 {
                     // Sulking, back to you, the tails stay together: a fan
@@ -1473,13 +1490,18 @@ impl Walk {
             // asleep on its back it is round and plain to see (Roger: like
             // breathing; his fifteenth pass: in every sleeping pose).
             let back = lie * chonkgene_rig::math::smoothstep(90.0, 150.0, self.roll.x);
-            let amp = 0.05 + LYING_BREATH * lie + BELLY_UP_BREATH * back;
+            let amp = 0.05 + LYING_BREATH * lie;
             let y = self
                 .belly
                 .step(-amp * self.breath, -acc * self.jiggle, 3.6, 0.16, dt);
             let jiggle_most = if self.jiggle > 1.0 { JIGGLE_MOST } else { 0.12 };
-            let most = jiggle_most + LYING_BREATH * lie + BELLY_UP_BREATH * back;
-            j[i].shift = v3(0.0, y.clamp(-most, most), 0.0);
+            let most = jiggle_most + LYING_BREATH * lie;
+            // On its back: swelling round about a middle deep in the body
+            // (growing about the soft spot's own middle, just under the
+            // skin, would push it out to the sides more than up).
+            let swell = BELLY_UP_SWELL * back * 0.5 * (1.0 + self.breath);
+            j[i].shift = v3(0.0, y.clamp(-most, most) - BELLY_SWELL_DEPTH * swell, 0.0);
+            j[i].swell = swell;
         }
         if let Some(i) = b.butt {
             // Plopping down into a sit squashes the bottom, and it bounces;
