@@ -289,6 +289,7 @@ fn main() {
                 let body = BodyShape {
                     belly,
                     chest,
+                    armpits: r.armpits(),
                     edge: &|y, side| r.body_edge(y, side),
                     bottom: &|x| r.body_bottom(x),
                 };
@@ -328,11 +329,15 @@ fn main() {
                 if let Some(h) = &hands {
                     draw_hug_hands(&mut src, h, HandLayer::Front, 1.0, t - 0.3);
                 }
+                // Room above it for the lift (the app moves its window up
+                // instead), so its head is not cut off.
+                const ROOM: i32 = 30;
                 let lift = hug_lift(hold, 1.0, t - 0.3, secs).round() as i32;
-                let mut pm = tiny_skia::Pixmap::new(src.width(), src.height()).unwrap();
+                let mut pm =
+                    tiny_skia::Pixmap::new(src.width(), src.height() + ROOM as u32).unwrap();
                 pm.draw_pixmap(
                     0,
-                    -lift,
+                    ROOM - lift,
                     src.as_ref(),
                     &tiny_skia::PixmapPaint::default(),
                     tiny_skia::Transform::identity(),

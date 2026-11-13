@@ -888,7 +888,7 @@ pub struct Walk {
     cradle: f32,
     /// A dog: a good scratch sets a hind leg kicking.
     kicks: bool,
-    /// A cat: scratched, its front paws knead.
+    /// A cat: scratched, its front paws knead (and lifted, it hangs long).
     kneads: bool,
     /// Floor to the middle of the body, world units: what it rolls about.
     body_h: f32,
@@ -1225,6 +1225,11 @@ impl Walk {
             .step(if cradled { 1.0 } else { 0.0 }, 0.0, 1.4, 1.0, dt)
             .clamp(0.0, 1.0);
         let up = self.feel.mood == Mood::Laugh || lv.rub > 0.3 || cradled;
+        // Lifted up high under its front legs it does not sit: it hangs.
+        let lifted = self
+            .gesture
+            .is_some_and(|g| g.act == chonkgene_core::anim::Act::Hug)
+            && self.hug == Hug::ByYou(HugHold::Carry);
         let rolled_over = !many_tails && up;
         let sits_up = many_tails && up;
         let hugging = self.gesture.is_some_and(|g| {
@@ -1278,6 +1283,7 @@ impl Walk {
             && !self.lying
             && !lying_about
             && !walking
+            && !lifted
         {
             1.0
         } else {
@@ -1944,14 +1950,36 @@ impl Walk {
                             j[0].rot.z += e * 6.0 * sway;
                             j[b.head].rot.z += e * 10.0 * (TAU * 1.1 * g.t).sin();
                             j[b.head].rot.x -= e * 6.0;
+                            if lifted {
+                                // 舉高高: held up under its front legs, its
+                                // body upright, the front legs pushed up by
+                                // your hands, the hind legs and the tail
+                                // hanging down and swinging; a cat hangs
+                                // long (its hips sag away from its chest).
+                                let long = if self.kneads { 1.0 } else { 0.0 };
+                                let pitch = 48.0 + 14.0 * long;
+                                j[b.body].rot.x -= e * pitch;
+                                // Up off the bottom of its picture so the
+                                // hanging legs stay in it (the fox, tall
+                                // with her tails, more).
+                                let fox = if self.tails.len() > 1 { 0.3 } else { 0.0 };
+                                j[0].shift.y += e * (0.34 + 0.06 * long + fox) * self.leg_len;
+                                j[b.head].rot.x += e * (pitch - 10.0);
+                                j[b.hips].shift.y -= e * 0.1 * long;
+                                j[b.hips].rot.x += e * 8.0 * long;
+                            }
                             let mut k = 0.0;
                             for &(leg, _, front) in &self.legs {
                                 if front {
-                                    let up = if lifted { 30.0 } else { 14.0 };
+                                    let up = if lifted { 20.0 } else { 14.0 };
                                     j[leg].rot.x -= e * (up + 5.0 * squeeze);
+                                    if lifted {
+                                        j[leg].shift.y += e * 0.06;
+                                    }
                                 } else if lifted {
+                                    // Straight down from the upright body.
                                     let dangle = (TAU * 0.9 * g.t + PI * k).sin();
-                                    j[leg].rot.x += e * (8.0 + 7.0 * dangle);
+                                    j[leg].rot.x += e * (50.0 + 8.0 * dangle);
                                     k += 1.0;
                                 }
                             }

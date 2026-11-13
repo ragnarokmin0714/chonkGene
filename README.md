@@ -20,7 +20,7 @@ A gang of chubby desktop pets that lounge on your desktop all day being cute.
 
 <table>
 <tr><td><img src="docs/media/pond.gif" alt="Pets wading in the pond, golden sand round it"></td></tr>
-<tr><td><img src="docs/media/hugs.gif" alt="Hugs: two pets cheek to cheek, the fox's bear hug, a child's hands round a pet, a chick held up"></td></tr>
+<tr><td><img src="docs/media/hugs.gif" alt="Hugs: two pets cheek to cheek, the fox's bear hug, a cat lifted up under its front legs and hanging long, the Shiba rocked on its back in your hands"></td></tr>
 <tr><td><img src="docs/media/touch.gif" alt="Touch: a cat's chin, the Shiba's tail base, a paw it does not want touched, the Munchkin's belly trap"></td></tr>
 </table>
 

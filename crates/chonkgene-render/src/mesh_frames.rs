@@ -953,6 +953,21 @@ impl MeshRenderer {
         ))
     }
 
+    /// Its armpits in the picture shown, pixels: between the tops of its
+    /// front legs, a little down, where your hands lift it up (舉高高).
+    /// None for a bird (no front legs) or until the bake has landed.
+    pub fn armpits(&self) -> Option<(f32, f32)> {
+        self.live.as_ref()?;
+        let m = &self.model;
+        let (l, r) = (m.part("leg_fl")?, m.part("leg_fr")?);
+        let down = v3(0.0, -0.08, 0.0);
+        let (a, b) = (
+            self.project_on(Some(l), down),
+            self.project_on(Some(r), down),
+        );
+        Some(((a.0 + b.0) / 2.0, (a.1 + b.1) / 2.0))
+    }
+
     /// The edge of its body (and legs: sitting, its haunches are its
     /// sides; not its head, tails or wings) on row `y` of the picture
     /// shown, toward `side` (−1 left, +1 right), pixels: where your hands

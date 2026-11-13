@@ -333,6 +333,7 @@ impl Renderer {
             let body = props::BodyShape {
                 belly,
                 chest,
+                armpits: r.armpits(),
                 edge: &|y, side| r.body_edge(y, side),
                 bottom: &|x| r.body_bottom(x),
             };

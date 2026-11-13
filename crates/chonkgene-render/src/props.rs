@@ -1849,13 +1849,17 @@ pub struct HugHand {
 }
 
 /// Where its body is in its picture, for your hands: the middle of its
-/// belly and of its chest (pixels, see `MeshRenderer::body_at`), the edge
+/// belly and of its chest (pixels, see `MeshRenderer::body_at`), its
+/// armpits, the edge
 /// of its body on a row toward a side (`edge(y, side)`, see
 /// `MeshRenderer::body_edge`) and the bottom of its body in a column
 /// (`bottom(x)`, see `MeshRenderer::body_bottom`).
 pub struct BodyShape<'a> {
     pub belly: (f32, f32),
     pub chest: (f32, f32),
+    /// Between the tops of its front legs (see `MeshRenderer::armpits`);
+    /// none for a bird.
+    pub armpits: Option<(f32, f32)>,
     pub edge: &'a dyn Fn(f32, f32) -> Option<f32>,
     pub bottom: &'a dyn Fn(f32) -> Option<f32>,
 }
@@ -1895,8 +1899,8 @@ const HAND_OFF: f32 = 34.0;
 ///
 /// | | 環抱 `Wrap` (hands in front) | 前抱 `Carry` (lifted) | 搖搖抱 `Cradle` |
 /// |---|---|---|---|
-/// | dogs | crossed under the chest | thumbs on the chest | cupped under head and bottom |
-/// | cats | crossed on the belly | thumb on the chest, cupped under the bottom | as dogs |
+/// | dogs | crossed under the chest | under the front legs, thumbs in front | cupped under head and bottom |
+/// | cats | crossed on the belly | as dogs (it hangs long) | as dogs |
 /// | fox | as dogs | as dogs | cupped under her, sitting |
 /// | birds | over the folded wings | cupped from below | as lifted |
 #[allow(clippy::too_many_arguments)]
@@ -1992,15 +1996,12 @@ pub fn hug_hands(
         // Over the folded wings, the fingers across the breast, not
         // crossing.
         (HugHold::Wrap, Build::Bird) => [back(chest, 0.45, 0)?, back(chest, 0.45, 1)?],
-        (HugHold::Carry, Build::Dog | Build::Fox) => {
-            [thumb(chest, -1.0, 0)?, thumb(chest, 1.0, 1)?]
-        }
-        // A cat: one hand under the chest (the thumb in front), the other
-        // under its bottom, as vets lift a cat.
-        (HugHold::Carry, Build::Cat { .. }) => {
-            let (mid, half) = width(belly)?;
-            let under = cup(mid - facing * 0.55 * half, -facing, 0)?;
-            [under, thumb(chest, facing, 1)?]
+        // Lifted up high under its front legs, the thumbs in front on its
+        // chest, the fingers round its ribs (Roger: 舉高高 is under the
+        // armpits, cats too; they hang long).
+        (HugHold::Carry, Build::Dog | Build::Fox | Build::Cat { .. }) => {
+            let row = body.armpits.map_or(chest, |a| a.1);
+            [thumb(row, -1.0, 0)?, thumb(row, 1.0, 1)?]
         }
         (HugHold::Carry | HugHold::Cradle, Build::Bird) => cups_under(belly, 0.42)?,
         // On its back: one hand under its head and shoulders, the other
@@ -2544,6 +2545,7 @@ mod tests {
         let body = BodyShape {
             belly: (cx, cy + 10.0),
             chest: (cx, cy - 10.0),
+            armpits: Some((cx, cy - 20.0)),
             edge: &edge,
             bottom: &bottom,
         };
@@ -2558,22 +2560,22 @@ mod tests {
         // A bird's: over its wings, not crossed.
         let h = hold(Build::Bird, HugHold::Wrap);
         assert!(h.hands[0].at.0 < cx && h.hands[1].at.0 > cx, "{h:?}");
-        // Lifted, a dog: thumbs, one each side, on its outline.
-        let h = hold(Build::Fox, HugHold::Carry);
-        assert_eq!(grips(&h), [Grip::Thumb, Grip::Thumb]);
-        for hand in h.hands {
-            let e = edge(hand.at.1, hand.side).unwrap();
-            assert!((hand.at.0 - e).abs() < 6.0, "off its side: {hand:?}");
-            assert!(
-                (hand.press.0 - cx).abs() < (e - cx).abs(),
-                "presses outside it"
-            );
+        // Lifted, a dog or a cat: under its armpits, thumbs, one each side,
+        // on its outline.
+        for build in [Build::Fox, Build::Cat { short: false }] {
+            let h = hold(build, HugHold::Carry);
+            assert_eq!(grips(&h), [Grip::Thumb, Grip::Thumb]);
+            for hand in h.hands {
+                let at_armpits = (hand.at.1 - (cy - 20.0)).abs() < 4.0;
+                assert!(at_armpits, "not at its armpits: {hand:?}");
+                let e = edge(hand.at.1, hand.side).unwrap();
+                assert!((hand.at.0 - e).abs() < 6.0, "off its side: {hand:?}");
+                assert!(
+                    (hand.press.0 - cx).abs() < (e - cx).abs(),
+                    "presses outside it"
+                );
+            }
         }
-        // A cat: a thumb at the front (facing right), cupped under its
-        // bottom (behind, to the left).
-        let h = hold(Build::Cat { short: false }, HugHold::Carry);
-        assert_eq!(grips(&h), [Grip::Cup, Grip::Thumb]);
-        assert!(h.hands[0].at.0 < cx && h.hands[1].at.0 > cx, "{h:?}");
         // Cradled: cupped under both ends, below its body, the fingers up.
         for build in [
             Build::Dog,
