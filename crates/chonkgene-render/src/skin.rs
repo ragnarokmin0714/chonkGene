@@ -730,8 +730,9 @@ const CURL_TAIL_WRAP: f32 = 110.0;
 /// much bigger at the top of a breath, about a middle this far inside the
 /// body beyond the belly's soft spot (world units), so it rises as a dome.
 /// Roger's seventeenth pass wanted it plain to see; his twenty-first:
-/// pushed out along the bone (0.24) its top came to a point, 「不夠圓滾滾」.
-const BELLY_UP_SWELL: f32 = 0.4;
+/// pushed out along the bone (0.24) its top came to a point, 「不夠圓滾滾」;
+/// at 0.4 the Shiba's rose too far, 「起伏有點太大」.
+const BELLY_UP_SWELL: f32 = 0.25;
 const BELLY_SWELL_DEPTH: f32 = 0.3;
 /// How much more a belly wobbles than it used to, when the body moves or
 /// is poked, and how far it may go (Roger's seventeenth pass: more to see
