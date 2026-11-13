@@ -1352,7 +1352,7 @@ Roger, 2026-11-13: 「只要做出儘可能做出符合寵物特性的活動，�
 
 Roger, 2026-11-13: 「這是 chonkGene 接下來要新增的寵物」, with a concept picture he made with Gemini (`inbox/Gemini_Generated_Image_1w2xeh1w2xeh1w2x.jpeg`, 「超萌動物大集合」; a reference for look only, nothing from it ships). It shows nine animals; the Munchkin is already in the cast, so eight are new. Roger then added three not in the picture (same day: 「再加個 無尾熊 和 熊貓 台灣黑熊」): the koala, the giant panda and the Formosan black bear, eleven in all. When they come relative to the open items above is Roger's call (his order of 2026-11-13 is to clear what is planned first).
 
-Defaults in the form of §1.1 (personality rolls near them on adoption). Names follow the cast's food names; Roger may rename any.
+Defaults in the form of §1.1 (personality rolls near them on adoption). Names follow the cast's food names.
 
 | Species | Default name | Ticklish | Patience | Energy | Daily rhythm | Signature moves |
 |---|---|---|---|---|---|---|
@@ -1382,10 +1382,10 @@ How each is built, by what is nearest (`assets/species/<id>/model.ron` plus `qua
 
 Each gets its own lines in `assets/lines/zh-TW.ron` (§1.11), sounds, `fondness` by zone (Roger's table), `habits`, `plays_like`, `Grumpiness` (guinea pig: freezes; rabbit: thumps; red panda: the threat pose; capybara: does not wake grumpy; otter: rolls over and away; tit and penguin: `PuffUp`; sand cat: `Swat`; koala: does not wake, only grumbles; panda: rolls over, back to sleep; black bear: the huffing snort), and a place on the adoption screen.
 
-Open for Roger before building:
+Decisions (all settled; build after the queued pass items above):
 1. ~~How many on the desktop by default~~ **Settled (Roger, 2026-11-13: 「我覺得桌面7隻就夠了」)**: the default count stays 7 (§1.1), no longer "every species once" now that there are 18. The new ones rest in the pet house until swapped in; the adoption screen lets one pick any. Which seven come out by default on first run is the original cast unless the adoption screen picks others.
-2. **Which first**: proposal sand cat → red panda → penguin chick → long-tailed tit (all near a build that exists), then guinea pig and capybara (the new low build together), then panda and Formosan black bear (the bear build together), koala (on the bear build, plus the cling), then rabbit (the hop) and sea otter (floating).
-3. The names.
+2. **Build order, settled (Roger, 2026-11-13: 「都先加進 plan」)**: sand cat → red panda → penguin chick → long-tailed tit (all near a build that exists), then guinea pig and capybara (the new low build together), then panda and Formosan black bear (the bear build together), koala (on the bear build, plus the cling), then rabbit (the hop) and sea otter (floating).
+3. **Names, settled the same way**: the default names in the tables above (布丁, 麻糬, 楓糖, 柚子, 貝果, 大福, 芝麻, 沙琪瑪, 芋泥, 竹筍, 黑糖); Roger can rename any later, and users rename their own in settings as now.
 
 ### Phase 1: Shiba prototype (feel) — `v0.1.0`
 
