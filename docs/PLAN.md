@@ -33,7 +33,7 @@
 
 ### 1.1 Pets
 
-v1 has seven species (the 九尾狐 joined on 2026-10-28). A species only sets **default personality**; each individual rolls its own personality near those defaults when adopted, editable later in settings.
+v1 has seven species (the 九尾狐 joined on 2026-10-28). Eight more are planned (Roger, 2026-11-13): see §8, "New species". A species only sets **default personality**; each individual rolls its own personality near those defaults when adopted, editable later in settings.
 
 | Species | Default name | Ticklish | Patience | Energy | Daily rhythm | Signature moves |
 |---|---|---|---|---|---|---|
@@ -1347,6 +1347,40 @@ Roger, 2026-11-13: 「只要做出儘可能做出符合寵物特性的活動，�
 - **Chick**: following whoever is nearest in a line (imprinting), the chick hurrying after; dust bathing in the beach's sand, wriggling and fluffing; falling asleep standing and nodding off forward; peeping louder when left alone.
 - **Duckling**: dabbling (tipping bottom-up in the pond, tail in the air); ducklings in a row behind the duck if there are several (or behind the chick, mixed up); preening water off; waddling at speed to the pond the moment it appears.
 - **Together**: grooming each other (cats, the fox and a cat), a dog play-bowing to a cat that ignores it, the owl watching from up high and hooting at whoever squabbles, everyone piling up asleep in one heap when it is late.
+
+### New species: eight more pets (Roger, 2026-11-13; planned, none built)
+
+Roger, 2026-11-13: 「這是 chonkGene 接下來要新增的寵物」, with a concept picture he made with Gemini (`inbox/Gemini_Generated_Image_1w2xeh1w2xeh1w2x.jpeg`, 「超萌動物大集合」; a reference for look only, nothing from it ships). It shows nine animals; the Munchkin is already in the cast, so eight are new. When they come relative to the open items above is Roger's call (his order of 2026-11-13 is to clear what is planned first).
+
+Defaults in the form of §1.1 (personality rolls near them on adoption). Names follow the cast's food names; Roger may rename any.
+
+| Species | Default name | Ticklish | Patience | Energy | Daily rhythm | Signature moves |
+|---|---|---|---|---|---|---|
+| Guinea pig (天竺鼠) | 布丁 (tricolour, like caramel pudding) | medium | low (startles easily) | medium | daytime, many short naps | **popcorning** (hops straight up, twisting, when happy); **wheeking** 「噗依噗依！」 when it hears you or wants food; freezes stock-still when startled; never stops chewing; scurries along a window's bottom edge |
+| Netherland dwarf rabbit (侏儒兔) | 麻糬 | low (dislikes being held) | low | high at dawn and dusk | **crepuscular**: lively early and late, dozes midday | **binky** (leaps, twisting in the air); **the flop** (tips over on its side when content); thumps a hind foot when annoyed; nose always twitching; washes its face with its front paws; moves by **hopping**, not walking |
+| Red panda (小貓熊) | 楓糖 | medium | medium | low | **crepuscular**, sleeps much of the day | **the threat pose** (stands up on its hind legs, arms up: fierce and absurdly cute) when poked too often; sleeps draped over a window's top edge, legs hanging; curls its ringed tail round its face to sleep; licks its paws |
+| Capybara (水豚) | 柚子 (the yuzu on its head) | low | **very high** (the calmest of all) | low | daytime | **a yuzu on its head** in the pond (onsen), eyes half shut; **others sit on it**: the birds and small ones climb onto its back and it does not mind; never squabbles in irrational mode, sits through it unmoved; long contented 「嗯——」 |
+| Sea otter (海獺) | 貝果 | high | medium | high | daytime | **floats on its back** in the pond; cracks a shell on its belly with a stone; keeps a favourite stone tucked under its arm; **holds paws** with another floating pet so neither drifts off asleep; rubs its face with both paws; on land, a humped, bounding lope |
+| Long-tailed tit, Hokkaido (銀喉長尾山雀) | 大福 | medium | low | high | **early riser** like the chick | tiny round white puff on a long tail; hops; hangs upside down from a window's edge; **huddles in a row** with others (several, or any small pets) on a ledge, pushing to the middle; 「啾哩哩」 |
+| Emperor penguin chick (帝王企鵝幼崽, grey-fluff stage) | 芝麻 | medium | high | medium | daytime | waddles, flippers out for balance; **tobogganing** (slides on its belly, §8 eighteenth pass, as its everyday way to go fast); falls over and cannot get up quickly; **huddles** with the others when it is cold or late; tufts of grey fluff come loose |
+| Sand cat (沙漠貓) | 沙琪瑪 | low | low | high at night | **nocturnal** (as the owl) | digs in the beach's sand and naps in the hole; ears flatten wide and low; a **bark-like call** (sand cats really do), startling from something so small; looks fierce, is tiny; walks with soft, padded big feet |
+
+How each is built, by what is nearest (`assets/species/<id>/model.ron` plus `quad.ron` or `biped.ron`, `Species`, `Build` in `props.rs` for the hands of the hugs):
+
+- **Sand cat**: a cat (`Build::Cat { short: false }`), new coat (sandy, faint stripes on the legs), wide low ears, big paws. The cheapest; a good first.
+- **Red panda**: four-legged, the dog's or cat's skeleton with a long thick ringed tail (a tail chain like the Shiba's, longer); its threat pose is a new pose on the hind legs (`Posture`), the way the owl's head turn was its own.
+- **Guinea pig, capybara**: a new low build, a loaf with short legs nearly hidden and no tail (`Build::Rodent`, hands: cupped from below, as birds, for the guinea pig; the capybara is held round the middle). The capybara is the same shape at a bigger size and with a blunt square muzzle.
+- **Rabbit**: four-legged with long hind legs; a **hop** gait (both hind legs together, front paws touching down between) in place of the walk; long ears as bones that swing.
+- **Sea otter**: four-legged on land; a floating-on-its-back pose for the pond (the cradle's roll-over, §8 twenty-first pass item 2, held in the water), paws on its chest. Its home is the pond: it goes there more than anyone.
+- **Long-tailed tit**: a bird (`Build::Bird`), the chick's biped with a long two-feather tail; smaller than any pet so far.
+- **Penguin chick**: a bird, upright, flippers in place of wings (they flap but do not fly: it hangs under balloons like the Shiba when it flies); the belly slide is already there.
+
+Each gets its own lines in `assets/lines/zh-TW.ron` (§1.11), sounds, `fondness` by zone (Roger's table), `habits`, `plays_like`, `Grumpiness` (guinea pig: freezes; rabbit: thumps; red panda: the threat pose; capybara: does not wake grumpy; otter: rolls over and away; tit and penguin: `PuffUp`; sand cat: `Swat`), and a place on the adoption screen.
+
+Open for Roger before building:
+1. **How many on the desktop by default**: §1.1 says every species once (now 7). With 15 that is heavy (the GPU budget is shared, §8 twentieth pass item 1). Proposal: keep 7 as the default count and let the new ones rest in the pet house until swapped in; the adoption screen lets one pick any.
+2. **Which first**: proposal sand cat → red panda → penguin chick → long-tailed tit (all near a build that exists), then guinea pig and capybara (the new low build together), then rabbit (the hop) and sea otter (floating).
+3. The names.
 
 ### Phase 1: Shiba prototype (feel) — `v0.1.0`
 
