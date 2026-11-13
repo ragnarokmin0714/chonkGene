@@ -8,7 +8,7 @@
 
 use crate::diag::diag;
 use chonkgene_core::activity::{Activity, Watcher};
-use chonkgene_core::anim::{Act, Expression, Posture};
+use chonkgene_core::anim::{Act, Expression, Hug, Posture};
 use chonkgene_core::mind::Line;
 use chonkgene_core::motion::{Heading, Motion};
 use chonkgene_core::play::{
@@ -595,15 +595,21 @@ impl Fun {
     }
 
     pub fn pond_lift(&self) -> f32 {
+        self.wet.0 * self.pond_depth() * Thing::Pond.size().1 * self.scale
+    }
+
+    /// How far into a pond it stands, as a share of the pond's height up
+    /// from its near edge; 0 out of one. Where it is going, not where the
+    /// water has eased it to yet, so the order of the windows (see
+    /// [`stack_order`]) does not flicker as it wades in.
+    pub fn pond_depth(&self) -> f32 {
         if self.pond.now.is_none() {
-            return 0.0;
-        }
-        let deep = if self.pond_deep > 0.0 {
+            0.0
+        } else if self.pond_deep > 0.0 {
             self.pond_deep
         } else {
             POND_DEEP
-        };
-        self.wet.0 * deep * Thing::Pond.size().1 * self.scale
+        }
     }
 }
 
@@ -765,6 +771,9 @@ pub(super) struct Playground {
     /// pets', so the pets (and their bubbles) go back above it (Roger: the
     /// pond was still drawn over the duckling on Windows).
     restack: bool,
+    /// The pets' windows in the order last stacked, bottom first (see
+    /// [`stack_order`]): stacked again when that order changes.
+    stacked: Vec<u64>,
     /// Where every pet stands this go round: (id, feet x, feet y, the half
     /// width of its body, settled: asleep or busy, so it will not move), so
     /// a pond or a sunbeam comes out where nobody is.
@@ -1536,11 +1545,53 @@ pub(super) fn tick(
     // In the same go round as a new thing's first picture, so it never
     // shows over the pets for a tick (a new pond covered the sleeping owl
     // for 0.1 s in Roger's clip).
-    if std::mem::take(&mut ground.restack) {
-        for p in pets.iter() {
-            p.raise(ctx.shared);
+    let order: Vec<usize> = stack_order(&pets.iter().map(stack_key).collect::<Vec<_>>());
+    let ids: Vec<u64> = order.iter().map(|&i| pets[i].save.id).collect();
+    if std::mem::take(&mut ground.restack) || ids != ground.stacked {
+        // Further back first, so the nearer cover them (Roger's
+        // twenty-first pass: in a pond the one behind lay over the one in
+        // front); the bubbles over every pet, a butterfly over it all.
+        for &i in &order {
+            pets[i].raise_window(ctx.shared);
         }
+        for &i in &order {
+            pets[i].raise_bubble(ctx.shared);
+        }
+        for w in ground
+            .things
+            .iter()
+            .filter(|w| w.prop.thing == Thing::Butterfly && w.shown)
+        {
+            if let Err(e) = w.presenter.raise(ctx.shared) {
+                eprintln!("raise failed: {e}");
+            }
+        }
+        ground.stacked = ids;
     }
+}
+
+/// Where a pet's window goes in the stack: on top whatever its depth (held
+/// in your hand or hugged by you, or the one in front in a hug), and how
+/// far back it stands (in a pond, see [`Fun::pond_depth`]).
+fn stack_key(p: &Pet) -> (bool, f32) {
+    let front_in_hug = p.anim.doing() == Some(Act::Hug)
+        && matches!(p.anim.hug, Hug::Cuddle { front: true } | Hug::Squeezed);
+    let top = p.body.motion == Motion::Held || p.fun.hug_by_you.is_some() || front_in_hug;
+    (top, p.fun.pond_depth())
+}
+
+/// The order to raise windows in, bottom first, from each one's key (on
+/// top, how far back): the furthest back first, the nearest last, those on
+/// top after all the rest; otherwise as listed, so nothing moves for no
+/// reason.
+fn stack_order(keys: &[(bool, f32)]) -> Vec<usize> {
+    let mut order: Vec<usize> = (0..keys.len()).collect();
+    order.sort_by(|&a, &b| {
+        let (ta, da) = keys[a];
+        let (tb, db) = keys[b];
+        ta.cmp(&tb).then(db.total_cmp(&da))
+    });
+    order
 }
 
 trait Held {
@@ -3051,6 +3102,20 @@ fn react_to(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// In a pond the one further back is raised first, so the nearer one
+    /// covers it (Roger's twenty-first pass), whatever the pets' list
+    /// order; those out of the water stand nearest; a held pet stays on
+    /// top; equals keep the list's order.
+    #[test]
+    fn windows_stack_from_the_back_of_the_pond_forward() {
+        let keys = [(false, 0.24), (false, 0.40), (false, 0.0), (false, 0.30)];
+        assert_eq!(stack_order(&keys), [1, 3, 0, 2]);
+        let keys = [(true, 0.0), (false, 0.24), (false, 0.36)];
+        assert_eq!(stack_order(&keys), [2, 1, 0]);
+        let keys = [(false, 0.0), (false, 0.0), (false, 0.0)];
+        assert_eq!(stack_order(&keys), [0, 1, 2]);
+    }
 
     /// Cats and the owl are the most curious about the cursor, the lively
     /// more than the calm, and none never or always.

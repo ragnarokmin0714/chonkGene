@@ -2099,7 +2099,8 @@ fn direct(pets: &mut [Pet], ctx: &mut Ctx, cmds: Vec<Cmd>) {
             }
             Cmd::Hug { role, .. } => {
                 // Face to face (turned by the Face before it), sitting
-                // into the hug; the one in front over the other.
+                // into the hug; the one in front over the other (its window
+                // goes on top with the next restack, see `play::stack_key`).
                 if p.body.motion == Motion::Walk {
                     p.body.motion = Motion::Idle;
                 }
@@ -2110,9 +2111,6 @@ fn direct(pets: &mut [Pet], ctx: &mut Ctx, cmds: Vec<Cmd>) {
                 p.anim.expression = Expression::Happy;
                 p.happy_until = ctx.world.now + f64::from(HUG_SECS) + HAPPY_SECS;
                 p.fun.effect(Fx::Hearts, ctx.world.now);
-                if matches!(role, Hug::Cuddle { front: true } | Hug::Squeezed) {
-                    p.raise(ctx.shared);
-                }
                 diag!("{}: hugs as {role:?}", p.save.name);
             }
             Cmd::Bless { .. } => {
@@ -3137,12 +3135,15 @@ impl Pet {
             })
     }
 
-    /// Bring its window above every other (things on the floor came out
-    /// over it), its bubble above that.
-    fn raise(&self, shared: &Shared) {
+    /// Bring its window above every other (see `play::stack_order`).
+    fn raise_window(&self, shared: &Shared) {
         if let Err(e) = self.presenter.raise(shared) {
             eprintln!("raise failed: {e}");
         }
+    }
+
+    /// Bring its bubble, if it has one, above every other window.
+    fn raise_bubble(&self, shared: &Shared) {
         if let Some(b) = &self.bubble
             && let Err(e) = b.presenter.raise(shared)
         {
