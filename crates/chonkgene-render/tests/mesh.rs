@@ -2062,8 +2062,9 @@ fn every_action_asks_for_frames_enough_to_move_smoothly() {
     assert!(slow.is_empty(), "jerky:\n{}", slow.join("\n"));
 }
 
-/// Hugged, your hands press in on its sides: its body is narrower between
-/// them (dented and squeezed); let go, it springs back as it was.
+/// Hugged, your hands press in on it (the backs of two hands on its
+/// belly): its body is squeezed narrower; let go, it springs back as it
+/// was.
 #[test]
 fn hug_hands_press_in_on_its_sides_and_let_go() {
     use chonkgene_core::anim::{Animator, Expression};
@@ -2106,12 +2107,19 @@ fn hug_hands_press_in_on_its_sides_and_let_go() {
     let left = r.body_edge(belly.1, -1.0).expect("its left side");
     let right = r.body_edge(belly.1, 1.0).expect("its right side");
     for _ in 0..30 {
-        r.hug_press(Some(([(left + 3.0, belly.1), (right - 3.0, belly.1)], 1.0)));
+        let back = chonkgene_render::props::Grip::Back;
+        let (l, rt) = (
+            left + 0.3 * (belly.0 - left),
+            right - 0.3 * (right - belly.0),
+        );
+        r.hug_press(Some(([((l, belly.1), back), ((rt, belly.1), back)], 1.0)));
         run(&mut r, &mut a, 1.0 / 30.0);
     }
     assert!(r.hands_in() > 0.05, "pressed in {}", r.hands_in());
     let held = width(&r, belly);
-    assert!(held + 4 <= before, "hugged {held} px wide, {before} before");
+    // Pressed into the screen, the dents show in its shading; the squeeze
+    // narrows its outline.
+    assert!(held + 2 <= before, "hugged {held} px wide, {before} before");
     r.hug_press(None);
     run(&mut r, &mut a, 2.0);
     assert_eq!(r.hands_in(), 0.0, "let go, the dents settle");

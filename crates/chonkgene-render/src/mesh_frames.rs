@@ -30,6 +30,7 @@ use crate::fidget::{Kind, Tongue};
 use crate::gpu::{Ask, Gpu};
 use crate::mesh::{Mesh, bake};
 use crate::mesh_gpu::{MeshCanvas, Press};
+use crate::props::Grip;
 use crate::raymarch::PPU;
 use crate::skin::{Affine, Feel, Gesture, Mood, Skeleton, SleepPose, Spring, Travel, bite};
 use crate::waddle::Mover;
@@ -50,6 +51,12 @@ const HAND_R: f32 = 0.36;
 /// Squeezed between your hands it gets this much narrower (half of it)
 /// and taller, at the firmest squeeze.
 const HAND_SQUEEZE: f32 = 0.09;
+/// Your two hands in a hug: where each presses (pixels) with what grip,
+/// and how firmly, 0 … 1 (see [`MeshRenderer::hug_press`]).
+pub type HandPresses = ([((f32, f32), Grip); 2], f32);
+/// The zones your hands hold it by: its body and legs (last, so a hand
+/// cupped under it can leave them out), never its head, tails or wings.
+const BODY_ZONES: [&str; 4] = ["belly", "back", "bottom", "paw"];
 /// A frame held back by the GPU budget this long goes anyway (PLAN §8,
 /// Roger's eleventh pass, item 5: pets stood frozen for seconds while
 /// others took the budget).
@@ -184,7 +191,7 @@ pub struct MeshRenderer {
     /// picture shown) and how firmly (0 … 1); the vertex under each and the
     /// pixel it was found for; how deep they have pressed in; and the dents
     /// sent with the next frame.
-    hands: Option<([(f32, f32); 2], f32)>,
+    hands: Option<HandPresses>,
     hand_verts: [Option<(usize, (f32, f32))>; 2],
     hand_dent: Spring,
     hand_press: [Option<Press>; 2],
@@ -922,10 +929,10 @@ impl MeshRenderer {
     }
 
     /// Your hands holding it in a hug, from the picture shown: where each
-    /// presses in (pixels, just inside its outline) and how firmly (0 …
-    /// 1); none when nobody is hugging it. Its flesh dents under them and
-    /// it is squeezed a little narrower and taller between them.
-    pub fn hug_press(&mut self, hands: Option<([(f32, f32); 2], f32)>) {
+    /// presses in (pixels, on it) with what grip (which way it pushes) and
+    /// how firmly (0 … 1); none when nobody is hugging it. Its flesh dents
+    /// under them and it is squeezed a little narrower and taller.
+    pub fn hug_press(&mut self, hands: Option<HandPresses>) {
         self.hands = hands;
     }
 
@@ -954,16 +961,50 @@ impl MeshRenderer {
         self.edge_vertex(y, side).map(|(x, _)| x)
     }
 
+    /// The species' id ("shiba", "fox", …).
+    pub fn species(&self) -> &str {
+        &self.model.species
+    }
+
+    /// The bottom of its body (not its legs: a bird is cupped under its
+    /// belly, not its feet; a sitting fox under her haunches) in column `x`
+    /// of the picture shown, pixels: where a hand cupped under it goes.
+    pub fn body_bottom(&self, x: f32) -> Option<f32> {
+        self.bottom_vertex(x).map(|(y, _)| y)
+    }
+
+    /// The vertex at [`MeshRenderer::body_bottom`], and where it is.
+    fn bottom_vertex(&self, x: f32) -> Option<(f32, usize)> {
+        let live = self.live.as_ref()?;
+        let near = 3.0 * self.scale;
+        let mut low: Option<(f32, usize)> = None;
+        for i in 0..live.mesh.vertices.len() {
+            if !ZONES
+                .get(usize::from(live.mesh.zones[i]))
+                .is_some_and(|z| BODY_ZONES[..3].contains(z))
+            {
+                continue;
+            }
+            let (px, y) = live.canvas.project(self.skinned(&live.mesh, i));
+            if (px - x).abs() > near {
+                continue;
+            }
+            if low.is_none_or(|(e, _)| y > e) {
+                low = Some((y, i));
+            }
+        }
+        low
+    }
+
     /// The vertex at [`MeshRenderer::body_edge`], and where it is.
     fn edge_vertex(&self, y: f32, side: f32) -> Option<(f32, usize)> {
         let live = self.live.as_ref()?;
-        let body = |z: &str| matches!(z, "belly" | "back" | "bottom" | "paw");
         let near = 3.0 * self.scale;
         let mut edge: Option<(f32, usize)> = None;
         for i in 0..live.mesh.vertices.len() {
             if !ZONES
                 .get(usize::from(live.mesh.zones[i]))
-                .is_some_and(|z| body(z))
+                .is_some_and(|z| BODY_ZONES.contains(z))
             {
                 continue;
             }
@@ -1159,22 +1200,27 @@ impl MeshRenderer {
             }
             return;
         };
-        let mid = self.pixmap.width() as f32 / 2.0;
         let fwd = self.canvas_forward();
-        for (k, at) in spots.into_iter().enumerate() {
-            // The dent's middle on its outline, at the side (the vertex
-            // nearest the camera there would be on its front, and dent
-            // the outline only a little); found again when the hand has
-            // moved a few pixels (the search goes through the whole mesh).
-            let side = if at.0 > mid { 1.0 } else { -1.0 };
+        for (k, (at, grip)) in spots.into_iter().enumerate() {
+            // The thumb or the back of a hand presses into the screen at
+            // the vertex nearest you there; a cupped hand pushes up at the
+            // bottom of its body. Found again when the hand has moved a
+            // few pixels (the search goes through the whole mesh).
             let stale = self.hand_verts[k]
                 .is_none_or(|(_, was)| (was.0 - at.0).hypot(was.1 - at.1) > 2.0 * self.scale);
-            if stale && let Some((_, i)) = self.edge_vertex(at.1, side) {
-                self.hand_verts[k] = Some((i, at));
+            let dir = match grip {
+                Grip::Cup => v3(0.0, 1.0, 0.0),
+                Grip::Thumb | Grip::Back => fwd,
+            };
+            if stale {
+                let found = match grip {
+                    Grip::Cup => self.bottom_vertex(at.0).map(|(_, i)| i),
+                    Grip::Thumb | Grip::Back => self.nearest(at.0, at.1),
+                };
+                if let Some(i) = found {
+                    self.hand_verts[k] = Some((i, at));
+                }
             }
-            // In from its side, a little into the screen too (the palm
-            // wraps round it).
-            let dir = (v3(-side, 0.0, 0.0) * 0.85 + fwd * 0.45).normalize();
             self.hand_press[k] = self.hand_verts[k].and_then(|(i, _)| {
                 Some(Press {
                     at: self.posed(i)?,

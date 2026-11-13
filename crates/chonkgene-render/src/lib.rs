@@ -315,23 +315,34 @@ impl Renderer {
     }
 
     /// Hugged by you, held `hold`, `t` seconds into a hug `secs` long
-    /// (`s` the pet's scale): where your hands hold it this frame, found
-    /// on the picture shown, and pressing in on the next one drawn (see
-    /// [`props::hug_hands`]); none: not hugged (they let go). Only the mesh
-    /// pets are held by hands.
+    /// (`s` the pet's scale, `facing` +1 right): where your hands hold it
+    /// this frame, found on the picture shown, and pressing in on the next
+    /// one drawn (see [`props::hug_hands`]); none: not hugged (they let
+    /// go). Only the mesh pets are held by hands.
     pub fn hug_hands(
         &mut self,
         hug: Option<(props::HugHold, f32, f32)>,
+        facing: f32,
         s: f32,
     ) -> Option<props::HugHands> {
         let Self::Mesh(r) = self else {
             return None;
         };
         let hands = hug.and_then(|(hold, t, secs)| {
-            let body = r.body_at()?;
-            props::hug_hands(|y, side| r.body_edge(y, side), body, hold, s, t, secs)
+            let (belly, chest) = r.body_at()?;
+            let body = props::BodyShape {
+                belly,
+                chest,
+                edge: &|y, side| r.body_edge(y, side),
+                bottom: &|x| r.body_bottom(x),
+            };
+            let build = props::Build::of(r.species());
+            props::hug_hands(&body, build, hold, facing, s, t, secs)
         });
-        r.hug_press(hands.map(|h| ([h.hands[0].press, h.hands[1].press], h.firm)));
+        r.hug_press(hands.map(|h| {
+            let [a, b] = h.hands;
+            ([(a.press, a.grip), (b.press, b.grip)], h.firm)
+        }));
         hands
     }
 
@@ -390,7 +401,11 @@ pub fn key_for(expression: Expression, params: &PoseParams) -> Key {
         Act::Bliss => (PoseId::BellyUp, Look::Happy),
         Act::Swish => (PoseId::LookLeft, Look::Happy),
     };
+    let cradled = params.act == Act::Hug
+        && params.hug == chonkgene_core::anim::Hug::ByYou(props::HugHold::Cradle);
     let (pose, look) = match expression {
+        // Rocked on its back in your hands, its eyes closing by degrees.
+        _ if cradled => (PoseId::BellyUp, eyes),
         Expression::Neutral => gesture(eyes),
         // Smiling ^ ^ at rest; open-eyed in a gesture, blinking too.
         Expression::Happy => match params.act {

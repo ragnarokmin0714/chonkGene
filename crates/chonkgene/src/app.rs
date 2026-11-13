@@ -8,7 +8,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use chonkgene_core::Zone;
-use chonkgene_core::anim::{Act, Animator, Expression, HOLD_SECS, HUG_SECS, Hug};
+use chonkgene_core::anim::{Act, Animator, Expression, HOLD_SECS, HUG_SECS, Hug, HugHold, HugMood};
 use chonkgene_core::mind::{Line, Mind, Out, World, XP_PER_LEVEL};
 use chonkgene_core::motion::{Area, Body, Heading, Motion};
 use chonkgene_core::play::{Command as Ask, Scene, Thing};
@@ -327,6 +327,8 @@ enum Page {
     HugWho,
     /// 大家的大小: every pet's size at once.
     Sizes,
+    /// How to hold it (抱抱…): 環抱, 舉高高, 搖搖抱.
+    HugHow,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -359,8 +361,12 @@ enum Action {
     Dance,
     /// 放聚光燈: a spotlight put down beside it (or taken away).
     Stage,
-    /// 抱抱: you hug it (a double-click does too).
+    /// 抱抱: you hug it, held as it suits it now (a double-click; asleep,
+    /// it only stirs).
     Hug,
+    /// The page of how to hold it, and one of them.
+    HugHow,
+    HugAs(HugHold),
     /// The page of whom it could go and hug, and one of them.
     HugWho,
     HugWith(u64),
@@ -1319,6 +1325,23 @@ impl App {
             actions.push(Action::Back);
             return self.show_menu(el, i, items, actions, at);
         }
+        if page == Page::HugHow {
+            // Roger's twenty-first pass: three ways to hold it, picked
+            // here (a double-click picks by how it is).
+            let holds = [
+                ("環抱", HugHold::Wrap),
+                ("舉高高", HugHold::Carry),
+                ("搖搖抱", HugHold::Cradle),
+            ];
+            let mut items: Vec<Item> = holds
+                .iter()
+                .map(|&(label, _)| item(label, None, Icon::Hug, false))
+                .collect();
+            let mut actions: Vec<Action> = holds.iter().map(|&(_, h)| Action::HugAs(h)).collect();
+            items.push(item("返回", None, Icon::Back, true));
+            actions.push(Action::Back);
+            return self.show_menu(el, i, items, actions, at);
+        }
         if page == Page::HugWho {
             let mut items = Vec::new();
             let mut actions = Vec::new();
@@ -1348,7 +1371,12 @@ impl App {
             return self.show_menu(el, i, items, actions, at);
         }
         let mut items = vec![
-            item("抱抱", None, Icon::Hug, false),
+            item(
+                if asleep { "抱抱" } else { "抱抱…" },
+                None,
+                Icon::Hug,
+                false,
+            ),
             item("摸摸頭", None, Icon::Heart, false),
             item(
                 "餵零食",
@@ -1364,7 +1392,7 @@ impl App {
             item("幫牠換造型…", None, Icon::Palette, false),
         ];
         let mut actions = vec![
-            Action::Hug,
+            if asleep { Action::Hug } else { Action::HugHow },
             Action::Pat,
             Action::Feed,
             Action::Edit,
@@ -1537,12 +1565,18 @@ impl App {
         let now = Instant::now();
         let world = self.world(now);
         match action {
-            Action::Commands | Action::Spells | Action::Back | Action::HugWho | Action::Sizes => {
+            Action::Commands
+            | Action::Spells
+            | Action::Back
+            | Action::HugWho
+            | Action::Sizes
+            | Action::HugHow => {
                 let page = match action {
                     Action::Commands => Page::Commands,
                     Action::Spells => Page::Spells,
                     Action::HugWho => Page::HugWho,
                     Action::Sizes => Page::Sizes,
+                    Action::HugHow => Page::HugHow,
                     _ => Page::Main,
                 };
                 if let Some(i) = self.pets.iter().position(|p| p.save.id == pet) {
@@ -1762,8 +1796,12 @@ impl App {
                 out
             }
             Action::Wake => p.mind.wake(&world),
-            Action::Hug => {
-                p.hug_you(&mut ctx);
+            Action::Hug | Action::HugAs(_) => {
+                let hold = match action {
+                    Action::HugAs(h) => Some(h),
+                    _ => None,
+                };
+                p.hug_you(&mut ctx, hold);
                 p.next = now;
                 *dirty = true;
                 return;
@@ -2485,33 +2523,83 @@ impl Pet {
     }
 
     /// 抱抱 (the menu, or a double-click): it says how it takes it, and if
-    /// it is awake and free your arms go round it and it snuggles in.
-    fn hug_you(&mut self, ctx: &mut Ctx) {
+    /// it is awake and free your hands hold it, `hold` (none: as suits how
+    /// it is now, see [`HugHold::pick`]), and it snuggles in.
+    fn hug_you(&mut self, ctx: &mut Ctx, hold: Option<HugHold>) {
         let now = ctx.world.now;
-        let out = self.mind.hug(&ctx.world);
+        let mut out = self.mind.hug(&ctx.world);
         let free = out.line == Some(Line::Hugged)
             && !self.in_skit
             && self.press.as_ref().is_none_or(|p| !p.moved)
             && matches!(self.body.motion, Motion::Idle | Motion::Walk)
             && !self.fun.busy(now);
+        let hold = hold.unwrap_or_else(|| {
+            let hour = ctx.world.hour;
+            let mood = HugMood {
+                sleepy: chonkgene_core::species::in_hours(hour, self.species.sleep_hours())
+                    || !(6.0..23.0).contains(&hour),
+                tired: self.anim.params().puffed,
+                pleased: now < self.happy_until,
+                energy: self.mind.personality.energy,
+            };
+            HugHold::pick(self.species, mood, self.rng.f32())
+        });
         if free {
             self.body.motion = Motion::Idle;
-            self.anim.hug(Hug::ByYou);
-            // Wrapped round, or held up in front: either, as a baby hugs a
-            // plush toy (Roger's eighteenth pass).
-            let hold = if self.rng.bool() {
-                props::HugHold::Wrap
-            } else {
-                props::HugHold::Carry
-            };
+            self.anim.hug(Hug::ByYou(hold));
             self.fun.hug_by_you = Some((now, hold));
+            // Not off for a walk while in your hands (a 搖搖抱 is long: it
+            // got up and ran off half way).
+            self.switch_at = self.switch_at.max(now + f64::from(hold.secs()) + 0.5);
+            if hold == HugHold::Cradle {
+                // Rocked, not cheered: no happy hop on its back; the fox
+                // says she does not want this, and melts later.
+                out.line = Some(Line::Cradled);
+                out.expression = Some(Expression::Neutral);
+                self.fun.cradle_melt = Some(now + 0.4 * f64::from(hold.secs()));
+            }
         }
         diag!(
             "{}: hugged ({})",
             self.save.name,
-            if free { "in arms" } else { "not now" }
+            if free {
+                match hold {
+                    HugHold::Wrap => "wrapped round",
+                    HugHold::Carry => "lifted up",
+                    HugHold::Cradle => "cradled",
+                }
+            } else {
+                "not now"
+            }
         );
         self.apply(ctx, out);
+    }
+
+    /// Held in your hands: let go if the hug was cut short (picked up,
+    /// startled); rocked in a 搖搖抱, drowsy murmurs (the fox melting) part
+    /// way, and asleep at the end (the sleep of PLAN §1.12).
+    fn cradle_step(&mut self, ctx: &mut Ctx) {
+        let now = ctx.world.now;
+        if let Some((since, _)) = self.fun.hug_by_you
+            && now - since > 0.2
+            && self.anim.doing() != Some(Act::Hug)
+        {
+            self.fun.hug_by_you = None;
+        }
+        let Some((since, HugHold::Cradle)) = self.fun.hug_by_you else {
+            self.fun.cradle_melt = None;
+            return;
+        };
+        if self.fun.cradle_melt.is_some_and(|at| now >= at) {
+            self.fun.cradle_melt = None;
+            self.say(ctx, Line::CradleMelt);
+        }
+        if now - since >= f64::from(HugHold::Cradle.secs()) - 0.15 && !self.mind.asleep() {
+            self.fun.hug_by_you = None;
+            let out = self.mind.put_to_sleep(&ctx.world, &mut self.rng);
+            diag!("{}: rocked to sleep", self.save.name);
+            self.apply(ctx, out);
+        }
     }
 
     /// A finger held on it, every frame: by the spot (PLAN §8, Roger's
@@ -2795,6 +2883,7 @@ impl Pet {
         let t = ctx.world.now;
         self.fidget_sound(ctx);
         self.touch_step(ctx);
+        self.cradle_step(ctx);
         if let Some((due, zone)) = self.poke_due
             && now >= due
         {
@@ -3090,8 +3179,10 @@ impl Pet {
         let hug = self
             .fun
             .hug_by_you
-            .map(|(since, hold)| (hold, (t - since) as f32, chonkgene_core::anim::HUG_SECS));
-        self.fun.hands = self.renderer.hug_hands(hug, self.fun.scale);
+            .map(|(since, hold)| (hold, (t - since) as f32, hold.secs()));
+        self.fun.hands = self
+            .renderer
+            .hug_hands(hug, self.anim.facing, self.fun.scale);
         if self.mind.asleep() {
             self.renderer
                 .render_asleep(&params, (t - self.asleep_since) as f32);
@@ -3375,7 +3466,7 @@ impl ApplicationHandler<UserEvent> for App {
                                 world,
                             };
                             let p = &mut pets[i];
-                            p.hug_you(&mut ctx);
+                            p.hug_you(&mut ctx, None);
                             p.next = now;
                             self.dirty = true;
                             return;
@@ -3753,6 +3844,14 @@ impl ApplicationHandler<UserEvent> for App {
             } else if self.stage_test == "hug" {
                 self.act(el, pet, Action::Hug);
                 diag!("CHONKGENE_STAGE=hug: hugged the first pet");
+            } else if let Some(hold) = match self.stage_test.as_str() {
+                "wrap" => Some(HugHold::Wrap),
+                "carry" => Some(HugHold::Carry),
+                "cradle" => Some(HugHold::Cradle),
+                _ => None,
+            } {
+                self.act(el, pet, Action::HugAs(hold));
+                diag!("CHONKGENE_STAGE={}: held the first pet so", self.stage_test);
             } else if self.stage_test == "pond" {
                 let duck = self.pets.iter().find(|p| p.species == Species::Duck);
                 if let Some(duck) = duck.map(|p| p.save.id) {

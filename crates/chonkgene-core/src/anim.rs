@@ -110,7 +110,7 @@ pub enum Act {
 }
 
 /// Its part in a hug (see [`Act::Hug`]).
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Hug {
     /// Face to face with another, cheek to cheek, swaying together; the
     /// one in front (`front`) has a paw or wing over the other's shoulder.
@@ -121,13 +121,116 @@ pub enum Hug {
     /// Held in the fox's bear hug: squeezed, a small one lifted off its
     /// feet, legs dangling.
     Squeezed,
-    /// Hugged by you: squeezed in your arms, nuzzling.
+    /// Hugged by you, held one of three ways (your hands only, Roger's
+    /// twentieth and twenty-first passes).
+    ByYou(HugHold),
+}
+
+impl Default for Hug {
+    fn default() -> Self {
+        Self::ByYou(HugHold::Wrap)
+    }
+}
+
+impl Hug {
+    /// How long the hug lasts, seconds: rocked like a baby, long enough to
+    /// grow sleepy.
+    pub fn secs(self) -> f32 {
+        match self {
+            Self::ByYou(HugHold::Cradle) => CRADLE_SECS,
+            _ => HUG_SECS,
+        }
+    }
+}
+
+/// How you hold a pet you hug (PLAN §8, Roger's twenty-first pass).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum HugHold {
+    /// 環抱: from behind, as on your lap facing out, your hands in front
+    /// of it (crossed on a dog's chest or a cat's belly, over a bird's
+    /// folded wings).
     #[default]
-    ByYou,
+    Wrap,
+    /// 舉高高 (前抱): lifted up in front of you, thumbs on its chest and
+    /// fingers round behind it (a cat with one hand under its bottom, a
+    /// bird cupped from below).
+    Carry,
+    /// 搖搖抱: cradled on its back like a baby, one hand under its head
+    /// and shoulders, the other under its bottom, rocked until its eyes
+    /// close (the fox sits sideways for her tails; a bird is cupped).
+    Cradle,
+}
+
+impl HugHold {
+    pub const ALL: [HugHold; 3] = [Self::Wrap, Self::Carry, Self::Cradle];
+
+    /// How long you hold it so, seconds.
+    pub fn secs(self) -> f32 {
+        Hug::ByYou(self).secs()
+    }
+}
+
+/// How it is when you double-click it to hug, for which hold (see
+/// [`HugHold::pick`]).
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct HugMood {
+    /// Its sleeping hours, or late at night.
+    pub sleepy: bool,
+    /// Worn out from running about or playing.
+    pub tired: bool,
+    /// Just pleased (a pat, a snack, a game).
+    pub pleased: bool,
+    /// How lively it is by nature, 0 … 1.
+    pub energy: f32,
+}
+
+impl HugHold {
+    /// The hold a double-click picks, from how it is (Roger's twenty-first
+    /// pass: so a double-click differs from time to time, for a reason one
+    /// can see): sleepy or tired, rocked like a baby; pleased or full of
+    /// beans, lifted up high; otherwise wrapped round. Weighted by the
+    /// species: most cats do not like being lifted. `roll` is 0 … 1.
+    pub fn pick(species: crate::species::Species, mood: HugMood, roll: f32) -> HugHold {
+        use crate::species::Species;
+        let mut wrap = 1.0;
+        let mut carry = 0.35;
+        let mut cradle = 0.15;
+        if mood.sleepy || mood.tired {
+            cradle += 3.0;
+        }
+        if mood.pleased {
+            carry += 1.5;
+        }
+        if mood.energy > 0.65 {
+            carry += 0.8;
+        }
+        if matches!(species, Species::Munchkin | Species::Fold) {
+            carry *= 0.2;
+            wrap += 0.3;
+        }
+        let roll = roll.clamp(0.0, 0.9999) * (wrap + carry + cradle);
+        if roll < wrap {
+            HugHold::Wrap
+        } else if roll < wrap + carry {
+            HugHold::Carry
+        } else {
+            HugHold::Cradle
+        }
+    }
 }
 
 /// How long a hug lasts, seconds.
 pub const HUG_SECS: f32 = 3.2;
+/// How long you rock it in a 搖搖抱, seconds.
+pub const CRADLE_SECS: f32 = 9.0;
+
+/// How open its eyes are `t` seconds into a 搖搖抱 `secs` long: open at
+/// first, then closing by degrees as it is rocked, shut well before the
+/// end.
+pub fn cradle_eyes(t: f32, secs: f32) -> f32 {
+    let u = ((t - 1.5) / (0.7 * secs - 1.5)).clamp(0.0, 1.0);
+    1.0 - 0.94 * u * u * (3.0 - 2.0 * u)
+}
 
 /// How long the 肉肉舞 lasts, seconds, and its beat (120 a minute).
 pub const DANCE_SECS: f32 = 7.0;
@@ -424,7 +527,7 @@ impl Default for PoseParams {
             licks: 0,
             travelling: false,
             glow: 0.0,
-            hug: Hug::ByYou,
+            hug: Hug::default(),
         }
     }
 }
@@ -542,7 +645,7 @@ impl Animator {
             hops_left: 0,
             pressed: false,
             fond: None,
-            hug: Hug::ByYou,
+            hug: Hug::default(),
             trap_until: 0.0,
             held: None,
             last_touch: None,
@@ -752,6 +855,7 @@ impl Animator {
     fn start(&mut self, act: Act) {
         let secs = match act {
             Act::LookLeft | Act::LookRight => 1.4 + self.rng.f32() * 0.8,
+            Act::Hug => self.hug.secs(),
             _ => match gesture_secs(act) {
                 Some(secs) => secs,
                 None => return,
@@ -1081,6 +1185,14 @@ impl Animator {
             Some(n) => (f32::from(n) / f32::from(BEATS) * tau).sin() * 14.0,
             None => self.tail(),
         };
+        // Rocked in a 搖搖抱, its eyes close by degrees, whatever its face.
+        let cradled = match self.gesture {
+            Some((Act::Hug, since, until)) if self.hug == Hug::ByYou(HugHold::Cradle) => {
+                Some(cradle_eyes(self.t - since, until - since))
+            }
+            _ => None,
+        };
+        let blinking = blinking && cradled.is_none();
         PoseParams {
             breath: if beat.is_some() {
                 0.0
@@ -1091,7 +1203,7 @@ impl Animator {
             },
             squash: (self.body.pos + footfall).clamp(-0.4, 0.4),
             belly: self.belly.pos.clamp(-0.4, 0.4),
-            eyes_open: match self.expression {
+            eyes_open: cradled.unwrap_or(match self.expression {
                 Expression::Giggle | Expression::Happy => 0.18,
                 Expression::Sulk => 0.12,
                 Expression::Asleep => 0.06,
@@ -1099,7 +1211,7 @@ impl Animator {
                 Expression::FedUp => 0.5,
                 Expression::Neutral if blinking => lids,
                 Expression::Neutral => 1.0,
-            },
+            }),
             tail,
             bob: bob + self.hop,
             sway: self.sway + roll,
@@ -1503,10 +1615,60 @@ mod tests {
         });
         run(&mut a, 0.5, |_| {});
         assert_ne!(a.doing(), Some(Act::Hug));
-        a.hug(Hug::ByYou);
+        a.hug(Hug::default());
         a.walking = true;
         run(&mut a, 0.1, |_| {});
         assert_ne!(a.doing(), Some(Act::Hug));
+    }
+
+    /// Rocked in a 搖搖抱 it is held longer than a hug, its eyes open at
+    /// first and closing by degrees until shut, never blinking open again.
+    #[test]
+    fn a_cradle_rocks_its_eyes_shut() {
+        let mut a = Animator::new(9, 0.33, 0.35);
+        a.expression = Expression::Happy;
+        a.hug(Hug::ByYou(HugHold::Cradle));
+        let mut last = 1.0;
+        run(&mut a, CRADLE_SECS - 0.2, |a| {
+            assert_eq!(a.doing(), Some(Act::Hug), "cut short");
+            let eyes = a.params().eyes_open;
+            assert!(eyes <= last + 1e-4, "opened again: {eyes} after {last}");
+            last = eyes;
+        });
+        assert!(last < 0.1, "still open: {last}");
+        const { assert!(CRADLE_SECS > HUG_SECS) };
+        assert_eq!(HugHold::Wrap.secs(), HUG_SECS);
+    }
+
+    /// A double-click's hold goes by how it is: sleepy, mostly cradled;
+    /// pleased and lively, mostly lifted, a cat less often than a dog;
+    /// nothing special, mostly wrapped round.
+    #[test]
+    fn a_double_click_holds_it_by_how_it_is() {
+        use crate::species::Species;
+        let share = |species, mood, hold| {
+            (0..1000)
+                .filter(|&k| HugHold::pick(species, mood, k as f32 / 1000.0) == hold)
+                .count() as f32
+                / 1000.0
+        };
+        let sleepy = HugMood {
+            sleepy: true,
+            ..HugMood::default()
+        };
+        assert!(share(Species::Shiba, sleepy, HugHold::Cradle) > 0.6);
+        let lively = HugMood {
+            pleased: true,
+            energy: 0.8,
+            ..HugMood::default()
+        };
+        let dog = share(Species::Shiba, lively, HugHold::Carry);
+        let cat = share(Species::Fold, lively, HugHold::Carry);
+        assert!(dog > 0.5, "{dog}");
+        assert!(cat < dog / 2.0, "{cat} vs {dog}");
+        let calm = HugMood::default();
+        assert!(share(Species::Owl, calm, HugHold::Wrap) > 0.6);
+        assert!(share(Species::Owl, calm, HugHold::Cradle) > 0.0);
     }
 
     #[test]

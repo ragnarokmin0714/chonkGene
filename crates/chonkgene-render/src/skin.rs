@@ -6,7 +6,7 @@
 //! belly, bottom and chin wobble on springs of their own.
 
 use chonkgene_core::Zone;
-use chonkgene_core::anim::Hug;
+use chonkgene_core::anim::{Hug, HugHold};
 use chonkgene_core::species::Fondness;
 use chonkgene_rig::math::{M3, V3, v3};
 use chonkgene_rig::{FLOOR, Model, builtin};
@@ -883,6 +883,9 @@ pub struct Walk {
     sleep_w: [Spring; 4],
     /// Rolled over about its length, degrees (on its back 180).
     roll: Spring,
+    /// Cradled on its back in your hands (搖搖抱), 0 … 1, eased.
+    cradle_w: Spring,
+    cradle: f32,
     /// A dog: a good scratch sets a hind leg kicking.
     kicks: bool,
     /// A cat: scratched, its front paws knead.
@@ -986,7 +989,7 @@ impl Walk {
             sit: Spring::default(),
             legs,
             gesture: None,
-            hug: Hug::ByYou,
+            hug: Hug::default(),
             travel: Travel::None,
             travel_w: Default::default(),
             tempo: 1.0,
@@ -1016,6 +1019,8 @@ impl Walk {
                 Spring::default(),
             ],
             roll: Spring::default(),
+            cradle_w: Spring::default(),
+            cradle: 0.0,
             kicks: false,
             kneads: false,
             body_h: sk.bone("body").map_or(0.8, |b| sk.pivots[b].y - FLOOR),
@@ -1208,12 +1213,23 @@ impl Walk {
         let touched = self.feel.gaze.is_some() && !self.feel.behind();
         // Several tails (the fox) would prop it up off its back like legs:
         // it laughs and takes a rub sitting up instead.
+        // Cradled like a baby (搖搖抱) it lies on its back too, limp, and the
+        // fox sits up sideways in your hands.
         let many_tails = self.tails.len() > 1;
-        let rolled_over = !many_tails && (self.feel.mood == Mood::Laugh || lv.rub > 0.3);
-        let sits_up = many_tails && (self.feel.mood == Mood::Laugh || lv.rub > 0.3);
-        let hugging = self
+        let cradled = self
             .gesture
-            .is_some_and(|g| g.act == chonkgene_core::anim::Act::Hug && self.hug != Hug::ByYou);
+            .is_some_and(|g| g.act == chonkgene_core::anim::Act::Hug)
+            && self.hug == Hug::ByYou(HugHold::Cradle);
+        self.cradle = self
+            .cradle_w
+            .step(if cradled { 1.0 } else { 0.0 }, 0.0, 1.4, 1.0, dt)
+            .clamp(0.0, 1.0);
+        let up = self.feel.mood == Mood::Laugh || lv.rub > 0.3 || cradled;
+        let rolled_over = !many_tails && up;
+        let sits_up = many_tails && up;
+        let hugging = self.gesture.is_some_and(|g| {
+            g.act == chonkgene_core::anim::Act::Hug && !matches!(self.hug, Hug::ByYou(_))
+        });
         let yaw = self.yaw.step(
             facing
                 * if going || self.travel != Travel::None {
@@ -1895,13 +1911,48 @@ impl Walk {
                         // front paws up hugging you back; the fox wraps
                         // her tails round to the front, round you (傲嬌:
                         // she says no, her tails say yes).
-                        Hug::ByYou => {
+                        // Cradled on its back (搖搖抱): the roll and the
+                        // rocking are the reaction's (`react`); limp, no
+                        // nuzzling. The fox sits sideways in your hands
+                        // instead, rocked, her tails draped over them.
+                        Hug::ByYou(HugHold::Cradle) => {
+                            if self.tails.len() > 1 {
+                                let rock = (TAU * 0.45 * g.t).sin();
+                                j[0].rot.z += e * 8.0 * rock;
+                                j[b.head].rot.z += e * 12.0;
+                                let n = self.tails.len() as f32;
+                                for (k, tail) in self.tails.iter().enumerate() {
+                                    let side = (k as f32 + 0.5) / n * 2.0 - 1.0;
+                                    if let Some(&root) = tail.bones.first() {
+                                        j[root].rot.y += e * side * 30.0;
+                                        j[root].rot.x += e * -60.0;
+                                    }
+                                    for &seg in tail.bones.iter().skip(1) {
+                                        j[seg].rot.x += e * -20.0;
+                                    }
+                                }
+                            }
+                        }
+                        // In your hands: rocked side to side, nuzzling.
+                        // Wrapped round from behind it faces out, front
+                        // paws resting on your hands; lifted up in front,
+                        // held under them, its hind legs dangle. The fox
+                        // wraps her tails round to the front, round you
+                        // (傲嬌: she says no, her tails say yes).
+                        Hug::ByYou(hold) => {
+                            let lifted = hold == HugHold::Carry;
                             j[0].rot.z += e * 6.0 * sway;
                             j[b.head].rot.z += e * 10.0 * (TAU * 1.1 * g.t).sin();
                             j[b.head].rot.x -= e * 6.0;
+                            let mut k = 0.0;
                             for &(leg, _, front) in &self.legs {
                                 if front {
-                                    j[leg].rot.x -= e * (35.0 + 8.0 * squeeze);
+                                    let up = if lifted { 30.0 } else { 14.0 };
+                                    j[leg].rot.x -= e * (up + 5.0 * squeeze);
+                                } else if lifted {
+                                    let dangle = (TAU * 0.9 * g.t + PI * k).sin();
+                                    j[leg].rot.x += e * (8.0 + 7.0 * dangle);
+                                    k += 1.0;
                                 }
                             }
                             if self.tails.len() > 1 {
@@ -2322,7 +2373,9 @@ impl Walk {
         let awake_roll = if many_tails {
             0.0
         } else {
-            (UP_ROLL * lv.laugh).max(RUB_ROLL * lv.rub.min(1.0))
+            (UP_ROLL * lv.laugh)
+                .max(RUB_ROLL * lv.rub.min(1.0))
+                .max(UP_ROLL * self.cradle)
         };
         let goal = awake_roll.max(lie * (SIDE_ROLL * sw[2] + UP_ROLL * sw[3]));
         let roll = self.roll.step(goal, 0.0, 1.2, 0.85, dt).max(0.0);
@@ -2330,7 +2383,9 @@ impl Walk {
         if roll > 0.5 {
             let up = chonkgene_rig::math::smoothstep(90.0, 150.0, roll);
             let giggle = 9.0 * lv.laugh * (TAU * 2.2 * t).sin();
-            let phi = -facing * roll + giggle;
+            // Cradled: rocked slowly side to side in your hands.
+            let rock = 11.0 * self.cradle * (TAU * 0.45 * t).sin();
+            let phi = -facing * roll + giggle + rock;
             j[0].rot.z += phi;
             // About the middle of the body, not the floor under it.
             let d = v3(0.0, self.body_h, 0.0);
@@ -2340,10 +2395,15 @@ impl Walk {
             // or flopping about for a rub; the head tipped back to look at
             // you upside down.
             let awake = up * (1.0 - lie);
+            // Cradled, limp: paws soft and half folded, swinging a little
+            // with the rocking.
+            let limp = self.cradle;
             for (k, &(leg, _, front)) in self.legs.iter().enumerate() {
                 let pedal =
                     (18.0 * lv.laugh + 6.0 * lv.rub) * (TAU * 2.4 * t + k as f32 * 1.57).sin();
-                j[leg].rot.x += awake * (if front { -55.0 } else { -35.0 } + pedal);
+                let folded = if front { -55.0 } else { -35.0 } * (1.0 - 0.45 * limp);
+                let swing = 6.0 * limp * (TAU * 0.45 * t + 0.6 + 0.3 * k as f32).sin();
+                j[leg].rot.x += awake * (folded + pedal + swing);
             }
             // Rolled over side-on, you are off to its side: the head turns
             // to you (undoing the turn it keeps at rest).

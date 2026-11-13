@@ -378,7 +378,7 @@ impl Waddle {
             swimming: false,
             swim: Spring::default(),
             gesture: None,
-            hug: Hug::ByYou,
+            hug: Hug::default(),
             travel: Travel::None,
             travel_w: Default::default(),
             tempo: 1.0,
@@ -501,7 +501,7 @@ impl Waddle {
         self.untouched = if touched { 0.0 } else { self.untouched + dt };
         let hugging = self
             .gesture
-            .is_some_and(|g| g.act == Act::Hug && self.hug != Hug::ByYou);
+            .is_some_and(|g| g.act == Act::Hug && !matches!(self.hug, Hug::ByYou(_)));
         let yaw = self.yaw.step(
             facing
                 * if going || self.flying || self.travel != Travel::None {
@@ -732,12 +732,17 @@ impl Waddle {
                     let (lean, tilt, wings, lift) = match self.hug {
                         Hug::Cuddle { front } => (10.0, 14.0, if front { 55.0 } else { 30.0 }, 0.0),
                         Hug::Squeezed => (-6.0, 8.0, 20.0, 0.32),
-                        Hug::Bear | Hug::ByYou => (2.0, 6.0, 35.0, 0.0),
+                        Hug::Bear => (2.0, 6.0, 35.0, 0.0),
+                        // In your hands its wings stay folded (holding a
+                        // bird keeps its wings in), however you hold it.
+                        Hug::ByYou(_) => (2.0, 6.0, 0.0, 0.0),
                     };
                     j[self.body].rot.x += e * lean;
                     j[self.body].rot.z += e * 5.0 * sway;
                     j[self.head].rot.z += facing * e * (tilt + 3.0 * sway)
-                        + e * 8.0 * (TAU * 1.1 * g.t).sin() * f32::from(self.hug == Hug::ByYou);
+                        + e * 8.0
+                            * (TAU * 1.1 * g.t).sin()
+                            * f32::from(matches!(self.hug, Hug::ByYou(_)));
                     for (side, wing) in self.wings.iter().enumerate() {
                         if let Some(w) = *wing {
                             let sign = if side == 0 { 1.0 } else { -1.0 };

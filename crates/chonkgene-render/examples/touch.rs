@@ -14,7 +14,7 @@
 use std::sync::Arc;
 
 use chonkgene_core::Zone;
-use chonkgene_core::anim::{Act, Animator, Expression, HOLD_SECS, Hug, Posture};
+use chonkgene_core::anim::{Act, Animator, Expression, HOLD_SECS, Hug, HugHold, Posture};
 use chonkgene_core::species::Species;
 use chonkgene_render::MeshRenderer;
 use chonkgene_render::gpu::Gpu;
@@ -79,9 +79,9 @@ fn scenes() -> Vec<Scene> {
         posture: None,
         pace: None,
     };
-    let hug = |name, role| Scene {
+    let hug = |name, role: Hug| Scene {
         name,
-        secs: 3.8,
+        secs: role.secs() + 0.6,
         expression: Expression::Happy,
         hold: None,
         sleep: None,
@@ -119,8 +119,9 @@ fn scenes() -> Vec<Scene> {
         hug("hug-back", Hug::Cuddle { front: false }),
         hug("hug-bear", Hug::Bear),
         hug("hug-squeezed", Hug::Squeezed),
-        hug("hug-you", Hug::ByYou),
-        hug("hug-carry", Hug::ByYou),
+        hug("hug-you", Hug::ByYou(HugHold::Wrap)),
+        hug("hug-carry", Hug::ByYou(HugHold::Carry)),
+        hug("hug-cradle", Hug::ByYou(HugHold::Cradle)),
         travel("slide", Posture::Slide),
         travel("glide", Posture::Glide),
         travel("fly", Posture::Fly),
@@ -276,17 +277,28 @@ fn main() {
             }
             // Your hands in a hug, found on its picture (the last one, as
             // the app does) and pressing in before it is drawn.
-            use chonkgene_render::props::{HugHold, draw_hug_hands, hug_hands, hug_lift};
-            let hold = if scene.name == "hug-carry" {
-                HugHold::Carry
-            } else {
-                HugHold::Wrap
+            use chonkgene_render::props::{
+                BodyShape, Build, HandLayer, draw_hug_hands, hug_hands, hug_lift,
             };
-            let by_you = scene.hug == Some(Hug::ByYou) && t >= 0.3;
-            let hands = r.body_at().filter(|_| by_you).and_then(|b| {
-                hug_hands(|y, side| r.body_edge(y, side), b, hold, 1.0, t - 0.3, 3.2)
+            let (by_you, hold) = match scene.hug {
+                Some(Hug::ByYou(hold)) if t >= 0.3 => (true, hold),
+                _ => (false, HugHold::Wrap),
+            };
+            let secs = hold.secs();
+            let hands = r.body_at().filter(|_| by_you).and_then(|(belly, chest)| {
+                let body = BodyShape {
+                    belly,
+                    chest,
+                    edge: &|y, side| r.body_edge(y, side),
+                    bottom: &|x| r.body_bottom(x),
+                };
+                let build = Build::of(r.species());
+                hug_hands(&body, build, hold, a.facing, 1.0, t - 0.3, secs)
             });
-            r.hug_press(hands.map(|h| ([h.hands[0].press, h.hands[1].press], h.firm)));
+            r.hug_press(hands.map(|h| {
+                let [p, q] = h.hands;
+                ([(p.press, p.grip), (q.press, q.grip)], h.firm)
+            }));
             let params = a.params();
             if expression == Expression::Asleep {
                 r.render_asleep(&params, t);
@@ -300,11 +312,23 @@ fn main() {
             if by_you {
                 // The hands over it; held up in front, it is lifted too (the
                 // app moves its window).
-                let mut src = r.pixmap().clone();
+                let mut src =
+                    tiny_skia::Pixmap::new(r.pixmap().width(), r.pixmap().height()).expect("frame");
                 if let Some(h) = &hands {
-                    draw_hug_hands(&mut src, h, 1.0, t - 0.3);
+                    draw_hug_hands(&mut src, h, HandLayer::Behind, 1.0, t - 0.3);
                 }
-                let lift = hug_lift(hold, 1.0, t - 0.3, 3.2).round() as i32;
+                src.draw_pixmap(
+                    0,
+                    0,
+                    r.pixmap().as_ref(),
+                    &tiny_skia::PixmapPaint::default(),
+                    tiny_skia::Transform::identity(),
+                    None,
+                );
+                if let Some(h) = &hands {
+                    draw_hug_hands(&mut src, h, HandLayer::Front, 1.0, t - 0.3);
+                }
+                let lift = hug_lift(hold, 1.0, t - 0.3, secs).round() as i32;
                 let mut pm = tiny_skia::Pixmap::new(src.width(), src.height()).unwrap();
                 pm.draw_pixmap(
                     0,

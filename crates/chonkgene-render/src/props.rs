@@ -1663,16 +1663,7 @@ fn water(pm: &mut Pixmap, oval: (f32, f32, f32, f32), t: f32, over: Option<(f32,
     }
 }
 
-/// How your arms hold a pet you hug (Roger's eighteenth pass: as a small
-/// baby hugs a plush toy).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum HugHold {
-    /// 環抱: arms round its middle from both sides, the little hands
-    /// overlapping on its belly, squeezing.
-    Wrap,
-    /// 前抱: hands up under its arms from below, holding it up in front.
-    Carry,
-}
+pub use chonkgene_core::anim::HugHold;
 
 /// A bunch of three balloons a four-legged pet hangs from, flying
 /// (Roger's eighteenth pass: everyone flies): small and shiny, bobbing and
@@ -1772,23 +1763,68 @@ pub fn copter(pm: &mut Pixmap, head: (f32, f32), s: f32, t: f32) {
     oval(pm, x, top, 3.6 * s, 3.0 * s, [0xF0, 0x6A, 0x5E, 255], id);
 }
 
-/// How far a pet held up in front (前抱) is lifted, pixels, `t` seconds
-/// into a hug `secs` long: up as the arms come in, a little bounce, down as
-/// they let go. Nothing for the other holds.
+/// How far a pet you hold is lifted, pixels, `t` seconds into a hug
+/// `secs` long: up as the hands come in, a little bounce (held up in
+/// front) or none (cradled, rocked instead), down as they let go. Nothing
+/// wrapped round from behind: it stays on your lap.
 pub fn hug_lift(hold: HugHold, s: f32, t: f32, secs: f32) -> f32 {
-    if hold != HugHold::Carry {
-        return 0.0;
-    }
     let up = smooth(0.15, 0.6, t) * smooth(secs, secs - 0.5, t);
-    up * (22.0 + 3.0 * (TAU * 1.2 * t).sin()) * s
+    match hold {
+        HugHold::Wrap => 0.0,
+        HugHold::Carry => up * (22.0 + 3.0 * (TAU * 1.2 * t).sin()) * s,
+        HugHold::Cradle => up * 14.0 * s,
+    }
+}
+
+/// What kind of body your hands hold (PLAN §8, Roger's twenty-first pass:
+/// each held the way that suits it).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Build {
+    /// The Shiba: a deep chest behind its front legs.
+    Dog,
+    /// The fox: as a dog, but she cannot lie on her back for her tails.
+    Fox,
+    /// A cat; `short` the Munchkin, its belly lower down.
+    Cat { short: bool },
+    /// The chick, the duckling, the owl: kept upright, wings in.
+    Bird,
+}
+
+impl Build {
+    /// From the model's species id.
+    pub fn of(species: &str) -> Build {
+        match species {
+            "shiba" => Build::Dog,
+            "fox" => Build::Fox,
+            "munchkin" => Build::Cat { short: true },
+            "fold" => Build::Cat { short: false },
+            _ => Build::Bird,
+        }
+    }
+}
+
+/// The shape a hand takes on it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Grip {
+    /// The thumb on its chest, toward you, the four fingers round its ribs
+    /// behind it: only the thumb (and the hand's edge) in front, the rest
+    /// drawn behind its picture. Presses into the screen.
+    Thumb,
+    /// The back of the hand toward you, in front of it, the fingers across
+    /// its chest, belly or folded wings. Presses into the screen.
+    Back,
+    /// Palm up under it, the fingers curled up its front (you see their
+    /// backs). Presses up from below.
+    Cup,
 }
 
 /// Where your hands hold a pet you hug, this frame (Roger's twentieth
 /// pass, item 2: no arms, only a child's hands, see-through, resting on
-/// the pet and pressing in).
+/// the pet and pressing in; twenty-first pass: as real hands hold).
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct HugHands {
-    /// The two hands, left one first.
+    /// The two hands, in the order drawn (the second over the first where
+    /// they cross).
     pub hands: [HugHand; 2],
     /// How far they have come in (0 … 1: fading in from off its sides).
     pub reach: f32,
@@ -1799,35 +1835,76 @@ pub struct HugHands {
 /// One hand of a [`HugHands`].
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct HugHand {
-    /// Where the middle of the palm is, pixels: on the pet's outline.
+    /// Where the middle of the palm is, pixels.
     pub at: (f32, f32),
-    /// Where it presses in, pixels: a little inside the outline, on the
-    /// pet (the dent's middle).
+    /// Where it presses in, pixels, on the pet (the dent's middle).
     pub press: (f32, f32),
     /// Which way the fingers point, radians on the screen (0: right, y
-    /// down): in over its body, up a little.
+    /// down).
     pub angle: f32,
-    /// Which side of the pet it is on: −1 left, +1 right.
+    /// Which side of the pet it comes from: −1 left, +1 right (the thumb
+    /// is drawn on the far side from it, up its wrist).
     pub side: f32,
+    pub grip: Grip,
 }
 
-/// How far in from its outline your hand presses (pixels at 100%), and
-/// how far off its side the hand starts, coming in.
-const HAND_IN: f32 = 3.0;
+/// Where its body is in its picture, for your hands: the middle of its
+/// belly and of its chest (pixels, see `MeshRenderer::body_at`), the edge
+/// of its body on a row toward a side (`edge(y, side)`, see
+/// `MeshRenderer::body_edge`) and the bottom of its body in a column
+/// (`bottom(x)`, see `MeshRenderer::body_bottom`).
+pub struct BodyShape<'a> {
+    pub belly: (f32, f32),
+    pub chest: (f32, f32),
+    pub edge: &'a dyn Fn(f32, f32) -> Option<f32>,
+    pub bottom: &'a dyn Fn(f32) -> Option<f32>,
+}
+
+impl BodyShape<'_> {
+    /// Its left and right edges on row `y` (a little higher or lower if
+    /// that row misses it), and the row used.
+    fn across(&self, y: f32, s: f32) -> Option<(f32, f32, f32)> {
+        [0.0, -4.0, 4.0, -8.0, 8.0].iter().find_map(|dy| {
+            let y = y + dy * s;
+            Some(((self.edge)(y, -1.0)?, (self.edge)(y, 1.0)?, y))
+        })
+    }
+
+    /// The bottom of its body at column `x` (a little to either side if
+    /// that column misses it).
+    fn under(&self, x: f32, s: f32) -> Option<f32> {
+        [0.0, -4.0, 4.0, -8.0, 8.0]
+            .iter()
+            .find_map(|dx| (self.bottom)(x + dx * s))
+    }
+}
+
+/// How far in from its outline a hand presses (pixels at 100%), and how
+/// far off it a hand starts, coming in.
+const HAND_IN: f32 = 4.0;
 const HAND_OFF: f32 = 34.0;
 
-/// Where your hands hold a pet you hug, from where its body is in its
-/// picture (`body`: the middle of its belly, and of its chest, pixels; see
-/// `MeshRenderer::body_at`) and the edge of its body on a row toward a
-/// side (`edge(y, side)`, see `MeshRenderer::body_edge`), `t` seconds into
-/// a hug `secs` long: on its sides, found again every frame so they follow
-/// its outline as it breathes, squirms and is squeezed; coming in at the
-/// start, stroking it a little up and down, letting go at the end. None
-/// when the hands are away (before, after) or its body is not found.
+/// Where your hands hold a pet you hug (`body`: where its body is in its
+/// picture; `build`: what kind of body; `facing` +1 right, −1 left), `t`
+/// seconds into a hug `secs` long, found again every frame so they follow
+/// it as it breathes, squirms, is squeezed and rocked; coming in at the
+/// start, stroking a little, letting go at the end. None when the hands are
+/// away (before, after) or its body is not found.
+///
+/// The holds (PLAN §8, Roger's twenty-first pass):
+///
+/// | | 環抱 `Wrap` (hands in front) | 前抱 `Carry` (lifted) | 搖搖抱 `Cradle` |
+/// |---|---|---|---|
+/// | dogs | crossed under the chest | thumbs on the chest | cupped under head and bottom |
+/// | cats | crossed on the belly | thumb on the chest, cupped under the bottom | as dogs |
+/// | fox | as dogs | as dogs | cupped under her, sitting |
+/// | birds | over the folded wings | cupped from below | as lifted |
+#[allow(clippy::too_many_arguments)]
 pub fn hug_hands(
-    edge: impl Fn(f32, f32) -> Option<f32>,
-    body: ((f32, f32), (f32, f32)),
+    body: &BodyShape,
+    build: Build,
     hold: HugHold,
+    facing: f32,
     s: f32,
     t: f32,
     secs: f32,
@@ -1838,71 +1915,187 @@ pub fn hug_hands(
     }
     // Squeezing gently, in slow pulses, from the moment they arrive.
     let firm = reach * (0.6 + 0.4 * (TAU * 0.8 * t).sin());
-    // Wrapped round, at its belly; held up in front, under its arms,
-    // the fingers pointing up more.
-    let ((_, y), rise) = match hold {
-        HugHold::Wrap => (body.0, 0.35),
-        HugHold::Carry => (body.1, 0.95),
-    };
-    let mut hands = [HugHand {
-        at: (0.0, 0.0),
-        press: (0.0, 0.0),
-        angle: 0.0,
-        side: 0.0,
-    }; 2];
-    for (k, side) in [-1.0f32, 1.0].into_iter().enumerate() {
-        // Stroking: each hand slides up and down its side a little, the
-        // two out of step.
-        let stroke = 3.0 * s * (TAU * 0.6 * t + 1.7 * k as f32).sin();
-        let y = y + stroke;
-        // The edge of its body on that row (a little higher or lower if
-        // that row misses it).
-        let edge = [0.0, -4.0, 4.0, -8.0, 8.0]
-            .iter()
-            .find_map(|dy| edge(y + dy * s, side))?;
-        let off = (1.0 - reach) * HAND_OFF * s;
-        hands[k] = HugHand {
-            at: (edge + side * (off - 2.0 * s * firm), y),
-            press: (edge - side * HAND_IN * s, y),
-            angle: if side > 0.0 { PI + rise } else { -rise },
+    let off = (1.0 - reach) * HAND_OFF * s;
+    let l = HAND_LEN * s;
+    // Stroking: each hand slides a little, the two out of step.
+    let stroke = |k: f32| 2.5 * s * (TAU * 0.6 * t + 1.7 * k).sin();
+    let facing = if facing < 0.0 { -1.0 } else { 1.0 };
+    let face = |k: usize| if k == 0 { -1.0 } else { 1.0 };
+
+    // The back of a hand in front: palm `in_` of the half width in from
+    // the edge (past the middle: crossed), fingers toward the other side,
+    // tipped down a little; in from its side.
+    let back = |row: f32, in_: f32, k: usize| -> Option<HugHand> {
+        let (l0, r0, y) = body.across(row + stroke(k as f32), s)?;
+        let (mid, half) = ((l0 + r0) / 2.0, (r0 - l0) / 2.0);
+        let side = face(k);
+        let x = mid + side * half * (1.0 - in_);
+        // The second hand a little lower, so the two cross, not hide.
+        let y = y + 4.0 * s * k as f32;
+        Some(HugHand {
+            at: (x + side * off, y),
+            press: (x, y),
+            angle: if side < 0.0 { 0.18 } else { PI - 0.18 },
             side,
-        };
-    }
+            grip: Grip::Back,
+        })
+    };
+    // Thumb on the chest from a side: the palm just inside its outline,
+    // behind it, the fingers pointing in behind it, up a little; only the
+    // wrist shows past the outline, going off to the side.
+    let thumb = |row: f32, side: f32, k: usize| -> Option<HugHand> {
+        let (l0, r0, y) = body.across(row + stroke(k as f32), s)?;
+        let edge = if side < 0.0 { l0 } else { r0 };
+        Some(HugHand {
+            at: (edge + side * (off - 0.22 * l), y),
+            press: (edge - side * (HAND_IN * s + 0.18 * l), y - 0.1 * l),
+            angle: if side < 0.0 { -0.5 } else { PI + 0.5 },
+            side,
+            grip: Grip::Thumb,
+        })
+    };
+    // Cupped under it at column `x`, fingers up its front, leaning in; up
+    // from below.
+    let cup = |x: f32, side: f32, k: usize| -> Option<HugHand> {
+        let x = x + 0.6 * stroke(k as f32);
+        let y = body.under(x, s)?;
+        Some(HugHand {
+            at: (x, y + 0.12 * l + off),
+            press: (x, y - HAND_IN * s),
+            angle: -PI / 2.0 - side * 0.3,
+            side,
+            grip: Grip::Cup,
+        })
+    };
+    let width = |row: f32| -> Option<(f32, f32)> {
+        let (l0, r0, _) = body.across(row, s)?;
+        Some(((l0 + r0) / 2.0, (r0 - l0) / 2.0))
+    };
+    let (belly, chest) = (body.belly.1, body.chest.1);
+    let cups_under = |row: f32, apart: f32| -> Option<[HugHand; 2]> {
+        let (mid, half) = width(row)?;
+        Some([
+            cup(mid - apart * half, -1.0, 0)?,
+            cup(mid + apart * half, 1.0, 1)?,
+        ])
+    };
+    let hands = match (hold, build) {
+        (HugHold::Wrap, Build::Dog | Build::Fox) => {
+            // Under the chest, behind the front legs.
+            let row = chest + 0.35 * (belly - chest);
+            [back(row, 1.12, 0)?, back(row, 1.12, 1)?]
+        }
+        (HugHold::Wrap, Build::Cat { short }) => {
+            let row = belly + if short { 0.12 * l } else { 0.0 };
+            [back(row, 1.1, 0)?, back(row, 1.1, 1)?]
+        }
+        // Over the folded wings, the fingers across the breast, not
+        // crossing.
+        (HugHold::Wrap, Build::Bird) => [back(chest, 0.45, 0)?, back(chest, 0.45, 1)?],
+        (HugHold::Carry, Build::Dog | Build::Fox) => {
+            [thumb(chest, -1.0, 0)?, thumb(chest, 1.0, 1)?]
+        }
+        // A cat: one hand under the chest (the thumb in front), the other
+        // under its bottom, as vets lift a cat.
+        (HugHold::Carry, Build::Cat { .. }) => {
+            let (mid, half) = width(belly)?;
+            let under = cup(mid - facing * 0.55 * half, -facing, 0)?;
+            [under, thumb(chest, facing, 1)?]
+        }
+        (HugHold::Carry | HugHold::Cradle, Build::Bird) => cups_under(belly, 0.42)?,
+        // On its back: one hand under its head and shoulders, the other
+        // under its bottom.
+        (HugHold::Cradle, Build::Dog | Build::Cat { .. }) => {
+            let (mid, half) = width(belly)?;
+            let head = cup(mid + facing * 0.6 * half, facing, 0)?;
+            let tail = cup(mid - facing * 0.6 * half, -facing, 1)?;
+            [tail, head]
+        }
+        // The fox sits sideways in your hands.
+        (HugHold::Cradle, Build::Fox) => cups_under(belly, 0.45)?,
+    };
     Some(HugHands { hands, reach, firm })
 }
 
-/// Your hands holding a pet in a hug (see [`hug_hands`]), drawn over its
-/// picture: a child's hands from the wrist, plump, the fingers a little
-/// apart, see-through so its fur shows under them, the wrist fading out;
-/// the fingers stroke it, one after another, `t` seconds in.
-pub fn draw_hug_hands(pm: &mut Pixmap, hands: &HugHands, s: f32, t: f32) {
-    let Some(mut layer) = Pixmap::new(pm.width(), pm.height()) else {
+/// Length from a hand's palm middle to the tip of its longest finger,
+/// pixels at 100%.
+const HAND_LEN: f32 = 26.0;
+
+/// Which part of your hands to draw (see [`draw_hug_hands`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum HandLayer {
+    /// Behind its picture: the fingers round its back (hidden where its
+    /// body is, their tips peeking past its outline).
+    Behind,
+    /// Over its picture.
+    Front,
+}
+
+/// Your hands holding a pet in a hug (see [`hug_hands`]): `layer` says
+/// whether this is the part behind its picture (drawn before it) or in
+/// front (after). A child's hands from the wrist, plump, see-through so
+/// its fur shows under them, the wrist fading out; the fingers stroke it,
+/// one after another, `t` seconds in.
+pub fn draw_hug_hands(pm: &mut Pixmap, hands: &HugHands, layer: HandLayer, s: f32, t: f32) {
+    let behind = hands.hands.iter().any(|h| h.grip == Grip::Thumb);
+    if layer == HandLayer::Behind && !behind {
+        return;
+    }
+    let (Some(mut sheet), Some(mut one)) = (
+        Pixmap::new(pm.width(), pm.height()),
+        Pixmap::new(pm.width(), pm.height()),
+    ) else {
         return;
     };
     for (k, hand) in hands.hands.iter().enumerate() {
-        child_hand(&mut layer, hand, s, t + 0.4 * k as f32);
+        let t = t + 0.4 * k as f32;
+        let part = match (layer, hand.grip) {
+            (HandLayer::Behind, Grip::Thumb) => Part::Palm,
+            (HandLayer::Behind, _) => continue,
+            (HandLayer::Front, Grip::Thumb) => Part::Thumb,
+            (HandLayer::Front, Grip::Back | Grip::Cup) => Part::Back,
+        };
+        // Each on its own first: rubbing out one's wrist must not rub out
+        // the other where they cross.
+        one.fill(Color::TRANSPARENT);
+        child_hand(&mut one, hand, part, s, t);
+        let id = Transform::identity();
+        sheet.draw_pixmap(0, 0, one.as_ref(), &PixmapPaint::default(), id, None);
     }
     // All of it at once at one opacity, so where the fingers overlap the
-    // palm it is no less see-through.
+    // palm (or one hand the other) it is no less see-through.
     let paint = PixmapPaint {
         opacity: 0.66 * hands.reach.min(1.0),
         ..PixmapPaint::default()
     };
-    pm.draw_pixmap(0, 0, layer.as_ref(), &paint, Transform::identity(), None);
+    pm.draw_pixmap(0, 0, sheet.as_ref(), &paint, Transform::identity(), None);
+}
+
+/// Which of a hand [`child_hand`] draws.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Part {
+    /// The palm side, without the thumb (round behind it, the thumb being
+    /// in front).
+    Palm,
+    /// The back of the hand: knuckle dimples, little nails, the fingers
+    /// together, the thumb tucked along its side.
+    Back,
+    /// Only the thumb, and the hand's edge it grows from.
+    Thumb,
 }
 
 /// A child's hand (see [`draw_hug_hands`]), opaque, into `pm`.
-fn child_hand(pm: &mut Pixmap, hand: &HugHand, s: f32, t: f32) {
+fn child_hand(pm: &mut Pixmap, hand: &HugHand, part: Part, s: f32, t: f32) {
     const SKIN: [u8; 4] = [0xFF, 0xE2, 0xD2, 255];
     const LIGHT: [u8; 4] = [0xFF, 0xF2, 0xEA, 255];
     const LINE: [u8; 4] = [0xE6, 0xA4, 0x92, 255];
     const SOFT: [u8; 4] = [0xE6, 0xA4, 0x92, 90];
     const ROSY: [u8; 4] = [0xFF, 0xA6, 0xA6, 150];
-    // Length from the palm's middle to the tip of the longest finger.
-    let l = 26.0 * s;
+    const NAIL: [u8; 4] = [0xFF, 0xF4, 0xF0, 230];
+    const DIMPLE: [u8; 4] = [0xE6, 0xA4, 0x92, 120];
+    let l = HAND_LEN * s;
     // Drawn upright (fingers up, the thumb on the right), turned so the
-    // fingers point along `angle`; the left hand mirrored, so both thumbs
-    // are on top.
+    // fingers point along `angle`; a hand from the left mirrored.
     let (sin, cos) = (hand.angle + PI / 2.0).sin_cos();
     let flip = hand.side.signum();
     let ts = Transform::from_row(cos * flip, sin * flip, -sin, cos, hand.at.0, hand.at.1);
@@ -1928,49 +2121,111 @@ fn child_hand(pm: &mut Pixmap, hand: &HugHand, s: f32, t: f32) {
     };
     // The fingers, little finger to index (the thumb on the right): where
     // each starts on the palm, how it leans out (radians) and how long it
-    // is. Stroking, they curl in one after another, a wave across them.
+    // is; seen from the back, closer together. Stroking, they curl in one
+    // after another, a wave across them.
     let fingers: [(f32, f32, f32); 4] = [
         (-0.21, -0.18, 0.28),
         (-0.07, -0.06, 0.36),
         (0.07, 0.05, 0.39),
         (0.21, 0.16, 0.34),
     ];
+    let spread = if part == Part::Back { 0.55 } else { 1.0 };
     let tips: Vec<((f32, f32), (f32, f32))> = fingers
         .iter()
         .enumerate()
         .map(|(k, &(x, lean, len))| {
             let curl = 1.0 - 0.2 * (TAU * 1.3 * t - 0.9 * k as f32).sin().max(0.0);
             let base = (x * l, -0.2 * l);
-            let len = len * l * curl;
+            let (lean, len) = (lean * spread, len * l * curl);
             (base, (base.0 + lean.sin() * len, base.1 - lean.cos() * len))
         })
         .collect();
     let fr = 0.075 * l;
-    let thumb = ((0.27 * l, 0.02 * l), (0.47 * l, -0.2 * l));
-    let tr = 0.085 * l;
+    let thumb = match part {
+        // Tucked along the side of the hand, seen from its back.
+        Part::Back => ((0.25 * l, 0.04 * l), (0.36 * l, -0.12 * l)),
+        // Lying along its chest, from the edge of the hand.
+        Part::Thumb => ((-0.02 * l, 0.12 * l), (0.12 * l, -0.4 * l)),
+        Part::Palm => ((0.27 * l, 0.02 * l), (0.47 * l, -0.2 * l)),
+    };
+    let tr = if part == Part::Thumb {
+        0.1 * l
+    } else {
+        0.085 * l
+    };
     let edge = 1.2 * s;
+    let palm = part != Part::Thumb;
     // A soft halo, then the outline, then the skin, so the edge is soft.
     for (grow, c) in [(edge + 1.6 * s, SOFT), (edge, LINE)] {
-        // The wrist, fading out: drawn only round the palm's end.
-        blob(pm, 0.0, 0.12 * l, 0.27 * l + grow, 0.18 * l + grow, c);
-        blob(pm, 0.0, -0.04 * l, 0.33 * l + grow, 0.27 * l + grow, c);
-        for &(a, b) in &tips {
-            digit(pm, a, b, fr + grow, c);
+        if palm {
+            // The wrist, fading out: drawn only round the palm's end.
+            blob(pm, 0.0, 0.12 * l, 0.27 * l + grow, 0.18 * l + grow, c);
+            blob(pm, 0.0, -0.04 * l, 0.33 * l + grow, 0.27 * l + grow, c);
+            for &(a, b) in &tips {
+                digit(pm, a, b, fr + grow, c);
+            }
+        } else {
+            // The hand's edge the thumb grows from, at its outline.
+            blob(pm, 0.0, 0.1 * l, 0.13 * l + grow, 0.16 * l + grow, c);
         }
-        digit(pm, thumb.0, thumb.1, tr + grow, c);
+        if part != Part::Palm {
+            digit(pm, thumb.0, thumb.1, tr + grow, c);
+        }
     }
-    blob(pm, 0.0, 0.12 * l, 0.27 * l, 0.18 * l, SKIN);
-    blob(pm, 0.0, -0.04 * l, 0.33 * l, 0.27 * l, SKIN);
-    for &(a, b) in &tips {
-        digit(pm, a, b, fr, SKIN);
+    if palm {
+        blob(pm, 0.0, 0.12 * l, 0.27 * l, 0.18 * l, SKIN);
+        blob(pm, 0.0, -0.04 * l, 0.33 * l, 0.27 * l, SKIN);
+        for &(a, b) in &tips {
+            digit(pm, a, b, fr, SKIN);
+        }
+    } else {
+        blob(pm, 0.0, 0.1 * l, 0.13 * l, 0.16 * l, SKIN);
     }
-    digit(pm, thumb.0, thumb.1, tr, SKIN);
-    // A light on the palm's heel, rosy fingertips.
-    blob(pm, -0.08 * l, -0.02 * l, 0.12 * l, 0.09 * l, LIGHT);
-    for &(_, b) in &tips {
-        blob(pm, b.0, b.1, 0.6 * fr, 0.6 * fr, ROSY);
+    if part != Part::Palm {
+        digit(pm, thumb.0, thumb.1, tr, SKIN);
     }
-    blob(pm, thumb.1.0, thumb.1.1, 0.6 * tr, 0.6 * tr, ROSY);
+    match part {
+        Part::Palm => {
+            // A light on the palm's heel, rosy fingertips.
+            blob(pm, -0.08 * l, -0.02 * l, 0.12 * l, 0.09 * l, LIGHT);
+            for &(_, b) in &tips {
+                blob(pm, b.0, b.1, 0.6 * fr, 0.6 * fr, ROSY);
+            }
+        }
+        Part::Back => {
+            // Dimples over the knuckles, a light across the back, little
+            // nails at the tips (and the thumb's).
+            blob(pm, 0.02 * l, -0.06 * l, 0.17 * l, 0.1 * l, LIGHT);
+            for &(a, b) in &tips {
+                blob(pm, a.0, a.1 + 0.02 * l, 0.3 * fr, 0.22 * fr, DIMPLE);
+                let (dx, dy) = (b.0 - a.0, b.1 - a.1);
+                let n = dx.hypot(dy).max(1e-3);
+                let nail = (b.0 - dx / n * 0.45 * fr, b.1 - dy / n * 0.45 * fr);
+                blob(pm, nail.0, nail.1, 0.52 * fr, 0.62 * fr, NAIL);
+            }
+            blob(
+                pm,
+                thumb.1.0,
+                thumb.1.1 + 0.3 * tr,
+                0.5 * tr,
+                0.6 * tr,
+                NAIL,
+            );
+        }
+        Part::Thumb => {
+            blob(
+                pm,
+                thumb.1.0,
+                thumb.1.1 + 0.35 * tr,
+                0.5 * tr,
+                0.6 * tr,
+                NAIL,
+            );
+        }
+    }
+    if !palm {
+        return;
+    }
     // The wrist fades away rather than ending: rubbed out below the palm.
     let mut fade = PathBuilder::new();
     fade.move_to(-0.5 * l, 0.2 * l);
@@ -2271,6 +2526,73 @@ pub fn foxfire(pm: &mut Pixmap, at: (f32, f32), reach: (f32, f32), s: f32, t: f3
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Your hands on a body (an oval 100 px wide, 80 tall, its middle at
+    /// 100, 100), held each way, each kind of body: where they go and
+    /// with what grip, as the table on `hug_hands` says.
+    #[test]
+    fn hands_hold_each_body_its_own_way() {
+        let (cx, cy, rx, ry) = (100.0f32, 100.0f32, 50.0f32, 40.0f32);
+        let edge = |y: f32, side: f32| {
+            let k = 1.0 - ((y - cy) / ry).powi(2);
+            (k > 0.0).then(|| cx + side * rx * k.sqrt())
+        };
+        let bottom = |x: f32| {
+            let k = 1.0 - ((x - cx) / rx).powi(2);
+            (k > 0.0).then(|| cy + ry * k.sqrt())
+        };
+        let body = BodyShape {
+            belly: (cx, cy + 10.0),
+            chest: (cx, cy - 10.0),
+            edge: &edge,
+            bottom: &bottom,
+        };
+        let hold =
+            |build, hold| hug_hands(&body, build, hold, 1.0, 1.0, 1.5, 3.2).expect("hands on it");
+        let grips = |h: &HugHands| [h.hands[0].grip, h.hands[1].grip];
+        // Wrapped round a dog: the backs of both hands, crossed in front
+        // (the left hand's palm right of the right hand's).
+        let h = hold(Build::Dog, HugHold::Wrap);
+        assert_eq!(grips(&h), [Grip::Back, Grip::Back]);
+        assert!(h.hands[0].at.0 > h.hands[1].at.0, "not crossed: {h:?}");
+        // A bird's: over its wings, not crossed.
+        let h = hold(Build::Bird, HugHold::Wrap);
+        assert!(h.hands[0].at.0 < cx && h.hands[1].at.0 > cx, "{h:?}");
+        // Lifted, a dog: thumbs, one each side, on its outline.
+        let h = hold(Build::Fox, HugHold::Carry);
+        assert_eq!(grips(&h), [Grip::Thumb, Grip::Thumb]);
+        for hand in h.hands {
+            let e = edge(hand.at.1, hand.side).unwrap();
+            assert!((hand.at.0 - e).abs() < 6.0, "off its side: {hand:?}");
+            assert!(
+                (hand.press.0 - cx).abs() < (e - cx).abs(),
+                "presses outside it"
+            );
+        }
+        // A cat: a thumb at the front (facing right), cupped under its
+        // bottom (behind, to the left).
+        let h = hold(Build::Cat { short: false }, HugHold::Carry);
+        assert_eq!(grips(&h), [Grip::Cup, Grip::Thumb]);
+        assert!(h.hands[0].at.0 < cx && h.hands[1].at.0 > cx, "{h:?}");
+        // Cradled: cupped under both ends, below its body, the fingers up.
+        for build in [
+            Build::Dog,
+            Build::Cat { short: true },
+            Build::Fox,
+            Build::Bird,
+        ] {
+            let h = hold(build, HugHold::Cradle);
+            assert_eq!(grips(&h), [Grip::Cup, Grip::Cup], "{build:?}");
+            for hand in h.hands {
+                let b = bottom(hand.at.0).unwrap();
+                assert!(hand.at.1 > b && hand.press.1 < b, "{build:?}: {hand:?}");
+                assert!(hand.angle.sin() < -0.8, "fingers not up: {hand:?}");
+            }
+        }
+        // Before the hands come in, and after they let go: none.
+        assert!(hug_hands(&body, Build::Dog, HugHold::Wrap, 1.0, 1.0, 0.0, 3.2).is_none());
+        assert!(hug_hands(&body, Build::Dog, HugHold::Wrap, 1.0, 1.0, 3.2, 3.2).is_none());
+    }
 
     const ALL: [Thing; 10] = [
         Thing::Ball,

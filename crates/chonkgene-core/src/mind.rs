@@ -109,10 +109,15 @@ pub enum Line {
     Hugged,
     /// Caught in the fox's bear hug.
     BearHugged,
+    /// Cradled by you like a baby (搖搖抱), as you start rocking it (the
+    /// fox: says she does not want this).
+    Cradled,
+    /// Rocked a while: drowsy murmurs (the fox: melting).
+    CradleMelt,
 }
 
 impl Line {
-    pub const ALL: [Line; 54] = [
+    pub const ALL: [Line; 56] = [
         Line::Hello,
         Line::WelcomeBack,
         Line::PokeSmall,
@@ -167,6 +172,8 @@ impl Line {
         Line::Hug,
         Line::Hugged,
         Line::BearHugged,
+        Line::Cradled,
+        Line::CradleMelt,
     ];
 
     /// Key in the line tables.
@@ -226,6 +233,8 @@ impl Line {
             Line::Hug => "hug",
             Line::Hugged => "hugged",
             Line::BearHugged => "bear_hugged",
+            Line::Cradled => "cradled",
+            Line::CradleMelt => "cradle_melt",
         }
     }
 

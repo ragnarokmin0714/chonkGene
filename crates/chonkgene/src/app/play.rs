@@ -589,8 +589,7 @@ impl Fun {
     /// pixels, at `t`.
     pub fn hug_lift(&self, t: f64) -> f32 {
         self.hug_by_you.map_or(0.0, |(since, hold)| {
-            let secs = chonkgene_core::anim::HUG_SECS;
-            props::hug_lift(hold, self.scale, (t - since) as f32, secs)
+            props::hug_lift(hold, self.scale, (t - since) as f32, hold.secs())
         })
     }
 
@@ -690,6 +689,8 @@ pub(super) struct Fun {
     /// are this frame (found on its picture each frame, see
     /// `Renderer::hug_hands`).
     pub hug_by_you: Option<(f64, props::HugHold)>,
+    /// Cradled (搖搖抱): when it says something drowsy (the fox: melts).
+    pub cradle_melt: Option<f64>,
     pub hands: Option<props::HugHands>,
     /// When it last finished a 肉肉舞 (it does not dance again at once).
     pub danced: f64,
@@ -1188,11 +1189,10 @@ impl Pet {
             (sun - step).max(0.0)
         };
         self.fun.sun = (sun, t);
-        let hug_secs = f64::from(chonkgene_core::anim::HUG_SECS);
         if self
             .fun
             .hug_by_you
-            .is_some_and(|(since, ..)| t - since >= hug_secs)
+            .is_some_and(|(since, hold)| t - since >= f64::from(hold.secs()))
         {
             self.fun.hug_by_you = None;
         }
@@ -1237,6 +1237,15 @@ impl Pet {
                 t as f32,
             );
         }
+        // Your fingers round its back, behind it (Roger's twenty-first
+        // pass: thumbs in front, fingers behind).
+        let hug_t = self
+            .fun
+            .hug_by_you
+            .map_or(0.0, |(since, _)| (t - since) as f32);
+        if let Some(hands) = &self.fun.hands {
+            props::draw_hug_hands(canvas, hands, props::HandLayer::Behind, s, hug_t);
+        }
         canvas.draw_pixmap(
             0,
             0,
@@ -1275,8 +1284,7 @@ impl Pet {
             }
         }
         if let Some(hands) = &self.fun.hands {
-            let since = self.fun.hug_by_you.map_or(t, |(since, _)| since);
-            props::draw_hug_hands(canvas, hands, s, (t - since) as f32);
+            props::draw_hug_hands(canvas, hands, props::HandLayer::Front, s, hug_t);
         }
         if let Some(thing) = self.fun.carry {
             let at = self.renderer.mouth(self.anim.facing);
@@ -2963,6 +2971,7 @@ fn curious(p: &mut Pet, ctx: &Ctx, activity: Activity, cursor: Option<(i32, i32)
         && p.press.is_none()
         && !p.playing
         && !p.fun.busy(now)
+        && p.fun.hug_by_you.is_none()
         && p.body.motion == Motion::Idle
         && matches!(activity, Activity::Busy);
     let Some((since, until)) = p.fun.curious else {
