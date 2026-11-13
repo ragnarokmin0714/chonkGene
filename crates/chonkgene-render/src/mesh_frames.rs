@@ -316,6 +316,14 @@ impl MeshRenderer {
         let landed = match baked {
             Ok(mesh) => {
                 let (w, h) = (self.base.width(), self.base.height());
+                if let Some(old) = &self.live {
+                    // The old canvas's frames since the last report still
+                    // count; the new one counts from zero (a resize or a
+                    // new coat logged a negative GPU time).
+                    self.stats.gpu_secs += old.canvas.measured - self.gpu_seen.0;
+                    self.stats.gpu_frames += old.canvas.frames.saturating_sub(self.gpu_seen.1);
+                }
+                self.gpu_seen = (0.0, 0);
                 let canvas = MeshCanvas::new(self.gpu, &mesh, w, h, self.scale);
                 self.live = Some(Live { mesh, canvas });
                 self.unsent = true;
@@ -374,8 +382,8 @@ impl MeshRenderer {
         let mut stats = std::mem::take(&mut self.stats);
         if let Some(live) = &self.live {
             let now = (live.canvas.measured, live.canvas.frames);
-            stats.gpu_secs = now.0 - self.gpu_seen.0;
-            stats.gpu_frames = now.1.saturating_sub(self.gpu_seen.1);
+            stats.gpu_secs += now.0 - self.gpu_seen.0;
+            stats.gpu_frames += now.1.saturating_sub(self.gpu_seen.1);
             self.gpu_seen = now;
         }
         stats

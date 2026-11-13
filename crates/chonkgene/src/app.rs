@@ -2704,11 +2704,26 @@ impl Pet {
     fn hug_you(&mut self, ctx: &mut Ctx, hold: Option<HugHold>) {
         let now = ctx.world.now;
         let mut out = self.mind.hug(&ctx.world);
-        let free = out.line == Some(Line::Hugged)
-            && !self.in_skit
-            && self.press.as_ref().is_none_or(|p| !p.moved)
-            && matches!(self.body.motion, Motion::Idle | Motion::Walk)
-            && !self.fun.busy(now);
+        // Lounging while you read, sitting by you or on its way to you, it
+        // is still yours to hug (Roger's log, 2026-11-13: eight
+        // double-clicks in a row on the chick, lying preening, all came to
+        // nothing).
+        let why_not = if out.line == Some(Line::TurnOver) {
+            Some("asleep")
+        } else if out.line != Some(Line::Hugged) {
+            Some("in a mood")
+        } else if self.in_skit {
+            Some("in a skit")
+        } else if self.press.as_ref().is_some_and(|p| p.moved) {
+            Some("being dragged")
+        } else if !matches!(self.body.motion, Motion::Idle | Motion::Walk) {
+            Some("not on its feet")
+        } else if self.fun.engaged() {
+            Some("busy")
+        } else {
+            None
+        };
+        let free = why_not.is_none();
         let hold = hold.unwrap_or_else(|| {
             let hour = ctx.world.hour;
             let mood = HugMood {
@@ -2721,6 +2736,7 @@ impl Pet {
             HugHold::pick(self.species, mood, self.rng.f32())
         });
         if free {
+            self.fun.end_leisure();
             self.body.motion = Motion::Idle;
             self.anim.hug(Hug::ByYou(hold));
             self.fun.hug_by_you = Some((now, hold));
@@ -2745,7 +2761,7 @@ impl Pet {
                     HugHold::Cradle => "cradled",
                 }
             } else {
-                "not now"
+                why_not.unwrap_or_default()
             }
         );
         self.apply(ctx, out);

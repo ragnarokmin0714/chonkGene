@@ -724,6 +724,26 @@ impl Fun {
         self.pounce_at = Some(now + STALK_SECS);
     }
 
+    /// Up to something of its own that your hug should not cut into
+    /// (chasing, a scene, hiding, …); unlike [`Fun::busy`], not its
+    /// leisure: lounging while you read, sitting by you, on its way to you.
+    pub fn engaged(&self) -> bool {
+        self.chase.is_some()
+            || self.order.is_some()
+            || self.scene.is_some()
+            || self.nip.is_some()
+            || self.swat.is_some()
+            || self.carry.is_some()
+            || self.hide.is_some()
+    }
+
+    /// Its leisure ends: your hand comes first.
+    pub fn end_leisure(&mut self) {
+        self.goto = None;
+        self.hold_until = 0.0;
+        self.lounge_until = 0.0;
+    }
+
     /// Up to something that the pet's own wandering must leave alone.
     pub fn busy(&self, now: f64) -> bool {
         self.chase.is_some()
@@ -3212,6 +3232,25 @@ fn react_to(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Lounging, sitting by you or coming to you, it is busy for its own
+    /// wandering but free for your hug, and the hug ends that leisure.
+    #[test]
+    fn leisure_is_busy_for_wandering_but_free_for_a_hug() {
+        let now = 100.0;
+        let mut fun = Fun {
+            lounge_until: now + 30.0,
+            hold_until: now + 4.0,
+            goto: Some(500.0),
+            ..Fun::default()
+        };
+        assert!(fun.busy(now));
+        assert!(!fun.engaged());
+        fun.end_leisure();
+        assert!(!fun.busy(now));
+        fun.carry = Some(Thing::Bone);
+        assert!(fun.engaged());
+    }
 
     /// In a pond the one further back is raised first, so the nearer one
     /// covers it (Roger's twenty-first pass), whatever the pets' list
