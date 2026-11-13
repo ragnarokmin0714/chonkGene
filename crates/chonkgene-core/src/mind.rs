@@ -69,6 +69,10 @@ pub enum Line {
     SkitPlay,
     /// Starting its own little scene.
     Scene,
+    /// Asked into a pond that is not its own scene.
+    SceneWater,
+    /// Asked into a sunbeam that is not its own scene.
+    SceneSun,
     /// The fox casting its spell (定身術).
     SkitSpell,
     /// Held up in the air by the spell.
@@ -117,7 +121,7 @@ pub enum Line {
 }
 
 impl Line {
-    pub const ALL: [Line; 56] = [
+    pub const ALL: [Line; 58] = [
         Line::Hello,
         Line::WelcomeBack,
         Line::PokeSmall,
@@ -152,6 +156,8 @@ impl Line {
         Line::CatnipMeh,
         Line::SkitPlay,
         Line::Scene,
+        Line::SceneWater,
+        Line::SceneSun,
         Line::SkitSpell,
         Line::SkitFloated,
         Line::HideStart,
@@ -213,6 +219,8 @@ impl Line {
             Line::CatnipMeh => "catnip_meh",
             Line::SkitPlay => "skit_play",
             Line::Scene => "scene",
+            Line::SceneWater => "scene_water",
+            Line::SceneSun => "scene_sun",
             Line::SkitSpell => "skit_spell",
             Line::SkitFloated => "skit_floated",
             Line::HideStart => "hide_start",

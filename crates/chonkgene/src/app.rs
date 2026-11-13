@@ -329,6 +329,8 @@ enum Page {
     Sizes,
     /// How to hold it (抱抱…): 環抱, 舉高高, 搖搖抱.
     HugHow,
+    /// Its scenes (場景…), or why not now.
+    Scenes,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -370,6 +372,10 @@ enum Action {
     /// The page of whom it could go and hug, and one of them.
     HugWho,
     HugWith(u64),
+    /// The page of its scenes, one of them, and putting one away.
+    Scenes,
+    CallScene(Scene),
+    EndScene,
     /// The page of sizes for every pet at once, and one of them.
     Sizes,
     /// Percent.
@@ -956,11 +962,50 @@ impl App {
             TrayCommand::Ball => self.throw(el, Thing::Ball),
             TrayCommand::Frisbee => self.throw(el, Thing::Frisbee),
             TrayCommand::Catnip => self.catnip(el),
+            TrayCommand::Scene(i) => {
+                if let Some(&scene) = TRAY_SCENES.get(usize::from(i)) {
+                    self.tray_scene(el, scene);
+                }
+            }
             TrayCommand::Settings => self.open_settings(None),
             TrayCommand::Quit => {
                 self.save_now();
                 el.exit();
             }
+        }
+    }
+
+    /// The tray's 「場景」 (Roger's twentieth pass, item 3): put it away if
+    /// someone is in it, else ask whoever can and is free, nearest the
+    /// middle of the screen.
+    fn tray_scene(&mut self, el: &ActiveEventLoop, scene: Scene) {
+        if self.hidden || self.fullscreen {
+            return;
+        }
+        let now = Instant::now();
+        let world = self.world(now);
+        let pets: Vec<_> = self
+            .pets
+            .iter()
+            .map(|p| {
+                let own = p.fun.scene.filter(|r| !r.keep).map(|r| r.scene);
+                let free = play::not_now(p, scene, world.now).is_none();
+                (p.save.id, p.species, p.center_x(), own, free)
+            })
+            .collect();
+        let mid = self.area.x + self.area.w / 2.0;
+        match tray_pick(&pets, scene, mid) {
+            Some((pet, true)) => {
+                if let Some(p) = self.pets.iter_mut().find(|p| p.save.id == pet) {
+                    play::wind_down(&mut self.play, p, world.now);
+                    p.next = now;
+                }
+            }
+            Some((pet, false)) => {
+                diag!("tray: {scene:?} for pet {pet}");
+                self.call_scene(el, pet, scene, world, now);
+            }
+            None => diag!("tray: nobody free for {scene:?}"),
         }
     }
 
@@ -990,10 +1035,8 @@ impl App {
         );
     }
 
-    /// Put down a sprig of catnip under the cursor, or take it away (PLAN
-    /// §8 "Catnip").
     /// Start `scene` for `pet` now, if it is free (跳舞: a spotlight comes
-    /// down on it and it dances the 肉肉舞).
+    /// down on it and it dances the 肉肉舞; 施法… › 狐火).
     fn start_scene(
         &mut self,
         el: &ActiveEventLoop,
@@ -1001,6 +1044,38 @@ impl App {
         scene: Scene,
         world: World,
         now: Instant,
+    ) {
+        self.with_pet(el, pet, world, now, |play, p, ctx| {
+            if !(p.fun.busy(world.now) || p.mind.asleep() || p.in_skit) {
+                play::start_scene(play, p, ctx, scene);
+            }
+        });
+    }
+
+    /// Asked for `scene` from its 「場景…」 page or the tray (Roger's
+    /// twentieth pass, item 3).
+    fn call_scene(
+        &mut self,
+        el: &ActiveEventLoop,
+        pet: u64,
+        scene: Scene,
+        world: World,
+        now: Instant,
+    ) {
+        self.with_pet(el, pet, world, now, |play, p, ctx| {
+            let _ = play::call_scene(play, p, ctx, scene);
+        });
+    }
+
+    /// Run `f` on pet `pet` with the playground and a step's context,
+    /// then let the pet take its next step straight away.
+    fn with_pet(
+        &mut self,
+        el: &ActiveEventLoop,
+        pet: u64,
+        world: World,
+        now: Instant,
+        f: impl FnOnce(&mut play::Playground, &mut Pet, &mut Ctx),
     ) {
         let App {
             pets,
@@ -1019,9 +1094,6 @@ impl App {
         else {
             return;
         };
-        if p.fun.busy(world.now) || p.mind.asleep() || p.in_skit {
-            return;
-        }
         let mut ctx = Ctx {
             el,
             shared,
@@ -1035,10 +1107,12 @@ impl App {
             ui_scale: *ui_scale,
             world,
         };
-        play::start_scene(play, p, &mut ctx, scene);
+        f(play, p, &mut ctx);
         p.next = now;
     }
 
+    /// Put down a sprig of catnip under the cursor, or take it away (PLAN
+    /// §8 "Catnip").
     fn catnip(&mut self, el: &ActiveEventLoop) {
         let Some(shared) = &self.shared else {
             return;
@@ -1353,6 +1427,55 @@ impl App {
             actions.push(Action::Commands);
             return self.show_menu(el, i, items, actions, at);
         }
+        if page == Page::Scenes {
+            // Roger's twentieth pass, item 3: its scenes from the menu
+            // too; one already out can be put away; asleep or busy, the
+            // page says so.
+            let mut items = Vec::new();
+            let mut actions = Vec::new();
+            if let Some(run) = p.fun.scene {
+                // Its thing stays for the others when it only joined in
+                // (someone's pond, the spotlight put down from the menu).
+                let (label, icon) = match run.scene {
+                    Scene::Pond if run.keep => ("從水池上岸".to_string(), Icon::Pond),
+                    Scene::Dance if run.keep => ("不跳了".to_string(), Icon::Note),
+                    scene => (format!("把{}收起來", scene_thing(scene)), Icon::Hide),
+                };
+                items.push(item(&label, None, icon, false));
+                actions.push(Action::EndScene);
+            } else {
+                match play::not_now(p, Scene::Foxfire, world.now) {
+                    Some(play::NotNow::Asleep) => {
+                        items.push(item("牠睡著了，醒來再玩", None, Icon::Moon, false));
+                        actions.push(Action::Back);
+                    }
+                    Some(_) => {
+                        items.push(item("牠在忙，等等再叫牠", None, Icon::Paw, false));
+                        actions.push(Action::Back);
+                    }
+                    None => {
+                        let own = p.species.scenes();
+                        for (n, scene) in p.species.menu_scenes().into_iter().enumerate() {
+                            let up = play::not_now(p, scene, world.now).is_some();
+                            items.push(item(
+                                scene_label(scene),
+                                up.then(|| "在高處".to_string()),
+                                scene_icon(scene),
+                                n > 0 && n == own.len(),
+                            ));
+                            actions.push(if up {
+                                Action::Scenes
+                            } else {
+                                Action::CallScene(scene)
+                            });
+                        }
+                    }
+                }
+            }
+            items.push(item("返回", None, Icon::Back, true));
+            actions.push(Action::Back);
+            return self.show_menu(el, i, items, actions, at);
+        }
         if page == Page::Commands {
             let mut items: Vec<Item> = ["坐下", "趴下", "過來", "轉圈", "握手"]
                 .iter()
@@ -1429,6 +1552,8 @@ impl App {
             items.push(item("玩躲貓貓", None, Icon::Peek, false));
             actions.push(Action::Hide);
         }
+        items.push(item("場景…", None, Icon::Scenery, false));
+        actions.push(Action::Scenes);
         items.push(item("丟球給牠們", None, Icon::Ball, false));
         actions.push(Action::Throw(Thing::Ball));
         items.push(item("丟飛盤給牠們", None, Icon::Frisbee, false));
@@ -1570,6 +1695,7 @@ impl App {
             | Action::Back
             | Action::HugWho
             | Action::Sizes
+            | Action::Scenes
             | Action::HugHow => {
                 let page = match action {
                     Action::Commands => Page::Commands,
@@ -1577,6 +1703,7 @@ impl App {
                     Action::HugWho => Page::HugWho,
                     Action::Sizes => Page::Sizes,
                     Action::HugHow => Page::HugHow,
+                    Action::Scenes => Page::Scenes,
                     _ => Page::Main,
                 };
                 if let Some(i) = self.pets.iter().position(|p| p.save.id == pet) {
@@ -1600,42 +1727,20 @@ impl App {
                 return;
             }
             Action::Magic(Magic::Foxfire) => {
-                let App {
-                    pets,
-                    play,
-                    shared,
-                    lines,
-                    bubble_face,
-                    sounds,
-                    settings,
-                    area,
-                    terrain,
-                    ui_scale,
-                    ..
-                } = self;
-                let (Some(shared), Some(p)) =
-                    (shared.as_ref(), pets.iter_mut().find(|p| p.save.id == pet))
-                else {
-                    return;
-                };
-                if p.fun.busy(world.now) || p.mind.asleep() || p.in_skit {
-                    return;
+                self.start_scene(el, pet, Scene::Foxfire, world, now);
+                return;
+            }
+            Action::CallScene(scene) => {
+                if !(self.hidden || self.fullscreen) {
+                    self.call_scene(el, pet, scene, world, now);
                 }
-                let mut ctx = Ctx {
-                    el,
-                    shared,
-                    lines,
-                    face: bubble_face,
-                    sounds,
-                    sound_on: settings.sound,
-                    volume: f32::from(settings.volume) / 100.0,
-                    area: *area,
-                    terrain,
-                    ui_scale: *ui_scale,
-                    world,
-                };
-                play::start_scene(play, p, &mut ctx, Scene::Foxfire);
-                p.next = now;
+                return;
+            }
+            Action::EndScene => {
+                if let Some(p) = self.pets.iter_mut().find(|p| p.save.id == pet) {
+                    play::wind_down(&mut self.play, p, world.now);
+                    p.next = now;
+                }
                 return;
             }
             Action::HugWith(_) | Action::Magic(Magic::Spell(_)) => {
@@ -1888,6 +1993,77 @@ fn pending_save(dirty: bool, save_at: Instant) -> Option<Instant> {
 }
 
 /// The pets as the skit director sees them.
+/// A scene's row in the 「場景…」 page and the tray (PLAN §1.11: a plain
+/// label).
+fn scene_label(scene: Scene) -> &'static str {
+    match scene {
+        Scene::Pond => "玩水池",
+        Scene::Sunbeam => "曬太陽",
+        Scene::Butterfly => "追蝴蝶",
+        Scene::Bone => "啃骨頭",
+        Scene::Seeds => "啄種子",
+        Scene::Perch => "飛上樹枝",
+        Scene::Foxfire => "狐火",
+        Scene::Dance => "跳舞",
+    }
+}
+
+/// What 「把…收起來」 puts away.
+fn scene_thing(scene: Scene) -> &'static str {
+    match scene {
+        Scene::Pond => "水池",
+        Scene::Sunbeam => "陽光",
+        Scene::Butterfly => "蝴蝶",
+        Scene::Bone => "骨頭",
+        Scene::Seeds => "種子",
+        Scene::Perch => "樹枝",
+        Scene::Foxfire => "狐火",
+        Scene::Dance => "聚光燈",
+    }
+}
+
+fn scene_icon(scene: Scene) -> Icon {
+    match scene {
+        Scene::Pond => Icon::Pond,
+        Scene::Sunbeam => Icon::Sun,
+        Scene::Butterfly => Icon::Butterfly,
+        Scene::Bone => Icon::Snack,
+        Scene::Seeds => Icon::Seeds,
+        Scene::Perch => Icon::Branch,
+        Scene::Foxfire => Icon::Flame,
+        Scene::Dance => Icon::Note,
+    }
+}
+
+/// The tray's 「場景」 submenu, in the order of its labels
+/// ([`chonkgene_platform::tray::SCENES`]).
+const TRAY_SCENES: [Scene; 7] = [
+    Scene::Pond,
+    Scene::Sunbeam,
+    Scene::Butterfly,
+    Scene::Bone,
+    Scene::Seeds,
+    Scene::Perch,
+    Scene::Foxfire,
+];
+
+/// Whom the tray asks into `scene`: the pet already in it (to put it
+/// away), or else of those that can be asked for it and are free now,
+/// the one nearest the middle of the screen (`mid`); none if nobody can.
+fn tray_pick(
+    pets: &[(u64, Species, f32, Option<Scene>, bool)],
+    scene: Scene,
+    mid: f32,
+) -> Option<(u64, bool)> {
+    if let Some(&(id, ..)) = pets.iter().find(|p| p.3 == Some(scene)) {
+        return Some((id, true));
+    }
+    pets.iter()
+        .filter(|p| p.4 && p.1.can_call(scene))
+        .min_by(|a, b| (a.2 - mid).abs().total_cmp(&(b.2 - mid).abs()))
+        .map(|p| (p.0, false))
+}
+
 fn actors(pets: &[Pet], now: f64) -> Vec<Actor> {
     pets.iter()
         .map(|p| Actor {
@@ -3852,6 +4028,14 @@ impl ApplicationHandler<UserEvent> for App {
             } {
                 self.act(el, pet, Action::HugAs(hold));
                 diag!("CHONKGENE_STAGE={}: held the first pet so", self.stage_test);
+            } else if self.stage_test.starts_with("tray-pond") {
+                // The tray's 場景 › 玩水池, then again 8 s later: put away.
+                self.tray_scene(el, Scene::Pond);
+                diag!("CHONKGENE_STAGE={}: the tray's 玩水池", self.stage_test);
+                if self.stage_test == "tray-pond" {
+                    self.stage_test = "tray-pond-again".into();
+                    self.stage_at = Some(t + 8.0);
+                }
             } else if self.stage_test == "pond" {
                 let duck = self.pets.iter().find(|p| p.species == Species::Duck);
                 if let Some(duck) = duck.map(|p| p.save.id) {
@@ -3907,6 +4091,42 @@ impl ApplicationHandler<UserEvent> for App {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_trays_scenes_read_as_the_pet_menus_and_cover_every_species() {
+        for (label, scene) in chonkgene_platform::tray::SCENES.iter().zip(TRAY_SCENES) {
+            assert_eq!(*label, scene_label(scene));
+        }
+        for s in Species::ALL {
+            for scene in s.menu_scenes() {
+                assert!(TRAY_SCENES.contains(&scene), "{s:?} {scene:?}");
+            }
+        }
+        // A label fits its row beside the icon (at most nine characters).
+        for scene in TRAY_SCENES {
+            assert!(format!("把{}收起來", scene_thing(scene)).chars().count() <= 9);
+        }
+    }
+
+    #[test]
+    fn the_tray_puts_a_scene_away_or_asks_the_free_pet_nearest_the_middle() {
+        let pets = [
+            (1, Species::Duck, 100.0, None, true),
+            (2, Species::Shiba, 900.0, None, true),
+            (3, Species::Munchkin, 1000.0, None, false),
+            (4, Species::Fold, 1500.0, None, true),
+        ];
+        // Anyone for a pond: the free one nearest the middle.
+        assert_eq!(tray_pick(&pets, Scene::Pond, 1000.0), Some((2, false)));
+        // Only cats chase butterflies; the busy one is passed over.
+        assert_eq!(tray_pick(&pets, Scene::Butterfly, 1000.0), Some((4, false)));
+        // Nobody perches but the owl.
+        assert_eq!(tray_pick(&pets, Scene::Perch, 1000.0), None);
+        // One already in it: put away.
+        let mut out = pets;
+        out[0].3 = Some(Scene::Pond);
+        assert_eq!(tray_pick(&out, Scene::Pond, 1000.0), Some((1, true)));
+    }
 
     /// A pet the director keeps sending a walk is still stepped at its
     /// own rate (招喚術: the called pets never moved), and a command never

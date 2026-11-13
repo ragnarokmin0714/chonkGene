@@ -313,7 +313,7 @@ pub(super) struct Run {
     spot: f32,
     /// Its thing is shared (a spotlight put down from the menu): it stays
     /// when this pet is done.
-    keep: bool,
+    pub keep: bool,
     /// Beats counted so far (the 肉肉舞).
     count: u32,
 }
@@ -2261,11 +2261,105 @@ pub(super) fn start_scene(
         count: 0,
     });
     println!("{}: starts its scene, {scene:?}", p.save.name);
-    // A dance says its own line once the music starts.
-    if scene != Scene::Dance {
-        p.say(ctx, Line::Scene);
+    // A dance says its own line once the music starts; a pond or a
+    // sunbeam that is not its own scene has lines of its own.
+    match scene {
+        Scene::Dance => {}
+        _ if p.species.scenes().contains(&scene) => p.say(ctx, Line::Scene),
+        Scene::Pond => p.say(ctx, Line::SceneWater),
+        Scene::Sunbeam => p.say(ctx, Line::SceneSun),
+        _ => p.say(ctx, Line::Scene),
     }
     true
+}
+
+/// Why a pet cannot be asked into a scene just now (its menu's 「場景…」
+/// says so rather than doing nothing).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum NotNow {
+    Asleep,
+    /// Held, in a skit, chasing something, doing as it was asked, …
+    Busy,
+    /// Up on a window: no floor for a thing put down beside it.
+    Up,
+}
+
+/// Whether `p` can be asked into `scene` now (`None`: it can).
+pub(super) fn not_now(p: &Pet, scene: Scene, now: f64) -> Option<NotNow> {
+    if p.mind.asleep() {
+        Some(NotNow::Asleep)
+    } else if p.in_skit
+        || p.act.is_some()
+        || p.press.is_some()
+        || p.playing
+        || p.fun.busy(now)
+        || !matches!(p.body.motion, Motion::Idle | Motion::Walk)
+    {
+        Some(NotNow::Busy)
+    } else if scene.on_floor() && p.body.on_window() {
+        Some(NotNow::Up)
+    } else {
+        None
+    }
+}
+
+/// Asked from the menu or the tray: start `scene` for `p` if it can,
+/// and put off the next scene of its own.
+pub(super) fn call_scene(
+    ground: &mut Playground,
+    p: &mut Pet,
+    ctx: &mut Ctx,
+    scene: Scene,
+) -> Result<(), NotNow> {
+    let now = ctx.world.now;
+    if let Some(why) = not_now(p, scene, now) {
+        diag!("{}: cannot start {scene:?} now ({why:?})", p.save.name);
+        return Err(why);
+    }
+    if start_scene(ground, p, ctx, scene) {
+        p.fun.next_scene = now + SCENE_GAP * (1.0 + f64::from(ground.roll()));
+    }
+    Ok(())
+}
+
+/// 「收起來」: the scene it is in ends now, as it would at its time (out
+/// of the water with a shake, the butterfly off, back down from the
+/// branch); not yet at its thing, the thing is simply taken away.
+pub(super) fn wind_down(ground: &mut Playground, p: &mut Pet, now: f64) {
+    let Some(run) = p.fun.scene.as_mut() else {
+        return;
+    };
+    diag!(
+        "{}: puts its {:?} away (phase {}, joined {})",
+        p.save.name,
+        run.scene,
+        run.phase,
+        run.keep
+    );
+    if run.scene == Scene::Dance && run.keep {
+        // In a spotlight put down from the menu, which stays: the dance
+        // stops at its next step (its first beat does not wait for time).
+        run.until = run.until.min(now);
+        if run.phase == 1 {
+            run.phase = 2;
+            run.since = now;
+        }
+        return;
+    }
+    let not_there = run.phase == 0 && !matches!(run.scene, Scene::Butterfly | Scene::Foxfire);
+    if run.scene == Scene::Dance || not_there {
+        if let Some(id) = run.prop.filter(|_| !run.keep) {
+            // Its scene sees the thing gone and ends itself.
+            ground.remove(id);
+        } else {
+            p.fun.scene = None;
+            p.fun.carry = None;
+            p.fun.hold_until = 0.0;
+            p.stop();
+        }
+        return;
+    }
+    run.until = run.until.min(now);
 }
 
 /// How much of a pet's window its body stands on, each side of its
@@ -2503,6 +2597,7 @@ fn scene(ground: &mut Playground, p: &mut Pet, ctx: &mut Ctx) {
                 if p.walk_to(out, 1.0, ctx.terrain) == Heading::Going {
                     return;
                 }
+                diag!("{}: out of the pond", p.save.name);
                 p.try_gesture(Act::Shake);
                 p.fun.effect(Fx::Splash, now);
             }
@@ -2634,7 +2729,13 @@ fn water_fight(ground: &mut Playground, pets: &mut [Pet], ctx: &mut Ctx) {
         .enumerate()
         .filter_map(|(i, p)| {
             let pond = p.fun.pond.now?;
-            let free = !p.mind.asleep() && p.press.is_none() && p.act.is_none() && !p.in_skit;
+            // Not one on its way out (its time up, or put away).
+            let leaving = p
+                .fun
+                .scene
+                .is_some_and(|r| r.scene == Scene::Pond && r.phase >= 2);
+            let free =
+                !leaving && !p.mind.asleep() && p.press.is_none() && p.act.is_none() && !p.in_skit;
             free.then_some((i, pond))
         })
         .collect();

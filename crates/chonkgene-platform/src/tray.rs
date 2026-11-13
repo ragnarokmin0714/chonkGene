@@ -15,6 +15,9 @@ pub enum TrayCommand {
     Catnip,
     /// Every pet this size at once, percent (大家的大小).
     Size(u16),
+    /// A scene, by its place in [`SCENES`]: called up for a pet that can,
+    /// or put away if one is in it.
+    Scene(u8),
     Settings,
     Quit,
 }
@@ -34,8 +37,41 @@ const LABELS: [(&str, TrayCommand); 7] = [
 /// (the pet menu and settings offer the same).
 const SIZE_MENU: &str = "大家的大小";
 pub const SIZES: [(&str, u16); 4] = [("小", 70), ("中", 100), ("大", 130), ("特大", 160)];
-/// The submenu goes before this entry of [`LABELS`] (設定…).
-const SIZES_BEFORE: usize = 5;
+/// The 場景 submenu, before 大家的大小: the pet menu's 「場景…」 rows (the
+/// app maps each place to its scene).
+const SCENE_MENU: &str = "場景";
+pub const SCENES: [&str; 7] = [
+    "玩水池",
+    "曬太陽",
+    "追蝴蝶",
+    "啃骨頭",
+    "啄種子",
+    "飛上樹枝",
+    "狐火",
+];
+/// The submenus go before this entry of [`LABELS`] (設定…).
+const SUBMENUS_BEFORE: usize = 5;
+
+/// The submenus, in order: title and entries.
+fn submenus() -> [(&'static str, Vec<(&'static str, TrayCommand)>); 2] {
+    [
+        (
+            SCENE_MENU,
+            SCENES
+                .iter()
+                .enumerate()
+                .map(|(i, &label)| (label, TrayCommand::Scene(i as u8)))
+                .collect(),
+        ),
+        (
+            SIZE_MENU,
+            SIZES
+                .iter()
+                .map(|&(label, pct)| (label, TrayCommand::Size(pct)))
+                .collect(),
+        ),
+    ]
+}
 
 /// Keeps the tray icon alive; dropping it removes the icon.
 pub struct Tray {
@@ -62,7 +98,7 @@ mod imp {
     use tray_icon::menu::{Menu, MenuEvent, MenuItem, PredefinedMenuItem, Submenu};
     use tray_icon::{Icon, MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 
-    use super::{LABELS, SIZE_MENU, SIZES, SIZES_BEFORE, TOOLTIP, Tray, TrayCommand};
+    use super::{LABELS, SUBMENUS_BEFORE, TOOLTIP, Tray, TrayCommand, submenus};
 
     pub fn create(
         icons: Vec<(Vec<u8>, u32)>,
@@ -71,14 +107,16 @@ mod imp {
         let menu = Menu::new();
         let mut ids = Vec::new();
         for (i, (label, command)) in LABELS.iter().enumerate() {
-            if i == SIZES_BEFORE {
-                let sub = Submenu::new(SIZE_MENU, true);
-                for (label, pct) in SIZES {
-                    let item = MenuItem::new(label, true, None);
-                    ids.push((item.id().clone(), TrayCommand::Size(pct)));
-                    sub.append(&item).map_err(|e| e.to_string())?;
+            if i == SUBMENUS_BEFORE {
+                for (title, entries) in submenus() {
+                    let sub = Submenu::new(title, true);
+                    for (label, command) in entries {
+                        let item = MenuItem::new(label, true, None);
+                        ids.push((item.id().clone(), command));
+                        sub.append(&item).map_err(|e| e.to_string())?;
+                    }
+                    menu.append(&sub).map_err(|e| e.to_string())?;
                 }
-                menu.append(&sub).map_err(|e| e.to_string())?;
             }
             if i == LABELS.len() - 1 {
                 menu.append(&PredefinedMenuItem::separator())
@@ -144,28 +182,28 @@ impl ksni::Tray for Sni {
     fn menu(&self) -> Vec<ksni::MenuItem<Self>> {
         let mut items = Vec::new();
         for (i, (label, command)) in LABELS.iter().enumerate() {
-            if i == SIZES_BEFORE {
-                let submenu = SIZES
-                    .iter()
-                    .map(|&(label, pct)| {
-                        ksni::menu::StandardItem {
-                            label: label.into(),
-                            activate: Box::new(move |this: &mut Self| {
-                                (this.on)(TrayCommand::Size(pct))
-                            }),
+            if i == SUBMENUS_BEFORE {
+                for (title, entries) in submenus() {
+                    let submenu = entries
+                        .into_iter()
+                        .map(|(label, command)| {
+                            ksni::menu::StandardItem {
+                                label: label.into(),
+                                activate: Box::new(move |this: &mut Self| (this.on)(command)),
+                                ..Default::default()
+                            }
+                            .into()
+                        })
+                        .collect();
+                    items.push(
+                        ksni::menu::SubMenu {
+                            label: title.into(),
+                            submenu,
                             ..Default::default()
                         }
-                        .into()
-                    })
-                    .collect();
-                items.push(
-                    ksni::menu::SubMenu {
-                        label: SIZE_MENU.into(),
-                        submenu,
-                        ..Default::default()
-                    }
-                    .into(),
-                );
+                        .into(),
+                    );
+                }
             }
             if i == LABELS.len() - 1 {
                 items.push(ksni::MenuItem::Separator);

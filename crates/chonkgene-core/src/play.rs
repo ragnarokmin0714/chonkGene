@@ -623,6 +623,20 @@ pub enum Scene {
 }
 
 impl Scene {
+    /// Scenes any pet can be asked into from its menu or the tray (PLAN
+    /// §8, Roger's twentieth pass, item 3): a pond to get into, a
+    /// sunbeam to lie in.
+    pub const SHARED: [Scene; 2] = [Scene::Pond, Scene::Sunbeam];
+
+    /// Its thing is put down on the floor beside the pet, so it needs a
+    /// floor under it (not a window's top).
+    pub fn on_floor(self) -> bool {
+        matches!(
+            self,
+            Scene::Pond | Scene::Sunbeam | Scene::Seeds | Scene::Bone
+        )
+    }
+
     /// How long it plays, seconds.
     pub fn secs(self) -> f64 {
         match self {
@@ -667,6 +681,21 @@ impl Species {
             Species::Duck => &[Scene::Pond],
             Species::Owl => &[Scene::Perch],
         }
+    }
+
+    /// The scenes it can be asked for (its menu's 「場景…」, the tray):
+    /// its own first, then the shared ones it has not got.
+    pub fn menu_scenes(self) -> Vec<Scene> {
+        let own = self.scenes();
+        own.iter()
+            .copied()
+            .chain(Scene::SHARED.into_iter().filter(|s| !own.contains(s)))
+            .collect()
+    }
+
+    /// It can be asked for `scene`.
+    pub fn can_call(self, scene: Scene) -> bool {
+        self.scenes().contains(&scene) || Scene::SHARED.contains(&scene)
     }
 
     /// Cats care for catnip, mostly: about one in three does not (PLAN §8
@@ -1049,6 +1078,21 @@ mod tests {
         for s in Species::ALL {
             assert!(!s.scenes().is_empty(), "{s:?}");
         }
+    }
+
+    #[test]
+    fn anyone_can_be_asked_into_a_pond_or_a_sunbeam_and_its_own_come_first() {
+        for s in Species::ALL {
+            let menu = s.menu_scenes();
+            assert_eq!(&menu[..s.scenes().len()], s.scenes(), "{s:?}");
+            for shared in Scene::SHARED {
+                assert_eq!(menu.iter().filter(|&&m| m == shared).count(), 1, "{s:?}");
+            }
+            assert!(menu.iter().all(|&m| s.can_call(m)), "{s:?}");
+            assert!(!menu.contains(&Scene::Dance), "{s:?}");
+        }
+        assert_eq!(Species::Duck.menu_scenes(), [Scene::Pond, Scene::Sunbeam]);
+        assert!(!Species::Shiba.can_call(Scene::Perch));
     }
 
     #[test]
