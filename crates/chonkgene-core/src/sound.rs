@@ -1188,13 +1188,38 @@ pub fn synth(species: Species, sound: Sound, take: u32) -> Vec<i16> {
             1.6
         }
         Sound::Pant => {
-            // Hah-hah-hah: quick breaths, out louder than in.
-            for k in 0..8 {
-                let at = 0.155 * k as f32;
+            // Hah-hah-hah, mouth open and tongue out: only breath, but shaped
+            // by the open mouth (soft formants, no voice): out a warm "hah",
+            // in a quieter, thinner "hih", each swelling in and fading out.
+            // A band of plain noise, as before 2026-11-16, sounded like sand
+            // being swept (Roger): its weight sat near 2.5 kHz, a fifth of
+            // it above 3 kHz; this one's sits near 1.3 kHz. Voice mixed in
+            // squeaked or grated.
+            let mut at = 0.0;
+            for k in 0..9 {
                 let out = k % 2 == 0;
-                let hz = if out { 1500.0 } else { 1100.0 };
-                let g = if out { 1.0 } else { 0.55 };
-                b.noise(at, 0.12, hz, 1.2, &|t| ease(t / 0.2) * (1.0 - t), g);
+                let wob = 1.0 + 0.05 * b.rng.s();
+                let (secs, f, g) = if out {
+                    (0.13, [560.0, 1150.0, 2300.0], 1.0)
+                } else {
+                    (0.1, [700.0, 1700.0, 2900.0], 0.4)
+                };
+                let f1 = [(0.0, f[0] * wob), (1.0, f[0] * 0.85 * wob)];
+                let f2 = [(0.0, f[1] * wob)];
+                let f3 = [(0.0, f[2])];
+                b.voice(&Syllable {
+                    at,
+                    secs,
+                    formants: [&f1, &f2, &f3],
+                    gains: [1.0, 0.45, 0.12],
+                    q: [2.2, 3.0, 3.5],
+                    breath: &[(0.0, 1.0)],
+                    attack: secs * 0.45,
+                    release: secs * 0.5,
+                    gain: g,
+                    ..Syllable::default()
+                });
+                at += secs + if out { 0.025 } else { 0.045 };
             }
             1.25
         }

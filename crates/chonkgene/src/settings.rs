@@ -142,12 +142,12 @@ fn image(pm: &tiny_skia::Pixmap) -> Image {
     Image::from_rgba8_premultiplied(buf)
 }
 
-/// A small sitting portrait for the adoption list, rendered now: six of
-/// them take well under 0.1 s on all cores.
-fn portrait(model: &Model) -> Image {
+/// A small sitting portrait for the adoption list, in the coat at `coat`,
+/// rendered now: six of them take well under 0.1 s on all cores.
+fn portrait(model: &Model, coat: usize) -> Image {
     let threads = std::thread::available_parallelism().map_or(1, |n| n.get());
     let variant = Variant {
-        coat: 0,
+        coat,
         chonk: 0.33,
         scale: 0.6,
     };
@@ -156,6 +156,19 @@ fn portrait(model: &Model) -> Image {
         .and_then(|size| tiny_skia::Pixmap::from_vec(s.rgba, size))
         .map(|pm| image(&pm))
         .unwrap_or_default()
+}
+
+/// Shows species `s` on its adoption card in the coat at `coat`.
+fn set_portrait(ui: &SettingsWindow, st: &State, s: Species, coat: usize) {
+    use slint::Model as _;
+    let rows = ui.get_species();
+    let Some(i) = Species::ALL.iter().position(|&k| k == s) else {
+        return;
+    };
+    if let Some(mut row) = rows.row_data(i) {
+        row.portrait = portrait(&st.kinds[&s].model, coat);
+        rows.set_row_data(i, row);
+    }
 }
 
 struct Kind {
@@ -463,7 +476,7 @@ fn setup(
             .into_iter()
             .map(|s| {
                 let kind = &st.kinds[&s];
-                let portrait = portrait(&kind.model);
+                let portrait = portrait(&kind.model, 0);
                 SpeciesRow {
                     id: s.id().into(),
                     label: s.label().into(),
@@ -501,11 +514,18 @@ fn setup(
     on!(on_start_adopting, |ui, st| {
         ui.set_adopting(true);
         ui.set_adopt_species(SharedString::new());
-        st.adopt_species = None;
+        if let Some(old) = st.adopt_species.take() {
+            set_portrait(&ui, st, old, 0);
+        }
     });
     on!(on_pick_adopt_species, |ui, st, id: SharedString| {
         if let Some(s) = Species::from_id(&id) {
-            st.adopt_species = Some(s);
+            // The card left shows its first coat again.
+            if let Some(old) = st.adopt_species.replace(s)
+                && old != s
+            {
+                set_portrait(&ui, st, old, 0);
+            }
             let coats = st.coats(s);
             st.adopt_coat = coats.first().map(|c| c.0.clone()).unwrap_or_default();
             ui.set_adopt_coats(coat_rows(coats));
@@ -515,6 +535,10 @@ fn setup(
     });
     on!(on_pick_adopt_coat, |ui, st, id: SharedString| {
         st.adopt_coat = id.to_string();
+        if let Some(s) = st.adopt_species {
+            let coat = st.kinds[&s].model.coat(&id).unwrap_or(0);
+            set_portrait(&ui, st, s, coat);
+        }
         ui.set_adopt_coat(id);
     });
     on!(on_adopt, |ui, st| {
@@ -958,6 +982,10 @@ mod tests {
             (Species::Shiba, "red"),
             (Species::Fold, "bluegrey"),
             (Species::Duck, "white"),
+            (Species::Munchkin, "orange"),
+            (Species::Owl, "brown"),
+            (Species::Chick, "yellow"),
+            (Species::Fox, "white"),
         ]
         .into_iter()
         .enumerate()
@@ -967,7 +995,7 @@ mod tests {
             p.xp = 60;
             pets.pets.push(p);
         }
-        pets.next_id = 4;
+        pets.next_id = 8;
         store::save(&data.pets(), &pets).unwrap();
 
         let ui = SettingsWindow::new().unwrap();
@@ -978,14 +1006,18 @@ mod tests {
         for (name, tab, adopting) in [
             ("pets", 0, false),
             ("adopt", 0, true),
+            ("adopt-fox", 0, true),
             ("play", 1, false),
             ("quiet", 2, false),
             ("general", 3, false),
         ] {
             ui.set_tab(tab);
             ui.set_adopting(adopting);
-            if adopting {
+            if name == "adopt" {
                 ui.invoke_pick_adopt_species("chick".into());
+            } else if name == "adopt-fox" {
+                ui.invoke_pick_adopt_species("fox".into());
+                ui.invoke_pick_adopt_coat("night".into());
             }
             slint::platform::update_timers_and_animations();
             std::thread::sleep(Duration::from_millis(600));

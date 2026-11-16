@@ -431,119 +431,126 @@ export component SettingsWindow inherits Window {
                 if root.tab == 0: VerticalLayout {
                     spacing: 16px;
                     alignment: start;
-                    Flickable {
-                        height: 48px;
-                        content-width: chips.preferred-width;
-                        chips := HorizontalLayout {
-                            spacing: 10px;
-                            alignment: start;
-                            for p in root.pets: Rectangle {
-                                height: 44px;
-                                width: chip-text.preferred-width + 58px;
-                                border-radius: 22px;
-                                background: Theme.card;
-                                border-width: 2px;
-                                border-color: !root.adopting && p.id == root.selected-pet ? Theme.accent : Theme.line;
-                                opacity: p.resting ? 0.6 : 1.0;
-                                Rectangle {
-                                    x: 8px;
-                                    width: 28px;
-                                    height: 28px;
-                                    border-radius: 14px;
-                                    background: p.dot;
-                                    Rectangle { y: 20px; height: 8px; border-radius: 4px; background: p.ring; }
-                                }
-                                chip-text := Text {
-                                    x: 44px;
-                                    text: p.name;
-                                    color: Theme.ink;
-                                    font-size: 15px;
-                                    vertical-alignment: center;
-                                }
-                                TouchArea {
-                                    mouse-cursor: pointer;
-                                    clicked => { root.select-pet(p.id); }
-                                }
-                            }
+                    // Roger's twenty-second pass: the adopt button sat at the
+                    // end of a sideways-scrolling row of names, out of sight
+                    // with the seven pets a new desk starts with. Now it has
+                    // its own place on top, and the names wrap onto rows.
+                    HorizontalLayout {
+                        spacing: 12px;
+                        Text {
+                            text: root.adopting ? "領養新寵物" : "我的寵物";
+                            color: Theme.ink;
+                            font-size: 20px;
+                            vertical-alignment: center;
+                            horizontal-stretch: 1;
+                        }
+                        if root.adopting && root.pets.length > 0: CuteButton {
+                            text: "算了";
+                            primary: false;
+                            clicked => { root.select-pet(root.selected-pet); }
+                        }
+                        if root.adopting: CuteButton {
+                            text: root.adopt-species == "" ? "先點一隻吧" : "帶牠回家";
+                            enabled: root.adopt-species != "";
+                            clicked => { root.adopt(); }
+                        }
+                        if !root.adopting: CuteButton {
+                            text: "＋ 領養新寵物";
+                            clicked => { root.start-adopting(); }
+                        }
+                    }
+
+                    if !root.adopting: FlexboxLayout {
+                        spacing: 10px;
+                        for p in root.pets: Rectangle {
+                            height: 44px;
+                            width: chip-text.preferred-width + 58px;
+                            border-radius: 22px;
+                            background: Theme.card;
+                            border-width: 2px;
+                            border-color: p.id == root.selected-pet ? Theme.accent : Theme.line;
+                            opacity: p.resting ? 0.6 : 1.0;
                             Rectangle {
-                                height: 44px;
-                                width: add-text.preferred-width + 36px;
-                                border-radius: 22px;
-                                border-width: 2px;
-                                border-color: root.adopting ? Theme.accent : Theme.line;
-                                add-text := Text {
-                                    text: "＋ 領養新寵物";
-                                    color: Theme.muted;
-                                    font-size: 15px;
-                                    horizontal-alignment: center;
-                                    vertical-alignment: center;
-                                }
-                                TouchArea {
-                                    mouse-cursor: pointer;
-                                    clicked => { root.start-adopting(); }
-                                }
+                                x: 8px;
+                                width: 28px;
+                                height: 28px;
+                                border-radius: 14px;
+                                background: p.dot;
+                                Rectangle { y: 20px; height: 8px; border-radius: 4px; background: p.ring; }
+                            }
+                            chip-text := Text {
+                                x: 44px;
+                                text: p.name;
+                                color: Theme.ink;
+                                font-size: 15px;
+                                vertical-alignment: center;
+                            }
+                            TouchArea {
+                                mouse-cursor: pointer;
+                                clicked => { root.select-pet(p.id); }
                             }
                         }
                     }
 
-                    // Adoption.
+                    // Adoption: four small cards a row, so all seven show at
+                    // once with the button above; the coats are picked on the
+                    // card itself, which then shows the pet in that coat.
                     if root.adopting: VerticalLayout {
-                        spacing: 14px;
-                        Text { text: "挑一隻帶回你的桌面吧"; color: Theme.ink; font-size: 22px; }
+                        spacing: 12px;
+                        Hint { text: "挑一隻帶回你的桌面吧，點牠還能選毛色。"; }
                         GridLayout {
-                            spacing: 12px;
+                            spacing: 10px;
                             for s[i] in root.species: Rectangle {
-                                col: mod(i, 3);
-                                row: floor(i / 3);
-                                height: 196px;
-                                border-radius: 22px;
+                                col: mod(i, 4);
+                                row: floor(i / 4);
+                                height: 194px;
+                                border-radius: 20px;
                                 background: Theme.card;
                                 border-width: 2.5px;
                                 border-color: s.id == root.adopt-species ? Theme.accent : Theme.line;
-                                VerticalLayout {
-                                    padding: 8px;
-                                    spacing: 6px;
-                                    Rectangle {
-                                        height: 120px;
-                                        border-radius: 16px;
-                                        background: s.tint;
-                                        Image { source: s.portrait; height: 112px; image-fit: contain; }
-                                    }
-                                    Text { text: s.label; color: Theme.ink; font-size: 17px; horizontal-alignment: center; }
-                                    Text { text: s.blurb; color: Theme.muted; font-size: 12px; horizontal-alignment: center; wrap: word-wrap; }
-                                }
                                 TouchArea {
                                     mouse-cursor: pointer;
                                     clicked => { root.pick-adopt-species(s.id); }
                                 }
-                            }
-                        }
-                        if root.adopt-species != "": HorizontalLayout {
-                            spacing: 10px;
-                            alignment: start;
-                            Label { text: "毛色"; }
-                            for c in root.adopt-coats: Rectangle {
-                                width: 40px;
-                                height: 40px;
-                                border-radius: 20px;
-                                border-width: c.id == root.adopt-coat ? 3px : 0px;
-                                border-color: Theme.accent;
-                                Rectangle {
-                                    x: 5px; y: 5px; width: 30px; height: 30px; border-radius: 15px; background: c.main; border-width: 1px; border-color: #00000018;
-                                    Rectangle { y: 22px; height: 8px; border-radius: 4px; background: c.light; }
+                                VerticalLayout {
+                                    padding: 7px;
+                                    spacing: 4px;
+                                    alignment: start;
+                                    Rectangle {
+                                        height: 104px;
+                                        border-radius: 14px;
+                                        background: s.tint;
+                                        Image { source: s.portrait; height: 98px; image-fit: contain; }
+                                    }
+                                    Text { text: s.label; color: Theme.ink; font-size: 15px; horizontal-alignment: center; }
+                                    if s.id != root.adopt-species: Text {
+                                        text: s.blurb;
+                                        color: Theme.muted;
+                                        font-size: 11px;
+                                        horizontal-alignment: center;
+                                        wrap: word-wrap;
+                                    }
+                                    if s.id == root.adopt-species: HorizontalLayout {
+                                        height: 32px;
+                                        spacing: 6px;
+                                        alignment: center;
+                                        for c in root.adopt-coats: Rectangle {
+                                            width: 30px;
+                                            height: 30px;
+                                            border-radius: 15px;
+                                            border-width: c.id == root.adopt-coat ? 2.5px : 0px;
+                                            border-color: Theme.accent;
+                                            Rectangle {
+                                                x: 4px; y: 4px; width: 22px; height: 22px; border-radius: 11px; background: c.main; border-width: 1px; border-color: #00000018;
+                                                Rectangle { y: 16px; height: 6px; border-radius: 3px; background: c.light; }
+                                            }
+                                            TouchArea {
+                                                mouse-cursor: pointer;
+                                                clicked => { root.pick-adopt-coat(c.id); }
+                                            }
+                                        }
+                                    }
                                 }
-                                TouchArea {
-                                    mouse-cursor: pointer;
-                                    clicked => { root.pick-adopt-coat(c.id); }
-                                }
-                            }
-                        }
-                        HorizontalLayout {
-                            alignment: end;
-                            CuteButton {
-                                text: root.adopt-species == "" ? "先選一隻吧" : "帶牠回家";
-                                enabled: root.adopt-species != "";
-                                clicked => { root.adopt(); }
                             }
                         }
                     }
