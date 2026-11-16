@@ -475,6 +475,10 @@ impl MeshRenderer {
                 _ => look,
             };
         }
+        // Buried in the sand to its neck: grinning at you, tongue out.
+        if params.grin && expression != Expression::Asleep {
+            look = if dog { Look::Pant } else { Look::Happy };
+        }
         // Catnip: rolled over, eyes glazed.
         if params.act == Act::Bliss {
             look = Look::Half;

@@ -125,11 +125,16 @@ pub fn canvas(thing: Thing, scale: f32) -> ((u32, u32), (f32, f32)) {
         Thing::Pond => SPRAY_ROOM,
         _ => MARGIN,
     };
+    let below = if thing == Thing::Beach {
+        BEACH_BELOW
+    } else {
+        MARGIN
+    };
     let size = (
         ((w + 2.0 * MARGIN) * scale).ceil() as u32,
-        ((h + top + MARGIN) * scale).ceil() as u32,
+        ((h + top + below) * scale).ceil() as u32,
     );
-    let foot = (size.0 as f32 / 2.0, size.1 as f32 - MARGIN * scale);
+    let foot = (size.0 as f32 / 2.0, size.1 as f32 - below * scale);
     (size, foot)
 }
 
@@ -153,10 +158,21 @@ pub struct Look {
     pub turn: f32,
     /// Held by its rim in a mouth: a frisbee shows more of its face.
     pub held: bool,
-    /// A pond: water thrown in a water fight, from and to (x from the
-    /// middle of the pond's bottom, pixels) and how far it has flown (0 …
-    /// 1).
-    pub sprays: [Option<(f32, f32, f32)>; 4],
+    /// A pond: water thrown in a water fight (see [`Spray`]).
+    pub sprays: [Option<Spray>; 4],
+}
+
+/// Water thrown in a water fight, in a pond's window: scooped from the
+/// water at `from.0` (x from the middle of the pond's bottom, pixels), or
+/// spat in a jet from `from` (`spout`: a bill or a mouth, x and y from the
+/// pond's bottom middle), landing on the pet at `to`; `p` is how far it
+/// has flown (0 … 1).
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct Spray {
+    pub from: (f32, f32),
+    pub to: f32,
+    pub p: f32,
+    pub spout: bool,
 }
 
 /// A frisbee in a mouth is drawn this much smaller than on the floor.
@@ -458,8 +474,14 @@ pub fn draw(pm: &mut Pixmap, thing: Thing, at: (f32, f32), s: f32, look: Look) {
                 }
             }
             // Water being thrown about (a water fight).
-            for spray in look.sprays.iter().flatten() {
-                splash_arc(pm, (at.0 + spray.0, cy), (at.0 + spray.1, cy), spray.2, s);
+            for sp in look.sprays.iter().flatten() {
+                let to = (at.0 + sp.to, cy);
+                if sp.spout {
+                    let from = (at.0 + sp.from.0, at.1 + sp.from.1);
+                    splash_arc(pm, from, to, sp.p, s, true);
+                } else {
+                    splash_arc(pm, (at.0 + sp.from.0, cy), to, sp.p, s, false);
+                }
             }
         }
         Thing::Beach => {
@@ -572,10 +594,13 @@ pub enum Fx {
     /// Golden sand kicked up (sliding, running on the beach); `at` is the
     /// feet.
     Sand,
+    /// Hit by water in a water fight: drops bursting off its head and
+    /// running down; `at` is the top of the head.
+    Soaked,
 }
 
 impl Fx {
-    pub const ALL: [Fx; 11] = [
+    pub const ALL: [Fx; 12] = [
         Fx::Hearts,
         Fx::Sparkles,
         Fx::Dust,
@@ -587,6 +612,7 @@ impl Fx {
         Fx::Dream,
         Fx::Notes,
         Fx::Sand,
+        Fx::Soaked,
     ];
 
     /// How long it shows, seconds.
@@ -601,6 +627,7 @@ impl Fx {
             Fx::Brawl => 2.6,
             Fx::Fright => 1.8,
             Fx::Notes => 2.2,
+            Fx::Soaked => 1.1,
         }
     }
 }
@@ -689,6 +716,28 @@ pub fn effect(pm: &mut Pixmap, fx: Fx, at: (f32, f32), s: f32, t: f32) {
         Fx::Brawl => brawl(pm, at, s, t, 1.0 - ((u - 0.9) / 0.1).max(0.0)),
         Fx::Fright => fright(pm, at, s, t, fade),
         Fx::Notes => notes(pm, at, s, t, fade),
+        Fx::Soaked => {
+            // A burst of drops off the head, then a few running down.
+            let burst = (t / 0.35).min(1.0);
+            for k in 0..9 {
+                let a = PI * (0.05 + 0.9 * k as f32 / 8.0);
+                let d = (8.0 + 22.0 * burst) * s;
+                let (dx, dy) = (-a.cos() * d, -a.sin() * d * 0.8 + 40.0 * s * burst * burst);
+                let c = with_alpha([0xD8, 0xF2, 0xFF, 235], 1.0 - burst);
+                circle(pm, x + dx, y + 6.0 * s + dy, 2.2 * s, c);
+            }
+            for k in 0..4 {
+                let kf = k as f32;
+                let start = 0.2 + 0.15 * kf;
+                if t < start {
+                    continue;
+                }
+                let v = ((t - start) / (fx.secs() - start)).min(1.0);
+                let dx = (kf - 1.5) * 13.0 * s;
+                let dy = (10.0 + 50.0 * v * v) * s;
+                water_drop(pm, x + dx, y + dy, 2.4 * s, 1.0 - v);
+            }
+        }
         Fx::Splash => {
             for k in 0..7 {
                 let a = PI * (0.15 + 0.7 * k as f32 / 6.0);
@@ -957,59 +1006,159 @@ fn smooth(a: f32, b: f32, v: f32) -> f32 {
     k * k * (3.0 - 2.0 * k)
 }
 
+/// The beach's sand, an oval: middle and radii, for the beach with the
+/// middle of its bottom at `at` (its front reaches the pets' feet).
+pub fn beach_oval(at: (f32, f32), s: f32) -> (f32, f32, f32, f32) {
+    let (w, h) = Thing::Beach.size();
+    (at.0, at.1 - 0.37 * h * s, 0.48 * w * s, 0.45 * h * s)
+}
+
+/// Room under the beach's foot in its window, pixels at 100%: its sand
+/// runs a little past the pets' feet toward you, so they walk on it, not
+/// in front of it.
+const BEACH_BELOW: f32 = 16.0;
+
+/// A grain of sand at a pixel or not, and how light: −0.5 … 0.5, the same
+/// every frame.
+fn grain(px: usize, py: usize) -> f32 {
+    let hash = ((px as u32).wrapping_mul(73_856_093) ^ (py as u32).wrapping_mul(19_349_663))
+        .wrapping_mul(2_654_435_761)
+        >> 24;
+    hash as f32 / 255.0 - 0.5
+}
+
+/// A dune stands this many times as high as the line a pet's feet follow
+/// over it ([`chonkgene_core::play::dune_height`]): they walk up its near
+/// slope, not along its top.
+const DUNE_TALL: f32 = 1.7;
+
+/// Golden sand.
+const SAND: [f32; 3] = [246.0, 217.0, 142.0];
+
+/// Lay colour `c` (straight, 0 … 255 each) at `a` over the pixel at byte
+/// `i` of premultiplied `data`.
+fn lay(data: &mut [u8], i: usize, c: [f32; 3], a: f32) {
+    for k in 0..3 {
+        let v = c[k].clamp(0.0, 255.0) * a;
+        data[i + k] = (v + f32::from(data[i + k]) * (1.0 - a)).min(255.0) as u8;
+    }
+    data[i + 3] = (255.0 * a + f32::from(data[i + 3]) * (1.0 - a)).min(255.0) as u8;
+}
+
 /// The beach (see [`Thing::Beach`]): an oval of golden sand lying on the
 /// floor with its bottom middle at `at`, worked out pixel by pixel: warm
 /// gold, grains speckled in it (the same every frame), fading out over its
 /// outer fifth (a third read as a haze), damp and darker in a band round
-/// the pond's water; two
-/// shells and a starfish on it. `fade` 0 … 1.
+/// the pond's water; a dune either side of the pond (see
+/// [`chonkgene_core::play::DUNES`]), lit on the slope toward the sun (up
+/// to the right, as the sunbeam), in shade on the other; two shells and a
+/// starfish on it. `fade` 0 … 1.
 fn beach(pm: &mut Pixmap, at: (f32, f32), s: f32, fade: f32) {
+    use chonkgene_core::play::dune_height;
     if fade <= 0.0 {
         return;
     }
-    let (w, h) = Thing::Beach.size();
-    let (cx, cy) = (at.0, at.1 - 0.45 * h * s);
-    let (rx, ry) = (0.48 * w * s, 0.4 * h * s);
+    let (cx, cy, rx, ry) = beach_oval(at, s);
     let (px0, py0, prx, pry) = pond_oval(at, s);
     let (pw, ph) = (pm.width() as usize, pm.height() as usize);
     let x0 = (cx - rx).floor().max(0.0) as usize;
     let x1 = ((cx + rx).ceil().max(0.0) as usize).min(pw);
     let y0 = (cy - ry).floor().max(0.0) as usize;
     let y1 = ((cy + ry).ceil().max(0.0) as usize).min(ph);
+    // How much sand there is at a pixel: fading out toward the oval's
+    // edge, all round, or only toward its ends.
+    let edge = |px: usize, py: usize| {
+        let fx = (px as f32 + 0.5 - cx) / rx;
+        let fy = (py as f32 + 0.5 - cy) / ry;
+        (fx * fx + fy * fy).sqrt()
+    };
+    let ends = |px: usize| smooth(1.0, 0.8, ((px as f32 + 0.5 - cx) / rx).abs());
     let data = pm.data_mut();
     for py in y0..y1 {
         let fy = (py as f32 + 0.5 - cy) / ry;
         for px in x0..x1 {
-            let fx = (px as f32 + 0.5 - cx) / rx;
-            let d = (fx * fx + fy * fy).sqrt();
+            let d = edge(px, py);
             if d >= 1.0 {
                 continue;
             }
-            // A grain here or not, and how light: the same every frame.
-            let hash = ((px as u32).wrapping_mul(73_856_093)
-                ^ (py as u32).wrapping_mul(19_349_663))
-            .wrapping_mul(2_654_435_761)
-                >> 24;
-            let grain = (hash as f32 / 255.0 - 0.5) * 0.22;
             // Damp by the water: within a little of the pond's edge.
             let qx = (px as f32 + 0.5 - px0) / (1.12 * prx);
             let qy = (py as f32 + 0.5 - py0) / (1.25 * pry);
             let damp = smooth(1.0, 0.86, (qx * qx + qy * qy).sqrt());
-            let light = 1.0 + grain - 0.18 * damp + 0.06 * (-fy).max(0.0);
-            let base = [0xF6 as f32, 0xD9 as f32, 0x8E as f32];
+            let light = 1.0 + 0.22 * grain(px, py) - 0.18 * damp + 0.06 * (-fy).max(0.0);
             let a = 0.97 * smooth(1.0, 0.78, d) * fade;
-            let i = 4 * (py * pw + px);
-            for k in 0..3 {
-                let c = (base[k] * light).clamp(0.0, 255.0) * a;
-                data[i + k] = (c + f32::from(data[i + k]) * (1.0 - a)).min(255.0) as u8;
-            }
-            data[i + 3] = (255.0 * a + f32::from(data[i + 3]) * (1.0 - a)).min(255.0) as u8;
+            lay(data, 4 * (py * pw + px), SAND.map(|c| c * light), a);
         }
     }
-    // Shells and a starfish on the sand, out beyond the water.
+    // The dunes: mounds rising from the line the pets walk along, taller
+    // than where their feet go over them (they walk up the slope toward
+    // you, see [`DUNE_TALL`]), lighter up to the crest, lit on the slope
+    // toward the sun (up to the right, as the sunbeam) and in shade on the
+    // other, wind ripples along them, the crest catching the light; a
+    // shadow on the sand behind them, away from the sun; their foot melts
+    // into the flat sand.
+    let foot = at.1;
+    let tall = |px: f32| DUNE_TALL * dune_height((px + 0.5 - cx) / s) * s;
+    // The shadow's height in each column: whatever a dune to its right
+    // casts, lower the further away.
+    let shade_px = (90.0 * s) as usize;
+    let tops: Vec<f32> = (x0..x1).map(|px| tall(px as f32)).collect();
+    for (k, px) in (x0..x1).enumerate() {
+        let x = px as f32;
+        let hgt = tops[k];
+        let cast = (0..shade_px)
+            .filter_map(|dx| tops.get(k + dx).map(|h| h - 0.55 * dx as f32))
+            .fold(0.0f32, f32::max);
+        if cast > 0.5 {
+            // On the flat sand behind the dune: from its foot back.
+            let reach = 0.7 * cast;
+            let from = (foot - reach).floor().max(0.0) as usize;
+            for py in from..(foot.ceil() as usize).min(ph) {
+                let y = py as f32 + 0.5;
+                if y > foot - hgt || edge(px, py) >= 1.0 {
+                    continue;
+                }
+                let k = smooth(foot - reach, foot - 0.5 * reach, y) * (cast / (12.0 * s)).min(1.0);
+                lay(
+                    data,
+                    4 * (py * pw + px),
+                    [150.0, 120.0, 70.0],
+                    0.16 * k * ends(px) * fade,
+                );
+            }
+        }
+        if hgt < 0.5 {
+            continue;
+        }
+        let across = (tall(x + 1.0) - tall(x - 1.0)) / 2.0;
+        let slope = (-1.1 * across).clamp(-0.13, 0.15);
+        let a = 0.98 * ends(px) * fade;
+        let top = foot - hgt;
+        let melt = 4.0 * s;
+        let y_end = (foot + melt).ceil().min(ph as f32) as usize;
+        for py in (top.floor().max(0.0) as usize)..y_end {
+            let y = py as f32 + 0.5;
+            // 0 at its foot, 1 on the crest.
+            let up = ((foot - y) / hgt).clamp(0.0, 1.0);
+            let mut light = 0.9 + 0.12 * up.sqrt() + slope * (0.35 + 0.65 * up);
+            // Ripples the wind left: thin darker lines along the slope, a
+            // little wavy.
+            let wave = (up * 6.0 + 0.15 * (x / s * 0.05).sin()).fract();
+            light -= 0.06 * smooth(0.1, 0.0, (wave - 0.5).abs() - 0.4);
+            // The crest catches the light.
+            light += 0.06 * smooth(3.0 * s, 0.0, y - top);
+            light += 0.2 * grain(px, py);
+            let c = SAND.map(|c| c * light.min(1.07));
+            let cover = (py as f32 + 1.0 - top).clamp(0.0, 1.0)
+                * (1.0 - smooth(foot - melt, foot + melt, y))
+                * (hgt / (3.0 * s)).min(1.0);
+            lay(data, 4 * (py * pw + px), c, a * cover);
+        }
+    }
+    // Shells and a starfish on the flat sand, out beyond the water.
     let id = Transform::identity();
     let fade_c = |c: [u8; 4]| with_alpha(c, fade);
-    for (u, v, k) in [(-0.78, 0.15, 0.0f32), (0.7, 0.35, 1.0)] {
+    for (u, v, k) in [(-0.47, 0.5, 0.0f32), (0.24, -0.78, 1.0)] {
         let (x, y) = (cx + u * rx, cy + v * ry);
         let r = 6.5 * s;
         let mut pb = PathBuilder::new();
@@ -1035,7 +1184,7 @@ fn beach(pm: &mut Pixmap, at: (f32, f32), s: f32, fade: f32) {
             );
         }
     }
-    let (sx, sy) = (cx + 0.86 * rx * 0.88, cy - 0.05 * ry);
+    let (sx, sy) = (cx - 0.3 * rx, cy - 0.7 * ry);
     let mut pb = PathBuilder::new();
     for k in 0..10 {
         let a = -std::f32::consts::FRAC_PI_2 + k as f32 * std::f32::consts::PI / 5.0;
@@ -1056,6 +1205,155 @@ fn beach(pm: &mut Pixmap, at: (f32, f32), s: f32, fade: f32) {
             id,
             None,
         );
+    }
+}
+
+/// A dog buried in the beach's sand up to its neck (Roger's twentieth
+/// pass, item 5: 「狗會挖沙把自己埋起來只留給頭」): the heap over its
+/// body, fixed once it is lying down, in the pixels of its picture.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Mound {
+    /// Its middle and half width.
+    pub mid: f32,
+    pub half: f32,
+    /// How high it rises over the floor at its middle.
+    pub high: f32,
+}
+
+/// Where a pet lying facing you has its head in its picture, from the top
+/// of the head and the point under its nose: an oval (middle and radii)
+/// down to its chin, as wide as its cheeks, round the nose (the top of
+/// the head, a point on the skull, shows off to one side).
+pub fn head_round(top: (f32, f32), mouth: (f32, f32)) -> (f32, f32, f32, f32) {
+    let d = (mouth.1 - top.1).max(8.0);
+    (mouth.0, top.1 + 0.62 * d, 0.85 * d, 0.62 * d)
+}
+
+/// The heap for a pet lying in `pm` with its feet on `floor` and its head
+/// at `head` (see [`head_round`]): as wide as all of it and a little more,
+/// over every part of its body beside and behind the head, but never
+/// higher than a little under the middle of its head (higher, it stood
+/// up beside the head in a point; what sticks up, the Shiba's curled
+/// tail, pokes out); the head itself
+/// stays clear (see [`sand_mound`]).
+pub fn mound_for(pm: &Pixmap, floor: f32, head: (f32, f32, f32, f32)) -> Option<Mound> {
+    let (x0, _, x1, _) = opaque_bounds(pm)?;
+    let mid = 0.5 * (x0 + x1);
+    let half = 0.5 * (x1 - x0) + 16.0;
+    let (hx, hy, hrx, hry) = head;
+    let w = pm.width() as usize;
+    let most = floor - (hy + 0.1 * hry);
+    let mut high = (floor - (hy + 0.5 * hry)).max(10.0);
+    for px in (x0 as usize)..(x1 as usize).min(w) {
+        let x = px as f32 + 0.5;
+        if (x - hx).abs() < hrx {
+            continue;
+        }
+        let Some(top) = (0..pm.height() as usize).find(|&py| {
+            pm.pixel(px as u32, py as u32)
+                .is_some_and(|c| c.alpha() > 128)
+        }) else {
+            continue;
+        };
+        // Only its middle: what sticks out at the ends (a tail) would
+        // make a tower of it.
+        let u = (x - mid) / half;
+        if u.abs() > 0.7 {
+            continue;
+        }
+        let need = (floor - top as f32 + 4.0) / dome(u);
+        high = high.max(need.min(most));
+    }
+    Some(Mound { mid, half, high })
+}
+
+/// The heap's height across it (−1 … 1), a share of its middle's: round,
+/// nearly flat on top.
+fn dome(u: f32) -> f32 {
+    (1.0 - u * u).max(0.0).powf(0.5)
+}
+
+/// Draw the heap `m` over a buried pet's picture, its feet on `floor`,
+/// its head at `head` (left clear, with a collar of sand round its neck
+/// and a soft shadow under the chin): golden sand like the beach's, lit
+/// up to the right, grains in it, a lumpy top. `rise` 0 … 1 as it is piled
+/// on; `burst` 0 … 1 as the pet bursts out of it, the heap sinking and
+/// its sand flying off in clumps.
+pub fn sand_mound(
+    pm: &mut Pixmap,
+    m: &Mound,
+    floor: f32,
+    head: (f32, f32, f32, f32),
+    rise: f32,
+    burst: f32,
+    s: f32,
+) {
+    let keep = rise.clamp(0.0, 1.0) * (1.0 - burst.clamp(0.0, 1.0)).powi(2);
+    let (pw, ph) = (pm.width() as usize, pm.height() as usize);
+    let (hx, hy, hrx, hry) = head;
+    if keep > 0.01 {
+        let high = m.high * keep;
+        let x0 = (m.mid - m.half).floor().max(0.0) as usize;
+        let x1 = ((m.mid + m.half).ceil().max(0.0) as usize).min(pw);
+        let data = pm.data_mut();
+        for px in x0..x1 {
+            let x = px as f32 + 0.5;
+            let u = ((x - m.mid) / m.half).clamp(-1.0, 1.0);
+            // A round heap, a little lumpy along its top.
+            let lumps = 2.2 * s * ((x / s * 0.21).sin() + 0.6 * (x / s * 0.53 + 1.3).sin());
+            let dome = dome(u);
+            let top = floor - (high * dome + lumps * dome * keep);
+            // Lit up to the right: its right shoulder bright, its left in
+            // shade.
+            let slope = (0.22 * u).clamp(-0.2, 0.2);
+            let y_end = ((floor + 3.0 * s).ceil() as usize).min(ph);
+            for py in (top.floor().max(0.0) as usize)..y_end {
+                let y = py as f32 + 0.5;
+                // The head stays clear; sand banked round it is darker
+                // (in its shadow), the more so under the chin.
+                let off = (((x - hx) / hrx).powi(2) + ((y - hy) / hry).powi(2)).sqrt() - 1.0;
+                let off = off * hry;
+                if off < 0.0 {
+                    continue;
+                }
+                let under = smooth(6.0 * s, 0.0, off) * if y > hy { 0.16 } else { 0.07 };
+                let up = ((floor - y) / high.max(1.0)).clamp(0.0, 1.0);
+                let rim = smooth(2.5 * s, 0.0, y - top);
+                let light = 0.8 + 0.22 * up.sqrt() + slope * up.sqrt() - under
+                    + 0.08 * rim * (0.5 + u).max(0.0)
+                    + 0.2 * grain(px, py);
+                let edge = (py as f32 + 1.0 - top).clamp(0.0, 1.0)
+                    * off.min(1.0)
+                    * (1.0 - smooth(floor, floor + 3.0 * s, y));
+                lay(
+                    data,
+                    4 * (py * pw + px),
+                    SAND.map(|c| c * light.min(1.07)),
+                    edge,
+                );
+            }
+        }
+    }
+    if burst > 0.0 && burst < 1.0 {
+        // Clumps of sand thrown off the heap's top, outward each side and
+        // up, falling back down (off the pet, not over it).
+        let fly = burst.sqrt();
+        for k in 0..22 {
+            let kf = k as f32;
+            let side = if k % 2 == 0 { -1.0 } else { 1.0 };
+            let u = side * (0.45 + 0.5 * (kf * 0.618).fract());
+            let x = m.mid + u * m.half;
+            let y = floor - m.high * dome(u);
+            let speed = (70.0 + 80.0 * (kf * 1.9).sin().abs()) * s;
+            let up = 0.5 + 0.5 * (kf * 2.3).cos().abs();
+            let (dx, dy) = (
+                side * speed * fly * 1.2,
+                -up * speed * fly + 300.0 * s * burst * burst,
+            );
+            let r = (1.4 + 1.6 * (kf * 2.7).sin().abs()) * s * (1.0 - 0.5 * burst);
+            let c = [0xF2, 0xD3, 0x88, 240];
+            circle(pm, x + dx, y + dy, r, with_alpha(c, 1.0 - burst));
+        }
     }
 }
 
@@ -2256,14 +2554,20 @@ fn child_hand(pm: &mut Pixmap, hand: &HugHand, part: Part, s: f32, t: f32) {
     }
 }
 
-/// Water thrown from `from` to `to` (both on the water, pixels), `p` of
-/// the way (0 … 1): a sheet of drops flying up in an arc and coming down
-/// on the other one.
-fn splash_arc(pm: &mut Pixmap, from: (f32, f32), to: (f32, f32), p: f32, s: f32) {
+/// Water thrown from `from` to `to` (on the water, pixels), `p` of the
+/// way (0 … 1): a sheet of drops flying up in an arc and coming down on
+/// the other one; or, a `jet`, spat from a bill or a mouth at `from` in a
+/// thinner, flatter stream.
+fn splash_arc(pm: &mut Pixmap, from: (f32, f32), to: (f32, f32), p: f32, s: f32, jet: bool) {
     if !(0.0..1.0).contains(&p) {
         return;
     }
-    let high = 55.0 * s + 0.15 * (to.0 - from.0).abs();
+    let high = if jet {
+        18.0 * s + 0.06 * (to.0 - from.0).abs()
+    } else {
+        55.0 * s + 0.15 * (to.0 - from.0).abs()
+    };
+    let size = if jet { 0.85 } else { 1.15 };
     let fade = smooth(1.0, 0.8, p) * smooth(0.0, 0.08, p);
     let at = |u: f32, lift: f32| {
         let x = from.0 + (to.0 - from.0) * u;
@@ -2290,13 +2594,13 @@ fn splash_arc(pm: &mut Pixmap, from: (f32, f32), to: (f32, f32), p: f32, s: f32)
         stroke_path(
             pm,
             pb,
-            with_alpha([0xC8, 0xEC, 0xFF, 150], fade * thin),
-            (2.0 + 5.0 * thin) * s,
+            with_alpha([0xC8, 0xEC, 0xFF, if jet { 230 } else { 170 }], fade * thin),
+            (2.0 + 5.0 * thin) * s * size,
             Transform::identity(),
         );
     }
     // Drops flying off it, round the head and trailing behind.
-    for k in 0..22 {
+    for k in 0..if jet { 16 } else { 28 } {
         let kf = k as f32;
         let u = (p - 0.32 * ((kf * 0.618).fract())).clamp(0.0, 1.0);
         let lift = 1.0 + 0.22 * (kf * 1.7).sin();
@@ -2305,7 +2609,7 @@ fn splash_arc(pm: &mut Pixmap, from: (f32, f32), to: (f32, f32), p: f32, s: f32)
             x + 5.0 * s * (kf * 2.3).sin(),
             y + 4.0 * s * (kf * 3.1).cos(),
         );
-        let r = (3.4 - 0.1 * kf).max(1.2) * s;
+        let r = (3.4 - 0.1 * kf).max(1.2) * s * size;
         circle(pm, x, y, r, with_alpha([0xD8, 0xF2, 0xFF, 235], fade));
         circle(
             pm,
@@ -2333,6 +2637,97 @@ fn splash_arc(pm: &mut Pixmap, from: (f32, f32), to: (f32, f32), p: f32, s: f32)
             );
         }
     }
+}
+
+/// A drop of water, round at the bottom and pointed on top, `r` round,
+/// faded to `fade`, with a glint.
+fn water_drop(pm: &mut Pixmap, x: f32, y: f32, r: f32, fade: f32) {
+    let mut pb = PathBuilder::new();
+    pb.move_to(x, y - 2.2 * r);
+    pb.quad_to(x + 1.1 * r, y - 0.4 * r, x + r, y + 0.2 * r);
+    pb.quad_to(x, y + 1.6 * r, x - r, y + 0.2 * r);
+    pb.quad_to(x - 1.1 * r, y - 0.4 * r, x, y - 2.2 * r);
+    if let Some(p) = pb.finish() {
+        let c = with_alpha([0xC8, 0xEC, 0xFF, 235], fade);
+        pm.fill_path(
+            &p,
+            &paint(c),
+            FillRule::Winding,
+            Transform::identity(),
+            None,
+        );
+    }
+    circle(
+        pm,
+        x - 0.35 * r,
+        y - 0.1 * r,
+        0.35 * r,
+        with_alpha([255, 255, 255, 255], fade),
+    );
+}
+
+/// The wake behind each pet doing swimming zoomies in the pond, `pond`
+/// the middle of its bottom on `pm`, each `(x, facing)` in its pixels: two
+/// lines of foam spreading back from it in a V, broken into dashes that
+/// run back along them, and spray kicked up behind; kept inside the water.
+pub fn pond_wakes(pm: &mut Pixmap, pond: (f32, f32), wakes: &[(f32, f32)], s: f32, t: f32) {
+    let (cx, cy, rx, ry) = pond_oval(pond, s);
+    let Some(water) = oval_path(cx, cy, rx, ry) else {
+        return;
+    };
+    let Some(mut inside) = Mask::new(pm.width(), pm.height()) else {
+        return;
+    };
+    inside.fill_path(&water, FillRule::Winding, true, Transform::identity());
+    let Some(mut foam) = Pixmap::new(pm.width(), pm.height()) else {
+        return;
+    };
+    let y = cy + 0.25 * ry;
+    for &(x, dir) in wakes {
+        let back = -dir.signum();
+        let long = 150.0 * s;
+        for side in [-1.0f32, 1.0] {
+            // Dashes along each arm of the V, running back as it goes.
+            for k in 0..6 {
+                let u0 = ((k as f32 + (t * 3.0).fract()) / 6.0).min(1.0);
+                let u1 = (u0 + 0.09).min(1.0);
+                let at = |u: f32| (x + back * u * long, y + side * u * 0.55 * ry);
+                let (a, b) = (at(u0), at(u1));
+                let mut pb = PathBuilder::new();
+                pb.move_to(a.0, a.1);
+                pb.line_to(b.0, b.1);
+                stroke_path(
+                    &mut foam,
+                    pb,
+                    with_alpha([255, 255, 255, 230], 1.0 - u0),
+                    (2.6 - 1.4 * u0) * s,
+                    Transform::identity(),
+                );
+            }
+        }
+        // White water churned up just behind it.
+        for k in 0..7 {
+            let kf = k as f32;
+            let ph = (t * 2.5 + kf * 0.37).fract();
+            let (dx, dy) = (back * (8.0 + 30.0 * ph) * s, -(18.0 * s) * (PI * ph).sin());
+            let wob = 6.0 * s * (kf * 2.1).sin();
+            circle(
+                &mut foam,
+                x + dx + wob,
+                y + dy,
+                (2.6 - 1.2 * ph) * s,
+                with_alpha([0xE8, 0xF8, 0xFF, 240], 1.0 - ph),
+            );
+        }
+    }
+    pm.draw_pixmap(
+        0,
+        0,
+        foam.as_ref(),
+        &PixmapPaint::default(),
+        Transform::identity(),
+        Some(&inside),
+    );
 }
 
 /// A ring spreading on water from `at`, `p` (0 … 1) of the way out to
@@ -2527,6 +2922,42 @@ pub fn foxfire(pm: &mut Pixmap, at: (f32, f32), reach: (f32, f32), s: f32, t: f3
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_sand_heap_covers_the_body_and_leaves_the_head_clear() {
+        // A lying pet: a body 160 wide, its head on it, facing you.
+        let mut pm = Pixmap::new(240, 200).unwrap();
+        let orange = [0xF0, 0x90, 0x50, 255];
+        oval(
+            &mut pm,
+            120.0,
+            150.0,
+            80.0,
+            40.0,
+            orange,
+            Transform::identity(),
+        );
+        circle(&mut pm, 140.0, 105.0, 40.0, orange);
+        let floor = 190.0;
+        let head = head_round((140.0, 65.0), (140.0, 125.0));
+        let m = mound_for(&pm, floor, head).unwrap();
+        sand_mound(&mut pm, &m, floor, head, 1.0, 0.0, 1.0);
+        let at = |x: u32, y: u32| {
+            let c = pm.pixel(x, y).unwrap().demultiply();
+            [c.red(), c.green(), c.blue()]
+        };
+        // The face as it was.
+        assert_eq!(at(140, 100), [0xF0, 0x90, 0x50]);
+        // The body beside the head and the floor under it: golden sand.
+        for (x, y) in [(55, 160), (200, 160), (120, 185)] {
+            let [r, g, b] = at(x, y);
+            assert!(g > 150 && b > 70 && b < r, "({x}, {y}) is {:?}", [r, g, b]);
+        }
+        // Burst, it is gone.
+        let mut gone = Pixmap::new(240, 200).unwrap();
+        sand_mound(&mut gone, &m, floor, head, 1.0, 1.0, 1.0);
+        assert!(gone.pixels().iter().all(|c| c.alpha() == 0));
+    }
 
     /// Your hands on a body (an oval 100 px wide, 80 tall, its middle at
     /// 100, 100), held each way, each kind of body: where they go and
@@ -2770,8 +3201,9 @@ mod tests {
         assert_eq!(off.data(), before.data());
     }
 
-    /// Water thrown right across the pond, from one end to the other and
-    /// at every moment of its flight, stays inside the pond's window.
+    /// Water thrown (or spat) right across the pond, from one end to the
+    /// other and at every moment of its flight, stays inside the pond's
+    /// window.
     #[test]
     fn water_thrown_across_the_pond_stays_in_its_window() {
         for scale in [1.0, 2.0] {
@@ -2782,9 +3214,25 @@ mod tests {
                 let look = Look {
                     t: 1.0,
                     sprays: [
-                        Some((-reach, reach, p)),
-                        Some((reach, -reach, p)),
-                        None,
+                        Some(Spray {
+                            from: (-reach, 0.0),
+                            to: reach,
+                            p,
+                            spout: false,
+                        }),
+                        Some(Spray {
+                            from: (reach, 0.0),
+                            to: -reach,
+                            p,
+                            spout: false,
+                        }),
+                        // A jet from a duckling's bill at one end.
+                        Some(Spray {
+                            from: (reach, -110.0 * scale),
+                            to: -reach,
+                            p,
+                            spout: true,
+                        }),
                         None,
                     ],
                     ..Look::default()

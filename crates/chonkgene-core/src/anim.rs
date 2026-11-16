@@ -489,6 +489,9 @@ pub struct PoseParams {
     /// Out of breath from a run (a fetch, zoomies, a chase), or still
     /// running: a dog pants with its tongue out.
     pub puffed: bool,
+    /// Grinning at you, tongue out (a dog buried in the sand up to its
+    /// neck, Roger's twentieth pass, item 5).
+    pub grin: bool,
     /// Counts up each time it should lick its nose (a toy just put down):
     /// the renderer licks when it sees a new count.
     pub licks: u32,
@@ -524,6 +527,7 @@ impl Default for PoseParams {
             posture: Posture::Free,
             lively: false,
             puffed: false,
+            grin: false,
             licks: 0,
             travelling: false,
             glow: 0.0,
@@ -554,6 +558,8 @@ pub struct Animator {
     /// Busy with something fun (set from outside: a scene, a toy, catnip,
     /// a play-fight); pleased counts too (see [`PoseParams::lively`]).
     pub lively: bool,
+    /// Grinning at you (see [`PoseParams::grin`]); set from outside.
+    pub grin: bool,
     /// Seconds run so far on this run, and until when it is out of breath.
     run: f32,
     puffed_until: f32,
@@ -632,6 +638,7 @@ impl Animator {
             pace: 1.0,
             posture: Posture::Free,
             lively: false,
+            grin: false,
             run: 0.0,
             puffed_until: f32::NEG_INFINITY,
             sway: 0.0,
@@ -1248,6 +1255,7 @@ impl Animator {
                 _ => false,
             },
             puffed: self.expression != Expression::Asleep && self.puffed(),
+            grin: self.grin && self.expression != Expression::Asleep,
             licks: self.licks,
             travelling: false,
             glow: 0.0,

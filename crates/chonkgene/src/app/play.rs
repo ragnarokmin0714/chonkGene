@@ -12,7 +12,7 @@ use chonkgene_core::anim::{Act, Expression, Hug, Posture};
 use chonkgene_core::mind::Line;
 use chonkgene_core::motion::{Heading, Motion};
 use chonkgene_core::play::{
-    Chase, Command, Fetch, Order, Prop, SCENE_GAP, Scene, Thing, obey_delay, stay_secs,
+    Chase, Command, Fetch, Order, Prop, SCENE_GAP, Scene, Thing, dune_height, obey_delay, stay_secs,
 };
 use chonkgene_core::sound::Sound;
 use chonkgene_core::species::Species;
@@ -113,9 +113,26 @@ pub(super) struct PropWin {
     grab: Option<Grab>,
     /// A pond: the screen x of each pet in it, for the rings they stir.
     stirs: Vec<f32>,
-    /// A pond: water thrown in a water fight, from and to (screen x) and
-    /// when.
-    pub sprays: Vec<(f32, f32, f64)>,
+    /// A pond: water thrown in a water fight (see [`Spray`]).
+    pub sprays: Vec<Spray>,
+    /// A pond: where a pet doing swimming zoomies is (screen x) and which
+    /// way it goes, for the wake behind it.
+    wakes: Vec<(f32, f32)>,
+    /// The beach drawn once in full: fading in and out, it is only
+    /// copied, fainter (it is worked out pixel by pixel).
+    still: Option<Pixmap>,
+}
+
+/// Water thrown in a water fight: scooped up from the pond by a paw, a
+/// wing or the fox's tails (from the water at screen x `from.0`), or spat
+/// in a jet (`spout`, the duckling's bill or the Shiba's mouth, from
+/// `from` on the screen), landing on the pet at screen x `to`, at `since`.
+#[derive(Clone, Copy, Debug)]
+pub(super) struct Spray {
+    from: (f32, f32),
+    to: f32,
+    since: f64,
+    spout: bool,
 }
 
 impl PropWin {
@@ -160,6 +177,8 @@ impl PropWin {
             grab: None,
             stirs: Vec::new(),
             sprays: Vec::new(),
+            wakes: Vec::new(),
+            still: None,
         })
     }
 
@@ -196,6 +215,12 @@ impl PropWin {
         }
     }
 
+    /// How much of the beach shows, fading in over its first second and
+    /// out with its pond (see [`PropWin::used`]), 0 … 1.
+    fn shown_share(&self, now: f64) -> f32 {
+        ((now - self.born) as f32).clamp(0.0, 1.0) * (1.0 - self.used(now))
+    }
+
     /// Move the window with the thing and draw it again if it changed.
     fn show(&mut self, shared: &Shared, now: f64, visible: bool) {
         let visible = visible && self.carrier.is_none();
@@ -229,8 +254,8 @@ impl PropWin {
             );
         let grounded = self.prop.resting || (self.prop.vel.1 == 0.0 && self.prop.thing.falls());
         // Water flying about: drawn at twice the rate.
-        self.sprays.retain(|s| now - s.2 < SPRAY_SECS);
-        let fps = if self.sprays.is_empty() {
+        self.sprays.retain(|s| now - s.since < SPRAY_SECS);
+        let fps = if self.sprays.is_empty() && self.wakes.is_empty() {
             ALIVE_FPS
         } else {
             2.0 * ALIVE_FPS
@@ -243,12 +268,13 @@ impl PropWin {
         }
         self.pixmap.fill(tiny_skia::Color::TRANSPARENT);
         let mut sprays = [None; 4];
-        for (slot, &(from, to, since)) in sprays.iter_mut().zip(&self.sprays) {
-            *slot = Some((
-                from - self.prop.pos.0,
-                to - self.prop.pos.0,
-                ((now - since) / SPRAY_SECS) as f32,
-            ));
+        for (slot, sp) in sprays.iter_mut().zip(&self.sprays) {
+            *slot = Some(props::Spray {
+                from: (sp.from.0 - self.prop.pos.0, sp.from.1 - self.prop.pos.1),
+                to: sp.to - self.prop.pos.0,
+                p: ((now - sp.since) / SPRAY_SECS) as f32,
+                spout: sp.spout,
+            });
         }
         let look = props::Look {
             spin: self.prop.spin,
@@ -259,13 +285,38 @@ impl PropWin {
             sprays,
             ..props::Look::default()
         };
-        props::draw(
-            &mut self.pixmap,
-            self.prop.thing,
-            self.foot,
-            self.prop.scale,
-            look,
-        );
+        if self.prop.thing == Thing::Beach {
+            let k = self.shown_share(now);
+            let (pixmap, foot, scale) = (&mut self.pixmap, self.foot, self.prop.scale);
+            let still = self.still.get_or_insert_with(|| {
+                let mut pm = pixmap.clone();
+                let full = props::Look {
+                    t: 10.0,
+                    ..props::Look::default()
+                };
+                props::draw(&mut pm, Thing::Beach, foot, scale, full);
+                pm
+            });
+            for (d, v) in pixmap.data_mut().iter_mut().zip(still.data()) {
+                *d = (f32::from(*v) * k) as u8;
+            }
+        } else {
+            props::draw(
+                &mut self.pixmap,
+                self.prop.thing,
+                self.foot,
+                self.prop.scale,
+                look,
+            );
+        }
+        if !self.wakes.is_empty() {
+            let wakes: Vec<(f32, f32)> = self
+                .wakes
+                .iter()
+                .map(|&(x, dir)| (x - self.placed.0 as f32, dir))
+                .collect();
+            props::pond_wakes(&mut self.pixmap, self.foot, &wakes, self.prop.scale, look.t);
+        }
         if !self.stirs.is_empty() {
             let xs: Vec<f32> = self
                 .stirs
@@ -682,6 +733,16 @@ pub(super) struct Fun {
     pond_left: f32,
     /// Its feet are on a beach (see [`Playground::on_beach`]).
     pub on_sand: bool,
+    /// How far up its window goes on a dune, pixels (see
+    /// [`Playground::dune_under`]), eased.
+    pub dune_lift: f32,
+    /// Buried in the beach's sand (the Shiba), and not again before then.
+    pub bury: Option<Bury>,
+    next_bury: f64,
+    /// Swimming zoomies in a pond until then, and when the next may come
+    /// (0: not yet picked for this visit).
+    swim_zoom: Option<f64>,
+    next_zoom: f64,
     /// How far into the pond it stands, as a share of the pond's height up
     /// from its near edge (see [`Fun::pond_lift`]); 0 for the default.
     pond_deep: f32,
@@ -735,6 +796,7 @@ impl Fun {
             || self.swat.is_some()
             || self.carry.is_some()
             || self.hide.is_some()
+            || self.bury.is_some()
     }
 
     /// Its leisure ends: your hand comes first.
@@ -754,6 +816,7 @@ impl Fun {
             || self.swat.is_some()
             || self.carry.is_some()
             || self.hide.is_some()
+            || self.bury.is_some()
             || now < self.hold_until
             || now < self.lounge_until
     }
@@ -839,6 +902,22 @@ impl Playground {
                 && (feet.1 - w.prop.pos.1).abs() < 30.0 * w.prop.scale
                 && (feet.0 - w.prop.pos.0).abs() < 0.44 * Thing::Beach.size().0 * w.prop.scale
         })
+    }
+
+    /// How high the sand stands under feet at `feet` (screen pixels): a
+    /// dune's height there (see [`dune_height`]), as much of it as the
+    /// beach has faded in; 0 off the sand.
+    fn dune_under(&self, feet: (f32, f32), now: f64) -> f32 {
+        self.things
+            .iter()
+            .filter(|w| {
+                w.prop.thing == Thing::Beach && (feet.1 - w.prop.pos.1).abs() < 30.0 * w.prop.scale
+            })
+            .map(|w| {
+                let s = w.prop.scale;
+                dune_height((feet.0 - w.prop.pos.0) / s) * s * w.shown_share(now)
+            })
+            .fold(0.0, f32::max)
     }
 
     /// How much is left of the pond at `pos` (1 … 0 as it dries up); none
@@ -1224,7 +1303,8 @@ impl Pet {
             || in_pond
             || fire
             || vanished
-            || hide.is_some();
+            || hide.is_some()
+            || self.fun.bury.is_some_and(|b| b.heap(t).0 > 0.0);
         if !any {
             return false;
         }
@@ -1292,6 +1372,24 @@ impl Pet {
             let line = floor + (full - floor) * wet;
             props::pond_front(canvas, at, w / 2.0, line, s, t as f32);
         }
+        if let Some(mut b) = self.fun.bury {
+            // Buried in the sand to its neck: the heap over it, found on
+            // its picture while it settles into its hole, then kept.
+            let (rise, burst) = b.heap(t);
+            if rise > 0.0 {
+                let head = props::head_round(
+                    self.renderer.anchor(),
+                    self.renderer.mouth(self.anim.facing),
+                );
+                if b.mound.is_none() || (rise < 1.0 && burst == 0.0) {
+                    b.mound = props::mound_for(base, floor, head).or(b.mound);
+                    self.fun.bury = Some(b);
+                }
+                if let Some(m) = b.mound {
+                    props::sand_mound(canvas, &m, floor, head, rise, burst, s);
+                }
+            }
+        }
         if lifted {
             let head = self.renderer.anchor();
             // The strings are tied at its shoulders, behind the head.
@@ -1336,7 +1434,7 @@ impl Pet {
                 continue;
             }
             let at = match fx {
-                Fx::Hearts | Fx::Fright | Fx::Notes => head,
+                Fx::Hearts | Fx::Fright | Fx::Notes | Fx::Soaked => head,
                 Fx::Sparkles => mouth,
                 Fx::Dust | Fx::Sand => (w / 2.0, floor),
                 Fx::Splash => (w / 2.0, floor - 0.13 * PPU * s),
@@ -1536,6 +1634,16 @@ pub(super) fn tick(
             p.fun.effect(Fx::Splash, now);
         }
         p.fun.on_sand = ground.on_beach(p.body.feet());
+        // Over a dune its window rises with the sand (eased: the beach
+        // fading in, a hop off it).
+        let dune = match p.body.motion {
+            Motion::Idle | Motion::Walk | Motion::Slide if p.fun.pond.now.is_none() => {
+                ground.dune_under(p.body.feet(), now)
+            }
+            _ => 0.0,
+        };
+        p.fun.dune_lift += (dune - p.fun.dune_lift) * (dt * 14.0).min(1.0);
+        bury(p, ctx, dt);
         // Its pond drying up, the water on it goes too; gone, it is out.
         if let Some(pos) = p.fun.pond.now {
             match ground.pond_left(pos, now) {
@@ -1566,6 +1674,11 @@ pub(super) fn tick(
                 .iter()
                 .filter(|p| p.fun.pond.now == Some(w.prop.pos))
                 .map(|p| p.body.feet().0)
+                .collect();
+            w.wakes = pets
+                .iter()
+                .filter(|p| p.fun.pond.now == Some(w.prop.pos) && p.fun.swim_zoom.is_some())
+                .map(|p| (p.body.feet().0, p.body.facing))
                 .collect();
         }
     }
@@ -2435,6 +2548,8 @@ fn scene(ground: &mut Playground, p: &mut Pet, ctx: &mut Ctx) {
         p.fun.carry = None;
         p.fun.scene = None;
         p.fun.hold_until = 0.0;
+        p.fun.swim_zoom = None;
+        p.fun.next_zoom = 0.0;
         p.stop();
     };
     if interrupted || (run.prop.is_some() && prop.is_none()) {
@@ -2587,6 +2702,7 @@ fn scene(ground: &mut Playground, p: &mut Pet, ctx: &mut Ctx) {
                 Scene::Sunbeam => {
                     p.anim.posture = Posture::Lie;
                 }
+                Scene::Pond if swim_zoomies(p, ctx, prop) => {}
                 Scene::Pond => {
                     // Paddling slowly to and fro, well inside the water:
                     // over to one side, a stop, round, and back.
@@ -2609,6 +2725,8 @@ fn scene(ground: &mut Playground, p: &mut Pet, ctx: &mut Ctx) {
         (_, _) => {
             // Over: out of the water with a shake, or up from the sun.
             p.fun.hold_until = 0.0;
+            p.fun.swim_zoom = None;
+            p.fun.next_zoom = 0.0;
             if run.scene == Scene::Pond {
                 let Some(pond) = prop else {
                     return end(ground, p, &run);
@@ -2628,6 +2746,202 @@ fn scene(ground: &mut Playground, p: &mut Pet, ctx: &mut Ctx) {
     }
     p.fun.scene = Some(run);
 }
+
+/// The Shiba buries itself in the beach's sand (Roger's twentieth pass,
+/// item 5): standing free on the sand, it starts at this chance a
+/// second, and not again for [`BURY_AGAIN`] after.
+const BURY_CHANCE: f32 = 0.05;
+const BURY_AGAIN: f64 = 75.0;
+/// It digs this long, the sand is piled over it this fast, it stays
+/// under for the first of these and up to the second more, and bursts out
+/// over the last, seconds.
+const BURY_DIG: f64 = 2.4;
+pub(super) const BURY_RISE: f64 = 0.9;
+const BURY_STAYS: (f64, f64) = (7.0, 5.0);
+pub(super) const BURY_BURST: f64 = 0.6;
+
+/// Buried in the sand up to its neck (see [`bury`]).
+#[derive(Clone, Copy, Debug)]
+pub(super) struct Bury {
+    /// Lying in its hole, the sand piling on, from then (digging before).
+    under: f64,
+    /// It bursts out then, or did at `burst`.
+    until: f64,
+    burst: Option<f64>,
+    said: bool,
+    /// The heap over it, found on its picture as it settles (see
+    /// [`props::mound_for`]), then kept.
+    pub mound: Option<props::Mound>,
+}
+
+impl Bury {
+    /// How far the heap is piled on (0 … 1), and how far it has burst
+    /// (0 … 1).
+    pub(super) fn heap(&self, now: f64) -> (f32, f32) {
+        let rise = ((now - self.under) / BURY_RISE).clamp(0.0, 1.0) as f32;
+        let burst = self
+            .burst
+            .map_or(0.0, |b| ((now - b) / BURY_BURST).clamp(0.0, 1.0) as f32);
+        (rise, burst)
+    }
+}
+
+/// `CHONKGENE_STAGE=beach`: the Shiba buries itself as soon as it is on
+/// the sand, and pets in the pond do their zoomies soon.
+fn beach_test() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| std::env::var("CHONKGENE_STAGE").is_ok_and(|v| v == "beach"))
+}
+
+/// The Shiba on the beach digs a hole, lies down in it and is buried up
+/// to its neck, only its head out, grinning at you with its tongue out;
+/// a while later (or picked up, poked, falling asleep, the beach gone) it
+/// bursts out in a shower of sand and shakes it off.
+fn bury(p: &mut Pet, ctx: &mut Ctx, dt: f32) {
+    let now = ctx.world.now;
+    let Some(mut b) = p.fun.bury else {
+        let chance = if beach_test() { 1.0 } else { BURY_CHANCE * dt };
+        let free = p.species == Species::Shiba
+            && p.fun.on_sand
+            && p.fun.pond.now.is_none()
+            && now >= p.fun.next_bury
+            && p.free_to_play(now)
+            && !p.fun.busy(now)
+            && !p.playing
+            && p.body.motion == Motion::Idle
+            && !p.anim.walking
+            && matches!(p.anim.expression, Expression::Neutral | Expression::Happy);
+        if !free || p.rng.f32() >= chance {
+            return;
+        }
+        p.stop();
+        p.anim.gesture(Act::Dig);
+        p.fun.effect(Fx::Sand, now);
+        let stays = BURY_STAYS.0 + BURY_STAYS.1 * f64::from(p.rng.f32());
+        p.fun.bury = Some(Bury {
+            under: now + BURY_DIG,
+            until: now + BURY_DIG + stays,
+            burst: None,
+            said: false,
+            mound: None,
+        });
+        diag!("{}: digs itself into the sand", p.save.name);
+        return;
+    };
+    if b.burst.is_none() {
+        let asleep = p.mind.asleep();
+        let why = if p.press.is_some() {
+            Some("touched")
+        } else if asleep {
+            Some("asleep")
+        } else if p.in_skit || p.act.is_some() || p.fun.hug_by_you.is_some() {
+            Some("busy")
+        } else if !p.fun.on_sand || p.body.motion != Motion::Idle {
+            Some("off the sand")
+        } else if now >= b.until {
+            Some("time")
+        } else {
+            None
+        };
+        if let Some(why) = why {
+            diag!("{}: bursts out of the sand ({why})", p.save.name);
+            b.burst = Some(now);
+            p.anim.grin = false;
+            p.fun.hold_until = 0.0;
+            p.fun.effect(Fx::Sand, now);
+            if b.mound.is_some() && !asleep && p.press.is_none() {
+                p.anim.posture = Posture::Free;
+                p.try_gesture(Act::Shake);
+            }
+        }
+    }
+    if let Some(at) = b.burst {
+        if now - at >= BURY_BURST {
+            p.fun.bury = None;
+            p.fun.next_bury = now + BURY_AGAIN;
+            return;
+        }
+    } else if now >= b.under {
+        // Lying in its hole, the sand piled over it, grinning.
+        p.stop();
+        p.fun.hold_until = now + 0.5;
+        p.anim.posture = Posture::Lie;
+        p.anim.grin = true;
+        if !b.said {
+            b.said = true;
+            p.fun.effect(Fx::Sand, now);
+            p.say(ctx, Line::Buried);
+        }
+    } else if p.anim.doing().is_none() {
+        // Still digging.
+        p.anim.gesture(Act::Dig);
+        p.fun.effect(Fx::Sand, now);
+    }
+    p.fun.bury = Some(b);
+}
+
+/// Swimming zoomies (Roger's twentieth pass, item 5: 「突然游泳暴走」):
+/// now and then one in a pond suddenly paddles end to end of it at full
+/// speed, splashing, a wake behind it, then stops as if nothing happened.
+/// True while it is at it (its own paddling waits).
+fn swim_zoomies(p: &mut Pet, ctx: &mut Ctx, prop: Option<Prop>) -> bool {
+    let now = ctx.world.now;
+    let Some(pond) = prop else {
+        return false;
+    };
+    let Some(until) = p.fun.swim_zoom else {
+        if p.fun.next_zoom == 0.0 {
+            // Not every visit: about half of them, some way in.
+            let roll = p.rng.f32();
+            p.fun.next_zoom = if beach_test() {
+                now + 2.0
+            } else if roll < 0.55 {
+                now + 5.0 + 10.0 * f64::from(p.rng.f32())
+            } else {
+                f64::INFINITY
+            };
+        }
+        if now < p.fun.next_zoom || p.press.is_some() || p.anim.doing().is_some() {
+            return false;
+        }
+        p.fun.swim_zoom = Some(now + 3.0 + 2.0 * f64::from(p.rng.f32()));
+        p.fun.next_zoom = f64::INFINITY;
+        p.fun.effect(Fx::Splash, now);
+        if ctx.sound_on {
+            ctx.sounds
+                .play(p.save.id, p.species, Sound::Splash, now, ctx.volume, 1.2);
+        }
+        diag!("{}: swimming zoomies", p.save.name);
+        return true;
+    };
+    if now >= until {
+        // Done: back to paddling about, as if nothing happened.
+        p.fun.swim_zoom = None;
+        p.body.pace = 1.0;
+        return false;
+    }
+    p.fun.hold_until = 0.0;
+    let reach = SWIM_ZOOM_REACH * pond.px().0;
+    let x = pond.pos.0 + p.body.facing * reach;
+    let near = 6.0 * p.fun.scale;
+    if p.body.head_for(x, SWIM_ZOOM_PACE, near, ctx.terrain) != Heading::Going {
+        p.body.facing = -p.body.facing;
+    }
+    // Water flying off it all the way.
+    if p.fun
+        .fx
+        .iter()
+        .all(|&(f, since)| f != Fx::Splash || now - since > 0.35)
+    {
+        p.fun.effect(Fx::Splash, now);
+    }
+    true
+}
+
+/// Swimming zoomies go to this share of the pond's width either side of
+/// its middle (still in the water), this fast against a walk.
+const SWIM_ZOOM_REACH: f32 = 0.36;
+const SWIM_ZOOM_PACE: f32 = 2.4;
 
 /// Water thrown in a water fight flies this long, seconds.
 const SPRAY_SECS: f64 = 0.6;
@@ -2718,6 +3032,7 @@ fn water_fight(ground: &mut Playground, pets: &mut [Pet], ctx: &mut Ctx) {
         let side = if from > p.center_x() { 0.9 } else { 0.1 };
         p.anim.flinch((side * w as f32, 0.35 * h as f32));
         p.fun.effect(Fx::Splash, now);
+        p.fun.effect(Fx::Soaked, now);
         let roll = ground.roll();
         if roll < 0.35 {
             // Laughing it off.
@@ -2742,7 +3057,8 @@ fn water_fight(ground: &mut Playground, pets: &mut [Pet], ctx: &mut Ctx) {
     if now < ground.splash_at {
         return;
     }
-    ground.splash_at = now + 1.3 + 1.4 * f64::from(ground.roll());
+    // Oftener than it was (Roger's twentieth pass, item 5: more of it).
+    ground.splash_at = now + 0.9 + 1.1 * f64::from(ground.roll());
     // Who is in which pond, free to throw.
     let in_pond: Vec<(usize, (f32, f32))> = pets
         .iter()
@@ -2754,8 +3070,12 @@ fn water_fight(ground: &mut Playground, pets: &mut [Pet], ctx: &mut Ctx) {
                 .fun
                 .scene
                 .is_some_and(|r| r.scene == Scene::Pond && r.phase >= 2);
-            let free =
-                !leaving && !p.mind.asleep() && p.press.is_none() && p.act.is_none() && !p.in_skit;
+            let free = !leaving
+                && !p.mind.asleep()
+                && p.press.is_none()
+                && p.act.is_none()
+                && !p.in_skit
+                && p.fun.swim_zoom.is_none();
             free.then_some((i, pond))
         })
         .collect();
@@ -2792,12 +3112,23 @@ fn water_fight(ground: &mut Playground, pets: &mut [Pet], ctx: &mut Ctx) {
     let (target, target_name) = (pets[j].save.id, pets[j].save.name.clone());
     let p = &mut pets[i];
     p.body.facing = if to >= x { 1.0 } else { -1.0 };
-    let act = match p.species {
-        Species::Fox => Act::Swish,
-        Species::Chick | Species::Duck | Species::Owl => Act::Flap,
-        _ => Act::Dig,
+    p.anim.facing = p.body.facing;
+    // The duckling and the Shiba sometimes spit a jet of it from the bill
+    // or the mouth instead of scooping it (Roger's twentieth pass, item
+    // 5: 「對其它同伴噴水」).
+    let spout = matches!(p.species, Species::Duck | Species::Shiba) && ground.roll() < 0.5;
+    let from = if spout {
+        let m = p.renderer.mouth(p.body.facing);
+        (p.placed.0 as f32 + m.0, p.placed.1 as f32 + m.1)
+    } else {
+        let act = match p.species {
+            Species::Fox => Act::Swish,
+            Species::Chick | Species::Duck | Species::Owl => Act::Flap,
+            _ => Act::Dig,
+        };
+        p.try_gesture(act);
+        (x, pond.1)
     };
-    p.try_gesture(act);
     if ground.roll() < 0.3 {
         p.say(ctx, Line::Splash);
     }
@@ -2805,13 +3136,22 @@ fn water_fight(ground: &mut Playground, pets: &mut [Pet], ctx: &mut Ctx) {
         ctx.sounds
             .play(p.save.id, p.species, Sound::Splash, now, ctx.volume, 1.0);
     }
-    diag!("{}: throws water at {target_name}", p.save.name);
+    diag!(
+        "{}: {} water at {target_name}",
+        p.save.name,
+        if spout { "spits" } else { "throws" }
+    );
     if let Some(w) = ground
         .things
         .iter_mut()
         .find(|w| w.prop.thing == Thing::Pond && w.prop.pos == pond)
     {
-        w.sprays.push((x, to, now));
+        w.sprays.push(Spray {
+            from,
+            to,
+            since: now,
+            spout,
+        });
         if w.sprays.len() > 4 {
             w.sprays.remove(0);
         }
@@ -3235,6 +3575,24 @@ mod tests {
 
     /// Lounging, sitting by you or coming to you, it is busy for its own
     /// wandering but free for your hug, and the hug ends that leisure.
+    #[test]
+    fn a_buried_pet_has_the_sand_piled_on_then_bursts_out() {
+        let mut b = Bury {
+            under: 10.0,
+            until: 20.0,
+            burst: None,
+            said: false,
+            mound: None,
+        };
+        // Digging: nothing on it yet.
+        assert_eq!(b.heap(9.0), (0.0, 0.0));
+        assert_eq!(b.heap(10.0 + BURY_RISE / 2.0), (0.5, 0.0));
+        assert_eq!(b.heap(15.0), (1.0, 0.0));
+        b.burst = Some(20.0);
+        assert_eq!(b.heap(20.0 + BURY_BURST / 2.0), (1.0, 0.5));
+        assert_eq!(b.heap(30.0), (1.0, 1.0));
+    }
+
     #[test]
     fn leisure_is_busy_for_wandering_but_free_for_a_hug() {
         let now = 100.0;

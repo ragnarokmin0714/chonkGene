@@ -3329,10 +3329,12 @@ impl Pet {
             self.anim.step(dt);
         }
 
-        // In a pond it stands in the water, further in than its feet.
+        // In a pond it stands in the water, further in than its feet; on
+        // a dune, up on the sand.
         let placed = (
             self.body.pos.0.round() as i32,
-            (self.body.pos.1 - self.fun.pond_lift() - self.fun.hug_lift(t)).round() as i32,
+            (self.body.pos.1 - self.fun.pond_lift() - self.fun.hug_lift(t) - self.fun.dune_lift)
+                .round() as i32,
         );
         if placed != self.placed {
             self.window
@@ -3396,7 +3398,10 @@ impl Pet {
             eprintln!("present failed: {e}");
         }
         if crate::diag::dumping()
-            && (self.fun.pond.lately(t) || self.anim.doing() == Some(Act::Hug) || move_test())
+            && (self.fun.pond.lately(t)
+                || self.fun.on_sand
+                || self.anim.doing() == Some(Act::Hug)
+                || move_test())
         {
             let wading = if self.fun.pond.now.is_some() { "w" } else { "" };
             let what = format_args!("pet{}{wading}", self.save.id);
@@ -4052,11 +4057,31 @@ impl ApplicationHandler<UserEvent> for App {
                     self.stage_test = "tray-pond-again".into();
                     self.stage_at = Some(t + 8.0);
                 }
-            } else if self.stage_test == "pond" {
+            } else if self.stage_test == "pond" || self.stage_test == "beach" {
                 let duck = self.pets.iter().find(|p| p.species == Species::Duck);
                 if let Some(duck) = duck.map(|p| p.save.id) {
                     self.start_scene(el, duck, Scene::Pond, world, now);
-                    diag!("CHONKGENE_STAGE=pond: the duckling's pond");
+                    diag!("CHONKGENE_STAGE={}: the duckling's pond", self.stage_test);
+                }
+                // The beach: the Shiba put on the near slope of a dune,
+                // where it buries itself (see `play::beach_test`).
+                let beach = self
+                    .play
+                    .things
+                    .iter()
+                    .find(|w| w.prop.thing == chonkgene_core::play::Thing::Beach)
+                    .map(|w| w.prop);
+                let shiba = self.pets.iter_mut().find(|p| p.species == Species::Shiba);
+                if let (true, Some(b), Some(p)) = (self.stage_test == "beach", beach, shiba) {
+                    let side = if b.pos.0 > self.area.x + self.area.w / 2.0 {
+                        -1.0
+                    } else {
+                        1.0
+                    };
+                    p.body.pos.0 = b.pos.0 + side * 470.0 * b.scale - p.body.size.0 / 2.0;
+                    p.body.motion = Motion::Idle;
+                    p.body.speed = 0.0;
+                    diag!("CHONKGENE_STAGE=beach: the Shiba on a dune");
                 }
             } else {
                 self.play

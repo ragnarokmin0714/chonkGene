@@ -118,10 +118,13 @@ pub enum Line {
     Cradled,
     /// Rocked a while: drowsy murmurs (the fox: melting).
     CradleMelt,
+    /// Buried in the beach's sand up to its neck, grinning at you (the
+    /// Shiba, Roger's twentieth pass, item 5).
+    Buried,
 }
 
 impl Line {
-    pub const ALL: [Line; 58] = [
+    pub const ALL: [Line; 59] = [
         Line::Hello,
         Line::WelcomeBack,
         Line::PokeSmall,
@@ -180,6 +183,7 @@ impl Line {
         Line::BearHugged,
         Line::Cradled,
         Line::CradleMelt,
+        Line::Buried,
     ];
 
     /// Key in the line tables.
@@ -235,6 +239,7 @@ impl Line {
             Line::DanceEnd => "dance_end",
             Line::Splash => "splash",
             Line::Splashed => "splashed",
+            Line::Buried => "buried",
             Line::PatLove => "pat_love",
             Line::Dislike => "dislike",
             Line::Trap => "trap",
@@ -250,6 +255,7 @@ impl Line {
     pub fn only_for(self) -> Option<Species> {
         match self {
             Line::Trap => Some(Species::Munchkin),
+            Line::Buried => Some(Species::Shiba),
             _ => None,
         }
     }

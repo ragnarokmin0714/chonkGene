@@ -52,13 +52,29 @@ fn main() {
                 turn: 0.0,
                 held: false,
                 // The pond: water thrown from one side to the other.
-                sprays: [Some((-120.0 * scale, 120.0 * scale, 0.5)), None, None, None],
+                sprays: [
+                    Some(props::Spray {
+                        from: (-120.0 * scale, 0.0),
+                        to: 120.0 * scale,
+                        p: 0.5,
+                        spout: false,
+                    }),
+                    Some(props::Spray {
+                        from: (150.0 * scale, -110.0 * scale),
+                        to: -20.0 * scale,
+                        p: 0.45,
+                        spout: true,
+                    }),
+                    None,
+                    None,
+                ],
             },
         );
         let (cx, cy) = ((i as u32 % 3) * cell, (i as u32 / 3) * row);
         board.draw_pixmap(
-            (cx + (cell - w) / 2) as i32,
-            (cy + row - h - 10) as i32,
+            // Signed: the pond and the sunbeam are wider than a cell.
+            cx as i32 + (cell as i32 - w as i32) / 2,
+            (cy + row) as i32 - h as i32 - 10,
             pm.as_ref(),
             &PixmapPaint::default(),
             Transform::identity(),

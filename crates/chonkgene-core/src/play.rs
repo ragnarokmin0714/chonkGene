@@ -70,7 +70,7 @@ impl Thing {
             Thing::Seeds => (70.0, 14.0),
             Thing::Branch => (260.0, 60.0),
             Thing::Pond => (640.0, 136.0),
-            Thing::Beach => (1180.0, 150.0),
+            Thing::Beach => (1600.0, 170.0),
             Thing::Sunbeam => (400.0, 420.0),
             Thing::Butterfly => (28.0, 24.0),
             Thing::Spotlight => (240.0, 380.0),
@@ -98,6 +98,38 @@ impl Thing {
     pub fn grabbed(self) -> bool {
         matches!(self, Thing::Ball | Thing::Frisbee | Thing::Catnip)
     }
+}
+
+/// The beach's dunes (Roger's twentieth pass, item 5: 「有高低起伏」):
+/// each one's middle and half width along the beach's front (pixels at
+/// 100% from the beach's middle), its height there, and where its crest
+/// lies (−1 … 1 across it): a gentle slope up the side the wind comes
+/// from, a steeper one down the other, as real dunes have. Both lie
+/// beyond the pond, on the sand either side of it.
+pub const DUNES: [(f32, f32, f32, f32); 2] =
+    [(-495.0, 115.0, 28.0, -0.2), (490.0, 120.0, 36.0, 0.2)];
+
+/// How high the beach's sand stands along its front, where the pets
+/// walk, `x` pixels (at 100%) from the beach's middle: 0 on the flat, up
+/// to a dune's height on its crest, rising and falling smoothly so a pet
+/// walking over it is lifted without a jolt.
+pub fn dune_height(x: f32) -> f32 {
+    DUNES
+        .iter()
+        .map(|&(mid, half, high, crest)| {
+            let u = (x - mid) / half;
+            if u.abs() >= 1.0 {
+                return 0.0;
+            }
+            // Up to the crest, then down: each side eased at both ends.
+            let k = if u < crest {
+                (u + 1.0) / (crest + 1.0)
+            } else {
+                (1.0 - u) / (1.0 - crest)
+            };
+            high * k * k * (3.0 - 2.0 * k)
+        })
+        .fold(0.0, f32::max)
 }
 
 /// A thing and where it is: `pos` is the middle of its bottom, screen
@@ -761,6 +793,32 @@ pub fn stay_secs(command: Command) -> f64 {
 mod tests {
     use super::*;
     use crate::motion::Area;
+
+    #[test]
+    fn dunes_rise_and_fall_smoothly_beside_the_pond() {
+        // Flat in and round the pond (its water is 0.47 of 640 wide each
+        // side, its damp sand a little more), and at the ends.
+        for x in [-340.0, -200.0, 0.0, 200.0, 340.0, -790.0, 790.0] {
+            assert_eq!(dune_height(x), 0.0, "at {x}");
+        }
+        for &(mid, half, high, crest) in &DUNES {
+            let top = mid + crest * half;
+            assert!((dune_height(top) - high).abs() < 0.01, "crest of {mid}");
+            // Inside the beach's full sand (it fades out past 0.8 of 0.48
+            // of its width each side).
+            let edge = 0.8 * 0.48 * Thing::Beach.size().0;
+            assert!((mid - half).abs() <= edge && (mid + half).abs() <= edge);
+        }
+        // A pet walking over one is lifted without a jolt.
+        let mut x = -800.0;
+        while x < 800.0 {
+            assert!(
+                (dune_height(x + 1.0) - dune_height(x)).abs() < 0.6,
+                "at {x}"
+            );
+            x += 1.0;
+        }
+    }
 
     const AREA: Area = Area {
         x: 0.0,

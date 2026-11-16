@@ -8,8 +8,9 @@
 //! `paw`, `bottom`, `back`, `wing` (each held, then let go), `trap` (the
 //! 曼赤肯's belly rubbed into its trap), `scratch` (held on the head
 //! and rubbed about), `laugh`, `fedup`, `sulk`, `jog` and `run` (running
-//! at pace 1.6, half way into a gallop, and 2.2, a full one), and
-//! `sleep-chin`, `sleep-curl`, `sleep-side`, `sleep-up`.
+//! at pace 1.6, half way into a gallop, and 2.2, a full one),
+//! `sleep-chin`, `sleep-curl`, `sleep-side`, `sleep-up`, and `bury` (the
+//! Shiba lying, grinning, the beach's sand piled over it and burst out of).
 
 use std::sync::Arc;
 
@@ -112,7 +113,21 @@ fn scenes() -> Vec<Scene> {
         posture: None,
         pace: Some(pace),
     };
+    // Lying, grinning, then buried to the neck (the app draws the sand
+    // mound over its picture the same way).
+    let bury = Scene {
+        name: "bury",
+        secs: 4.0,
+        expression: Expression::Neutral,
+        hold: None,
+        sleep: None,
+        walk_first: true,
+        hug: None,
+        posture: Some(Posture::Lie),
+        pace: None,
+    };
     vec![
+        bury,
         run("jog", 1.6),
         run("run", 2.2),
         hug("hug-front", Hug::Cuddle { front: true }),
@@ -208,6 +223,7 @@ fn main() {
         }
         let mut pressed = None;
         let mut hugged = false;
+        let mut mound = None;
         let frames = (scene.secs * FPS * slow).round() as u32;
         for f in 0..frames {
             let t = f as f32 / FPS / slow;
@@ -267,6 +283,7 @@ fn main() {
             if let Some(p) = scene.posture {
                 a.posture = p;
             }
+            a.grin = scene.name == "bury" && t >= 0.6;
             if let Some(pace) = scene.pace {
                 a.pace = pace;
                 a.walking = true;
@@ -343,6 +360,19 @@ fn main() {
                     tiny_skia::Transform::identity(),
                     None,
                 );
+                pm.save_png(&path).expect("write frame");
+                continue;
+            }
+            if scene.name == "bury" && t >= 0.8 {
+                // The sand piled on (from 0.8 s), then burst out of (3.2 s).
+                use chonkgene_render::props::{head_round, mound_for, sand_mound};
+                let mut pm = r.pixmap().clone();
+                let floor = pm.height() as f32 - chonkgene_render::raymarch::FLOOR_PX;
+                let head = head_round(r.anchor(), r.mouth().expect("a mouth"));
+                let m = *mound.get_or_insert_with(|| mound_for(&pm, floor, head).expect("a pet"));
+                let rise = ((t - 0.8) / 0.9).min(1.0);
+                let burst = ((t - 3.2) / 0.6).clamp(0.0, 1.0);
+                sand_mound(&mut pm, &m, floor, head, rise, burst, 1.0);
                 pm.save_png(&path).expect("write frame");
                 continue;
             }
