@@ -1,14 +1,14 @@
 # Prints the fox's nine tails for quad.ron: `python3 gen_tails.py | python3
 # ../splice.py quad.ron`.
 #
-# Nine plumes spread behind her in a half circle, as in Roger's pictures
-# (PLAN §8, twenty-second pass, item 3): the top ones upright, the outer
-# ones sweeping out sideways and drooping, all leaning back so that from
-# the side they stream out behind her in layers. Each plume is thin at the
-# root, widest a little past half way (0.58) (near the width of her head), and
-# drawn out to a fine tip; flattened a little, as a brush of fur is; and
-# its centre line is an S: up and in from the root, out through the middle,
-# the tip flicking out and up like a flame's.
+# Nine fat plumes opening behind her like the petals of a lotus, as in
+# Roger's picture of her parts (PLAN §8, twenty-second pass, item 3,
+# 「3D示意與局部拆解圖」: 九尾巴（分件）): each a plump teardrop of fluff,
+# narrow where it leaves the round puff at her tail root, fullest a little
+# under half way (near the width of her head) and drawn to a point that
+# flicks up like a flame's; the top ones upright, the outer ones lying out
+# sideways, all leaning back, packed close so they overlap as petals do;
+# flattened a little, as a brush of fur is; the centre line an S.
 #
 # The centre line is sampled into round cones whose radii meet and which
 # carry on in the same direction, so a plume is one smooth surface; they
@@ -33,22 +33,22 @@ def f(v):
 
 
 base = [0.0, 0.1, -0.88]
-LENGTH = 2.45
+LENGTH = 1.9
 BONES = 5
 PER = 3  # cones to a bone
 CONES = BONES * PER
 SEG = ["", "_b", "_c", "_d", "_tip"]
 # How wide the fan opens either side of upright, degrees.
-SPREAD = 128.0
+SPREAD = 112.0
 FLAT = 1.2
 
 
 def radius(s):
-    """A plume's half-width a fraction `s` of the way out: a thin root
-    swelling to its fullest at 0.55, then easing in to a fine tip."""
-    if s < 0.58:
-        return 0.07 + 0.25 * math.sin(0.5 * math.pi * s / 0.58) ** 1.2
-    return 0.035 + 0.285 * max(0.0, math.cos(0.5 * math.pi * (s - 0.58) / 0.42)) ** 1.3
+    """A plume's half-width a fraction `s` of the way out: a narrow root
+    swelling quickly to its fullest at 0.42, then easing in to a point."""
+    if s < 0.42:
+        return 0.1 + 0.33 * math.sin(0.5 * math.pi * s / 0.42) ** 0.9
+    return 0.03 + 0.4 * max(0.0, math.cos(0.5 * math.pi * (s - 0.42) / 0.58)) ** 1.25
 
 
 def bend(s):
