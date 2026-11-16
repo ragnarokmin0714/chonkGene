@@ -162,6 +162,10 @@ struct User {
     /// GPU seconds spent, fading over [`USE_SECS`]: divided by it, the
     /// share of GPU time it takes now.
     used: f32,
+    /// What its frames cost lately (GPU seconds, as asked): its fair share
+    /// of time is weighted by it, so a costly pet gets as many frames as
+    /// the rest.
+    per_frame: f32,
     at: Instant,
     asked: Instant,
 }
@@ -179,10 +183,15 @@ impl User {
 /// what it is expected to cost; a frame it cannot pay for waits.
 ///
 /// Shared fairly (Roger's fifteenth pass, item 3: idle pets fell to 4 fps
-/// whenever others walked): every pet drawing may use `share` over the
-/// number drawing, saved or not, before anyone gets more; walking frames
-/// count against the walker like any other, and go anyway only at 30 a
-/// second. The debt that leaves is at most a burst deep.
+/// whenever others walked): every pet drawing may use its part of `share`,
+/// saved or not, before anyone gets more; walking frames count against the
+/// walker like any other, and go anyway only at 30 a second. The debt that
+/// leaves is at most a burst deep.
+///
+/// The parts are fair in frames, not in time (Roger's logs, 2026-11-13 and
+/// -16: the fox's frames cost 2.7 ms against 1.3–1.7 ms, so an equal part
+/// of the time gave her 43% of the frames she asked for, the others
+/// 64–78%): each pet's part is weighted by what its frames cost.
 struct Budget {
     share: f32,
     saved: f32,
@@ -220,6 +229,7 @@ impl Budget {
                 self.users.push(User {
                     id,
                     used: 0.0,
+                    per_frame: 0.0,
                     at: now,
                     asked: now,
                 });
@@ -232,15 +242,21 @@ impl Budget {
         Some(u)
     }
 
-    /// Each drawing pet's fair share of GPU time.
-    fn fair(&self, now: Instant) -> f32 {
-        let drawing = self
-            .users
-            .iter()
-            .filter(|u| now.saturating_duration_since(u.asked) < ACTIVE)
-            .count()
-            .max(1);
-        self.share / drawing as f32
+    /// Pet `id`'s fair share of GPU time: `share` split among the pets
+    /// drawing in proportion to what their frames cost, so each can draw
+    /// as many.
+    fn fair(&self, id: u32, now: Instant) -> f32 {
+        let drawing = || {
+            self.users
+                .iter()
+                .filter(|u| now.saturating_duration_since(u.asked) < ACTIVE)
+        };
+        let total: f32 = drawing().map(|u| u.per_frame).sum();
+        let mine = self.users.iter().find(|u| u.id == id).map(|u| u.per_frame);
+        match mine {
+            Some(mine) if total > 0.0 => self.share * mine / total,
+            _ => self.share / drawing().count().max(1) as f32,
+        }
     }
 
     /// May a frame costing `cost` GPU seconds go now? If so it is paid for.
@@ -248,7 +264,14 @@ impl Budget {
         self.refill(now);
         let unlimited = self.share >= 1.0;
         let saved = self.saved >= cost;
-        let fair = self.fair(now);
+        if let Some(u) = self.user(id, now) {
+            u.per_frame = if u.per_frame > 0.0 {
+                u.per_frame + 0.1 * (cost - u.per_frame)
+            } else {
+                cost
+            };
+        }
+        let fair = self.fair(id, now);
         let Some(u) = self.user(id, now) else {
             if !(unlimited || saved || how == Ask::Now) {
                 return false;
@@ -1015,14 +1038,26 @@ mod tests {
     /// walking at 60 a second, five idle at 30, each frame `cost` GPU
     /// seconds; and the share of GPU time they took altogether.
     fn share_out(secs: f32, cost: f32) -> (Vec<f32>, f32) {
+        share_out_by(secs, &[cost; 7], 2, 60.0, 30.0)
+    }
+
+    /// As [`share_out`], each pet's frames costing its own, the first
+    /// `walkers` walking at `walk` a second, the rest asking `idle`.
+    fn share_out_by(
+        secs: f32,
+        costs: &[f32; 7],
+        walkers: u32,
+        walk: f32,
+        idle: f32,
+    ) -> (Vec<f32>, f32) {
         let t0 = Instant::now();
         let mut b = Budget::new(DEFAULT_BUDGET, t0);
         let gap = |fps: f32| Duration::from_secs_f32(1.0 / fps);
         // (id, asks every, walking, next ask, last frame, frames)
         let mut pets: Vec<(u32, Duration, bool, Duration, Option<Duration>, u32)> = (1..=7)
             .map(|id| {
-                let walking = id <= 2;
-                let every = gap(if walking { 60.0 } else { 30.0 });
+                let walking = id <= walkers;
+                let every = gap(if walking { walk } else { idle });
                 (
                     id,
                     every,
@@ -1049,6 +1084,7 @@ mod tests {
                 } else {
                     Ask::Fair
                 };
+                let cost = costs[p.0 as usize - 1];
                 if b.ask(p.0, cost, how, t0 + now) {
                     p.4 = Some(now);
                     p.5 += 1;
@@ -1100,6 +1136,21 @@ mod tests {
             assert!(*f >= 0.95 * asked, "pet {i}: {f:.1} of {asked} fps");
         }
         assert!(share <= DEFAULT_BUDGET);
+    }
+
+    /// Roger's logs (2026-11-13, -16): seven pets asking about 40 frames a
+    /// second, the fox's frames costing 2.7 ms and the others' 1.3–1.7 ms.
+    /// An equal share of time gave her 13.6 frames a second against 21–28
+    /// for the others; shared in frames, all get about 21.
+    #[test]
+    fn a_costly_pet_gets_as_many_frames_as_the_rest() {
+        let costs = [0.0017, 0.0017, 0.0017, 0.0017, 0.0013, 0.0013, 0.0027];
+        let (fps, share) = share_out_by(10.0, &costs, 0, 60.0, 40.0);
+        let rest = fps[..6].iter().sum::<f32>() / 6.0;
+        let fox = fps[6];
+        assert!(fox >= 0.9 * rest, "fox {fox:.1} fps, the rest {rest:.1}");
+        // As much over the budget as before (the shares fade, the burst).
+        assert!(share <= DEFAULT_BUDGET + 0.02, "GPU share {share:.3}");
     }
 
     /// The budget's debt stays a burst deep whatever is settled.

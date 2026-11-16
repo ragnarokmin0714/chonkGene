@@ -364,7 +364,7 @@ enum Action {
     /// 放聚光燈: a spotlight put down beside it (or taken away).
     Stage,
     /// 抱抱: you hug it, held as it suits it now (a double-click; asleep,
-    /// it only stirs).
+    /// cradled and sleeping on).
     Hug,
     /// The page of how to hold it, and one of them.
     HugHow,
@@ -560,7 +560,8 @@ struct App {
     stage_at: Option<f64>,
     /// `CHONKGENE_STAGE=dance`: 跳舞 asked of the first pet instead;
     /// `pond`: the duckling's pond scene started; `hug`: the first pet
-    /// hugged by you (your hands, dumped with `CHONKGENE_DUMP`).
+    /// hugged by you (your hands, dumped with `CHONKGENE_DUMP`);
+    /// `hug-asleep`: put to sleep first, hugged 3 s later.
     stage_test: String,
     sounds: Sounds,
     tray: Option<Tray>,
@@ -2700,7 +2701,8 @@ impl Pet {
 
     /// 抱抱 (the menu, or a double-click): it says how it takes it, and if
     /// it is awake and free your hands hold it, `hold` (none: as suits how
-    /// it is now, see [`HugHold::pick`]), and it snuggles in.
+    /// it is now, see [`HugHold::pick`]), and it snuggles in; asleep, it is
+    /// cradled and sleeps on.
     fn hug_you(&mut self, ctx: &mut Ctx, hold: Option<HugHold>) {
         let now = ctx.world.now;
         let mut out = self.mind.hug(&ctx.world);
@@ -2708,8 +2710,14 @@ impl Pet {
         // is still yours to hug (Roger's log, 2026-11-13: eight
         // double-clicks in a row on the chick, lying preening, all came to
         // nothing).
-        let why_not = if out.line == Some(Line::TurnOver) {
+        // Asleep, it is picked up and rocked without waking, curled as it
+        // lay (Roger's log, 2026-11-16: nine double-clicks on the sleeping
+        // fox, each turned down "asleep").
+        let asleep = out.line == Some(Line::TurnOver);
+        let why_not = if asleep && hold.is_some_and(|h| h != HugHold::Cradle) {
             Some("asleep")
+        } else if asleep {
+            None
         } else if out.line != Some(Line::Hugged) {
             Some("in a mood")
         } else if self.in_skit {
@@ -2724,6 +2732,7 @@ impl Pet {
             None
         };
         let free = why_not.is_none();
+        let hold = if asleep { Some(HugHold::Cradle) } else { hold };
         let hold = hold.unwrap_or_else(|| {
             let hour = ctx.world.hour;
             let mood = HugMood {
@@ -2743,7 +2752,10 @@ impl Pet {
             // Not off for a walk while in your hands (a 搖搖抱 is long: it
             // got up and ran off half way).
             self.switch_at = self.switch_at.max(now + f64::from(hold.secs()) + 0.5);
-            if hold == HugHold::Cradle {
+            if asleep {
+                // No word and no face: it sleeps on.
+                out = chonkgene_core::mind::Out::default();
+            } else if hold == HugHold::Cradle {
                 // Rocked, not cheered: no happy hop on its back; the fox
                 // says she does not want this, and melts later.
                 out.line = Some(Line::Cradled);
@@ -2758,6 +2770,7 @@ impl Pet {
                 match hold {
                     HugHold::Wrap => "wrapped round",
                     HugHold::Carry => "lifted up",
+                    HugHold::Cradle if asleep => "cradled asleep",
                     HugHold::Cradle => "cradled",
                 }
             } else {
@@ -4038,6 +4051,12 @@ impl ApplicationHandler<UserEvent> for App {
             if self.stage_test == "dance" {
                 self.start_scene(el, pet, Scene::Dance, world, now);
                 diag!("CHONKGENE_STAGE=dance: asked to dance");
+            } else if self.stage_test == "hug-asleep" {
+                // Put to sleep, then hugged as a double-click would.
+                self.act(el, pet, Action::Sleep);
+                self.stage_test = "hug".into();
+                self.stage_at = Some(t + 3.0);
+                diag!("CHONKGENE_STAGE=hug-asleep: put the first pet to sleep");
             } else if self.stage_test == "hug" {
                 self.act(el, pet, Action::Hug);
                 diag!("CHONKGENE_STAGE=hug: hugged the first pet");

@@ -137,6 +137,14 @@ fn scenes() -> Vec<Scene> {
         hug("hug-you", Hug::ByYou(HugHold::Wrap)),
         hug("hug-carry", Hug::ByYou(HugHold::Carry)),
         hug("hug-cradle", Hug::ByYou(HugHold::Cradle)),
+        // Picked up asleep: rocked without waking (Roger's log, 2026-11-16).
+        Scene {
+            name: "hug-asleep",
+            expression: Expression::Asleep,
+            sleep: Some(SleepPose::Curl),
+            walk_first: false,
+            ..hug("", Hug::ByYou(HugHold::Cradle))
+        },
         travel("slide", Posture::Slide),
         travel("glide", Posture::Glide),
         travel("fly", Posture::Fly),
