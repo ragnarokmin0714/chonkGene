@@ -714,7 +714,7 @@ const SIT_FAN_GAP: f32 = 24.0;
 /// a little side to side, and each segment past the root droops on this
 /// much, so the tips settle over the back. They move as one bunch: their
 /// roots share skin, and pulling them apart would stretch it into a sheet.
-const BLANKET_TIP: f32 = 62.0;
+const BLANKET_TIP: f32 = 74.0;
 const BLANKET_SPREAD: f32 = 14.0;
 const BLANKET_DROOP: f32 = 16.0;
 /// Curled up asleep, the chest turns this far (degrees) one way and the
@@ -799,6 +799,24 @@ const WAVE_LAG: f32 = 0.9;
 const WAVE_SPAN: f32 = 7.5;
 /// Swishes a second, standing and at full pace.
 const SWISH_HZ: (f32, f32) = (0.6, 1.6);
+/// The fox's plumes flow (Roger's twenty-second pass, item 3: 「不夠飄逸」):
+/// her swish this much slower and each segment further behind the one
+/// before, so a slow wave is seen running out to the tips; each segment
+/// pushed against the way the one before it moves (it lags, then whips
+/// past), on springs that soften toward the tip; and the fan swept back
+/// as she walks, swinging on when she starts or stops.
+const FLOW_HZ: f32 = 0.65;
+const FLOW_LAG: f32 = 0.85;
+const FLOW_PUSH: f32 = 10.0;
+/// The springs' rate at the root and at the tip, and damping.
+const FLOW_SPRING: (f32, f32, f32) = (3.2, 1.5, 0.32);
+/// Degrees the fan sweeps back at full pace, and how hard a change of
+/// pace swings it.
+const FLOW_TRAIL: f32 = 14.0;
+const FLOW_SWING: f32 = 900.0;
+/// How quickly her tails fold over her asleep, or open up (a critically
+/// damped spring's rate behind her lying down).
+const FLOW_FOLD_HZ: f32 = 0.5;
 
 /// A tail: its bones from the base out, with a sideways swish and an
 /// up-and-down bounce spring for each, and where in the swish it starts.
@@ -857,6 +875,9 @@ pub struct Walk {
     pace: f32,
     /// The turn's speed last frame: turning flings the tails the other way.
     yaw_v: f32,
+    /// How far the fox's tails have folded over her asleep: behind her
+    /// lying down, slower (they are long, and the tips go far).
+    blanket: Spring,
     /// Asked to sit, and how far down it is (0 standing … 1 sitting).
     sitting: bool,
     /// Asked to lie down (asleep, or `awake`: 趴下, a still mouse), and how
@@ -992,6 +1013,7 @@ impl Walk {
             nod: [0.0; 2],
             pace: 0.0,
             yaw_v: 0.0,
+            blanket: Spring::default(),
             sitting: false,
             lying: false,
             awake: false,
@@ -1417,9 +1439,14 @@ impl Walk {
         } else {
             0.0
         };
-        self.swish = (self.swish
-            + dt * (SWISH_HZ.0 + (SWISH_HZ.1 - SWISH_HZ.0) * s) * (1.0 + 2.5 * wag + 0.6 * curl))
-            .fract();
+        let flow = self.tails.len() > 1;
+        let fold = if flow {
+            self.blanket.step(lie, 0.0, FLOW_FOLD_HZ, 1.0, dt)
+        } else {
+            lie
+        };
+        let hz = (SWISH_HZ.0 + (SWISH_HZ.1 - SWISH_HZ.0) * s) * if flow { FLOW_HZ } else { 1.0 };
+        self.swish = (self.swish + dt * hz * (1.0 + 2.5 * wag + 0.6 * curl)).fract();
         // Laughing it thrashes its tail; melted it lies limp; held, it goes
         // stiff in your hand.
         let held_tail = matches!(self.feel.held, Some((Zone::Tail, ..)));
@@ -1442,8 +1469,13 @@ impl Walk {
             // Shiba's seven-segment ring) bends no more in all than a short
             // one and keeps its shape.
             let amp = amp * 3.0 / tail.bones.len().max(3) as f32;
+            let n = tail.bones.len();
             for (k, &bone) in tail.bones.iter().enumerate() {
-                let lag = WAVE_LAG.min(WAVE_SPAN / tail.bones.len() as f32) * k as f32;
+                let lag = if flow {
+                    FLOW_LAG
+                } else {
+                    WAVE_LAG.min(WAVE_SPAN / n as f32)
+                } * k as f32;
                 // Sideways, the travelling wave; up and down, a smaller one
                 // a quarter behind, plus a bounce with the steps at the root.
                 let sw_target = amp * (at - lag).sin();
@@ -1453,8 +1485,30 @@ impl Walk {
                 }
                 // Springs smooth the wave as the pace (and so its speed and
                 // size) changes.
-                let sw = tail.swish[k].step(sw_target, 0.0, 3.0, 0.5, dt);
-                let bo = tail.bounce[k].step(bo_target, 0.0, 3.0, 0.5, dt);
+                let (sw, bo) = if flow {
+                    // Each segment held back by the one before it moving.
+                    let (push_sw, push_bo) = match k {
+                        0 => (0.0, -FLOW_SWING * pace_acc),
+                        _ => (
+                            -FLOW_PUSH * tail.swish[k - 1].v,
+                            -FLOW_PUSH * tail.bounce[k - 1].v,
+                        ),
+                    };
+                    if k == 0 {
+                        bo_target -= FLOW_TRAIL * s;
+                    }
+                    let along = k as f32 / (n.max(2) - 1) as f32;
+                    let hz = FLOW_SPRING.0 + (FLOW_SPRING.1 - FLOW_SPRING.0) * along;
+                    (
+                        tail.swish[k].step(sw_target, push_sw, hz, FLOW_SPRING.2, dt),
+                        tail.bounce[k].step(bo_target, push_bo, hz, FLOW_SPRING.2, dt),
+                    )
+                } else {
+                    (
+                        tail.swish[k].step(sw_target, 0.0, 3.0, 0.5, dt),
+                        tail.bounce[k].step(bo_target, 0.0, 3.0, 0.5, dt),
+                    )
+                };
                 j[bone] = Joint {
                     rot: v3(
                         bo,
@@ -1479,9 +1533,9 @@ impl Walk {
                             TailStyle::Curl => {}
                         }
                     }
-                    j[bone].rot = j[bone].rot + tail.sit_turn * fan + tail.lie_turn * lie;
+                    j[bone].rot = j[bone].rot + tail.sit_turn * fan + tail.lie_turn * fold;
                 } else {
-                    j[bone].rot = j[bone].rot + tail.lie_curl * lie;
+                    j[bone].rot = j[bone].rot + tail.lie_curl * fold;
                 }
             }
         }
