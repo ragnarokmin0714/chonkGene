@@ -29,9 +29,32 @@ fn tapered(uv: vec2<f32>, a: vec2<f32>, b: vec2<f32>, r1: f32, r2: f32) -> f32 {
     return length(pa - ba * h) - (r1 + (r2 - r1) * h);
 }
 
-// The forehead flame, as face.rs `flame`.
-const FLAME_AT: vec2<f32> = vec2<f32>(0.0, 0.56);
-const FLAME_R: vec2<f32> = vec2<f32>(0.1, 0.18);
+// Where the fox's forehead mark stands, and her crest when casting.
+const CREST_AT: vec2<f32> = vec2<f32>(0.0, 0.45);
+
+// A leaf from `a` to `b`, `w` wide at its middle, pointed at both ends, as
+// face.rs `leaf`.
+fn leaf(uv: vec2<f32>, a: vec2<f32>, b: vec2<f32>, w: f32) -> f32 {
+    let pa = uv - a;
+    let ba = b - a;
+    let h = clamp(dot(pa, ba) / dot(ba, ba), 0.0, 1.0);
+    let r = w * pow(sin(3.14159265 * h), 0.7) + 0.003;
+    return length(pa - ba * h) - r;
+}
+
+// The fox's marks at rest, as face.rs `fox_marks`: three leaves fanned up
+// on the forehead, two long strokes back along each cheek. x: coverage;
+// y: how far out toward the ears (the strokes pale toward their ends).
+fn fox_marks(uv: vec2<f32>, aa: f32) -> vec2<f32> {
+    var d = leaf(uv, vec2<f32>(0.0, 0.45), vec2<f32>(0.0, 0.71), 0.05);
+    for (var k = 0; k < 2; k++) {
+        let side = select(-1.0, 1.0, k == 1);
+        d = min(d, leaf(uv, vec2<f32>(0.03 * side, 0.44), vec2<f32>(0.15 * side, 0.62), 0.038));
+        d = min(d, tapered(uv, vec2<f32>(0.5 * side, -0.2), vec2<f32>(0.88 * side, -0.1), 0.04, 0.005));
+        d = min(d, tapered(uv, vec2<f32>(0.52 * side, -0.31), vec2<f32>(0.86 * side, -0.25), 0.034, 0.005));
+    }
+    return vec2<f32>(ink(d, aa), ss(0.55, 0.86, abs(uv.x)));
+}
 
 // Looks, as numbered in `look_index`.
 const OPEN: i32 = 0;
@@ -129,51 +152,56 @@ fn paint_eyes(q: vec3<f32>, r: vec3<f32>, base: vec3<f32>, px: f32) -> vec3<f32>
         }
     }
     if u.spots.w >= 0.0 {
-        let p0 = (uv - FLAME_AT) / FLAME_R;
-        let t = clamp((p0.y + 0.3) / 1.3, 0.0, 1.0);
-        let p = vec2<f32>(p0.x - 0.35 * t * t, p0.y);
-        let body = tapered(p, vec2<f32>(0.0, -0.45), vec2<f32>(0.0, 0.95), 0.6, 0.03);
-        let lick = tapered(p, vec2<f32>(0.3, -0.2), vec2<f32>(0.72, 0.35), 0.22, 0.02);
-        let core = tapered(p, vec2<f32>(0.0, -0.6), vec2<f32>(0.0, -0.05), 0.2, 0.02);
         let mark = u.palette[u32(u.spots.w)].rgb;
-        let whole = ink(min(body, lick) * FLAME_R.x, aa);
-        c = mix(c, mark, whole);
-        c = mix(c, mix(mark, white, 0.55), ink(core * FLAME_R.x, aa) * whole);
-        // Casting, the stripes and seal lines in the mark's colour, deeper.
         let g = u.fwd.w;
+        // Casting, the rest marks give way to the seal (咒印) as it grows.
+        let m0 = fox_marks(uv, aa);
+        c = mix(c, mix(mark, white, 0.35 * m0.y), m0.x * (1.0 - ss(0.2, 0.7, g)));
         if g > 0.0 {
             let m = spell_marks(uv, aa, g);
-            c = mix(c, mark * 0.78, m.x * min(2.0 * g, 1.0));
+            c = mix(c, mark * 0.85, m.x * min(2.0 * g, 1.0));
         }
     }
     return c;
 }
 
-// The fox casting (u.fwd.w, 0 … 1; mesh.wgsl only): the stripes on its
-// cheeks and the flicks at its eyes drawn out longer toward the ears, a
-// ring round the flame with a bead either side on it, a dot under each eye
-// (咒印), growing as the spell builds. x: how much of `uv` they cover;
-// y: a soft halo round them.
+// The fox casting (u.fwd.w, 0 … 1; mesh.wgsl only): her seal (咒印, after
+// Roger's 紅髮版配件 picture): on the forehead a crest drawing itself up from
+// its foot, a tall flame drop with a round hollow in it and a curling flame
+// wing either side (a trident, a lotus seen from the front); a leaf at each
+// brow; three stacked stripes along each cheek, drawn out toward the ears;
+// a ring round each eye.
+// x: how much of `uv` they cover; y: a soft halo round them.
 fn spell_marks(uv: vec2<f32>, aa: f32, g: f32) -> vec2<f32> {
-    var d = 1e3;
+    let rise = ss(0.0, 0.6, g);
+    let top = CREST_AT + vec2<f32>(0.0, 0.36 * rise);
+    var d = tapered(uv, CREST_AT, top, 0.065 * rise, 0.004);
+    // The hollow in the drop, cut out once it has risen past it.
+    d = max(d, -(length(uv - vec2<f32>(0.0, 0.53)) - 0.026 * ss(0.3, 0.7, g)));
+    let wing = ss(0.25, 0.8, g);
     for (var k = 0; k < 2; k++) {
         let side = select(-1.0, 1.0, k == 1);
+        // A wing: up and out from the crest's foot, curling back in at its
+        // tip (two leaves meeting at an elbow).
+        let w0 = vec2<f32>(0.035 * side, 0.43);
+        let w1 = vec2<f32>(0.17 * side, 0.57);
+        let w2 = vec2<f32>(0.12 * side, 0.72);
+        d = min(d, leaf(uv, w0, mix(w0, w1, wing), 0.04 * wing + 0.001));
+        d = min(d, tapered(uv, w1, mix(w1, w2, ss(0.5, 0.9, g)), 0.022 * wing, 0.003));
+        // The brow leaves.
+        let bl = ss(0.45, 1.0, g);
+        let b0 = vec2<f32>(0.2 * side, 0.33);
+        d = min(d, leaf(uv, b0, mix(b0, vec2<f32>(0.4 * side, 0.4), bl), 0.045 * bl + 0.001));
         for (var i = 0; i < 3; i++) {
             let fi = f32(i);
-            let a = vec2<f32>(0.52 * side, -0.03 - 0.08 * fi);
-            let b = vec2<f32>((0.93 - 0.07 * fi) * side, 0.08 - 0.06 * fi);
-            d = min(d, tapered(uv, a, mix(a, b, g), 0.03, 0.008));
+            let a = vec2<f32>((0.5 + 0.01 * fi) * side, -0.16 - 0.085 * fi);
+            let b = vec2<f32>((0.93 - 0.05 * fi) * side, -0.04 - 0.07 * fi);
+            d = min(d, tapered(uv, a, mix(a, b, g), 0.036, 0.006));
         }
-        // The eyeliner's flick, on up toward the ear.
-        let la = vec2<f32>((u.eye.x + 0.85 * u.eye.z) * side, u.eye.y + 0.1 * u.eye.w);
-        let lb = vec2<f32>(0.72 * side, 0.46);
-        d = min(d, tapered(uv, la, mix(la, lb, g), 0.024, 0.006));
-        let bead = vec2<f32>(0.21 * side, 0.68);
-        d = min(d, length(uv - bead) - 0.034 * ss(0.4, 0.8, g));
-        d = min(d, length(uv - vec2<f32>(0.33 * side, -0.2)) - 0.024 * ss(0.5, 0.9, g));
-    }
-    if g > 0.55 {
-        d = min(d, arc(uv, FLAME_AT, 0.24, 0.012 * ss(0.55, 1.0, g)));
+        // A ring round the eye (the picture's full eyeliner).
+        let ec = vec2<f32>(u.eye.x * side, u.eye.y);
+        let ring = length((uv - ec) / vec2<f32>(u.eye.z * 1.22, u.eye.w * 1.18)) - 1.0;
+        d = min(d, abs(ring) * u.eye.z - 0.01 * ss(0.5, 1.0, g));
     }
     return vec2<f32>(ink(d, aa), ink(d - 0.04, aa * 6.0));
 }
@@ -208,17 +236,12 @@ fn spell_glow(q: vec3<f32>, r: vec3<f32>, lit: vec3<f32>, px: f32) -> vec3<f32> 
         c = mix(c, eye_c, g * (0.2 * halo + 0.75 * ring));
     }
     let m = spell_marks(uv, aa, g);
-    c = mix(c, mix(hot, white, 0.4), g * (0.28 * m.y + 0.35 * m.x));
-    let p0 = (uv - FLAME_AT) / FLAME_R;
-    let t = clamp((p0.y + 0.3) / 1.3, 0.0, 1.0);
-    let p = vec2<f32>(p0.x - 0.35 * t * t, p0.y);
-    let body = tapered(p, vec2<f32>(0.0, -0.45), vec2<f32>(0.0, 0.95), 0.6, 0.03);
-    let lick = tapered(p, vec2<f32>(0.3, -0.2), vec2<f32>(0.72, 0.35), 0.22, 0.02);
-    let core = tapered(p, vec2<f32>(0.0, -0.6), vec2<f32>(0.0, -0.05), 0.2, 0.02);
-    let halo = ink(ell(uv, FLAME_AT, FLAME_R * 1.9), aa * 12.0);
-    c = mix(c, mix(hot, white, 0.5), g * 0.4 * halo);
-    c = mix(c, hot, g * 0.8 * ink(min(body, lick) * FLAME_R.x, aa));
-    c = mix(c, vec3<f32>(1.0, 0.95, 0.85), g * 0.9 * ink(core * FLAME_R.x, aa));
+    // A soft glow round the seal, not over it: the seal itself stays the
+    // mark's deep colour (Roger's picture).
+    c = mix(c, mix(hot, white, 0.4), g * 0.22 * m.y * (1.0 - m.x));
+    // The crest blazing, a halo round it.
+    let halo = ink(ell(uv, CREST_AT + vec2<f32>(0.0, 0.16), vec2<f32>(0.24, 0.3)), aa * 12.0);
+    c = mix(c, mix(hot, white, 0.5), g * 0.2 * halo);
     return clamp(c, vec3<f32>(0.0), vec3<f32>(1.0));
 }
 

@@ -205,10 +205,10 @@ fn the_fox_eyeliner_lands_in_the_same_place_on_the_gpu_and_the_cpu() {
 }
 
 #[test]
-fn the_fox_forehead_flame_lands_in_the_same_place_on_the_gpu_and_the_cpu() {
+fn the_fox_marks_land_in_the_same_place_on_the_gpu_and_the_cpu() {
     let (model, _) = quad("fox").unwrap();
     assert!(model.face.forehead.is_some());
-    feature_lands_in_the_same_place("forehead flame", |m| m.face.forehead = None);
+    feature_lands_in_the_same_place("marks", |m| m.face.forehead = None);
 }
 
 #[test]

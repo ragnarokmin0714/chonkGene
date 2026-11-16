@@ -419,7 +419,8 @@ pub struct Face {
     pub whiskers: bool,
     /// Eyeliner colour slot.
     pub liner: Option<usize>,
-    /// Forehead flame colour slot.
+    /// The fox's marks' colour slot: the leaves on the forehead and the
+    /// strokes on the cheeks (face.rs `fox_marks`).
     pub forehead: Option<usize>,
 }
 

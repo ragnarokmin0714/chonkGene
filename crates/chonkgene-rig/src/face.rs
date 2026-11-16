@@ -35,27 +35,33 @@ fn tapered(uv: P, a: P, b: P, r1: f32, r2: f32) -> f32 {
     len((pa.0 - ba.0 * h, pa.1 - ba.1 * h)) - (r1 + (r2 - r1) * h)
 }
 
-/// Where the forehead flame sits in face space, and its half-width and
-/// half-height.
-const FLAME_AT: P = (0.0, 0.56);
-const FLAME_R: P = (0.1, 0.18);
+/// Distance to a leaf from `a` to `b`, `w` wide at its middle and coming
+/// to a point at both ends: not exact, but fine for painting.
+fn leaf(uv: P, a: P, b: P, w: f32) -> f32 {
+    let (pa, ba) = (sub(uv, a), sub(b, a));
+    let h = ((pa.0 * ba.0 + pa.1 * ba.1) / (ba.0 * ba.0 + ba.1 * ba.1)).clamp(0.0, 1.0);
+    let r = w * (std::f32::consts::PI * h).sin().powf(0.7) + 0.003;
+    len((pa.0 - ba.0 * h, pa.1 - ba.1 * h)) - r
+}
 
-/// The forehead flame at `uv`: a teardrop drawn out to a point that flicks
-/// to the side, a small lick curling off it, and a paler core. Returns the
-/// coverage of the whole and of the core.
-fn flame(uv: P, aa: f32) -> (f32, f32) {
-    let p = (
-        (uv.0 - FLAME_AT.0) / FLAME_R.0,
-        (uv.1 - FLAME_AT.1) / FLAME_R.1,
-    );
-    // The tip leans over to one side.
-    let t = ((p.1 + 0.3) / 1.3).clamp(0.0, 1.0);
-    let p = (p.0 - 0.35 * t * t, p.1);
-    let k = FLAME_R.0; // distances back to face space
-    let body = tapered(p, (0.0, -0.45), (0.0, 0.95), 0.6, 0.03);
-    let lick = tapered(p, (0.3, -0.2), (0.72, 0.35), 0.22, 0.02);
-    let core = tapered(p, (0.0, -0.6), (0.0, -0.05), 0.2, 0.02);
-    (ink(body.min(lick) * k, aa), ink(core * k, aa))
+/// The fox's marks at rest (Roger's picture 施法狀態, PLAN §8 twenty-third
+/// pass, item 3), the same in paint.wgsl `fox_marks`: on the forehead three
+/// leaves fanned up from one point, the middle one tallest; on each cheek
+/// two long strokes tapering back toward the ear. Returns the coverage of
+/// the marks, and how far out toward the ears it is (0 … 1: the strokes
+/// pale toward their ends).
+pub(crate) fn fox_marks(uv: P, aa: f32) -> (f32, f32) {
+    let mut d = leaf(uv, (0.0, 0.45), (0.0, 0.71), 0.05);
+    for side in [-1.0, 1.0] {
+        d = d.min(leaf(uv, (0.03 * side, 0.44), (0.15 * side, 0.62), 0.038));
+        for (a, b, r) in [
+            ((0.5, -0.2), (0.88, -0.1), 0.04),
+            ((0.52, -0.31), (0.86, -0.25), 0.034),
+        ] {
+            d = d.min(tapered(uv, (a.0 * side, a.1), (b.0 * side, b.1), r, 0.005));
+        }
+    }
+    (ink(d, aa), smoothstep(0.55, 0.86, uv.0.abs()))
 }
 
 /// Coverage of a shape at signed distance `d`, smoothed over `aa`.
@@ -159,10 +165,9 @@ pub fn eyes(scene: &Scene, shape: Shape, q: V3, base: V3, px: f32) -> V3 {
         }
     }
     if let Some(slot) = face.forehead {
-        let (whole, core) = flame(uv, aa);
+        let (whole, out) = fox_marks(uv, aa);
         let mark = scene.color(slot);
-        c = c.lerp(mark, whole);
-        c = c.lerp(mark.lerp(white, 0.55), core * whole);
+        c = c.lerp(mark.lerp(white, 0.35 * out), whole);
     }
     c
 }

@@ -1,8 +1,8 @@
 // 九尾狐 on all fours, for the skinned-mesh spike: a white fox spirit,
 // drawn the way chibi kitsune are. A round, short-legged body; a round,
 // cat-like face with a short muzzle, big eyes with a pink iris, red
-// eyeliner, a red flame on the forehead (painted, face.rs) and two red
-// stripes on each cheek; big rounded ears red from the tip down, flaring
+// eyeliner, three red leaves on the forehead and two long strokes along
+// each cheek (painted, face.rs `fox_marks`), soft round brow dots; big rounded ears red from the tip down, flaring
 // cheek tufts, a fluffy ruff and a tuft on the throat, a red cord with a
 // gold bell; and nine little flame tails opening behind like the petals of
 // a flower, white through pink to red, flickering as they sway.
@@ -14,26 +14,26 @@
     bake_cell: 0.03,
     // The fan of plumes reaches out past the usual picture (4.5 x 3.3).
     canvas: Some((6.2, 4.1)),
-    slots: ["fur", "light", "ear", "ink", "blush", "mark", "tip", "tailmid", "tailtip", "sock", "rope", "braid", "bell", "iris"],
+    slots: ["fur", "light", "ear", "ink", "blush", "mark", "tip", "tailmid", "tailtip", "sock", "rope", "braid", "bell", "iris", "brow"],
     coats: [
         (name: "white", colors: {
             "fur": "#FFF9F3", "light": "#FFFFFF", "ear": "#F9C9D4", "ink": "#3B2A22", "blush": "#FF9AAE",
-            "mark": "#E3354B", "tip": "#E04460", "tailmid": "#F7A8B8", "tailtip": "#D93050", "sock": "#FFF3F5", "rope": "#D8323F", "braid": "#F2C14E", "bell": "#F2C14E", "iris": "#E0607E",
+            "mark": "#E3354B", "tip": "#E04460", "tailmid": "#F7A8B8", "tailtip": "#D93050", "sock": "#FFF3F5", "rope": "#D8323F", "braid": "#F2C14E", "bell": "#F2C14E", "iris": "#E0607E", "brow": "#DCC2A8",
         }),
         // 雪狐 (Roger's picture 平常, and the 銀白 look of his parts
         // picture): snow-white, ice-blue marks and eyes, a white twisted
         // rope with a silver bell, pale blue tail tips.
         (name: "snow", colors: {
             "fur": "#FBFCFF", "light": "#FFFFFF", "ear": "#F6C9D3", "ink": "#2B2F3E", "blush": "#FFB3C4",
-            "mark": "#5DB8EC", "tip": "#EEF4FB", "tailmid": "#DCEEFB", "tailtip": "#8CCBF2", "sock": "#F4F8FD", "rope": "#F4F6FA", "braid": "#B9C3D2", "bell": "#C9D2DE", "iris": "#4A8FDB",
+            "mark": "#5DB8EC", "tip": "#EEF4FB", "tailmid": "#DCEEFB", "tailtip": "#8CCBF2", "sock": "#F4F8FD", "rope": "#F4F6FA", "braid": "#B9C3D2", "bell": "#C9D2DE", "iris": "#4A8FDB", "brow": "#D5D2D4",
         }),
         (name: "gold", colors: {
             "fur": "#F0A050", "light": "#FFF8EE", "ear": "#FFD9C2", "ink": "#3B2A22", "blush": "#FF8C94",
-            "mark": "#E8454F", "tip": "#5A3A2E", "tailmid": "#FBD9B0", "tailtip": "#FFFFFF", "sock": "#5A3A2E", "rope": "#D8323F", "braid": "#F2C14E", "bell": "#F2C14E", "iris": "#B8742A",
+            "mark": "#E8454F", "tip": "#5A3A2E", "tailmid": "#FBD9B0", "tailtip": "#FFFFFF", "sock": "#5A3A2E", "rope": "#D8323F", "braid": "#F2C14E", "bell": "#F2C14E", "iris": "#B8742A", "brow": "#FFF1DC",
         }),
         (name: "night", colors: {
             "fur": "#4A4060", "light": "#EDE7F5", "ear": "#C9A4C9", "ink": "#231C2A", "blush": "#FF8CA8",
-            "mark": "#7FD4FF", "tip": "#2A2436", "tailmid": "#7A88C8", "tailtip": "#9FE3FF", "sock": "#2A2436", "rope": "#E6E6F2", "braid": "#AEB8CC", "bell": "#C8D0E0", "iris": "#58B8F0",
+            "mark": "#7FD4FF", "tip": "#2A2436", "tailmid": "#7A88C8", "tailtip": "#9FE3FF", "sock": "#2A2436", "rope": "#E6E6F2", "braid": "#AEB8CC", "bell": "#C8D0E0", "iris": "#58B8F0", "brow": "#9A8CB8",
         }),
     ],
     pivots: {
@@ -169,9 +169,8 @@
             blend: 0.2, color: "fur", zone: "head",
             marks: [
                 (at: (0, -0.42, 0.4), radii: (0.95, 0.5, 0.62), color: "light", soft: 0.2),
-                // Two red stripes a cheek (the forehead flame is painted).
-                (at: (0.7, -0.05, 0.45), radii: (0.08, 0.02, 0.12), color: "mark", soft: 0.3, mirror: true),
-                (at: (0.68, -0.15, 0.45), radii: (0.07, 0.02, 0.12), color: "mark", soft: 0.3, mirror: true),
+                // Her marks (leaves on the forehead, strokes along the
+                // cheeks) are painted: face.rs `fox_marks`.
             ]),
         // Tufts flaring out from the cheeks, two a side, soft at the root.
         (name: "cheek_tuft", bone: "head", shape: Cone(r1: 0.19, r2: 0.05, h: 0.26), at: (0.7, 0.04, 1.0),
@@ -580,6 +579,9 @@
         eye: (at: (0.36, 0.03), r: (0.13, 0.15), iris: Some(("iris", 0.55))),
         liner: Some("mark"),
         forehead: Some("mark"),
+        // 麻呂眉: two soft round dots above the eyes (Roger's picture
+        // 施法狀態); casting, leaves are drawn over them (paint.wgsl).
+        brows: Some((at: (0.26, 0.31), r: (0.07, 0.045), color: "brow")),
         blush: (at: (0.52, -0.18), r: (0.13, 0.08), color: "blush"),
     ),
 )
