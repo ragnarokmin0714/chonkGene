@@ -20,6 +20,13 @@
             "fur": "#FFF9F3", "light": "#FFFFFF", "ear": "#F9C9D4", "ink": "#3B2A22", "blush": "#FF9AAE",
             "mark": "#E3354B", "tip": "#E04460", "tailmid": "#F7A8B8", "tailtip": "#D93050", "sock": "#FFF3F5", "rope": "#D8323F", "braid": "#F2C14E", "bell": "#F2C14E", "iris": "#E0607E",
         }),
+        // 雪狐 (Roger's picture 平常, and the 銀白 look of his parts
+        // picture): snow-white, ice-blue marks and eyes, a white twisted
+        // rope with a silver bell, pale blue tail tips.
+        (name: "snow", colors: {
+            "fur": "#FBFCFF", "light": "#FFFFFF", "ear": "#F6C9D3", "ink": "#2B2F3E", "blush": "#FFB3C4",
+            "mark": "#5DB8EC", "tip": "#EEF4FB", "tailmid": "#DCEEFB", "tailtip": "#8CCBF2", "sock": "#F4F8FD", "rope": "#F4F6FA", "braid": "#B9C3D2", "bell": "#C9D2DE", "iris": "#4A8FDB",
+        }),
         (name: "gold", colors: {
             "fur": "#F0A050", "light": "#FFF8EE", "ear": "#FFD9C2", "ink": "#3B2A22", "blush": "#FF8C94",
             "mark": "#E8454F", "tip": "#5A3A2E", "tailmid": "#FBD9B0", "tailtip": "#FFFFFF", "sock": "#5A3A2E", "rope": "#D8323F", "braid": "#F2C14E", "bell": "#F2C14E", "iris": "#B8742A",

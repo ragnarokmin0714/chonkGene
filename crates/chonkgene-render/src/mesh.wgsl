@@ -21,7 +21,8 @@ struct Uniforms {
     frame: vec4<f32>,
     palette: array<vec4<f32>, 16>,
     // Radii of the parts the eyes and mouth are painted on; eye_r.w: the
-    // pet's turn about the vertical, radians.
+    // pet's turn about the vertical, radians; mouth_r.w: the clock, seconds
+    // (the flames' flicker).
     eye_r: vec4<f32>,
     mouth_r: vec4<f32>,
     // The shadow: centre x and z on the floor, radii across and along the pet.
@@ -167,7 +168,32 @@ fn fs_pet(i: Out) -> @location(0) vec4<f32> {
     if i.eye.w > 0.5 {
         col = spell_glow(i.eye.xyz, u.eye_r.xyz, col, px);
     }
+    col = flame_tails(i.mouth.w, pp, ao, col);
     return vec4<f32>(col, 1.0);
+}
+
+// The fox casting (fwd.w, as her face's glow): her tails burn from white at
+// the root through gold and orange to red at the tips (Roger's picture
+// 施法狀態), the colours licking up and down them as a flame flickers, and
+// glowing a little of their own. `m` is the vertex's mouth.w: minus how much
+// it is a tail's, and past -1 how far along it (mesh.rs).
+fn flame_tails(m: f32, pp: vec3<f32>, ao: f32, lit: vec3<f32>) -> vec3<f32> {
+    let g = u.fwd.w;
+    let tail = clamp01(-m);
+    if g <= 0.0 || tail <= 0.0 {
+        return lit;
+    }
+    let s = max(-m - 1.0, 0.0);
+    let t = u.mouth_r.w;
+    let flick = vnoise(pp * 2.6 + vec3<f32>(0.0, -2.4 * t, 0.9 * t));
+    let h = clamp01(s + 0.28 * (flick - 0.5));
+    var fc = mix(vec3<f32>(1.0, 0.99, 0.95), vec3<f32>(1.0, 0.84, 0.36), ss(0.3, 0.55, h));
+    fc = mix(fc, vec3<f32>(1.0, 0.55, 0.18), ss(0.55, 0.78, h));
+    fc = mix(fc, vec3<f32>(0.93, 0.21, 0.17), ss(0.8, 0.97, h));
+    // The fur's own light and shade kept under the colour, a glow on top.
+    let shade = dot(lit, vec3<f32>(0.3, 0.55, 0.15));
+    let burn = fc * (0.5 + 0.55 * shade) + vec3<f32>(0.08, 0.05, 0.0) * flick;
+    return mix(lit, clamp(burn, vec3<f32>(0.0), vec3<f32>(1.0)), g * tail * ss(0.0, 0.25, s + 0.15));
 }
 
 struct ShadowOut {

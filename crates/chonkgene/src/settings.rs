@@ -51,6 +51,10 @@ fn coat_label(coat: &str) -> &'static str {
         "snowy" => "雪白",
         "yellow" => "黃色",
         "silkie" => "烏骨",
+        // The fox's (金色 and 夜色 showed as 其他 until 2026-11-16).
+        "gold" => "金色",
+        "night" => "夜色",
+        "snow" => "雪狐",
         _ => "其他",
     }
 }

@@ -67,6 +67,8 @@ pub struct MeshCanvas {
     /// The fox's spell glowing on its face, 0 … 1 (paint.wgsl
     /// `spell_glow`).
     pub glow: f32,
+    /// Seconds, for what flickers (mesh.wgsl `flame_tails`).
+    pub clock: f32,
 }
 
 impl MeshCanvas {
@@ -268,6 +270,7 @@ impl MeshCanvas {
             press: [None; 2],
             floor_shadow: true,
             glow: 0.0,
+            clock: 0.0,
         }
     }
 
@@ -351,7 +354,7 @@ impl MeshCanvas {
         let mut u = uniforms(scene, &self.cam, &Frame::default(), true, 0);
         u[3][3] = self.glow;
         u.push(v4(self.eye_r, yaw.to_radians()));
-        u.push(v4(self.mouth_r, 0.0));
+        u.push(v4(self.mouth_r, self.clock));
         u.push([ROOT_PIVOT.x, ROOT_PIVOT.z, self.shadow_r.0, self.shadow_r.1]);
         for p in &self.press {
             let p = p.unwrap_or(Press {

@@ -22,7 +22,10 @@ pub struct Vertex {
     pub color: [f32; 4],
     /// Position in the eye part's frame; w: 1.0 on its surface.
     pub eye: [f32; 4],
-    /// Position in the mouth part's frame; w: 1.0 on its surface.
+    /// Position in the mouth part's frame; w: 1.0 on its surface, or on a
+    /// tail of several (the fox's, for her flame tails, mesh.wgsl) minus
+    /// how much it is the tail's and how far along it, 0 root … 1 tip
+    /// (`-(1 + along)` fully on a tail).
     pub mouth: [f32; 4],
     pub bones: [u32; 4],
     pub weights: [f32; 4],
@@ -166,6 +169,17 @@ pub fn bake(
         .iter()
         .find(|pv| ["nose", "beak", "bill"].contains(&pv.part.name.as_str()))
         .map(|pv| pv.center.y);
+    // Several tails (the fox's): each tail bone's place along its tail,
+    // the middle of its segment, 0 root … 1 tip.
+    let mut along_tail = vec![None; skeleton.names.len()];
+    let chains = skeleton.tails();
+    if chains.len() > 1 {
+        for c in &chains {
+            for (k, &b) in c.iter().enumerate() {
+                along_tail[b] = Some((k as f32 + 0.5) / c.len() as f32);
+            }
+        }
+    }
     let vertices: Vec<Vertex> = points
         .iter()
         .map(|&p0| {
@@ -184,7 +198,20 @@ pub fn bake(
                 normal: [nrm.x, nrm.y, nrm.z, s.gloss],
                 color: [s.color.x, s.color.y, s.color.z, s.fuzz],
                 eye: on_face(eyes, p, 0.05),
-                mouth: on_face(mouth, p, 0.04),
+                mouth: {
+                    let mut m = on_face(mouth, p, 0.04);
+                    let (mut tail, mut along) = (0.0, 0.0);
+                    for (&b, &w) in bones.iter().zip(&weights) {
+                        if let Some(a) = along_tail.get(b as usize).copied().flatten() {
+                            tail += w;
+                            along += w * a;
+                        }
+                    }
+                    if tail > 0.0 && m[3] < 0.5 {
+                        m[3] = -(tail + if tail > 0.99 { along / tail } else { 0.0 });
+                    }
+                    m
+                },
                 bones,
                 weights,
             }

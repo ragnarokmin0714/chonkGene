@@ -210,6 +210,8 @@ pub struct MeshRenderer {
     floor_shadow: bool,
     /// The fox's spell glowing on its face (`PoseParams::glow`).
     glow: f32,
+    /// The animator's clock, seconds (the flame tails flicker by it).
+    flame_clock: f32,
 }
 
 impl MeshRenderer {
@@ -278,6 +280,7 @@ impl MeshRenderer {
             licks: 0,
             floor_shadow: true,
             glow: 0.0,
+            flame_clock: 0.0,
         })
     }
 
@@ -652,6 +655,7 @@ impl MeshRenderer {
             Posture::Swim | Posture::Fly | Posture::Glide
         );
         self.glow = params.glow;
+        self.flame_clock = params.clock;
         // A poke jiggles the animator's belly: jolt the mesh's.
         if params.belly > 0.15 && self.belly <= 0.15 {
             self.walk.poke(2.0);
@@ -779,6 +783,7 @@ impl MeshRenderer {
         };
         live.canvas.floor_shadow = self.floor_shadow;
         live.canvas.glow = self.glow;
+        live.canvas.clock = self.flame_clock;
         let sent = live
             .canvas
             .try_submit(self.gpu, &scene, &self.bones, yaw, how);

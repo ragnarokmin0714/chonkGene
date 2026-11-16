@@ -3,7 +3,8 @@
 //! desktop:
 //! `cargo run --release -p chonkgene-render --example touch -- <species> <out dir> [scene]`
 //! writes `<scene>-<frame>.png` at 15 fps (`SLOW=4` in the environment:
-//! four times slower, to check a gait frame by frame). Scenes: `poke` (a quick poke in
+//! four times slower, to check a gait frame by frame; `GLOW=1`: the fox
+//! casting all through, her flame tails). Scenes: `poke` (a quick poke in
 //! the belly), `rub` (a long belly rub), `chin`, `head`, `cheek`, `tail`,
 //! `paw`, `bottom`, `back`, `wing` (each held, then let go), `trap` (the
 //! 曼赤肯's belly rubbed into its trap), `scratch` (held on the head
@@ -325,7 +326,11 @@ fn main() {
                 let [p, q] = h.hands;
                 ([(p.press, p.grip), (q.press, q.grip)], h.firm)
             }));
-            let params = a.params();
+            let mut params = a.params();
+            // `GLOW=1`: the fox casting all through (her face, her tails).
+            if std::env::var_os("GLOW").is_some() {
+                params.glow = 1.0;
+            }
             if expression == Expression::Asleep {
                 r.render_asleep(&params, t);
                 r.finish();
