@@ -11,8 +11,6 @@ use tiny_skia::{FillRule, Paint, Path, PathBuilder, Pixmap, Transform};
 /// jf open 粉圓體 2.1, unmodified (its Reserved Font Names forbid renaming
 /// only for modified versions; PLAN §1.9).
 pub const HUNINN: &[u8] = include_bytes!("../../../assets/fonts/jf-openhuninn-2.1.ttf");
-/// 芫荽 Iansui 1.020.
-pub const IANSUI: &[u8] = include_bytes!("../../../assets/fonts/Iansui-Regular.ttf");
 
 struct Glyph {
     /// In font units, y pointing down.
@@ -90,17 +88,9 @@ pub struct Face {
 }
 
 impl Face {
-    /// Speech bubbles: Iansui, falling back to huninn for names users type.
-    pub fn bubble() -> Self {
-        Self {
-            fonts: [IANSUI, HUNINN]
-                .into_iter()
-                .filter_map(|d| Font::new(d).ok())
-                .collect(),
-        }
-    }
-
-    /// Menus and labels.
+    /// Speech bubbles, menus and labels: one font for all of them (Roger's
+    /// twenty-third pass, item 2: the bubbles were in 芫荽 Iansui, the rest
+    /// in 粉圓, until 2026-11-17).
     pub fn ui() -> Self {
         Self {
             fonts: Font::new(HUNINN).into_iter().collect(),
@@ -153,8 +143,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn both_fonts_cover_the_pet_lines_and_ui() {
-        let mut bubble = Face::bubble();
+    fn the_font_covers_the_pet_lines_and_ui() {
         let mut ui = Face::ui();
         for text in [
             "哈哈哈哈！不行了啦～",
@@ -162,7 +151,6 @@ mod tests {
             "全部收起來",
             "Ctrl+Alt+P",
         ] {
-            assert!(bubble.measure(text, 20.0) > 0.0);
             assert!(ui.measure(text, 20.0) > 0.0);
         }
     }

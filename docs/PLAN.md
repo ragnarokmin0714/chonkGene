@@ -169,7 +169,7 @@ v1 has seven species (the 九尾狐 joined on 2026-10-28). Eleven more are plann
 | Use | Font |
 |---|---|
 | Main UI | **jf open 粉圓體 (jf open huninn)** |
-| Speech bubbles | **芫荽 Iansui** (handwritten feel); the build keeps only glyphs used by built-in lines; user-entered names fall back to huninn |
+| Speech bubbles | **jf open 粉圓體**, as the UI (Roger's twenty-third pass, item 2, 2026-11-17); 芫荽 Iansui until then, and dropped from the build (9.4 MB) |
 | Latin and digits | **Fredoka** or **Nunito** (decided in Phase 4 by how they pair) |
 
 **Font check results** (Phase 0 S5, done 2026-10-22)
@@ -1423,6 +1423,8 @@ Items 1 and 2 built the same day; item 3 waits for Roger's answers below, and co
 
 1. **Japanese and English** (「要考慮支援日文和英文語系」). Now everything is in Traditional Chinese: the pets' lines (`assets/lines/zh-TW.ron`, the only file there), the menus and bubbles' fixed words in Rust, the settings window (`ui/settings.slint`), the tray, the release notes. Plan to write up first: a language setting (follow the system, or chosen in 一般), lines files `ja.ron` and `en.ron` beside `zh-TW.ron` (the every-species and length tests run on each; the 14-character limit becomes a width limit for English), UI strings out of the code into one table per language (Slint's own `@tr` and its translations, or our table passed in), the voice rules of PLAN §1.11 for each language (牠/牠們 has no Japanese or English twin; a glossary each), and who writes them (draft by Claude, Gemini as a second opinion, Roger's look; a native reader for Japanese if he can find one). Fonts: jf open 粉圓 has kana and Latin, so one font may do for all three (to check its kanji cover for Japanese).
 2. **One font for the bubbles and the UI** (「對話框字體是不是和 ui 介面的字體不一樣，可考慮一律用 ui 字體」). Yes, they differ: bubbles use 芫荽 Iansui, falling back to 粉圓 for what it lacks (`text::Face::bubble`); menus, labels and the settings window use jf open 粉圓 (`Face::ui`, `settings.slint`). Plan: bubbles in 粉圓 too (`Face::bubble` → 粉圓 only), the bubble's size and padding checked again (粉圓 is rounder and a little wider), and 芫荽 dropped from the build if nothing else uses it (smaller download; `licenses/` updated). Small; can go first.
+
+   **Built (2026-11-17)**: `text::Face::bubble` is gone; bubbles, menus and labels all use `Face::ui` (粉圓). A bubble is the same width and 3 px shorter (`tests/golden/bubble-*.png` redone); the padding needed no change. `assets/fonts/Iansui-Regular.ttf` (9.4 MB, included in the binary) and `licenses/Iansui-OFL.txt` removed, so the program is about 9 MB smaller.
 
 3. **The fox's seal marks, at rest and casting** (Roger: 未施法狀態 after `…施法狀態.jpeg`, 施法狀態 after `…3D示意與局部拆解圖2.jpeg`). Now (painted in `face.rs`, glowing by `paint.wgsl` `spell_glow`): one red flame on the forehead, two short red strokes on each cheek, red eyeliner; casting, the face glows and seal lines grow longer.
    - **At rest** (the beast's face in 施法狀態.jpeg): on the forehead three small leaf-shaped petals fanned upward from one point (the middle one tallest), in the mark colour; two soft round brow dots (麻呂眉) above the eyes, in a pale fawn; on each cheek two long strokes tapering to a point and sweeping back toward the ear, the mark colour fading to orange; a short flick of eyeliner at the outer corner of each eye.

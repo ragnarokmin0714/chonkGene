@@ -1,5 +1,5 @@
 //! Speech bubbles (PLAN §1.9): white rounded box, soft drop shadow, a tail
-//! pointing down at the pet, Iansui text.
+//! pointing down at the pet, its text in jf open 粉圓 as the menus are.
 
 use tiny_skia::{FillRule, Paint, PathBuilder, Pixmap, Transform};
 

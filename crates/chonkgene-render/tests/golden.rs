@@ -222,7 +222,7 @@ fn pokes_land_on_the_zone_under_the_cursor() {
 
 #[test]
 fn speech_bubbles() {
-    let mut face = chonkgene_render::text::Face::bubble();
+    let mut face = chonkgene_render::text::Face::ui();
     for (name, line) in [
         ("bubble-laugh", "哈哈哈哈！不行了啦～"),
         ("bubble-sigh", "……唉。"),

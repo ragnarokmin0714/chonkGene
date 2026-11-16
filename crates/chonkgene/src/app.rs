@@ -632,7 +632,7 @@ impl App {
             dirty: fitted,
             kinds,
             lines: Lines::zh_tw()?,
-            bubble_face: Face::bubble(),
+            bubble_face: Face::ui(),
             ui_face: Face::ui(),
             shared: None,
             area: Area {
