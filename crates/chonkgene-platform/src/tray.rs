@@ -78,6 +78,54 @@ fn submenus() -> [(&'static str, Vec<(&'static str, TrayCommand)>); 2] {
     ]
 }
 
+/// Which command each tray menu item stands for, and where commands go:
+/// replaced whole each time the tray is made (again on a change of
+/// language), read by event handlers set only once. tray-icon's and muda's
+/// handlers live in a `OnceLock`, so a second `set_event_handler` is
+/// ignored: a handler holding the first menu's ids matched none of the
+/// remade menu's items, and every tray command did nothing after the
+/// language changed (Roger, 2026-11-17).
+#[cfg(any(windows, test))]
+pub(crate) struct Routes<Id> {
+    ids: Vec<(Id, TrayCommand)>,
+    on: Option<Box<dyn Fn(TrayCommand) + Send + Sync>>,
+}
+
+#[cfg(any(windows, test))]
+impl<Id: PartialEq> Routes<Id> {
+    pub(crate) const fn new() -> Self {
+        Self {
+            ids: Vec::new(),
+            on: None,
+        }
+    }
+
+    /// The items of the menu now showing, and where their commands go.
+    pub(crate) fn set(
+        &mut self,
+        ids: Vec<(Id, TrayCommand)>,
+        on: impl Fn(TrayCommand) + Send + Sync + 'static,
+    ) {
+        self.ids = ids;
+        self.on = Some(Box::new(on));
+    }
+
+    /// Send the command of the item `id`, if it is one of this menu's.
+    pub(crate) fn chosen(&self, id: &Id) -> bool {
+        let Some((_, command)) = self.ids.iter().find(|(i, _)| i == id) else {
+            return false;
+        };
+        self.send(*command);
+        true
+    }
+
+    pub(crate) fn send(&self, command: TrayCommand) {
+        if let Some(on) = &self.on {
+            on(command);
+        }
+    }
+}
+
 /// Keeps the tray icon alive; dropping it removes the icon.
 pub struct Tray {
     #[cfg(windows)]
@@ -103,8 +151,15 @@ mod imp {
     use tray_icon::menu::{Menu, MenuEvent, MenuItem, PredefinedMenuItem, Submenu};
     use tray_icon::{Icon, MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 
-    use super::{LABELS, SUBMENUS_BEFORE, TOOLTIP, Tray, TrayCommand, submenus};
+    use std::sync::{Mutex, Once};
+
+    use tray_icon::menu::MenuId;
+
+    use super::{LABELS, Routes, SUBMENUS_BEFORE, TOOLTIP, Tray, TrayCommand, submenus};
     use chonkgene_core::i18n::tr;
+
+    static ROUTES: Mutex<Routes<MenuId>> = Mutex::new(Routes::new());
+    static HANDLERS: Once = Once::new();
 
     pub fn create(
         icons: Vec<(Vec<u8>, u32)>,
@@ -141,22 +196,28 @@ mod imp {
             .with_icon(icon)
             .build()
             .map_err(|e| e.to_string())?;
-        let on_menu = on.clone();
-        MenuEvent::set_event_handler(Some(move |e: MenuEvent| {
-            if let Some((_, command)) = ids.iter().find(|(id, _)| *id == e.id) {
-                on_menu(*command);
-            }
-        }));
-        TrayIconEvent::set_event_handler(Some(move |e: TrayIconEvent| {
-            if let TrayIconEvent::Click {
-                button: MouseButton::Left,
-                button_state: MouseButtonState::Up,
-                ..
-            } = e
-            {
-                on(TrayCommand::Toggle);
-            }
-        }));
+        if let Ok(mut routes) = ROUTES.lock() {
+            routes.set(ids, on);
+        }
+        // Set once for good (see `Routes`); they read whatever menu is up.
+        HANDLERS.call_once(|| {
+            MenuEvent::set_event_handler(Some(|e: MenuEvent| {
+                if let Ok(routes) = ROUTES.lock() {
+                    routes.chosen(&e.id);
+                }
+            }));
+            TrayIconEvent::set_event_handler(Some(|e: TrayIconEvent| {
+                if let TrayIconEvent::Click {
+                    button: MouseButton::Left,
+                    button_state: MouseButtonState::Up,
+                    ..
+                } = e
+                    && let Ok(routes) = ROUTES.lock()
+                {
+                    routes.send(TrayCommand::Toggle);
+                }
+            }));
+        });
         Ok(Tray { _icon: tray })
     }
 }
@@ -260,5 +321,45 @@ mod imp {
         };
         let handle = sni.spawn().map_err(|e| e.to_string())?;
         Ok(Tray { _handle: handle })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::{Arc, Mutex};
+
+    use super::{Routes, TrayCommand};
+
+    /// The tray is made again when the language changes, with new item
+    /// ids; the one handler (set once) must follow the new menu.
+    #[test]
+    fn a_remade_tray_menu_still_sends_its_commands() {
+        let sent = Arc::new(Mutex::new(Vec::new()));
+        let log = |sent: &Arc<Mutex<Vec<TrayCommand>>>| {
+            let sent = sent.clone();
+            move |c| sent.lock().unwrap().push(c)
+        };
+        let mut routes: Routes<u32> = Routes::new();
+        routes.set(
+            vec![(1, TrayCommand::Ball), (2, TrayCommand::Quit)],
+            log(&sent),
+        );
+        assert!(routes.chosen(&1));
+        // Remade in another language: new ids for the same commands.
+        routes.set(
+            vec![(11, TrayCommand::Ball), (12, TrayCommand::Settings)],
+            log(&sent),
+        );
+        assert!(!routes.chosen(&1), "an id of the old menu");
+        assert!(routes.chosen(&12));
+        routes.send(TrayCommand::Toggle);
+        assert_eq!(
+            *sent.lock().unwrap(),
+            [
+                TrayCommand::Ball,
+                TrayCommand::Settings,
+                TrayCommand::Toggle
+            ]
+        );
     }
 }
