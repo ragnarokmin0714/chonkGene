@@ -99,6 +99,7 @@ mod imp {
     use tray_icon::{Icon, MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 
     use super::{LABELS, SUBMENUS_BEFORE, TOOLTIP, Tray, TrayCommand, submenus};
+    use chonkgene_core::i18n::tr;
 
     pub fn create(
         icons: Vec<(Vec<u8>, u32)>,
@@ -109,9 +110,9 @@ mod imp {
         for (i, (label, command)) in LABELS.iter().enumerate() {
             if i == SUBMENUS_BEFORE {
                 for (title, entries) in submenus() {
-                    let sub = Submenu::new(title, true);
+                    let sub = Submenu::new(tr(title), true);
                     for (label, command) in entries {
-                        let item = MenuItem::new(label, true, None);
+                        let item = MenuItem::new(tr(label), true, None);
                         ids.push((item.id().clone(), command));
                         sub.append(&item).map_err(|e| e.to_string())?;
                     }
@@ -122,7 +123,7 @@ mod imp {
                 menu.append(&PredefinedMenuItem::separator())
                     .map_err(|e| e.to_string())?;
             }
-            let item = MenuItem::new(*label, true, None);
+            let item = MenuItem::new(tr(label), true, None);
             ids.push((item.id().clone(), *command));
             menu.append(&item).map_err(|e| e.to_string())?;
         }
@@ -131,7 +132,7 @@ mod imp {
         let tray = TrayIconBuilder::new()
             .with_menu(Box::new(menu))
             .with_menu_on_left_click(false)
-            .with_tooltip(TOOLTIP)
+            .with_tooltip(tr(TOOLTIP))
             .with_icon(icon)
             .build()
             .map_err(|e| e.to_string())?;
@@ -162,13 +163,16 @@ pub struct Sni {
 }
 
 #[cfg(target_os = "linux")]
+use chonkgene_core::i18n::tr;
+
+#[cfg(target_os = "linux")]
 impl ksni::Tray for Sni {
     fn id(&self) -> String {
         "chonkgene".into()
     }
 
     fn title(&self) -> String {
-        TOOLTIP.into()
+        tr(TOOLTIP).into()
     }
 
     fn icon_pixmap(&self) -> Vec<ksni::Icon> {
@@ -188,7 +192,7 @@ impl ksni::Tray for Sni {
                         .into_iter()
                         .map(|(label, command)| {
                             ksni::menu::StandardItem {
-                                label: label.into(),
+                                label: tr(label).into(),
                                 activate: Box::new(move |this: &mut Self| (this.on)(command)),
                                 ..Default::default()
                             }
@@ -197,7 +201,7 @@ impl ksni::Tray for Sni {
                         .collect();
                     items.push(
                         ksni::menu::SubMenu {
-                            label: title.into(),
+                            label: tr(title).into(),
                             submenu,
                             ..Default::default()
                         }
@@ -211,7 +215,7 @@ impl ksni::Tray for Sni {
             let command = *command;
             items.push(
                 ksni::menu::StandardItem {
-                    label: (*label).into(),
+                    label: tr(label).into(),
                     activate: Box::new(move |this: &mut Self| (this.on)(command)),
                     ..Default::default()
                 }

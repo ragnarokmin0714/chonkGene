@@ -7,6 +7,8 @@ rust-version.workspace = true
 publish.workspace = true
 
 [dependencies]
+# The computer's language (the default for the words on screen).
+sys-locale = "0.3.2"
 chonkgene-core.workspace = true
 chonkgene-platform.workspace = true
 chonkgene-render.workspace = true

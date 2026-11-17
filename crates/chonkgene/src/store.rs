@@ -98,6 +98,9 @@ pub struct Settings {
     pub on_desktop: u32,
     /// Set once the first run has been handled.
     pub welcomed: bool,
+    /// The language, as `i18n::Lang::id`; empty: the computer's (Roger,
+    /// 2026-11-17: follow the computer by default).
+    pub language: String,
 }
 
 impl Default for Settings {
@@ -113,11 +116,19 @@ impl Default for Settings {
             start_at_login: false,
             on_desktop: 7,
             welcomed: false,
+            language: String::new(),
         }
     }
 }
 
 impl Settings {
+    /// The language to show: the one chosen, or the computer's.
+    pub fn lang(&self) -> chonkgene_core::i18n::Lang {
+        use chonkgene_core::i18n::Lang;
+        Lang::from_id(&self.language)
+            .unwrap_or_else(|| Lang::for_locale(&sys_locale::get_locale().unwrap_or_default()))
+    }
+
     /// Bring a file written by an older version up to date; true if it
     /// changed. Format 1 defaulted to six pets on the desktop; a 6 still
     /// there is that old default (Roger: seven by default), so it becomes

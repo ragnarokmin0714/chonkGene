@@ -1,6 +1,7 @@
 //! The pet process: one winit event loop owning every pet, bubble and menu
 //! window (PLAN §3.2).
 
+use chonkgene_core::i18n::{tr, trf};
 use std::collections::HashMap;
 use std::io::Write as _;
 use std::process::{Child, Command};
@@ -606,6 +607,7 @@ impl App {
             })
             .unwrap_or_default();
         let upgraded = settings.upgrade();
+        chonkgene_core::i18n::set(settings.lang());
         if upgraded && let Err(e) = store::save(&data.settings(), &settings) {
             notes.push(e);
         }
@@ -733,6 +735,20 @@ impl App {
     /// affinity must never go down (PLAN §0).
     /// Read the desktop again: each monitor's floor and the windows to stand
     /// on (PLAN §1.3). Pets on a window that moved move with it.
+    /// The tray icon and its menu, in the current language.
+    fn make_tray(&mut self) {
+        let proxy = std::sync::Arc::new(std::sync::Mutex::new(self.proxy.clone()));
+        let send = move |c: TrayCommand| {
+            if let Ok(p) = proxy.lock() {
+                let _ = p.send_event(UserEvent::Tray(c));
+            }
+        };
+        match chonkgene_platform::tray::create(brand::tray(self.ui_scale), send) {
+            Ok(t) => self.tray = Some(t),
+            Err(e) => eprintln!("no tray icon: {e}"),
+        }
+    }
+
     fn refresh_terrain(&mut self) {
         let Some(shared) = &self.shared else {
             return;
@@ -1264,9 +1280,17 @@ impl App {
                     self.collect_affinity();
                     self.dirty |= self.store.fit_to(s.on_desktop);
                 }
+                let new_language = s.lang() != self.settings.lang();
                 self.settings = s;
                 if let Err(e) = store::save(&self.data.settings(), &self.settings) {
                     eprintln!("{e}");
+                }
+                if new_language {
+                    chonkgene_core::i18n::set(self.settings.lang());
+                    // The tray's menu is made once: made again in the new
+                    // words (the pets' menus are made each time they open).
+                    self.tray = None;
+                    self.make_tray();
                 }
                 self.sync_autostart();
                 self.sync_desktop(el);
@@ -1368,17 +1392,17 @@ impl App {
         };
         if page == Page::Spells {
             let spells = [
-                ("定身術", Icon::Bubble, Magic::Spell(Spell::Freeze)),
-                ("狐火", Icon::Flame, Magic::Foxfire),
-                ("祝福術", Icon::Heart, Magic::Spell(Spell::Bless)),
-                ("招喚術", Icon::Paw, Magic::Spell(Spell::Call)),
+                (tr("定身術"), Icon::Bubble, Magic::Spell(Spell::Freeze)),
+                (tr("狐火"), Icon::Flame, Magic::Foxfire),
+                (tr("祝福術"), Icon::Heart, Magic::Spell(Spell::Bless)),
+                (tr("招喚術"), Icon::Paw, Magic::Spell(Spell::Call)),
             ];
             let mut items: Vec<Item> = spells
                 .iter()
                 .map(|&(label, icon, _)| item(label, None, icon, false))
                 .collect();
             let mut actions: Vec<Action> = spells.iter().map(|&(.., m)| Action::Magic(m)).collect();
-            items.push(item("返回", None, Icon::Back, true));
+            items.push(item(tr("返回"), None, Icon::Back, true));
             actions.push(Action::Back);
             return self.show_menu(el, i, items, actions, at);
         }
@@ -1389,14 +1413,14 @@ impl App {
             // 大家的大小 (Roger's nineteenth pass: one go for every pet).
             for (label, pct) in chonkgene_platform::tray::SIZES {
                 let hint = if (now * 100.0 - f32::from(pct)).abs() < 1.0 {
-                    "目前".to_string()
+                    tr("目前").to_string()
                 } else {
                     format!("{pct}%")
                 };
                 items.push(item(label, Some(hint), Icon::Size, false));
                 actions.push(Action::SizeAll(pct));
             }
-            items.push(item("返回", None, Icon::Back, true));
+            items.push(item(tr("返回"), None, Icon::Back, true));
             actions.push(Action::Back);
             return self.show_menu(el, i, items, actions, at);
         }
@@ -1404,16 +1428,16 @@ impl App {
             // Roger's twenty-first pass: three ways to hold it, picked
             // here (a double-click picks by how it is).
             let holds = [
-                ("環抱", HugHold::Wrap),
-                ("舉高高", HugHold::Carry),
-                ("搖搖抱", HugHold::Cradle),
+                (tr("環抱"), HugHold::Wrap),
+                (tr("舉高高"), HugHold::Carry),
+                (tr("搖搖抱"), HugHold::Cradle),
             ];
             let mut items: Vec<Item> = holds
                 .iter()
                 .map(|&(label, _)| item(label, None, Icon::Hug, false))
                 .collect();
             let mut actions: Vec<Action> = holds.iter().map(|&(_, h)| Action::HugAs(h)).collect();
-            items.push(item("返回", None, Icon::Back, true));
+            items.push(item(tr("返回"), None, Icon::Back, true));
             actions.push(Action::Back);
             return self.show_menu(el, i, items, actions, at);
         }
@@ -1424,7 +1448,7 @@ impl App {
                 items.push(item(&q.save.name, None, Icon::Hug, false));
                 actions.push(Action::HugWith(q.save.id));
             }
-            items.push(item("返回", None, Icon::Back, true));
+            items.push(item(tr("返回"), None, Icon::Back, true));
             actions.push(Action::Commands);
             return self.show_menu(el, i, items, actions, at);
         }
@@ -1438,20 +1462,23 @@ impl App {
                 // Its thing stays for the others when it only joined in
                 // (someone's pond, the spotlight put down from the menu).
                 let (label, icon) = match run.scene {
-                    Scene::Pond if run.keep => ("從水池上岸".to_string(), Icon::Pond),
-                    Scene::Dance if run.keep => ("不跳了".to_string(), Icon::Note),
-                    scene => (format!("把{}收起來", scene_thing(scene)), Icon::Hide),
+                    Scene::Pond if run.keep => (tr("從水池上岸").to_string(), Icon::Pond),
+                    Scene::Dance if run.keep => (tr("不跳了").to_string(), Icon::Note),
+                    scene => (
+                        trf("把{thing}收起來", &[("thing", scene_thing(scene))]),
+                        Icon::Hide,
+                    ),
                 };
                 items.push(item(&label, None, icon, false));
                 actions.push(Action::EndScene);
             } else {
                 match play::not_now(p, Scene::Foxfire, world.now) {
                     Some(play::NotNow::Asleep) => {
-                        items.push(item("牠睡著了，醒來再玩", None, Icon::Moon, false));
+                        items.push(item(tr("牠睡著了，醒來再玩"), None, Icon::Moon, false));
                         actions.push(Action::Back);
                     }
                     Some(_) => {
-                        items.push(item("牠在忙，等等再叫牠", None, Icon::Paw, false));
+                        items.push(item(tr("牠在忙，等等再叫牠"), None, Icon::Paw, false));
                         actions.push(Action::Back);
                     }
                     None => {
@@ -1460,7 +1487,7 @@ impl App {
                             let up = play::not_now(p, scene, world.now).is_some();
                             items.push(item(
                                 scene_label(scene),
-                                up.then(|| "在高處".to_string()),
+                                up.then(|| tr("在高處").to_string()),
                                 scene_icon(scene),
                                 n > 0 && n == own.len(),
                             ));
@@ -1473,47 +1500,51 @@ impl App {
                     }
                 }
             }
-            items.push(item("返回", None, Icon::Back, true));
+            items.push(item(tr("返回"), None, Icon::Back, true));
             actions.push(Action::Back);
             return self.show_menu(el, i, items, actions, at);
         }
         if page == Page::Commands {
-            let mut items: Vec<Item> = ["坐下", "趴下", "過來", "轉圈", "握手"]
+            let mut items: Vec<Item> = [tr("坐下"), tr("趴下"), tr("過來"), tr("轉圈"), tr("握手")]
                 .iter()
                 .map(|label| item(label, None, Icon::Paw, false))
                 .collect();
             let mut actions: Vec<Action> = Ask::ALL.iter().map(|&c| Action::Command(c)).collect();
-            items.push(item("跳舞", None, Icon::Note, false));
+            items.push(item(tr("跳舞"), None, Icon::Note, false));
             actions.push(Action::Dance);
             // Someone else on the desktop to go and hug.
             if self.pets.iter().any(|q| q.save.id != p.save.id) {
-                items.push(item("去抱抱…", None, Icon::Hug, false));
+                items.push(item(tr("去抱抱…"), None, Icon::Hug, false));
                 actions.push(Action::HugWho);
             }
-            items.push(item("返回", None, Icon::Back, true));
+            items.push(item(tr("返回"), None, Icon::Back, true));
             actions.push(Action::Back);
             return self.show_menu(el, i, items, actions, at);
         }
         let mut items = vec![
             item(
-                if asleep { "抱抱" } else { "抱抱…" },
+                if asleep {
+                    tr("抱抱")
+                } else {
+                    tr("抱抱…")
+                },
                 None,
                 Icon::Hug,
                 false,
             ),
-            item("摸摸頭", None, Icon::Heart, false),
+            item(tr("摸摸頭"), None, Icon::Heart, false),
             item(
-                "餵零食",
+                tr("餵零食"),
                 Some(if snacks > 0 {
-                    format!("還有 {snacks} 份")
+                    trf("還有 {snacks} 份", &[("snacks", &snacks.to_string())])
                 } else {
-                    "吃飽了".into()
+                    tr("吃飽了").into()
                 }),
                 Icon::Snack,
                 false,
             ),
-            item("改名字…", None, Icon::Pencil, false),
-            item("幫牠換造型…", None, Icon::Palette, false),
+            item(tr("改名字…"), None, Icon::Pencil, false),
+            item(tr("幫牠換造型…"), None, Icon::Palette, false),
         ];
         let mut actions = vec![
             if asleep { Action::Hug } else { Action::HugHow },
@@ -1523,17 +1554,17 @@ impl App {
             Action::Edit,
         ];
         if asleep {
-            items.push(item("輕輕叫醒牠", None, Icon::Sun, false));
+            items.push(item(tr("輕輕叫醒牠"), None, Icon::Sun, false));
             actions.push(Action::Wake);
         } else {
-            items.push(item("讓牠去睡覺", None, Icon::Moon, false));
+            items.push(item(tr("讓牠去睡覺"), None, Icon::Moon, false));
             actions.push(Action::Sleep);
         }
         items.push(item(
             if self.toy.is_some() {
-                "把狗尾草收起來"
+                tr("把狗尾草收起來")
             } else {
-                "拿狗尾草逗牠們"
+                tr("拿狗尾草逗牠們")
             },
             None,
             Icon::Grass,
@@ -1543,27 +1574,27 @@ impl App {
         // Things to play with (PLAN §8, Roger's fourth pass, item 2, and
         // "Catnip"); asking it to do something only while it is awake.
         if !asleep {
-            items.push(item("叫牠…", None, Icon::Paw, false));
+            items.push(item(tr("叫牠…"), None, Icon::Paw, false));
             actions.push(Action::Commands);
             // The fox casts spells when you ask (Roger, 2026-11-06).
             if p.species == Species::Fox {
-                items.push(item("施法…", None, Icon::Wand, false));
+                items.push(item(tr("施法…"), None, Icon::Wand, false));
                 actions.push(Action::Spells);
             }
-            items.push(item("玩躲貓貓", None, Icon::Peek, false));
+            items.push(item(tr("玩躲貓貓"), None, Icon::Peek, false));
             actions.push(Action::Hide);
         }
-        items.push(item("場景…", None, Icon::Scenery, false));
+        items.push(item(tr("場景…"), None, Icon::Scenery, false));
         actions.push(Action::Scenes);
-        items.push(item("丟球給牠們", None, Icon::Ball, false));
+        items.push(item(tr("丟球給牠們"), None, Icon::Ball, false));
         actions.push(Action::Throw(Thing::Ball));
-        items.push(item("丟飛盤給牠們", None, Icon::Frisbee, false));
+        items.push(item(tr("丟飛盤給牠們"), None, Icon::Frisbee, false));
         actions.push(Action::Throw(Thing::Frisbee));
         items.push(item(
             if self.play.has(Thing::Catnip) {
-                "把貓薄荷收起來"
+                tr("把貓薄荷收起來")
             } else {
-                "放一把貓薄荷"
+                tr("放一把貓薄荷")
             },
             None,
             Icon::Leaf,
@@ -1572,27 +1603,27 @@ impl App {
         actions.push(Action::Catnip);
         items.push(item(
             if self.play.stage.is_some() {
-                "把聚光燈收起來"
+                tr("把聚光燈收起來")
             } else {
-                "放聚光燈"
+                tr("放聚光燈")
             },
             None,
             Icon::Spotlight,
             false,
         ));
         actions.push(Action::Stage);
-        items.push(item("大家的大小…", None, Icon::Size, false));
+        items.push(item(tr("大家的大小…"), None, Icon::Size, false));
         actions.push(Action::Sizes);
-        items.push(item("說再見…", None, Icon::Bye, false));
+        items.push(item(tr("說再見…"), None, Icon::Bye, false));
         actions.push(Action::Bye);
         items.push(item(
-            "全部收起來",
+            tr("全部收起來"),
             Some("Ctrl+Alt+P".into()),
             Icon::Hide,
             true,
         ));
-        items.push(item("設定…", None, Icon::Sliders, false));
-        items.push(item("結束肉肉賴桌", None, Icon::Exit, false));
+        items.push(item(tr("設定…"), None, Icon::Sliders, false));
+        items.push(item(tr("結束肉肉賴桌"), None, Icon::Exit, false));
         actions.extend([Action::HideAll, Action::Settings, Action::Quit]);
         self.show_menu(el, i, items, actions, at);
     }
@@ -1615,9 +1646,9 @@ impl App {
         let coat = kind.model.coat(&p.save.coat).unwrap_or(0);
         let avatar = kind.model.coats[coat].swatch();
         let status = if asleep {
-            Some("睡覺中".to_string())
+            Some(tr("睡覺中").to_string())
         } else if p.mind.grumpy() {
-            Some("有起床氣".to_string())
+            Some(tr("有起床氣").to_string())
         } else {
             None
         };
@@ -1998,28 +2029,28 @@ fn pending_save(dirty: bool, save_at: Instant) -> Option<Instant> {
 /// label).
 fn scene_label(scene: Scene) -> &'static str {
     match scene {
-        Scene::Pond => "玩水池",
-        Scene::Sunbeam => "曬太陽",
-        Scene::Butterfly => "追蝴蝶",
-        Scene::Bone => "啃骨頭",
-        Scene::Seeds => "啄種子",
-        Scene::Perch => "飛上樹枝",
-        Scene::Foxfire => "狐火",
-        Scene::Dance => "跳舞",
+        Scene::Pond => tr("玩水池"),
+        Scene::Sunbeam => tr("曬太陽"),
+        Scene::Butterfly => tr("追蝴蝶"),
+        Scene::Bone => tr("啃骨頭"),
+        Scene::Seeds => tr("啄種子"),
+        Scene::Perch => tr("飛上樹枝"),
+        Scene::Foxfire => tr("狐火"),
+        Scene::Dance => tr("跳舞"),
     }
 }
 
 /// What 「把…收起來」 puts away.
 fn scene_thing(scene: Scene) -> &'static str {
     match scene {
-        Scene::Pond => "水池",
-        Scene::Sunbeam => "陽光",
-        Scene::Butterfly => "蝴蝶",
-        Scene::Bone => "骨頭",
-        Scene::Seeds => "種子",
-        Scene::Perch => "樹枝",
-        Scene::Foxfire => "狐火",
-        Scene::Dance => "聚光燈",
+        Scene::Pond => tr("水池"),
+        Scene::Sunbeam => tr("陽光"),
+        Scene::Butterfly => tr("蝴蝶"),
+        Scene::Bone => tr("骨頭"),
+        Scene::Seeds => tr("種子"),
+        Scene::Perch => tr("樹枝"),
+        Scene::Foxfire => tr("狐火"),
+        Scene::Dance => tr("聚光燈"),
     }
 }
 
@@ -3511,16 +3542,13 @@ impl ApplicationHandler<UserEvent> for App {
         self.shared = Some(shared);
         self.refresh_terrain();
         self.sync_autostart();
+        self.make_tray();
         let proxy = std::sync::Arc::new(std::sync::Mutex::new(self.proxy.clone()));
         let send = move |c: TrayCommand| {
             if let Ok(p) = proxy.lock() {
                 let _ = p.send_event(UserEvent::Tray(c));
             }
         };
-        match chonkgene_platform::tray::create(brand::tray(self.ui_scale), send.clone()) {
-            Ok(t) => self.tray = Some(t),
-            Err(e) => eprintln!("no tray icon: {e}"),
-        }
         match hotkey::register(move || send(TrayCommand::Toggle)) {
             Ok(h) => self.hotkey = Some(h),
             Err(e) => eprintln!("Ctrl+Alt+P is not available: {e}"),
@@ -3565,8 +3593,8 @@ impl ApplicationHandler<UserEvent> for App {
                         // Goodbye is for good: the first click only asks.
                         if action == Action::Bye && !m.sure {
                             m.sure = true;
-                            m.model.items[row].label = "真的要說再見嗎？".into();
-                            m.model.items[row].hint = Some("再按一次".into());
+                            m.model.items[row].label = tr("真的要說再見嗎？").into();
+                            m.model.items[row].hint = Some(tr("再按一次").into());
                             self.redraw_menu();
                             return;
                         }
@@ -4164,7 +4192,12 @@ mod tests {
         }
         // A label fits its row beside the icon (at most nine characters).
         for scene in TRAY_SCENES {
-            assert!(format!("把{}收起來", scene_thing(scene)).chars().count() <= 9);
+            assert!(
+                trf("把{thing}收起來", &[("thing", scene_thing(scene))])
+                    .chars()
+                    .count()
+                    <= 9
+            );
         }
     }
 

@@ -287,7 +287,7 @@ component SectionTitle inherits Text {
 }
 
 export component SettingsWindow inherits Window {
-    title: "肉肉賴桌・設定";
+    title: @tr("肉肉賴桌・設定");
     // Set from Rust on Linux; Windows takes the exe's own icon instead.
     in property <image> window-icon;
     icon: window-icon;
@@ -350,10 +350,13 @@ export component SettingsWindow inherits Window {
     in-out property <float> volume;
     in-out property <bool> irrational;
     in-out property <int> squabble;
+    // 0 跟著電腦, then 繁體中文, 日本語, English (i18n::Lang::ALL).
+    in-out property <int> language;
     callback sound-toggled(bool);
     callback volume-changed(float);
     callback irrational-toggled(bool);
     callback squabble-picked(int);
+    callback language-picked(int);
 
     // Don't disturb.
     in-out property <bool> hide-fullscreen;
@@ -397,12 +400,12 @@ export component SettingsWindow inherits Window {
                 HorizontalLayout {
                     padding-left: 12px;
                     padding-bottom: 12px;
-                    Text { text: "肉肉賴桌"; color: Theme.accent; font-size: 18px; font-weight: 700; }
+                    Text { text: @tr("肉肉賴桌"); color: Theme.accent; font-size: 18px; font-weight: 700; }
                 }
-                NavItem { text: "我的寵物"; active: root.tab == 0; clicked => { root.tab = 0; } }
-                NavItem { text: "互動與聲音"; active: root.tab == 1; clicked => { root.tab = 1; } }
-                NavItem { text: "不打擾"; active: root.tab == 2; clicked => { root.tab = 2; } }
-                NavItem { text: "一般"; active: root.tab == 3; clicked => { root.tab = 3; } }
+                NavItem { text: @tr("我的寵物"); active: root.tab == 0; clicked => { root.tab = 0; } }
+                NavItem { text: @tr("互動與聲音"); active: root.tab == 1; clicked => { root.tab = 1; } }
+                NavItem { text: @tr("不打擾"); active: root.tab == 2; clicked => { root.tab = 2; } }
+                NavItem { text: @tr("一般"); active: root.tab == 3; clicked => { root.tab = 3; } }
             }
         }
 
@@ -438,24 +441,24 @@ export component SettingsWindow inherits Window {
                     HorizontalLayout {
                         spacing: 12px;
                         Text {
-                            text: root.adopting ? "領養新寵物" : "我的寵物";
+                            text: root.adopting ? @tr("領養新寵物") : @tr("我的寵物");
                             color: Theme.ink;
                             font-size: 20px;
                             vertical-alignment: center;
                             horizontal-stretch: 1;
                         }
                         if root.adopting && root.pets.length > 0: CuteButton {
-                            text: "算了";
+                            text: @tr("算了");
                             primary: false;
                             clicked => { root.select-pet(root.selected-pet); }
                         }
                         if root.adopting: CuteButton {
-                            text: root.adopt-species == "" ? "先點一隻吧" : "帶牠回家";
+                            text: root.adopt-species == "" ? @tr("先點一隻吧") : @tr("帶牠回家");
                             enabled: root.adopt-species != "";
                             clicked => { root.adopt(); }
                         }
                         if !root.adopting: CuteButton {
-                            text: "＋ 領養新寵物";
+                            text: @tr("＋ 領養新寵物");
                             clicked => { root.start-adopting(); }
                         }
                     }
@@ -497,7 +500,7 @@ export component SettingsWindow inherits Window {
                     // card itself, which then shows the pet in that coat.
                     if root.adopting: VerticalLayout {
                         spacing: 12px;
-                        Hint { text: "挑一隻帶回你的桌面吧，點牠還能選毛色。"; }
+                        Hint { text: @tr("挑一隻帶回你的桌面吧，點牠還能選毛色。"); }
                         GridLayout {
                             spacing: 10px;
                             for s[i] in root.species: Rectangle {
@@ -589,7 +592,7 @@ export component SettingsWindow inherits Window {
                                     }
                                     Image { source: root.preview; height: 220px; image-fit: contain; }
                                     Text { text: root.pet-name; color: Theme.ink; font-size: 22px; horizontal-alignment: center; }
-                                    Text { text: root.species-label + "・" + root.level-text; color: Theme.muted; font-size: 13px; horizontal-alignment: center; }
+                                    Text { text: root.species-label + @tr("・") + root.level-text; color: Theme.muted; font-size: 13px; horizontal-alignment: center; }
                                 }
                             }
                             Section {
@@ -600,8 +603,8 @@ export component SettingsWindow inherits Window {
                                     VerticalLayout {
                                         alignment: center;
                                         spacing: 4px;
-                                        Label { text: "在桌面上"; }
-                                        Hint { text: "關掉就在寵物窩休息。"; }
+                                        Label { text: @tr("在桌面上"); }
+                                        Hint { text: @tr("關掉就在寵物窩休息。"); }
                                     }
                                     PawSwitch {
                                         checked <=> root.on-desktop;
@@ -613,7 +616,7 @@ export component SettingsWindow inherits Window {
                             if !root.confirm-release: HorizontalLayout {
                                 alignment: end;
                                 CuteButton {
-                                    text: "說再見…";
+                                    text: @tr("說再見…");
                                     primary: false;
                                     danger: true;
                                     clicked => { root.confirm-release = true; }
@@ -624,13 +627,13 @@ export component SettingsWindow inherits Window {
                                 VerticalLayout {
                                     padding: 16px;
                                     spacing: 10px;
-                                    Label { text: "確定要和" + root.pet-name + "說再見嗎？"; }
-                                    Hint { text: "牠的名字和親密度會一起消失。"; }
+                                    Label { text: @tr("確定要和{}說再見嗎？", root.pet-name); }
+                                    Hint { text: @tr("牠的名字和親密度會一起消失。"); }
                                     HorizontalLayout {
                                         alignment: end;
                                         spacing: 10px;
-                                        CuteButton { text: "再想想"; primary: false; clicked => { root.confirm-release = false; } }
-                                        CuteButton { text: "說再見"; primary: false; danger: true; clicked => { root.release(); } }
+                                        CuteButton { text: @tr("再想想"); primary: false; clicked => { root.confirm-release = false; } }
+                                        CuteButton { text: @tr("說再見"); primary: false; danger: true; clicked => { root.release(); } }
                                     }
                                 }
                             }
@@ -642,7 +645,7 @@ export component SettingsWindow inherits Window {
                                 spacing: 12px;
                                 VerticalLayout {
                                     spacing: 6px;
-                                    Label { text: "名字"; }
+                                    Label { text: @tr("名字"); }
                                     LineEdit {
                                         text <=> root.pet-name;
                                         edited(t) => { root.name-edited(t); }
@@ -650,16 +653,16 @@ export component SettingsWindow inherits Window {
                                 }
                                 VerticalLayout {
                                     spacing: 6px;
-                                    Label { text: "牠怎麼叫你"; }
+                                    Label { text: @tr("牠怎麼叫你"); }
                                     LineEdit {
                                         text <=> root.pet-you;
                                         edited(t) => { root.you-edited(t); }
                                     }
                                 }
                             }
-                            Hint { text: "牠在對話泡泡裡會這樣叫你。"; }
+                            Hint { text: @tr("牠在對話泡泡裡會這樣叫你。"); }
 
-                            Label { text: "毛色"; }
+                            Label { text: @tr("毛色"); }
                             HorizontalLayout {
                                 spacing: 10px;
                                 alignment: start;
@@ -684,7 +687,7 @@ export component SettingsWindow inherits Window {
                                 }
                             }
 
-                            Label { text: "體型"; }
+                            Label { text: @tr("體型"); }
                             BoneSlider {
                                 value <=> root.chonk;
                                 chonk: root.chonk;
@@ -692,7 +695,7 @@ export component SettingsWindow inherits Window {
                             }
                             HorizontalLayout {
                                 alignment: space-between;
-                                for stop[i] in ["標準", "略肥（預設）", "圓滾滾", "麻糬"]: Text {
+                                for stop[i] in [@tr("標準"), @tr("略肥（預設）"), @tr("圓滾滾"), @tr("麻糬")]: Text {
                                     text: stop;
                                     color: Theme.muted;
                                     font-size: 13px;
@@ -708,7 +711,7 @@ export component SettingsWindow inherits Window {
 
                             HorizontalLayout {
                                 alignment: space-between;
-                                Label { text: "大小"; }
+                                Label { text: @tr("大小"); }
                                 Text { text: round(root.size * 100) + "%"; color: Theme.muted; font-size: 14px; }
                             }
                             BoneSlider {
@@ -718,10 +721,10 @@ export component SettingsWindow inherits Window {
                                 chonk: 0.2;
                                 changed(v) => { root.size-changed(v); }
                             }
-                            Hint { text: "牠在桌面上看起來有多大。"; }
+                            Hint { text: @tr("牠在桌面上看起來有多大。"); }
 
-                            Label { text: "個性"; }
-                            for t[i] in [{label: "怕癢", lo: "不怕", hi: "超怕"}, {label: "耐性", lo: "沒耐性", hi: "很有耐性"}, {label: "活潑", lo: "懶洋洋", hi: "停不下來"}]: HorizontalLayout {
+                            Label { text: @tr("個性"); }
+                            for t[i] in [{label: @tr("怕癢"), lo: @tr("不怕"), hi: @tr("超怕")}, {label: @tr("耐性"), lo: @tr("沒耐性"), hi: @tr("很有耐性")}, {label: @tr("活潑"), lo: @tr("懶洋洋"), hi: @tr("停不下來")}]: HorizontalLayout {
                                 spacing: 8px;
                                 Text { text: t.label; width: 40px; color: Theme.ink; font-size: 14px; vertical-alignment: center; }
                                 Text { text: t.lo; width: 52px; color: Theme.muted; font-size: 12px; horizontal-alignment: right; vertical-alignment: center; }
@@ -731,7 +734,7 @@ export component SettingsWindow inherits Window {
                                 }
                                 Text { text: t.hi; width: 64px; color: Theme.muted; font-size: 12px; vertical-alignment: center; }
                             }
-                            Hint { text: "會影響被戳的時候，是翻肚爆笑還是一臉厭世。"; }
+                            Hint { text: @tr("會影響被戳的時候，是翻肚爆笑還是一臉厭世。"); }
 
                         }
                     }
@@ -741,8 +744,8 @@ export component SettingsWindow inherits Window {
                 if root.tab == 1: VerticalLayout {
                     spacing: 12px;
                     alignment: start;
-                    Text { text: "互動與聲音"; color: Theme.ink; font-size: 24px; }
-                    SectionTitle { text: "聲音"; }
+                    Text { text: @tr("互動與聲音"); color: Theme.ink; font-size: 24px; }
+                    SectionTitle { text: @tr("聲音"); }
                     Section {
                         VerticalLayout {
                             padding-left: 20px;
@@ -751,13 +754,13 @@ export component SettingsWindow inherits Window {
                                 VerticalLayout {
                                     alignment: center;
                                     spacing: 4px;
-                                    Label { text: "聲音模式"; }
-                                    Hint { text: "讓牠們叫、笑、打呼。全螢幕時會自動安靜。"; }
+                                    Label { text: @tr("聲音模式"); }
+                                    Hint { text: @tr("讓牠們叫、笑、打呼。全螢幕時會自動安靜。"); }
                                 }
                                 PawSwitch { checked <=> root.sound; toggled(v) => { root.sound-toggled(v); } }
                             }
                             Row {
-                                Label { text: "音量"; width: 80px; }
+                                Label { text: @tr("音量"); width: 80px; }
                                 BoneSlider {
                                     value <=> root.volume;
                                     chonk: 0.1;
@@ -767,7 +770,7 @@ export component SettingsWindow inherits Window {
                             }
                         }
                     }
-                    SectionTitle { text: "非理性模式"; }
+                    SectionTitle { text: @tr("非理性模式"); }
                     Section {
                         VerticalLayout {
                             padding-left: 20px;
@@ -776,15 +779,15 @@ export component SettingsWindow inherits Window {
                                 VerticalLayout {
                                     alignment: center;
                                     spacing: 4px;
-                                    Label { text: "非理性模式"; }
-                                    Hint { text: "兩隻以上時，偶爾會為了小事吵起來，最後一定和好。點吵架中的任何一隻可以勸架。"; }
+                                    Label { text: @tr("非理性模式"); }
+                                    Hint { text: @tr("兩隻以上時，偶爾會為了小事吵起來，最後一定和好。點吵架中的任何一隻可以勸架。"); }
                                 }
                                 PawSwitch { checked <=> root.irrational; toggled(v) => { root.irrational-toggled(v); } }
                             }
                             Row {
-                                Label { text: "吵架頻率"; }
+                                Label { text: @tr("吵架頻率"); }
                                 Segmented {
-                                    options: ["偶爾", "常常", "超常"];
+                                    options: [@tr("偶爾"), @tr("常常"), @tr("超常")];
                                     selected <=> root.squabble;
                                     picked(i) => { root.squabble-picked(i); }
                                 }
@@ -797,7 +800,7 @@ export component SettingsWindow inherits Window {
                 if root.tab == 2: VerticalLayout {
                     spacing: 12px;
                     alignment: start;
-                    Text { text: "不打擾"; color: Theme.ink; font-size: 24px; }
+                    Text { text: @tr("不打擾"); color: Theme.ink; font-size: 24px; }
                     Section {
                         VerticalLayout {
                             padding-left: 20px;
@@ -806,8 +809,8 @@ export component SettingsWindow inherits Window {
                                 VerticalLayout {
                                     alignment: center;
                                     spacing: 4px;
-                                    Label { text: "全螢幕時躲起來"; }
-                                    Hint { text: "看影片、玩遊戲或簡報時，牠們會先躲起來，結束後再回來。"; }
+                                    Label { text: @tr("全螢幕時躲起來"); }
+                                    Hint { text: @tr("看影片、玩遊戲或簡報時，牠們會先躲起來，結束後再回來。"); }
                                 }
                                 PawSwitch { checked <=> root.hide-fullscreen; toggled(v) => { root.hide-fullscreen-toggled(v); } }
                             }
@@ -815,8 +818,8 @@ export component SettingsWindow inherits Window {
                                 VerticalLayout {
                                     alignment: center;
                                     spacing: 4px;
-                                    Label { text: "陪你打字和看書"; }
-                                    Hint { text: "打字時牠們會跟著拍拍腳，滑鼠停著時會趴下來陪你。只看鍵盤和滑鼠有沒有在用，不會讀你打的字。"; }
+                                    Label { text: @tr("陪你打字和看書"); }
+                                    Hint { text: @tr("打字時牠們會跟著拍拍腳，滑鼠停著時會趴下來陪你。只看鍵盤和滑鼠有沒有在用，不會讀你打的字。"); }
                                 }
                                 PawSwitch { checked <=> root.react-input; toggled(v) => { root.react-input-toggled(v); } }
                             }
@@ -824,8 +827,8 @@ export component SettingsWindow inherits Window {
                                 VerticalLayout {
                                     alignment: center;
                                     spacing: 4px;
-                                    Label { text: "一鍵收起來"; }
-                                    Hint { text: "再按一次就叫回來。"; }
+                                    Label { text: @tr("一鍵收起來"); }
+                                    Hint { text: @tr("再按一次就叫回來。"); }
                                 }
                                 Text { text: "Ctrl + Alt + P"; color: Theme.ink; font-size: 14px; vertical-alignment: center; }
                             }
@@ -837,17 +840,32 @@ export component SettingsWindow inherits Window {
                 if root.tab == 3: VerticalLayout {
                     spacing: 12px;
                     alignment: start;
-                    Text { text: "一般"; color: Theme.ink; font-size: 24px; }
+                    Text { text: @tr("一般"); color: Theme.ink; font-size: 24px; }
                     Section {
                         VerticalLayout {
                             padding-left: 20px;
                             padding-right: 20px;
+                            // Each language's name in itself, so it can be
+                            // found whatever the window is in now.
                             Row {
                                 VerticalLayout {
                                     alignment: center;
                                     spacing: 4px;
-                                    Label { text: "開機時一起醒來"; }
-                                    Hint { text: "電腦開機後，牠們會自動出現在桌面上。"; }
+                                    Label { text: @tr("語言"); }
+                                    Hint { text: @tr("跟著電腦：照電腦的語言顯示。"); }
+                                }
+                                Segmented {
+                                    options: [@tr("跟著電腦"), "繁體中文", "日本語", "English"];
+                                    selected <=> root.language;
+                                    picked(i) => { root.language-picked(i); }
+                                }
+                            }
+                            Row {
+                                VerticalLayout {
+                                    alignment: center;
+                                    spacing: 4px;
+                                    Label { text: @tr("開機時一起醒來"); }
+                                    Hint { text: @tr("電腦開機後，牠們會自動出現在桌面上。"); }
                                 }
                                 PawSwitch { checked <=> root.start-login; toggled(v) => { root.start-login-toggled(v); } }
                             }
@@ -855,13 +873,13 @@ export component SettingsWindow inherits Window {
                                 VerticalLayout {
                                     alignment: center;
                                     spacing: 4px;
-                                    Label { text: "同時在桌面上的寵物"; }
-                                    Hint { text: root.desktop-limit > 7 ? "寵物越多，用的電腦資源也越多。" : "其他的會在寵物窩休息。"; }
+                                    Label { text: @tr("同時在桌面上的寵物"); }
+                                    Hint { text: root.desktop-limit > 7 ? @tr("寵物越多，用的電腦資源也越多。") : @tr("其他的會在寵物窩休息。"); }
                                 }
                                 HorizontalLayout {
                                     spacing: 8px;
                                     CuteButton { text: "－"; primary: false; enabled: root.desktop-limit > 1; clicked => { root.desktop-limit-changed(root.desktop-limit - 1); } }
-                                    Text { text: root.desktop-limit + " 隻"; color: Theme.ink; font-size: 15px; vertical-alignment: center; min-width: 44px; horizontal-alignment: center; }
+                                    Text { text: @tr("{} 隻", root.desktop-limit); color: Theme.ink; font-size: 15px; vertical-alignment: center; min-width: 44px; horizontal-alignment: center; }
                                     CuteButton { text: "＋"; primary: false; clicked => { root.desktop-limit-changed(root.desktop-limit + 1); } }
                                 }
                             }
@@ -869,12 +887,12 @@ export component SettingsWindow inherits Window {
                                 VerticalLayout {
                                     alignment: center;
                                     spacing: 4px;
-                                    Label { text: "大家的大小"; }
-                                    Hint { text: "一次調整所有寵物的大小。"; }
+                                    Label { text: @tr("大家的大小"); }
+                                    Hint { text: @tr("一次調整所有寵物的大小。"); }
                                 }
                                 HorizontalLayout {
                                     spacing: 6px;
-                                    for choice in [{ label: "小", pct: 70 }, { label: "中", pct: 100 }, { label: "大", pct: 130 }, { label: "特大", pct: 160 }]: CuteButton {
+                                    for choice in [{ label: @tr("小"), pct: 70 }, { label: @tr("中"), pct: 100 }, { label: @tr("大"), pct: 130 }, { label: @tr("特大"), pct: 160 }]: CuteButton {
                                         text: choice.label;
                                         primary: root.size-all == choice.pct;
                                         clicked => { root.size-all-picked(choice.pct); }
@@ -885,23 +903,23 @@ export component SettingsWindow inherits Window {
                                 VerticalLayout {
                                     alignment: center;
                                     spacing: 4px;
-                                    Label { text: "資料位置"; }
+                                    Label { text: @tr("資料位置"); }
                                     Hint { text: root.data-path; }
                                 }
-                                CuteButton { text: "打開資料夾"; primary: false; clicked => { root.open-folder(); } }
+                                CuteButton { text: @tr("打開資料夾"); primary: false; clicked => { root.open-folder(); } }
                             }
                             Row {
                                 VerticalLayout {
                                     alignment: center;
                                     spacing: 4px;
-                                    Label { text: "移除所有痕跡"; }
-                                    Hint { text: "刪除開機自動啟動和應用程式選單的捷徑。之後結束肉肉賴桌、刪掉資料夾，就完全移除了。"; }
+                                    Label { text: @tr("移除所有痕跡"); }
+                                    Hint { text: @tr("刪除開機自動啟動和應用程式選單的捷徑。之後結束肉肉賴桌、刪掉資料夾，就完全移除了。"); }
                                 }
-                                CuteButton { text: "移除…"; primary: false; danger: true; clicked => { root.remove-traces(); } }
+                                CuteButton { text: @tr("移除…"); primary: false; danger: true; clicked => { root.remove-traces(); } }
                             }
                         }
                     }
-                    Text { text: "肉肉賴桌 " + root.version + "・不連網，不收集任何資料"; color: Theme.muted; font-size: 13px; horizontal-alignment: center; }
+                    Text { text: @tr("肉肉賴桌 {}・不連網，不收集任何資料", root.version); color: Theme.muted; font-size: 13px; horizontal-alignment: center; }
                     // Attribution required by Slint's royalty-free licence.
                     HorizontalLayout {
                         alignment: center;

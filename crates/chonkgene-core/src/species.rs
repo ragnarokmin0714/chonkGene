@@ -1,6 +1,7 @@
 //! The six species and their defaults (PLAN §1.1, §1.6, §1.12).
 
 use crate::anim::{Act, Habits};
+use crate::i18n::tr;
 use crate::{Personality, Zone};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -285,38 +286,38 @@ impl Species {
     /// Display name (zh-TW).
     pub fn label(self) -> &'static str {
         match self {
-            Species::Shiba => "柴犬",
-            Species::Munchkin => "曼赤肯貓",
-            Species::Fold => "蘇格蘭折耳貓",
-            Species::Owl => "貓頭鷹",
-            Species::Chick => "小雞",
-            Species::Duck => "小鴨",
-            Species::Fox => "九尾狐",
+            Species::Shiba => tr("柴犬"),
+            Species::Munchkin => tr("曼赤肯貓"),
+            Species::Fold => tr("蘇格蘭折耳貓"),
+            Species::Owl => tr("貓頭鷹"),
+            Species::Chick => tr("小雞"),
+            Species::Duck => tr("小鴨"),
+            Species::Fox => tr("九尾狐"),
         }
     }
 
     pub fn default_name(self) -> &'static str {
         match self {
-            Species::Shiba => "阿柴",
-            Species::Munchkin => "奶茶",
-            Species::Fold => "芋圓",
-            Species::Owl => "咕咕",
-            Species::Chick => "蛋黃",
-            Species::Duck => "湯圓",
-            Species::Fox => "小九",
+            Species::Shiba => tr("阿柴"),
+            Species::Munchkin => tr("奶茶"),
+            Species::Fold => tr("芋圓"),
+            Species::Owl => tr("咕咕"),
+            Species::Chick => tr("蛋黃"),
+            Species::Duck => tr("湯圓"),
+            Species::Fox => tr("小九"),
         }
     }
 
     /// Default 「牠怎麼叫你」.
     pub fn default_you(self) -> &'static str {
         match self {
-            Species::Shiba => "主人",
-            Species::Munchkin => "好朋友",
-            Species::Fold => "奴才",
-            Species::Owl => "同學",
-            Species::Chick => "老大",
-            Species::Duck => "領隊",
-            Species::Fox => "小主人",
+            Species::Shiba => tr("主人"),
+            Species::Munchkin => tr("好朋友"),
+            Species::Fold => tr("奴才"),
+            Species::Owl => tr("同學"),
+            Species::Chick => tr("老大"),
+            Species::Duck => tr("領隊"),
+            Species::Fox => tr("小主人"),
         }
     }
 
@@ -367,13 +368,13 @@ impl Species {
     /// Favourite snack (PLAN §1.13); the owl's is still open (§10).
     pub fn snack(self) -> &'static str {
         match self {
-            Species::Shiba => "肉乾",
-            Species::Munchkin | Species::Fold => "罐罐",
-            Species::Owl => "小餅乾",
-            Species::Chick => "玉米粒",
-            Species::Duck => "豌豆",
+            Species::Shiba => tr("肉乾"),
+            Species::Munchkin | Species::Fold => tr("罐罐"),
+            Species::Owl => tr("小餅乾"),
+            Species::Chick => tr("玉米粒"),
+            Species::Duck => tr("豌豆"),
             // Fried tofu, the fox's favourite in Japanese lore.
-            Species::Fox => "豆皮壽司",
+            Species::Fox => tr("豆皮壽司"),
         }
     }
 }

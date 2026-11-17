@@ -2,6 +2,7 @@
 //! saves, and sends every change to the pet process, which owns the files.
 //! If the pets are not running, it writes the files itself.
 
+use chonkgene_core::i18n::{self, Lang, tr, trf};
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -37,37 +38,37 @@ const SEND_EVERY: Duration = Duration::from_millis(150);
 
 fn coat_label(coat: &str) -> &'static str {
     match coat {
-        "red" => "赤柴",
-        "black" => "黑色",
-        "sesame" => "胡麻",
-        "white" => "白色",
-        "milktea" => "奶茶",
-        "orange" => "橘色",
-        "grey" => "灰色",
-        "bluegrey" => "藍灰",
-        "cream" => "奶油",
-        "silver" => "銀虎斑",
-        "brown" => "褐色",
-        "snowy" => "雪白",
-        "yellow" => "黃色",
-        "silkie" => "烏骨",
+        "red" => tr("赤柴"),
+        "black" => tr("黑色"),
+        "sesame" => tr("胡麻"),
+        "white" => tr("白色"),
+        "milktea" => tr("奶茶"),
+        "orange" => tr("橘色"),
+        "grey" => tr("灰色"),
+        "bluegrey" => tr("藍灰"),
+        "cream" => tr("奶油"),
+        "silver" => tr("銀虎斑"),
+        "brown" => tr("褐色"),
+        "snowy" => tr("雪白"),
+        "yellow" => tr("黃色"),
+        "silkie" => tr("烏骨"),
         // The fox's (金色 and 夜色 showed as 其他 until 2026-11-16).
-        "gold" => "金色",
-        "night" => "夜色",
-        "snow" => "雪狐",
-        _ => "其他",
+        "gold" => tr("金色"),
+        "night" => tr("夜色"),
+        "snow" => tr("雪狐"),
+        _ => tr("其他"),
     }
 }
 
 fn blurb(s: Species) -> &'static str {
     match s {
-        Species::Shiba => "固執又愛笑，被戳會翻肚。",
-        Species::Munchkin => "腿短但很努力，常常跳不上去。",
-        Species::Fold => "高冷系，戳多了會厭世。",
-        Species::Owl => "白天打瞌睡，晚上最有精神。",
-        Species::Chick => "好奇又急性子，什麼都想啄一下。",
-        Species::Duck => "慢半拍，喜歡跟在別人後面走。",
-        Species::Fox => "愛惡作劇的小狐仙，坐下會開屏。",
+        Species::Shiba => tr("固執又愛笑，被戳會翻肚。"),
+        Species::Munchkin => tr("腿短但很努力，常常跳不上去。"),
+        Species::Fold => tr("高冷系，戳多了會厭世。"),
+        Species::Owl => tr("白天打瞌睡，晚上最有精神。"),
+        Species::Chick => tr("好奇又急性子，什麼都想啄一下。"),
+        Species::Duck => tr("慢半拍，喜歡跟在別人後面走。"),
+        Species::Fox => tr("愛惡作劇的小狐仙，坐下會開屏。"),
     }
 }
 
@@ -95,43 +96,48 @@ fn body_line(s: Species, chonk: f32) -> &'static str {
     } else {
         3
     };
-    let lines: [&str; 4] = match s {
+    let lines: [&'static str; 4] = match s {
         Species::Fold => [
-            "……還不錯。",
-            "……剛好。",
-            "……你什麼都沒看到。",
-            "……我只是毛多。",
+            tr("……還不錯。"),
+            tr("……剛好。"),
+            tr("……你什麼都沒看到。"),
+            tr("……我只是毛多。"),
         ],
         Species::Duck => [
-            "……輕飄飄，呱。",
-            "剛剛好，呱。",
-            "……變圓了？呱。",
-            "……麻糬，呱。",
+            tr("……輕飄飄，呱。"),
+            tr("剛剛好，呱。"),
+            tr("……變圓了？呱。"),
+            tr("……麻糬，呱。"),
         ],
         Species::Chick => [
-            "啾！好輕！",
-            "啾～剛剛好",
-            "啾？肚子變大了？",
-            "啾！我是麻糬！",
+            tr("啾！好輕！"),
+            tr("啾～剛剛好"),
+            tr("啾？肚子變大了？"),
+            tr("啾！我是麻糬！"),
         ],
         Species::Owl => [
-            "咕，身輕如燕。",
-            "咕咕，剛剛好。",
-            "咕？好像變圓了",
-            "咕……麻糬咕。",
+            tr("咕，身輕如燕。"),
+            tr("咕咕，剛剛好。"),
+            tr("咕？好像變圓了"),
+            tr("咕……麻糬咕。"),
         ],
-        Species::Munchkin => ["好輕喔！", "剛剛好～", "肚子……變大了？", "我變成麻糬了……"],
+        Species::Munchkin => [
+            tr("好輕喔！"),
+            tr("剛剛好～"),
+            tr("肚子……變大了？"),
+            tr("我變成麻糬了……"),
+        ],
         Species::Shiba => [
-            "身輕如燕！",
-            "剛剛好的肉肉～",
-            "肚子好像變大了？",
-            "我是一顆麻糬。",
+            tr("身輕如燕！"),
+            tr("剛剛好的肉肉～"),
+            tr("肚子好像變大了？"),
+            tr("我是一顆麻糬。"),
         ],
         Species::Fox => [
-            "輕飄飄，像一陣風～",
-            "剛剛好，嘻嘻",
-            "尾巴……變胖了？",
-            "九條尾巴的麻糬！",
+            tr("輕飄飄，像一陣風～"),
+            tr("剛剛好，嘻嘻"),
+            tr("尾巴……變胖了？"),
+            tr("九條尾巴的麻糬！"),
         ],
     };
     lines[stop]
@@ -307,6 +313,28 @@ fn coat_rows(coats: Vec<(String, [u8; 4], [u8; 4])>) -> ModelRc<CoatRow> {
 }
 
 /// Push the selected pet's fields into the UI and rebuild its preview.
+/// Shows the window in the language of the settings: the words in the
+/// .slint file (Slint's bundled translations) and the ones made here (the
+/// adoption cards' names and blurbs; the rest is made afresh by
+/// [`show_pet`]).
+fn use_language(ui: &SettingsWindow, st: &mut State) {
+    use slint::Model as _;
+    let lang = st.settings.lang();
+    i18n::set(lang);
+    let id = if lang == Lang::ZhTw { "" } else { lang.id() };
+    if let Err(e) = slint::select_bundled_translation(id) {
+        eprintln!("no {} words for the settings window: {e}", lang.id());
+    }
+    let rows = ui.get_species();
+    for (i, s) in Species::ALL.into_iter().enumerate() {
+        if let Some(mut row) = rows.row_data(i) {
+            row.label = s.label().into();
+            row.blurb = blurb(s).into();
+            rows.set_row_data(i, row);
+        }
+    }
+}
+
 fn show_pet(ui: &SettingsWindow, st: &mut State) {
     ui.set_pets(pet_rows(st));
     let Some(p) = st.pet().cloned() else {
@@ -332,7 +360,16 @@ fn show_pet(ui: &SettingsWindow, st: &mut State) {
     ui.set_preview_tint(tint(species));
     ui.set_preview_line(body_line(species, p.chonk).into());
     let progress = p.xp * 100 / XP_PER_LEVEL;
-    ui.set_level_text(format!("親密度 Lv.{}（{progress}%）", p.level).into());
+    ui.set_level_text(
+        trf(
+            "親密度 Lv.{level}（{progress}%）",
+            &[
+                ("level", &p.level.to_string()),
+                ("progress", &progress.to_string()),
+            ],
+        )
+        .into(),
+    );
     ui.set_confirm_release(false);
     let kind = &st.kinds[&species];
     let coat = kind.model.coat(&p.coat).unwrap_or(0);
@@ -464,13 +501,20 @@ fn setup(
         ui.set_volume(f32::from(s.volume) / 100.0);
         ui.set_irrational(s.irrational);
         ui.set_squabble(i32::from(s.squabble.min(2)));
+        ui.set_language(
+            Lang::ALL
+                .iter()
+                .position(|l| l.id() == s.language)
+                .map_or(0, |i| i as i32 + 1),
+        );
+        use_language(ui, &mut st);
         ui.set_hide_fullscreen(s.hide_in_fullscreen);
         ui.set_react_input(s.react_to_input);
         ui.set_start_login(s.start_at_login);
         ui.set_desktop_limit(s.on_desktop.min(i32::MAX as u32) as i32);
         ui.set_size_all(common_size(&st.pets));
         let where_ = if st.data.portable {
-            "可攜模式："
+            tr("可攜模式：")
         } else {
             ""
         };
@@ -637,6 +681,15 @@ fn setup(
         st.settings.squabble = i.clamp(0, 2) as u8;
         st.send_settings();
     });
+    on!(on_language_picked, |ui, st, i: i32| {
+        st.settings.language = usize::try_from(i - 1)
+            .ok()
+            .and_then(|i| Lang::ALL.get(i))
+            .map_or(String::new(), |l| l.id().to_string());
+        st.send_settings();
+        use_language(&ui, st);
+        show_pet(&ui, st);
+    });
     on!(on_hide_fullscreen_toggled, |_ui, st, v: bool| {
         st.settings.hide_in_fullscreen = v;
         st.send_settings();
@@ -682,9 +735,9 @@ fn setup(
         st.send_settings();
         st.send(Msg::RemoveTraces);
         ui.set_notice(
-            format!(
-                "已移除開機自動啟動和應用程式選單的捷徑。要完全移除，請結束肉肉賴桌，再刪除這個資料夾：{}",
-                st.data.path.display()
+            trf(
+                "已移除開機自動啟動和應用程式選單的捷徑。要完全移除，請結束肉肉賴桌，再刪除這個資料夾：{path}",
+                &[("path", &st.data.path.display().to_string())],
             )
             .into(),
         );
@@ -720,7 +773,9 @@ fn setup(
                 }
             }
             if !st.reachable {
-                ui.set_notice("肉肉賴桌目前沒有在執行。改動已經存起來，下次開啟時套用。".into());
+                ui.set_notice(
+                    tr("肉肉賴桌目前沒有在執行。改動已經存起來，下次開啟時套用。").into(),
+                );
             }
             // Pick up pets the pet process just adopted.
             if st.reachable

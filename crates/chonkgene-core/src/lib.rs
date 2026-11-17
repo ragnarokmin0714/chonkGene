@@ -5,6 +5,7 @@
 
 pub mod activity;
 pub mod anim;
+pub mod i18n;
 pub mod mind;
 pub mod motion;
 pub mod play;

@@ -652,6 +652,7 @@ dependencies = [
  "serde",
  "slint",
  "slint-build",
+ "sys-locale",
  "tiny-skia",
  "winit",
  "winresource",
@@ -668,6 +669,7 @@ dependencies = [
 name = "chonkgene-platform"
 version = "0.6.0-beta.1"
 dependencies = [
+ "chonkgene-core",
  "global-hotkey",
  "ksni",
  "libloading 0.9.0",
