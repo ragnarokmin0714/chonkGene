@@ -1481,6 +1481,13 @@ Items 1 and 2 built the same day; item 3 waits for Roger's answers below, and co
 
    **Built (2026-11-17)**: at rest (`face.rs` `fox_marks` on the CPU and `paint.wgsl` `fox_marks` on the GPU, the same shapes): three leaves fanned up on the forehead (the flame is gone), two long strokes along each cheek tapering back toward the ear and paling at their ends (they replace the two short stripes that were coat marks on the head part, coarse as the mesh), and 麻呂眉 brow dots (`face.brows`, a new slot `brow`: fawn on 白色, pale grey on 雪狐, cream on 金色, lavender on 夜色). Casting (`spell_marks`), the rest marks fade out as the seal grows in: the crest drawing itself up from its foot (a tall drop with a round hollow, a curling wing either side), a leaf over each brow dot, three stripes along each cheek drawn out toward the ears, a ring round each eye; in the mark's own colour, a soft glow round the seal but not over it (the old glow washed it pale). The eyeliner's flick drawn on up to the ear when casting is gone (not in the picture). `the_fox_marks_land_in_the_same_place_on_the_gpu_and_the_cpu` checks the two painters agree. Picture `inbox/fox-seal.png` (at rest, casting). Owed: the eyes while casting are still lit pale pink (the picture has them red); the human form's face.
 
+### Roger's twenty-fourth pass (2026-11-17)
+
+- **The 3D look is on hold** (「3d畫面還是差滿多，但先hold」): the Blender hair pilot stays as built (§8 "Plan: her human form"), to come back to.
+- **Every tray command did nothing after the language changed** (found switching to Japanese with the settings window minimised; the right-click menu of the tray icon). Cause: tray-icon's and muda's event handlers live in a `OnceLock`, so `set_event_handler` works only the first time. The tray is made again on a change of language (its words); the remade menu's items get new ids, but the handler still held the first menu's ids and matched none of them. The left click (收起來 / 叫回來) kept working, as it needs no id. Every language switch did it, English and back to Chinese too. **Fixed (2026-11-17)**: the handlers are set once and read a table of the menu now up (`tray::Routes`, replaced each time the tray is made). Test `a_remade_tray_menu_still_sends_its_commands`. Checked with Windows clippy (stub C compiler); a try on Windows is owed. The pets' own menus were never affected: driven under Xvfb in Japanese and English (from the start, switched while running, sizes changed from the menu and from settings), every choice was carried out. Each choice in a pet's menu is now written to `chonkgene.log` (`menu: <action> (row n) for pet <id>`).
+- **The pet's first page ran off the screen**: 19 rows (20 for the fox), 947 px tall at 100%, so 「結束」 was below a 900 px screen, and with Windows scaling at 125% or more 「設定…」 too. **Changed (2026-11-17)**: the five things to take out and play with (狗尾草, 丟球, 丟飛盤, 貓薄荷, 聚光燈) moved to a page of their own, **「一起玩…」** (いっしょに遊ぶ…, Play together...), as 「叫牠…」 and 「場景…」 are: 15 rows (16 for the fox), 771 px; and a page still taller than the work area is drawn smaller to fit (`menu::fit_scale`, not under half; test `a_menu_taller_than_the_screen_is_drawn_smaller_to_fit`). Checked under Xvfb on a 900 px and a 700 px screen (drawn at 0.91 there), clicks landing on the right rows. The tray's menu keeps them at its top level.
+- **Steam**: asked whether chonkGene can go on Steam; the checklist is §11.
+
 ### New species: eleven more pets (Roger, 2026-11-13; planned, none built)
 
 Roger, 2026-11-13: 「這是 chonkGene 接下來要新增的寵物」, with a concept picture he made with Gemini (`inbox/Gemini_Generated_Image_1w2xeh1w2xeh1w2x.jpeg`, 「超萌動物大集合」; a reference for look only, nothing from it ships). It shows nine animals; the Munchkin is already in the cast, so eight are new. Roger then added three not in the picture (same day: 「再加個 無尾熊 和 熊貓 台灣黑熊」): the koala, the giant panda and the Formosan black bear, eleven in all. When they come relative to the open items above is Roger's call (his order of 2026-11-13 is to clear what is planned first).
@@ -1606,3 +1613,59 @@ Decisions (all settled; build after the queued pass items above):
 | Windows code signing (unsigned triggers SmartScreen warnings; cloud signing is about USD 10/month, to be rechecked). Roger, 2026-11-06: Chrome sometimes blocks the download as dangerous: Safe Browsing rates each file by its hash, so every build starts with no reputation and the verdict varies with the build, how often it has been downloaded, the browser's protection level and whether the lookup answered in time. Meanwhile CI's Windows test build is the zipped portable folder, not a bare `.exe` (a little less likely to be blocked). Plan when it is decided: sign `chonkGene.exe` in `release.yml` with Azure Artifact Signing (formerly Trusted Signing), so reputation builds on the publisher instead of starting over each release | first-run experience, downloads | Phase 6 |
 | Whether the GNOME Wayland degradation is acceptable | whether §9's native Wayland moves earlier | after Phase 0 |
 | Open-source licence and repo visibility | art, font and sound licences must agree | before going public |
+
+---
+
+## 11. Steam: what a release there takes (checklist, 2026-11-17)
+
+Roger asked whether chonkGene can go on Steam. Yes: desktop pets and idle desk companions sell there. Below is what Valve asks for, then what chonkGene still lacks, then what Roger has to decide. **Figures are from secondary guides found 2026-11-17 (sources at the end); check each against Steamworks' own documentation when signing up.**
+
+### 11.1 What Valve asks for
+
+- **A Steamworks account** (Steam Direct): identity, a tax interview (a non-US seller files a W-8 form; how much US tax is withheld depends on the treaty position at the time: check), a bank account for payouts.
+- **The Steam Direct fee**: USD 100 per product, also for a free one; recouped once the product has earned USD 1,000 adjusted gross. A waiting period runs from paying the fee to the earliest release (guides say 30 days; one says 21).
+- **A store page**, reviewed by Valve before it shows: description, tags, supported languages (zh-TW, ja, en, each listed for interface and subtitles/text), system requirements, at least five screenshots (1920×1080), a trailer (strongly advised), and the capsule art in Valve's current sizes (header 920×430, small 462×174, main 1232×706, vertical 748×896, library 600×900 plus the library hero and logo; Valve stopped accepting the old sizes in 2024).
+- **A "Coming soon" page** some time before release (wishlists; Valve has asked for at least two weeks: check).
+- **The content survey**, including **AI disclosure**: generative-AI content the player sees or hears (art, sound, voices, text, store material) is declared as pre-generated, or live-generated with safeguards described. AI used only as a development tool is not the point of the section, but guides disagree on whether shipped AI-written code is to be declared: read the survey's own wording.
+- **A build**, uploaded as depots with SteamPipe and reviewed by Valve (a few working days); then release, on a date chosen once both reviews have passed.
+
+### 11.2 What chonkGene still lacks
+
+Must have, before a Steam release:
+
+1. **A Windows pass on real hardware** of everything since the last one: the tray fix above, the i18n (Windows look owed), the 3D pets' GPU path, sounds through waveOut. Steam reviews are unforgiving of a desktop app that misbehaves.
+2. **The human form**: finish it to Roger's standard, or ship without it (behind its switch, not offered) and add it in an update.
+3. **A Steam build flavour** (a cargo feature or a build flag):
+   - no `chonkGene-data/` in the depot, so data goes to `%APPDATA%\chonkGene` (Steam's own folder is wiped on uninstall and is not the user's to carry about);
+   - no 「檢查更新」 (Steam updates it; §2.4's link to GitHub Releases would point elsewhere);
+   - start at login pointing at the exe inside Steam's library folder (works as it is: §2.3 repairs a moved path), checked after a Steam update and a library move;
+   - 「移除所有痕跡」 still offered (Steam's uninstall does not remove the Run key or the data).
+4. **Third-party notices** shipped with the build: every crate's licence (`cargo about` or `cargo deny`'s list), next to `licenses/jf-openhuninn-OFL.txt` and `licenses/sounds.md` (the CC0 recordings ask for nothing; the list is kept anyway).
+5. **AI disclosure, answered honestly**: the pets' lines in all three languages and the UI words were drafted by Claude (pre-generated text the player reads), the Japanese checked by Gemini; the code was written by Claude; reference pictures made with Gemini were used for modelling but are not shipped. If store art or a trailer is generated, that too. Roger to decide whether the lines get a human rewrite first (it changes what is declared, not whether).
+6. **Store material**: the capsule art in every size, screenshots of pets on a real desktop (no compositor artefacts), a trailer, the description in three languages (§1.11's voice).
+7. **The Steam overlay**: check it does not attach to the pets' windows or the GPU renderer's surfaces (the pets draw through wgpu offscreen and present to layered windows); if it does, turn it off for the app in Steamworks.
+8. **Name and brand check**: chonkGene / 肉肉賴桌 searched on Steam and in trademark registers.
+
+Should have:
+
+- **Performance on a low-end machine** measured again (§5's budget), since an always-running pet is judged by its idle CPU and GPU use.
+- **Crash reporting**: `chonkgene.log` exists; a "send this log" button or Steam's crash upload (needs the Steamworks SDK).
+- **Steam Deck**: mark it unsupported (a desktop companion makes no sense in Gaming Mode).
+
+Could have, later:
+
+- **The Steamworks SDK**: achievements (affinity levels, scenes found), Steam Cloud for the pets' saves, Rich Presence. Not needed to sell; adds a native library and needs Steam running.
+- **Trading cards** (Valve unlocks them only after enough sales).
+
+### 11.3 For Roger to decide
+
+| Question | Options |
+|---|---|
+| Free or paid, and the price | free (still the USD 100 fee); paid, with Valve's 30% cut and its two-hour refund rule |
+| Who sells it | Roger as an individual, or a company |
+| Keep GitHub releases | both (Steam and the portable zip), or Steam only; ties to §10's open-source licence question |
+| Linux on Steam | Windows only first (most desktop-pet buyers), Linux later |
+| The human form at launch | finished first, or shipped later in an update |
+| Store art | Roger's own, commissioned, or generated (then declared) |
+
+Sources (secondary, 2026-11-17): [Steam Direct fee explained](https://www.steampageanalyzer.com/blog/steam-direct-fee-explained), [How to publish a game on Steam (Immutable)](https://www.immutable.com/guides/how-to-publish-a-game-on-steam), [How to publish on Steam (Summer Engine)](https://www.summerengine.com/blog/how-to-publish-game-on-steam), [Steam AI disclosure rules (vgkami)](https://vgkami.com/steam-ai-disclosure-rules-in-a-practical-guide-for-game-developers/), [Pre-generated vs live-generated (itechguides)](https://www.itechguides.com/steamworks-ai-disclosure-what-your-games-content-survey-needs/), [Valve clarifies AI disclosure (BigGo)](https://finance.biggo.com/news/202601171220_Steam_AI_Disclosure_Update_Focuses_on_Player_Content), [Steam capsule sizes 2026 (virtuall)](https://virtuall.pro/blog/steam-banner-sizes-capsule-and-asset-guide), [Steamworks: store graphical assets](https://partner.steamgames.com/doc/store/assets/standard).
