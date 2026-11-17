@@ -10,6 +10,7 @@ use std::io;
 use std::path::{Path, PathBuf};
 
 use chonkgene_core::Personality;
+use chonkgene_core::i18n::{self, Lang};
 use chonkgene_core::mind::Affinity;
 use chonkgene_core::species::Species;
 use serde::{Deserialize, Serialize};
@@ -195,6 +196,36 @@ impl PetSave {
         Species::from_id(&self.species)
     }
 
+    /// A name or 「牠怎麼叫你」 still at its species' default, in whatever
+    /// language it was saved (the pet was adopted in Chinese, say), follows
+    /// the language shown now; one typed in by hand stays as it is. True if
+    /// anything changed.
+    pub fn localize_defaults(&mut self) -> bool {
+        self.localize_defaults_in(i18n::current())
+    }
+
+    /// [`Self::localize_defaults`] for language `lang`.
+    pub fn localize_defaults_in(&mut self, lang: Lang) -> bool {
+        let Some(species) = self.species() else {
+            return false;
+        };
+        let mut changed = false;
+        for (field, key) in [
+            (&mut self.name, species.default_name_zh()),
+            (&mut self.you, species.default_you_zh()),
+        ] {
+            let now = i18n::tr_in(lang, key);
+            let a_default = Lang::ALL
+                .iter()
+                .any(|&l| field.as_str() == i18n::tr_in(l, key));
+            if a_default && field.as_str() != now {
+                *field = now.into();
+                changed = true;
+            }
+        }
+        changed
+    }
+
     pub fn personality(&self) -> Personality {
         Personality {
             ticklish: self.ticklish,
@@ -286,6 +317,14 @@ impl Pets {
         moved
     }
 
+    /// Every pet's untouched default name and 「牠怎麼叫你」 in the language
+    /// shown now (see [`PetSave::localize_defaults`]). True if any changed.
+    pub fn localize_defaults(&mut self) -> bool {
+        self.pets
+            .iter_mut()
+            .fold(false, |any, p| p.localize_defaults() | any)
+    }
+
     pub fn sanitise(&mut self) {
         self.pets.retain(|p| p.species().is_some());
         for p in &mut self.pets {
@@ -336,6 +375,37 @@ pub fn save<T: Serialize>(path: &Path, value: &T) -> Result<(), String> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn untouched_names_follow_the_language_and_typed_ones_stay() {
+        let mut rng = fastrand::Rng::with_seed(1);
+        // Adopted while the program was in Chinese.
+        let mut munchkin = PetSave::adopt(1, Species::Munchkin, "cream", &mut rng);
+        munchkin.name = i18n::tr_in(Lang::ZhTw, Species::Munchkin.default_name_zh()).into();
+        munchkin.you = i18n::tr_in(Lang::ZhTw, Species::Munchkin.default_you_zh()).into();
+        assert!(munchkin.localize_defaults_in(Lang::En));
+        assert_eq!(munchkin.you, i18n::tr_in(Lang::En, "好朋友"));
+        assert_ne!(
+            munchkin.you, "好朋友",
+            "the English table has no 「好朋友」"
+        );
+        // On to Japanese from English, and back: still the defaults.
+        assert!(munchkin.localize_defaults_in(Lang::Ja));
+        assert_eq!(munchkin.name, i18n::tr_in(Lang::Ja, "奶茶"));
+        assert!(munchkin.localize_defaults_in(Lang::ZhTw));
+        assert_eq!(
+            (munchkin.name.as_str(), munchkin.you.as_str()),
+            ("奶茶", "好朋友")
+        );
+        assert!(
+            !munchkin.localize_defaults_in(Lang::ZhTw),
+            "nothing left to change"
+        );
+        // Renamed by hand: kept in every language.
+        munchkin.name = "小麻糬".into();
+        munchkin.localize_defaults_in(Lang::En);
+        assert_eq!(munchkin.name, "小麻糬");
+    }
+
     use super::*;
 
     fn temp_dir(name: &str) -> PathBuf {

@@ -623,6 +623,8 @@ impl App {
         // would, a pet resting only for the old limit comes out).
         let fitted = (upgraded || pets.out() > settings.on_desktop as usize)
             && pets.fit_to(settings.on_desktop);
+        // Names and 「牠怎麼叫你」 nobody changed, in the language shown.
+        let localized = pets.localize_defaults();
         for note in notes {
             eprintln!("{note}");
         }
@@ -631,7 +633,7 @@ impl App {
             data,
             settings,
             store: pets,
-            dirty: fitted,
+            dirty: fitted | localized,
             kinds,
             lines: Lines::load()?,
             bubble_face: Face::ui(),
@@ -1291,6 +1293,18 @@ impl App {
                     // words (the pets' menus are made each time they open).
                     self.tray = None;
                     self.make_tray();
+                    // Untouched names and 「牠怎麼叫你」 follow the language,
+                    // on the desktop as in the save.
+                    if self.store.localize_defaults() {
+                        self.dirty = true;
+                        for p in &mut self.pets {
+                            if let Some(s) = self.store.pets.iter().find(|s| s.id == p.save.id) {
+                                p.save.name = s.name.clone();
+                                p.save.you = s.you.clone();
+                                p.window.set_title(&s.name);
+                            }
+                        }
+                    }
                 }
                 self.sync_autostart();
                 self.sync_desktop(el);

@@ -164,6 +164,7 @@
 可攜模式：{path} → Portable: {path}
 肉肉賴桌目前沒有在執行。改動已經存起來，下次開啟時套用。 → chonkGene isn't running. Your changes are saved and apply next time it starts.
 親密度 Lv.{level}（{progress}%） → Bond Lv.{level} ({progress}%)
+親密度 Lv.{level} → Bond Lv.{level}
 已移除開機自動啟動和應用程式選單的捷徑。要完全移除，請結束肉肉賴桌，再刪除這個資料夾：{path} → Removed the start-up entry and the app menu shortcut. To remove it completely, quit chonkGene, then delete this folder: {path}
 肉肉賴桌・設定 → chonkGene · Settings
 肉肉賴桌 → chonkGene

@@ -321,6 +321,9 @@ fn use_language(ui: &SettingsWindow, st: &mut State) {
     use slint::Model as _;
     let lang = st.settings.lang();
     i18n::set(lang);
+    // Names and 「牠怎麼叫你」 nobody changed follow the language (the pet
+    // process does the same to its own copy and its save).
+    st.pets.localize_defaults();
     let id = if lang == Lang::ZhTw { "" } else { lang.id() };
     if let Err(e) = slint::select_bundled_translation(id) {
         eprintln!("no {} words for the settings window: {e}", lang.id());

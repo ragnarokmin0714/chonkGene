@@ -1,7 +1,7 @@
 //! The six species and their defaults (PLAN §1.1, §1.6, §1.12).
 
 use crate::anim::{Act, Habits};
-use crate::i18n::tr;
+use crate::i18n::{mark, tr};
 use crate::{Personality, Zone};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -296,28 +296,41 @@ impl Species {
         }
     }
 
+    /// Its default name in the language shown now.
     pub fn default_name(self) -> &'static str {
+        tr(self.default_name_zh())
+    }
+
+    /// Its default name as the code writes it (the key of its
+    /// translations): a save still holding it in any language was never
+    /// renamed (`PetSave::localize_defaults`).
+    pub fn default_name_zh(self) -> &'static str {
         match self {
-            Species::Shiba => tr("阿柴"),
-            Species::Munchkin => tr("奶茶"),
-            Species::Fold => tr("芋圓"),
-            Species::Owl => tr("咕咕"),
-            Species::Chick => tr("蛋黃"),
-            Species::Duck => tr("湯圓"),
-            Species::Fox => tr("小九"),
+            Species::Shiba => mark("阿柴"),
+            Species::Munchkin => mark("奶茶"),
+            Species::Fold => mark("芋圓"),
+            Species::Owl => mark("咕咕"),
+            Species::Chick => mark("蛋黃"),
+            Species::Duck => mark("湯圓"),
+            Species::Fox => mark("小九"),
         }
     }
 
-    /// Default 「牠怎麼叫你」.
+    /// Default 「牠怎麼叫你」, in the language shown now.
     pub fn default_you(self) -> &'static str {
+        tr(self.default_you_zh())
+    }
+
+    /// Default 「牠怎麼叫你」 as the code writes it (see [`Self::default_name_zh`]).
+    pub fn default_you_zh(self) -> &'static str {
         match self {
-            Species::Shiba => tr("主人"),
-            Species::Munchkin => tr("好朋友"),
-            Species::Fold => tr("奴才"),
-            Species::Owl => tr("同學"),
-            Species::Chick => tr("老大"),
-            Species::Duck => tr("領隊"),
-            Species::Fox => tr("小主人"),
+            Species::Shiba => mark("主人"),
+            Species::Munchkin => mark("好朋友"),
+            Species::Fold => mark("奴才"),
+            Species::Owl => mark("同學"),
+            Species::Chick => mark("老大"),
+            Species::Duck => mark("領隊"),
+            Species::Fox => mark("小主人"),
         }
     }
 

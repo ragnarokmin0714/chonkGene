@@ -218,7 +218,8 @@ pub fn draw(face: &mut Face, model: &Model, hover: Option<usize>, scale: f32) ->
         12.0,
         MUTED,
     );
-    let level = format!("親密度 Lv.{}", model.level);
+    let level =
+        chonkgene_core::i18n::trf("親密度 Lv.{level}", &[("level", &model.level.to_string())]);
     text(&mut pm, face, &level, tx, PAD + 44.0, 12.0, MUTED);
     let meter_x = tx + face.measure(&level, 12.0) + 8.0;
     let meter_w = (W - PAD - 12.0 - meter_x).max(20.0);
