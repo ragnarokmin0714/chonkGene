@@ -889,7 +889,7 @@ impl Canvas {
 
 const PART_VECS: usize = 7;
 const MARK_VECS: usize = 3;
-const UNIFORM_VECS: usize = 13 + PALETTE;
+const UNIFORM_VECS: usize = 14 + PALETTE;
 
 /// Waiting for a frame, how long its map may still take to land after the
 /// wait returns.
@@ -940,6 +940,7 @@ fn pack(scene: &Scene) -> (Vec<Vec4>, Vec<Vec4>) {
             Shape::Capsule { to, r } => (1.0, v4(to, r)),
             Shape::Torus { major, minor } => (2.0, [major, minor, 0.0, 0.0]),
             Shape::Cone { r1, r2, h, flat } => (3.0, [r1, r2, h, flat]),
+            Shape::Frustum { r1, r2, h, round } => (4.0, [r1, r2, h, round]),
         };
         let part = pv.part;
         let first = marks.len() / MARK_VECS;
@@ -1021,6 +1022,12 @@ pub(crate) fn uniforms(
             frame.breath,
             frame.lean.to_radians(),
             frame.lift / crate::raymarch::PPU,
+        ],
+        [
+            if face.chibi { 1.0 } else { 0.0 },
+            if face.seal { 1.0 } else { 0.0 },
+            0.0,
+            0.0,
         ],
     ];
     let palette = scene.palette();

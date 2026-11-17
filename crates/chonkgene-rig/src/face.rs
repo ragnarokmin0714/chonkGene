@@ -64,6 +64,72 @@ pub(crate) fn fox_marks(uv: P, aa: f32) -> (f32, f32) {
     (ink(d, aa), smoothstep(0.55, 0.86, uv.0.abs()))
 }
 
+/// The fox's seal in her human form, the same in paint.wgsl `seal_marks`
+/// (Roger's picture of her parts, 銀白版 and 紅髮版 faces): on the
+/// forehead a tall drop with a round hollow, a wing curling up either side
+/// of its foot; a leaf over each brow, slanting up and out; three short
+/// stripes on each cheek under the eye's outer corner, thick at the outer
+/// end and drawn to a point toward the nose. Laid out for a round face
+/// with big eyes low on it (eyes about (±0.34, −0.1)).
+pub(crate) fn seal_marks(uv: P, aa: f32) -> f32 {
+    let mut d = tapered(uv, (0.0, 0.25), (0.0, 0.58), 0.058, 0.004);
+    d = d.max(-(len(sub(uv, (0.0, 0.36))) - 0.024));
+    for side in [-1.0, 1.0] {
+        let w0 = (0.03 * side, 0.24);
+        let w1 = (0.16 * side, 0.36);
+        d = d.min(leaf(uv, w0, w1, 0.036));
+        d = d.min(tapered(uv, w1, (0.11 * side, 0.5), 0.02, 0.003));
+        d = d.min(leaf(uv, (0.22 * side, 0.2), (0.4 * side, 0.27), 0.05));
+        for i in 0..3 {
+            let fi = i as f32;
+            let outer = ((0.72 - 0.03 * fi) * side, -0.3 - 0.075 * fi);
+            let inner = ((0.47 + 0.02 * fi) * side, -0.36 - 0.07 * fi);
+            d = d.min(tapered(uv, outer, inner, 0.036, 0.005));
+        }
+    }
+    ink(d, aa)
+}
+
+/// A big chibi eye (the fox's human form), the same in paint.wgsl
+/// `chibi_eye`: the white, a gradient iris (dark at the top, light at the
+/// bottom) with a darker rim, a big pupil, a heavy upper lash line that
+/// flicks up and out at the outer corner, two highlights (the same way on
+/// both eyes, as one light makes them).
+fn chibi_eye(c: V3, uv: P, ec: P, r: P, side: f32, (iris, ink_c): (V3, V3), aa: f32) -> V3 {
+    let (rx, ry) = r;
+    let white = v3(1.0, 1.0, 1.0);
+    let open = ell(uv, ec, r);
+    let mut c = c.lerp(v3(0.98, 0.97, 0.99), ink(open, aa));
+    let ic = (ec.0, ec.1 - 0.04 * ry);
+    let ir = (0.8 * rx, 0.95 * ry);
+    let di = ell(uv, ic, ir).max(open);
+    let t = smoothstep(-ir.1, ir.1, uv.1 - ic.1);
+    let shade = iris.lerp(white, 0.4).lerp(iris * 0.45, t);
+    c = c.lerp(shade, ink(di, aa));
+    let rim = (ell(uv, ic, ir).abs() * ir.0 - 0.012).max(open);
+    c = c.lerp(iris * 0.35, ink(rim, aa));
+    c = c.lerp(
+        (iris * 0.18).lerp(ink_c, 0.5),
+        ink(ell(uv, ic, (0.46 * rx, 0.52 * ry)).max(open), aa),
+    );
+    // The lash line: thick along the top of the opening, thinning down
+    // its sides, and the flick out of the outer corner.
+    let top = smoothstep(ec.1 - 0.35 * ry, ec.1 + 0.7 * ry, uv.1);
+    let lash = (open.abs() * rx - (0.004 + 0.03 * top)).max(ec.1 - 0.2 * ry - uv.1);
+    let flick = tapered(
+        uv,
+        (ec.0 + 0.8 * rx * side, ec.1 + 0.45 * ry),
+        (ec.0 + (rx + 0.1) * side, ec.1 + 0.75 * ry),
+        0.03,
+        0.004,
+    );
+    c = c.lerp(ink_c, ink(lash.min(flick), aa));
+    let hl = (ec.0 + 0.3 * rx, ec.1 + 0.32 * ry);
+    c = c.lerp(white, ink(len(sub(uv, hl)) - 0.24 * rx, aa));
+    let hl2 = (ec.0 - 0.28 * rx, ec.1 - 0.38 * ry);
+    c.lerp(white, 0.85 * ink(len(sub(uv, hl2)) - 0.11 * rx, aa))
+}
+
 /// Coverage of a shape at signed distance `d`, smoothed over `aa`.
 fn ink(d: f32, aa: f32) -> f32 {
     1.0 - smoothstep(-aa, aa, d)
@@ -118,6 +184,9 @@ pub fn eyes(scene: &Scene, shape: Shape, q: V3, base: V3, px: f32) -> V3 {
             .iris
             .map_or((ink_c, 1.0), |(slot, k)| (scene.color(slot), k));
         match scene.look() {
+            Look::Open | Look::Blep if face.chibi => {
+                c = chibi_eye(c, uv, ec, (rx, ry), side, (iris_c, ink_c), aa);
+            }
             Look::Open | Look::Blep => {
                 c = c.lerp(iris_c, ink(ell(uv, ec, (rx, ry)), aa));
                 if pupil < 1.0 {
@@ -165,9 +234,13 @@ pub fn eyes(scene: &Scene, shape: Shape, q: V3, base: V3, px: f32) -> V3 {
         }
     }
     if let Some(slot) = face.forehead {
-        let (whole, out) = fox_marks(uv, aa);
         let mark = scene.color(slot);
-        c = c.lerp(mark.lerp(white, 0.35 * out), whole);
+        if face.seal {
+            c = c.lerp(mark, seal_marks(uv, aa));
+        } else {
+            let (whole, out) = fox_marks(uv, aa);
+            c = c.lerp(mark.lerp(white, 0.35 * out), whole);
+        }
     }
     c
 }

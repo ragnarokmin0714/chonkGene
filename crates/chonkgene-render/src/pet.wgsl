@@ -52,6 +52,8 @@ struct Uniforms {
     blush: vec4<f32>,
     // Squash (> 0 flattens), breath (−1…1), lean (radians), lift (world units).
     frame: vec4<f32>,
+    // x: big chibi eyes (1.0); y: the marks at rest are the seal (1.0).
+    style: vec4<f32>,
     palette: array<vec4<f32>, 16>,
 }
 
@@ -118,6 +120,25 @@ fn round_cone(p: vec3<f32>, r1: f32, r2: f32, h: f32) -> f32 {
     return a * qx + b * qy - r1;
 }
 
+// As sdf.rs `frustum`: a capped cone, r1 at y = 0, r2 at y = h, rims
+// rounded by `round`.
+fn frustum(p: vec3<f32>, r1o: f32, r2o: f32, h: f32, round: f32) -> f32 {
+    let rd = min(min(round, 0.5 * h), min(r1o, r2o));
+    let r1 = r1o - rd;
+    let r2 = r2o - rd;
+    let hh = 0.5 * h - rd;
+    let qx = length(p.xz);
+    let qy = p.y - 0.5 * h;
+    let ca = vec2<f32>(qx - min(qx, select(r2, r1, qy < 0.0)), abs(qy) - hh);
+    let k1 = vec2<f32>(r2, hh);
+    let k2 = vec2<f32>(r2 - r1, 2.0 * hh);
+    let q = vec2<f32>(qx, qy);
+    let t = clamp(dot(k1 - q, k2) / dot(k2, k2), 0.0, 1.0);
+    let cb = q - k1 + k2 * t;
+    let s = select(1.0, -1.0, cb.x < 0.0 && ca.y < 0.0);
+    return s * sqrt(min(dot(ca, ca), dot(cb, cb))) - rd;
+}
+
 fn shape_distance(kind: f32, s: vec4<f32>, p: vec3<f32>) -> f32 {
     if kind < 0.5 {
         return ellipsoid(p, s.xyz);
@@ -129,6 +150,9 @@ fn shape_distance(kind: f32, s: vec4<f32>, p: vec3<f32>) -> f32 {
     if kind < 2.5 {
         let qx = length(p.xz) - s.x;
         return length(vec2<f32>(qx, p.y)) - s.y;
+    }
+    if kind > 3.5 {
+        return frustum(p, s.x, s.y, s.z, s.w);
     }
     return round_cone(vec3<f32>(p.x, p.y, p.z * s.w), s.x, s.y, s.z) / s.w;
 }

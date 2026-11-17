@@ -162,6 +162,16 @@ fn draw_both(gpu: &Gpu, model: &Model, sk: &Skeleton) -> (Vec<[u8; 4]>, Vec<[u8;
 /// ones in the ray-marcher (face.rs) and the mesh (paint.wgsl): there are
 /// some, and they agree.
 fn feature_lands_in_the_same_place(name: &str, strip: fn(&mut chonkgene_rig::Model)) {
+    let (model, sk) = quad("fox").unwrap();
+    lands_in_the_same_place(name, &model, &sk, strip);
+}
+
+fn lands_in_the_same_place(
+    name: &str,
+    model: &Model,
+    sk: &Skeleton,
+    strip: fn(&mut chonkgene_rig::Model),
+) {
     let gpu = match Gpu::new() {
         Ok(g) => g,
         Err(e) => {
@@ -169,11 +179,10 @@ fn feature_lands_in_the_same_place(name: &str, strip: fn(&mut chonkgene_rig::Mod
             return;
         }
     };
-    let (model, sk) = quad("fox").unwrap();
     let mut bare = model.clone();
     strip(&mut bare);
-    let (mesh_with, ray_with) = draw_both(&gpu, &model, &sk);
-    let (mesh_bare, ray_bare) = draw_both(&gpu, &bare, &sk);
+    let (mesh_with, ray_with) = draw_both(&gpu, model, sk);
+    let (mesh_bare, ray_bare) = draw_both(&gpu, &bare, sk);
     let changed = |a: &[[u8; 4]], b: &[[u8; 4]]| -> Vec<bool> {
         a.iter()
             .zip(b)
@@ -2207,7 +2216,15 @@ fn the_fox_human_form_fits_the_shader_and_stands_on_her_feet() {
     assert!(
         red.coats
             .iter()
-            .all(|c| c.colors[hair] == [0xD6, 0x3A, 0x2E, 0xFF])
+            .all(|c| c.colors[hair] == [0xD8, 0x32, 0x2A, 0xFF])
     );
-    assert!(red.part("pony").is_some() && red.part("twin_l").is_none());
+    assert!(red.part("pony0").is_some() && red.part("twin_l0").is_none());
+}
+
+#[test]
+fn the_human_forms_seal_and_eyes_land_in_the_same_place_on_the_gpu_and_the_cpu() {
+    let (model, sk) = human("fox", "ponytail", "white").unwrap();
+    assert!(model.face.seal && model.face.chibi);
+    lands_in_the_same_place("seal", &model, &sk, |m| m.face.seal = false);
+    lands_in_the_same_place("chibi eyes", &model, &sk, |m| m.face.chibi = false);
 }

@@ -204,6 +204,13 @@ enum ShapeFile {
         #[serde(default = "one")]
         flat: f32,
     },
+    Frustum {
+        r1: f32,
+        r2: f32,
+        h: f32,
+        #[serde(default)]
+        round: f32,
+    },
 }
 
 fn one() -> f32 {
@@ -301,6 +308,16 @@ struct FaceFile {
     /// mark).
     #[serde(default)]
     forehead: Option<String>,
+    /// Big chibi eyes: a heavy upper lash line flicking up at the outer
+    /// corner, the white showing, a gradient iris with a dark rim, a big
+    /// pupil, two highlights (the fox's human form).
+    #[serde(default)]
+    chibi: bool,
+    /// The marks at rest are her seal (咒印): a crest on the forehead, a
+    /// leaf over each brow, three short stripes on each cheek, in the
+    /// `forehead` colour, laid out for a round child's face.
+    #[serde(default)]
+    seal: bool,
 }
 
 #[derive(Deserialize)]
@@ -432,6 +449,10 @@ pub struct Face {
     /// The fox's marks' colour slot: the leaves on the forehead and the
     /// strokes on the cheeks (face.rs `fox_marks`).
     pub forehead: Option<usize>,
+    /// Big chibi eyes (face.rs `chibi_eye`).
+    pub chibi: bool,
+    /// The marks at rest are the seal (face.rs `seal_marks`).
+    pub seal: bool,
 }
 
 /// How a species walks: the walk is worked out from these every frame (legs
@@ -805,12 +826,14 @@ fn resolve(file: ModelFile, shared: HashMap<String, PoseFile>) -> Result<Model, 
             },
             ShapeFile::Torus { major, minor } => Shape::Torus { major, minor },
             ShapeFile::Cone { r1, r2, h, flat } => Shape::Cone { r1, r2, h, flat },
+            ShapeFile::Frustum { r1, r2, h, round } => Shape::Frustum { r1, r2, h, round },
         };
         let positive = match shape {
             Shape::Ellipsoid(r) => r.min_elem() > 0.0,
             Shape::Capsule { to, r } => r > 0.0 && to.length() > 0.0,
             Shape::Torus { major, minor } => major > 0.0 && minor > 0.0,
             Shape::Cone { r1, r2, h, flat } => r1 > 0.0 && r2 > 0.0 && h > 0.0 && flat >= 1.0,
+            Shape::Frustum { r1, r2, h, round } => r1 > 0.0 && r2 > 0.0 && h > 0.0 && round >= 0.0,
         };
         if !positive || p.blend < 0.0 {
             return Err(ctx(format!("part {:?} has a degenerate shape", p.name)));
@@ -891,6 +914,8 @@ fn resolve(file: ModelFile, shared: HashMap<String, PoseFile>) -> Result<Model, 
         whiskers: f.whiskers,
         liner: f.liner.as_deref().map(slot).transpose()?,
         forehead: f.forehead.as_deref().map(slot).transpose()?,
+        chibi: f.chibi,
+        seal: f.seal,
     };
 
     let mut poses = Vec::new();

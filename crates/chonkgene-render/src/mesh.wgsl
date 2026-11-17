@@ -19,6 +19,8 @@ struct Uniforms {
     spots: vec4<f32>,
     blush: vec4<f32>,
     frame: vec4<f32>,
+    // x: big chibi eyes (1.0); y: the marks at rest are the seal (1.0).
+    style: vec4<f32>,
     palette: array<vec4<f32>, 16>,
     // Radii of the parts the eyes and mouth are painted on; eye_r.w: the
     // pet's turn about the vertical, radians; mouth_r.w: the clock, seconds

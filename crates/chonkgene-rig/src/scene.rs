@@ -59,7 +59,7 @@ impl Placed {
                 let axis = l.apply(v3(0.0, 1.0, 0.0)).normalize();
                 c.y - (major * (1.0 - axis.y * axis.y).max(0.0).sqrt() + minor) * self.smax
             }
-            Shape::Cone { r1, r2, h, .. } => {
+            Shape::Cone { r1, r2, h, .. } | Shape::Frustum { r1, r2, h, .. } => {
                 (c.y - r1 * self.smax).min(c.y + l.r[1].y * h - r2 * self.smax)
             }
         }

@@ -13,6 +13,15 @@ pub enum Shape {
     /// Along +y: radius `r1` at the base, `r2` at height `h`; `flat` squeezes
     /// it front to back (ears).
     Cone { r1: f32, r2: f32, h: f32, flat: f32 },
+    /// Along +y with flat ends: radius `r1` at the base (y = 0), `r2` at
+    /// height `h`, its rims rounded by `round` (a robe, a wide sleeve: a
+    /// round cone would end in a ball).
+    Frustum {
+        r1: f32,
+        r2: f32,
+        h: f32,
+        round: f32,
+    },
 }
 
 impl Shape {
@@ -32,6 +41,7 @@ impl Shape {
                 // dividing keeps the field safe to march.
                 round_cone(v3(p.x, p.y, p.z * flat), r1, r2, h) / flat
             }
+            Shape::Frustum { r1, r2, h, round } => frustum(p, r1, r2, h, round),
         }
     }
 
@@ -42,6 +52,7 @@ impl Shape {
             Shape::Capsule { to, r } => to.length() + r,
             Shape::Torus { major, minor } => major + minor,
             Shape::Cone { r1, r2, h, .. } => r1.max(h + r2),
+            Shape::Frustum { r1, r2, h, .. } => (r1.max(r2).powi(2) + h * h).sqrt(),
         }
     }
 
@@ -62,6 +73,12 @@ impl Shape {
                 r2,
                 h,
                 flat,
+            },
+            Shape::Frustum { r1, r2, h, round } => Shape::Frustum {
+                r1: r1 * f,
+                r2: r2 * f,
+                h,
+                round,
             },
         }
     }
@@ -92,6 +109,24 @@ fn round_cone(p: V3, r1: f32, r2: f32, h: f32) -> f32 {
     a * qx + b * qy - r1
 }
 
+/// A capped cone from radius `r1` at y = 0 to `r2` at y = `h`, its rims
+/// rounded by `round` (Inigo Quilez's capped cone, shrunk by the rounding
+/// and grown back).
+fn frustum(p: V3, r1: f32, r2: f32, h: f32, round: f32) -> f32 {
+    let rd = round.min(0.5 * h).min(r1).min(r2);
+    let (r1, r2, hh) = (r1 - rd, r2 - rd, 0.5 * h - rd);
+    let qx = (p.x * p.x + p.z * p.z).sqrt();
+    let qy = p.y - 0.5 * h;
+    let ca = (qx - qx.min(if qy < 0.0 { r1 } else { r2 }), qy.abs() - hh);
+    let (k1, k2) = ((r2, hh), (r2 - r1, 2.0 * hh));
+    let t =
+        (((k1.0 - qx) * k2.0 + (k1.1 - qy) * k2.1) / (k2.0 * k2.0 + k2.1 * k2.1)).clamp(0.0, 1.0);
+    let cb = (qx - k1.0 + k2.0 * t, qy - k1.1 + k2.1 * t);
+    let s = if cb.0 < 0.0 && ca.1 < 0.0 { -1.0 } else { 1.0 };
+    let d2 = (ca.0 * ca.0 + ca.1 * ca.1).min(cb.0 * cb.0 + cb.1 * cb.1);
+    s * d2.sqrt() - rd
+}
+
 /// Blend weight of a smooth union: 1.0 keeps `a`, 0.0 takes `b`.
 pub fn blend_weight(a: f32, b: f32, k: f32) -> f32 {
     if k <= 0.0 {
@@ -108,6 +143,24 @@ pub fn smin(a: f32, b: f32, k: f32) -> f32 {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_frustum_has_flat_ends_and_rounded_rims() {
+        let f = Shape::Frustum {
+            r1: 0.5,
+            r2: 0.3,
+            h: 1.0,
+            round: 0.05,
+        };
+        // Inside, on its flat foot and top, beside it at mid height.
+        assert!(f.distance(v3(0.0, 0.5, 0.0)) < -0.25);
+        assert!((f.distance(v3(0.0, -0.1, 0.0)) - 0.1).abs() < 1e-4);
+        assert!((f.distance(v3(0.1, 1.2, 0.0)) - 0.2).abs() < 1e-4);
+        assert!(f.distance(v3(0.4, 0.5, 0.0)).abs() < 0.02);
+        // Unlike a round cone, nothing hangs under the foot.
+        assert!(f.distance(v3(0.0, -0.05, 0.0)) > 0.04);
+        assert!(f.bound() >= 1.0);
+    }
+
     use super::*;
 
     #[test]

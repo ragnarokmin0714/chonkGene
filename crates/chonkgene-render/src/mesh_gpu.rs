@@ -520,7 +520,7 @@ impl MeshCanvas {
 
 /// pet.wgsl's 13 + palette, then eye and mouth radii, the shadow, two
 /// presses and three rows a bone.
-const UNIFORM_VECS: usize = 13 + 16 + 3 + 4 + 3 * MAX_BONES;
+const UNIFORM_VECS: usize = 14 + 16 + 3 + 4 + 3 * MAX_BONES;
 
 /// Something pressing the skin in: a finger, or one of your hands holding
 /// it in a hug.

@@ -56,6 +56,61 @@ fn fox_marks(uv: vec2<f32>, aa: f32) -> vec2<f32> {
     return vec2<f32>(ink(d, aa), ss(0.55, 0.86, abs(uv.x)));
 }
 
+// The seal in the fox's human form, as face.rs `seal_marks`: a crest on
+// the forehead (a drop with a round hollow, a wing curling up either side),
+// a leaf over each brow, three short stripes on each cheek. Coverage.
+fn seal_marks(uv: vec2<f32>, aa: f32) -> f32 {
+    var d = tapered(uv, vec2<f32>(0.0, 0.25), vec2<f32>(0.0, 0.58), 0.058, 0.004);
+    d = max(d, -(length(uv - vec2<f32>(0.0, 0.36)) - 0.024));
+    for (var k = 0; k < 2; k++) {
+        let side = select(-1.0, 1.0, k == 1);
+        let w0 = vec2<f32>(0.03 * side, 0.24);
+        let w1 = vec2<f32>(0.16 * side, 0.36);
+        d = min(d, leaf(uv, w0, w1, 0.036));
+        d = min(d, tapered(uv, w1, vec2<f32>(0.11 * side, 0.5), 0.02, 0.003));
+        d = min(d, leaf(uv, vec2<f32>(0.22 * side, 0.2), vec2<f32>(0.4 * side, 0.27), 0.05));
+        for (var i = 0; i < 3; i++) {
+            let fi = f32(i);
+            let outer = vec2<f32>((0.72 - 0.03 * fi) * side, -0.3 - 0.075 * fi);
+            let inner = vec2<f32>((0.47 + 0.02 * fi) * side, -0.36 - 0.07 * fi);
+            d = min(d, tapered(uv, outer, inner, 0.036, 0.005));
+        }
+    }
+    return ink(d, aa);
+}
+
+// A big chibi eye, as face.rs `chibi_eye`.
+fn chibi_eye(c0: vec3<f32>, uv: vec2<f32>, ec: vec2<f32>, r: vec2<f32>, side: f32, iris: vec3<f32>, ink_c: vec3<f32>, aa: f32) -> vec3<f32> {
+    let rx = r.x;
+    let ry = r.y;
+    let white = vec3<f32>(1.0);
+    let open = ell(uv, ec, r);
+    var c = mix(c0, vec3<f32>(0.98, 0.97, 0.99), ink(open, aa));
+    let ic = vec2<f32>(ec.x, ec.y - 0.04 * ry);
+    let ir = vec2<f32>(0.8 * rx, 0.95 * ry);
+    let di = max(ell(uv, ic, ir), open);
+    let t = ss(-ir.y, ir.y, uv.y - ic.y);
+    let shade = mix(mix(iris, white, 0.4), iris * 0.45, t);
+    c = mix(c, shade, ink(di, aa));
+    let rim = max(abs(ell(uv, ic, ir)) * ir.x - 0.012, open);
+    c = mix(c, iris * 0.35, ink(rim, aa));
+    c = mix(c, mix(iris * 0.18, ink_c, 0.5), ink(max(ell(uv, ic, vec2<f32>(0.46 * rx, 0.52 * ry)), open), aa));
+    let top = ss(ec.y - 0.35 * ry, ec.y + 0.7 * ry, uv.y);
+    let lash = max(abs(open) * rx - (0.004 + 0.03 * top), ec.y - 0.2 * ry - uv.y);
+    let flick = tapered(
+        uv,
+        vec2<f32>(ec.x + 0.8 * rx * side, ec.y + 0.45 * ry),
+        vec2<f32>(ec.x + (rx + 0.1) * side, ec.y + 0.75 * ry),
+        0.03,
+        0.004,
+    );
+    c = mix(c, ink_c, ink(min(lash, flick), aa));
+    let hl = vec2<f32>(ec.x + 0.3 * rx, ec.y + 0.32 * ry);
+    c = mix(c, white, ink(length(uv - hl) - 0.24 * rx, aa));
+    let hl2 = vec2<f32>(ec.x - 0.28 * rx, ec.y - 0.38 * ry);
+    return mix(c, white, 0.85 * ink(length(uv - hl2) - 0.11 * rx, aa));
+}
+
 // Looks, as numbered in `look_index`.
 const OPEN: i32 = 0;
 const HALF: i32 = 1;
@@ -115,7 +170,9 @@ fn paint_eyes(q: vec3<f32>, r: vec3<f32>, base: vec3<f32>, px: f32) -> vec3<f32>
             iris_c = u.palette[u32(u.iris.x)].rgb;
             pupil = u.iris.y;
         }
-        if look == OPEN || look == BLEP {
+        if (look == OPEN || look == BLEP) && u.style.x > 0.5 {
+            c = chibi_eye(c, uv, ec, vec2<f32>(rx, ry), side, iris_c, ink_c, aa);
+        } else if look == OPEN || look == BLEP {
             c = mix(c, iris_c, ink(ell(uv, ec, vec2<f32>(rx, ry)), aa));
             if pupil < 1.0 {
                 c = mix(c, ink_c, ink(ell(uv, ec, vec2<f32>(rx * pupil, ry * pupil)), aa));
@@ -155,8 +212,12 @@ fn paint_eyes(q: vec3<f32>, r: vec3<f32>, base: vec3<f32>, px: f32) -> vec3<f32>
         let mark = u.palette[u32(u.spots.w)].rgb;
         let g = u.fwd.w;
         // Casting, the rest marks give way to the seal (咒印) as it grows.
-        let m0 = fox_marks(uv, aa);
-        c = mix(c, mix(mark, white, 0.35 * m0.y), m0.x * (1.0 - ss(0.2, 0.7, g)));
+        if u.style.y > 0.5 {
+            c = mix(c, mark, seal_marks(uv, aa) * (1.0 - ss(0.2, 0.7, g)));
+        } else {
+            let m0 = fox_marks(uv, aa);
+            c = mix(c, mix(mark, white, 0.35 * m0.y), m0.x * (1.0 - ss(0.2, 0.7, g)));
+        }
         if g > 0.0 {
             let m = spell_marks(uv, aa, g);
             c = mix(c, mark * 0.85, m.x * min(2.0 * g, 1.0));
