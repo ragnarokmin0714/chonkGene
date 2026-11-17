@@ -781,14 +781,13 @@ fn an_eager_mesh_renderer_shows_each_frame_in_the_call_that_asks() {
     }
 }
 
-/// Screen x (pixels at 100%) of a bird's left foot over a steady waddle,
-/// as the window carries it along, and its height.
-fn foot_track(id: &str) -> Vec<(f32, f32)> {
-    let (model, sk) = mesh_model(id).unwrap();
+/// Screen x (pixels at 100%) of a two-legged pet's left foot over a
+/// steady walk, as the window carries it along, and its height.
+fn foot_track(model: &Model, sk: &Skeleton) -> Vec<(f32, f32)> {
     let leg = sk.bone("leg_l").unwrap();
     let hip = sk.pivots[leg];
     let sole = v3(hip.x, -1.05, hip.z + 0.1);
-    let mut walk = Mover::new(&sk, 1.0, &model).unwrap();
+    let mut walk = Mover::new(sk, 1.0, model).unwrap();
     let dt = 1.0 / 60.0;
     let mut x = 0.0;
     let mut track = Vec::new();
@@ -805,8 +804,13 @@ fn foot_track(id: &str) -> Vec<(f32, f32)> {
 
 #[test]
 fn a_planted_bird_foot_stays_put_while_the_body_waddles_over_it() {
-    for id in BIPED_SPECIES {
-        let track = foot_track(id);
+    // The birds, and the fox's human form on her two feet.
+    let pets = BIPED_SPECIES
+        .iter()
+        .map(|&id| (id, mesh_model(id).unwrap()))
+        .chain([("fox-human", human("fox", "ponytail", "white").unwrap())]);
+    for (id, (model, sk)) in pets {
+        let track = foot_track(&model, &sk);
         let low = track.iter().map(|t| t.1).fold(f32::MAX, f32::min);
         let mut worst = 0.0f32;
         let mut run: Vec<f32> = Vec::new();
@@ -2219,6 +2223,77 @@ fn the_fox_human_form_fits_the_shader_and_stands_on_her_feet() {
             .all(|c| c.colors[hair] == [0xD8, 0x32, 0x2A, 0xFF])
     );
     assert!(red.part("pony0").is_some() && red.part("twin_l0").is_none());
+}
+
+/// Her human form walks as a child does (PLAN §8, her human form:
+/// standing and walking): each arm swings with the other side's leg, her
+/// nine tails stream out behind and flow, and her hair and bell swing.
+#[test]
+fn the_fox_child_swings_her_arms_and_her_tails_and_hair_flow() {
+    let (model, sk) = human("fox", "ponytail", "white").unwrap();
+    let bone = |n: &str| sk.bone(n).unwrap();
+    let (leg_l, leg_r, arm_l, arm_r) = (bone("leg_l"), bone("leg_r"), bone("arm_l"), bone("arm_r"));
+    let tails = sk.tails();
+    assert_eq!(tails.len(), 9);
+    let mut walk = Mover::new(&sk, 1.0, &model).unwrap();
+    walk.still();
+    let (mut with, mut against, mut arm_span) = (0.0f32, 0.0f32, (f32::MAX, f32::MIN));
+    let mut tips: Vec<f32> = Vec::new();
+    let mut moved = [0.0f32; 3];
+    let mut last: Option<Vec<chonkgene_render::skin::Joint>> = None;
+    for f in 0..360 {
+        let j = walk.step(1.0 / 60.0, true, 1.0);
+        if f >= 120 {
+            // Arms and legs as forward swings (both turn about x, forward
+            // negative).
+            with += j[arm_l].rot.x * j[leg_r].rot.x;
+            against += j[arm_l].rot.x * j[leg_l].rot.x;
+            arm_span = (
+                arm_span.0.min(j[arm_r].rot.x),
+                arm_span.1.max(j[arm_r].rot.x),
+            );
+            let posed = sk.pose(&j);
+            for chain in &tails {
+                let tip = *chain.last().unwrap();
+                tips.push(posed[tip].apply(sk.pivots[tip]).x);
+            }
+            if let Some(prev) = &last {
+                for (k, name) in ["hair_b", "bell", chain_name(&sk, &tails)]
+                    .iter()
+                    .enumerate()
+                {
+                    let b = bone(name);
+                    moved[k] += (j[b].rot - prev[b].rot).length();
+                }
+            }
+        }
+        last = Some(j);
+    }
+    assert!(
+        with > 0.0 && against < 0.0,
+        "arms with the other leg: {with:.0} vs {against:.0}"
+    );
+    assert!(
+        arm_span.1 - arm_span.0 > 20.0,
+        "arms swing {:.1}..{:.1}",
+        arm_span.0,
+        arm_span.1
+    );
+    // Facing right (+x), the tails' tips are out behind her, to the left.
+    let behind = tips.iter().filter(|&&x| x < 0.0).count() as f32 / tips.len() as f32;
+    assert!(
+        behind > 0.9,
+        "only {:.0}% of tail tips behind her",
+        behind * 100.0
+    );
+    for (k, what) in ["hair", "bell", "tails"].iter().enumerate() {
+        assert!(moved[k] > 20.0, "her {what} hardly moved: {:.1}°", moved[k]);
+    }
+}
+
+/// The middle bone of the first tail.
+fn chain_name<'a>(sk: &'a Skeleton, tails: &[Vec<usize>]) -> &'a str {
+    &sk.names[tails[0][tails[0].len() / 2]]
 }
 
 #[test]

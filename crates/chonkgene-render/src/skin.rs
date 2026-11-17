@@ -810,21 +810,21 @@ pub(crate) fn drift(t: f32) -> (f32, f32, f32, f32) {
 /// standing and walking. The bend runs down the tail as a wave, each
 /// segment `WAVE_LAG` radians behind the one before, so a tail sways like
 /// seaweed in a current rather than swinging stiff from its root.
-const SWISH_REST: f32 = 12.0;
-const SWISH_WALK: f32 = 13.0;
+pub(crate) const SWISH_REST: f32 = 12.0;
+pub(crate) const SWISH_WALK: f32 = 13.0;
 const WAVE_LAG: f32 = 0.9;
 /// A long tail's wave still spans this many radians from root to tip, so
 /// a tail of many short segments ripples no more than one of a few.
 const WAVE_SPAN: f32 = 7.5;
 /// Swishes a second, standing and at full pace.
-const SWISH_HZ: (f32, f32) = (0.6, 1.6);
+pub(crate) const SWISH_HZ: (f32, f32) = (0.6, 1.6);
 /// The fox's plumes flow (Roger's twenty-second pass, item 3: 「不夠飄逸」):
 /// her swish this much slower and each segment further behind the one
 /// before, so a slow wave is seen running out to the tips; each segment
 /// pushed against the way the one before it moves (it lags, then whips
 /// past), on springs that soften toward the tip; and the fan swept back
 /// as she walks, swinging on when she starts or stops.
-const FLOW_HZ: f32 = 0.65;
+pub(crate) const FLOW_HZ: f32 = 0.65;
 const FLOW_LAG: f32 = 0.85;
 const FLOW_PUSH: f32 = 10.0;
 /// The springs' rate at the root and at the tip, and damping.
@@ -832,15 +832,15 @@ const FLOW_SPRING: (f32, f32, f32) = (3.2, 1.5, 0.32);
 /// Degrees the fan sweeps back at full pace, and how hard a change of
 /// pace swings it.
 const FLOW_TRAIL: f32 = 14.0;
-const FLOW_SWING: f32 = 900.0;
+pub(crate) const FLOW_SWING: f32 = 900.0;
 /// How quickly her tails fold over her asleep, or open up (a critically
 /// damped spring's rate behind her lying down).
 const FLOW_FOLD_HZ: f32 = 0.5;
 
 /// A tail: its bones from the base out, with a sideways swish and an
 /// up-and-down bounce spring for each, and where in the swish it starts.
-struct Tail {
-    bones: Vec<usize>,
+pub(crate) struct Tail {
+    pub(crate) bones: Vec<usize>,
     swish: Vec<Spring>,
     bounce: Vec<Spring>,
     /// The base's turn about the vertical: flung out by the body turning.
@@ -857,6 +857,125 @@ struct Tail {
     /// held up, as the Shiba's) and about the vertical (one held out
     /// behind, as the Fold's), from which way its root points.
     swish_axes: (f32, f32),
+}
+
+/// One frame of the tails' travelling wave, as [`Tail::wave`] takes it.
+pub(crate) struct Wave {
+    /// Sideways swing at the root, degrees (shared out along the tail).
+    pub amp: f32,
+    /// Where the swish is, cycles.
+    pub swish: f32,
+    /// Pace (0 … 1) and where the steps are, cycles.
+    pub s: f32,
+    pub ph: f32,
+    /// Speeding up or slowing down, and the body's turn speeding up.
+    pub pace_acc: f32,
+    pub yaw_acc: f32,
+    /// A poke on the tail or the bottom this frame: a flick.
+    pub flick: bool,
+    /// Several long tails (the fox's): each segment springs after the one
+    /// before it, trailing; else one wave, smoothed.
+    pub flow: bool,
+}
+
+impl Tail {
+    /// Every tail of `sk` (see [`Skeleton::tails`]), with its turns for
+    /// sitting (fanned) and lying (wrapped round).
+    pub(crate) fn chains(sk: &Skeleton) -> Vec<Tail> {
+        let chains = sk.tails();
+        let turns = fan(sk, &chains);
+        let blankets = blanket(sk, &chains);
+        chains
+            .into_iter()
+            .zip(turns.into_iter().zip(blankets))
+            .enumerate()
+            .map(|(i, (bones, (sit_turn, (lie_turn, lie_curl))))| {
+                let up = match bones[..] {
+                    [a, b, ..] => (sk.pivots[b] - sk.pivots[a]).normalize().y.abs(),
+                    _ => 1.0,
+                };
+                Tail {
+                    swish: vec![Spring::default(); bones.len()],
+                    bounce: vec![Spring::default(); bones.len()],
+                    bones,
+                    fling: Spring::default(),
+                    offset: i as f32 * 0.37,
+                    sit_turn,
+                    lie_turn,
+                    lie_curl,
+                    swish_axes: (up, (1.0 - up * up).max(0.0).sqrt()),
+                }
+            })
+            .collect()
+    }
+
+    /// Set this tail's joints for one frame of `w`: a wave runs from root
+    /// to tip, faster and wider at pace; the root bounces with the steps,
+    /// and turning flings it out.
+    pub(crate) fn wave(&mut self, j: &mut [Joint], w: &Wave, dt: f32) {
+        use std::f32::consts::TAU;
+        if w.flick {
+            self.swish[0].v += 260.0;
+            self.bounce[0].v -= 160.0;
+        }
+        let fling = self.fling.step(0.0, -0.5 * w.yaw_acc, 1.8, 0.35, dt);
+        let at = TAU * (w.swish + self.offset);
+        // The bend is shared out over the segments, so a long tail (a
+        // Shiba's seven-segment ring) bends no more in all than a short
+        // one and keeps its shape.
+        let n = self.bones.len();
+        let amp = w.amp * 3.0 / n.max(3) as f32;
+        for k in 0..n {
+            let bone = self.bones[k];
+            let lag = if w.flow {
+                FLOW_LAG
+            } else {
+                WAVE_LAG.min(WAVE_SPAN / n as f32)
+            } * k as f32;
+            // Sideways, the travelling wave; up and down, a smaller one a
+            // quarter behind, plus a bounce with the steps at the root.
+            let sw_target = amp * (at - lag).sin();
+            let mut bo_target = 0.4 * amp * (at - lag - 1.6).sin();
+            if k == 0 {
+                bo_target += 5.0 * w.s * (2.0 * TAU * w.ph - 0.8).sin();
+            }
+            // Springs smooth the wave as the pace (and so its speed and
+            // size) changes.
+            let (sw, bo) = if w.flow {
+                // Each segment held back by the one before it moving.
+                let (push_sw, push_bo) = match k {
+                    0 => (0.0, -FLOW_SWING * w.pace_acc),
+                    _ => (
+                        -FLOW_PUSH * self.swish[k - 1].v,
+                        -FLOW_PUSH * self.bounce[k - 1].v,
+                    ),
+                };
+                if k == 0 {
+                    bo_target -= FLOW_TRAIL * w.s;
+                }
+                let along = k as f32 / (n.max(2) - 1) as f32;
+                let hz = FLOW_SPRING.0 + (FLOW_SPRING.1 - FLOW_SPRING.0) * along;
+                (
+                    self.swish[k].step(sw_target, push_sw, hz, FLOW_SPRING.2, dt),
+                    self.bounce[k].step(bo_target, push_bo, hz, FLOW_SPRING.2, dt),
+                )
+            } else {
+                (
+                    self.swish[k].step(sw_target, 0.0, 3.0, 0.5, dt),
+                    self.bounce[k].step(bo_target, 0.0, 3.0, 0.5, dt),
+                )
+            };
+            j[bone] = Joint {
+                rot: v3(
+                    bo,
+                    sw * self.swish_axes.1 + if k == 0 { fling } else { 0.0 },
+                    sw * self.swish_axes.0,
+                ),
+                shift: V3::ZERO,
+                swell: 0.0,
+            };
+        }
+    }
 }
 
 /// How a species' tail shows it is pleased or at play (PLAN §8 "Roger's
@@ -988,31 +1107,7 @@ impl Walk {
         let swing = SWING * (LEG_REF / leg_len.max(0.2)).clamp(0.8, 2.0);
         // Several tails swish out of step, so they ripple rather than
         // sway as one.
-        let chains = sk.tails();
-        let turns = fan(sk, &chains);
-        let blankets = blanket(sk, &chains);
-        let tails = chains
-            .into_iter()
-            .zip(turns.into_iter().zip(blankets))
-            .enumerate()
-            .map(|(i, (bones, (sit_turn, (lie_turn, lie_curl))))| {
-                let up = match bones[..] {
-                    [a, b, ..] => (sk.pivots[b] - sk.pivots[a]).normalize().y.abs(),
-                    _ => 1.0,
-                };
-                Tail {
-                    swish: vec![Spring::default(); bones.len()],
-                    bounce: vec![Spring::default(); bones.len()],
-                    bones,
-                    fling: Spring::default(),
-                    offset: i as f32 * 0.37,
-                    sit_turn,
-                    lie_turn,
-                    lie_curl,
-                    swish_axes: (up, (1.0 - up * up).max(0.0).sqrt()),
-                }
-            })
-            .collect();
+        let tails = Tail::chains(sk);
         Ok(Self {
             phase: 0.0,
             speed: 0.0,
@@ -1476,86 +1571,36 @@ impl Walk {
             * (1.0 - 0.8 * lv.melt)
             * (1.0 + 1.6 * wag)
             * if held_tail { 0.25 } else { 1.0 };
+        let wave = Wave {
+            amp,
+            swish: self.swish,
+            s,
+            ph,
+            pace_acc,
+            yaw_acc,
+            flick: lv.flick,
+            flow,
+        };
         for tail in &mut self.tails {
-            // A poke on the tail or the bottom: a flick.
-            if lv.flick {
-                tail.swish[0].v += 260.0;
-                tail.bounce[0].v -= 160.0;
+            tail.wave(&mut j, &wave, dt);
+            // Sulking, back to you, the tails stay together: a fan seen
+            // from behind stretches the skin between them.
+            let base = tail.bones[0];
+            let mut fan = sit * (1.0 - lv.sulk);
+            if let Some((e, t)) = dance {
+                match self.tail_style {
+                    TailStyle::Ripple => fan = fan.max(e),
+                    TailStyle::Wag => {
+                        let w = TAU * 2.6 * t;
+                        j[base].rot.x += e * 28.0 * w.cos();
+                        j[base].rot.z += e * 28.0 * w.sin();
+                    }
+                    TailStyle::Curl => {}
+                }
             }
-            let fling = tail.fling.step(0.0, -0.5 * yaw_acc, 1.8, 0.35, dt);
-            let at = TAU * (self.swish + tail.offset);
-            // The bend is shared out over the segments, so a long tail (a
-            // Shiba's seven-segment ring) bends no more in all than a short
-            // one and keeps its shape.
-            let amp = amp * 3.0 / tail.bones.len().max(3) as f32;
-            let n = tail.bones.len();
-            for (k, &bone) in tail.bones.iter().enumerate() {
-                let lag = if flow {
-                    FLOW_LAG
-                } else {
-                    WAVE_LAG.min(WAVE_SPAN / n as f32)
-                } * k as f32;
-                // Sideways, the travelling wave; up and down, a smaller one
-                // a quarter behind, plus a bounce with the steps at the root.
-                let sw_target = amp * (at - lag).sin();
-                let mut bo_target = 0.4 * amp * (at - lag - 1.6).sin();
-                if k == 0 {
-                    bo_target += 5.0 * s * (2.0 * TAU * ph - 0.8).sin();
-                }
-                // Springs smooth the wave as the pace (and so its speed and
-                // size) changes.
-                let (sw, bo) = if flow {
-                    // Each segment held back by the one before it moving.
-                    let (push_sw, push_bo) = match k {
-                        0 => (0.0, -FLOW_SWING * pace_acc),
-                        _ => (
-                            -FLOW_PUSH * tail.swish[k - 1].v,
-                            -FLOW_PUSH * tail.bounce[k - 1].v,
-                        ),
-                    };
-                    if k == 0 {
-                        bo_target -= FLOW_TRAIL * s;
-                    }
-                    let along = k as f32 / (n.max(2) - 1) as f32;
-                    let hz = FLOW_SPRING.0 + (FLOW_SPRING.1 - FLOW_SPRING.0) * along;
-                    (
-                        tail.swish[k].step(sw_target, push_sw, hz, FLOW_SPRING.2, dt),
-                        tail.bounce[k].step(bo_target, push_bo, hz, FLOW_SPRING.2, dt),
-                    )
-                } else {
-                    (
-                        tail.swish[k].step(sw_target, 0.0, 3.0, 0.5, dt),
-                        tail.bounce[k].step(bo_target, 0.0, 3.0, 0.5, dt),
-                    )
-                };
-                j[bone] = Joint {
-                    rot: v3(
-                        bo,
-                        sw * tail.swish_axes.1 + if k == 0 { fling } else { 0.0 },
-                        sw * tail.swish_axes.0,
-                    ),
-                    shift: V3::ZERO,
-                    swell: 0.0,
-                };
-                if k == 0 {
-                    // Sulking, back to you, the tails stay together: a fan
-                    // seen from behind stretches the skin between them.
-                    let mut fan = sit * (1.0 - lv.sulk);
-                    if let Some((e, t)) = dance {
-                        match self.tail_style {
-                            TailStyle::Ripple => fan = fan.max(e),
-                            TailStyle::Wag => {
-                                let w = TAU * 2.6 * t;
-                                j[bone].rot.x += e * 28.0 * w.cos();
-                                j[bone].rot.z += e * 28.0 * w.sin();
-                            }
-                            TailStyle::Curl => {}
-                        }
-                    }
-                    j[bone].rot = j[bone].rot + tail.sit_turn * fan + tail.lie_turn * fold;
-                } else {
-                    j[bone].rot = j[bone].rot + tail.lie_curl * fold;
-                }
+            j[base].rot = j[base].rot + tail.sit_turn * fan + tail.lie_turn * fold;
+            for &bone in &tail.bones[1..] {
+                j[bone].rot = j[bone].rot + tail.lie_curl * fold;
             }
         }
         if let Some(i) = b.belly {

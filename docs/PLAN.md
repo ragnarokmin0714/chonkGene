@@ -1432,6 +1432,13 @@ Items 1 and 2 built the same day; item 3 waits for Roger's answers below, and co
   - **Tails**: 白色's are white through gold to orange, as the 紅髮版's.
   - **Tests**: `a_frustum_has_flat_ends_and_rounded_rims`, `the_human_forms_seal_and_eyes_land_in_the_same_place_on_the_gpu_and_the_cpu`.
   - Pictures: `inbox/fox-human.png`, `inbox/fox-human-hair.png`, `inbox/fox-human-vs-ref.png` (his heads beside hers). Still short of the picture: no strand grooves in the hair, the fringe's edge a little lumpy, the ponytail plainer than his.
+- **Built (2026-11-17): standing and walking** (still only in the `mesh` example; the app gets her with the switch). Her rig has `leg_l` and `leg_r`, so `Mover` gives her the birds' two-legged walk (`Waddle`, her `gait`: swing 24°, lift 0.08, roll 4°, about 3.3 quick steps a second); what a child's body adds is `Waddle::child`, which does nothing on a bird (no such bones):
+  - **Arms** (`arm_l`, `arm_r`): each swings with the other side's leg, 24° either way at full pace, smoothed on a spring (a planted foot sweeps back evenly, an arm swings); out a little at each step; at rest they hang, stirring with her breath.
+  - **Tails**: the four-legged fox's flowing wave, now shared: `Tail::chains` and `Tail::wave` (skin.rs) out of `Walk`, which calls them as before. Streaming out behind at pace, flung by turns, flicked by a poke; asleep, laughing, melted and pleased as the beast's.
+  - **Hair** (`hair_b`, `hair_l`, `hair_r`) on springs: hanging back against the head's lean, streaming back at pace, bouncing with the steps, flung out by turns. **Ears** bob a beat behind the steps; the **bell** swings on its cord as the beast's.
+  - **Test**: `the_fox_child_swings_her_arms_and_her_tails_and_hair_flow`; the planted-foot test now takes her too (slides at most 1.6 px, as the birds).
+  - Picture: `inbox/fox-human-walk.gif` (雪狐 with white hair and a ponytail; 白色 with red hair in bunches: walking, turning, standing).
+  - Not yet hers: sitting is still the birds' (legs folded under, which hides them); gestures move only what a bird has (no arms in them yet). Next: the switch (變身 and the lock), then sitting and sleeping.
 
 ### Roger's twenty-third pass (feedback only, 2026-11-16; to do next, from 2026-11-17)
 

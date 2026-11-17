@@ -22,7 +22,9 @@ use crate::skin::{
     SPEED_UP, STILL_GOING, SULK_BACK, SULK_YAW, Skeleton, SleepPose, Spring, TURN_HZ, WALK_YAW,
     Walk, bite, peck, tempo_split,
 };
-use crate::skin::{JIGGLE, JIGGLE_MOST, Travel, drift, hold};
+use crate::skin::{
+    FLOW_HZ, JIGGLE, JIGGLE_MOST, SWISH_HZ, SWISH_REST, SWISH_WALK, Tail, Travel, Wave, drift, hold,
+};
 
 /// The pace the pet's window moves at, world units a second (60 px/s at
 /// 100%): a planted foot slides back at this speed.
@@ -60,6 +62,32 @@ const BOB: f32 = 0.03;
 /// its body under the water.
 pub const SWIM_SINK: f32 = 0.2;
 const SLIDE: f32 = 0.045;
+/// A child's arms (the fox's human form): how far each swings forward and
+/// back at full pace, with the other side's leg (degrees), and how far
+/// they lift out from her sides at each step, for balance.
+const ARM_SWING: f32 = 24.0;
+const ARM_OUT: f32 = 6.0;
+/// Hair on springs: how far it streams back at full pace (degrees), how
+/// much of the head's lean it hangs back against (gravity), and how hard
+/// the steps' bounce, speeding up and turning shake it.
+const HAIR_TRAIL: f32 = 9.0;
+const HAIR_HANG: f32 = 0.7;
+const HAIR_BOB: f32 = 70.0;
+const HAIR_PACE: f32 = 500.0;
+const HAIR_TURN: f32 = 0.35;
+
+/// One frame's motion, for what a child's body adds (see
+/// [`Waddle::child`]): pace and step phase, the body's vertical
+/// acceleration, speeding up, how far lying down, and each leg's stride
+/// (1 forward … −1 back).
+struct Shake {
+    s: f32,
+    ph: f32,
+    acc: f32,
+    pace_acc: f32,
+    lie: f32,
+    strides: [f32; 2],
+}
 
 /// Walks either way.
 pub enum Mover {
@@ -349,6 +377,22 @@ pub struct Waddle {
     breath: f32,
     /// The owl: it dances bobbing and tilting its head, not foot to foot.
     owl: bool,
+    /// Several tails (the fox's human form: nine): they flow as the
+    /// four-legged fox's do (see [`Tail::wave`]); the body's turn speed
+    /// last frame, which flings them.
+    tails: Vec<Tail>,
+    yaw_v: f32,
+    /// A child's arms, swinging with her steps.
+    arms: [Option<usize>; 2],
+    arm: [Spring; 2],
+    /// Hair hung from the head on springs: its bone, its swing about x
+    /// (forward and back) and about z (side to side).
+    hair: Vec<(usize, Spring, Spring)>,
+    /// Ears that bounce with the steps, and a bell on a cord.
+    ears: [Option<usize>; 2],
+    ear: Spring,
+    bell: Option<usize>,
+    bell_swing: (Spring, Spring),
 }
 
 impl Waddle {
@@ -417,6 +461,22 @@ impl Waddle {
             fidget: Out::default(),
             breath: 0.0,
             owl: model.species == "owl",
+            // A bird's one tail wags its own way (`tail`).
+            tails: Some(Tail::chains(sk))
+                .filter(|t| t.len() > 1)
+                .unwrap_or_default(),
+            yaw_v: 0.0,
+            arms: [sk.bone("arm_l"), sk.bone("arm_r")],
+            arm: Default::default(),
+            hair: ["hair_b", "hair_l", "hair_r"]
+                .into_iter()
+                .filter_map(|n| sk.bone(n))
+                .map(|b| (b, Spring::default(), Spring::default()))
+                .collect(),
+            ears: [sk.bone("ear_l"), sk.bone("ear_r")],
+            ear: Spring::default(),
+            bell: sk.bone("bell"),
+            bell_swing: Default::default(),
         })
     }
 
@@ -555,6 +615,7 @@ impl Waddle {
         // Legs, in turn: on the floor a straight sweep back, off it an
         // eased swing forward with the foot lifted. Sitting folds them
         // forward under the body.
+        let mut strides = [0.0f32; 2];
         for (k, &leg) in self.legs.iter().enumerate() {
             let psi = (ph + 0.5 * k as f32).fract();
             let (fwd, up) = if psi < DUTY {
@@ -564,6 +625,7 @@ impl Waddle {
                 let e = t * t * (3.0 - 2.0 * t);
                 (-1.0 + 2.0 * e, (PI * t).sin())
             };
+            strides[k] = fwd;
             j[leg] = Joint {
                 rot: v3(
                     -(self.swing * longer).min(MAX_SWING) * s * fwd - SIT_LEGS * sit,
@@ -645,7 +707,7 @@ impl Waddle {
         self.bob = [bob, self.bob[0]];
         let nod_acc = (nod - 2.0 * self.nod[0] + self.nod[1]) / (dt * dt);
         self.nod = [nod, self.nod[0]];
-        let _pace_acc = (s - self.pace) / dt;
+        let pace_acc = (s - self.pace) / dt;
         self.pace = s;
         if let Some(i) = self.soft[0] {
             // The belly rises and falls with each breath, more settled
@@ -1030,6 +1092,15 @@ impl Waddle {
         }
         self.react(&mut j, &lv, dt, facing);
         self.fidgets(&mut j, &f, sit, lv.attend, dt);
+        let shake = Shake {
+            s,
+            ph,
+            acc,
+            pace_acc,
+            lie,
+            strides,
+        };
+        self.child(&mut j, &shake, &lv, &f, dt);
         self.busy = s > 0.0
             || self.gesture.is_some()
             || self.yaw.v.abs() > 1.0
@@ -1040,6 +1111,96 @@ impl Waddle {
             || swim > 0.0
             || lv.attend > 0.01;
         j
+    }
+
+    /// What a child's body (the fox's human form) adds on top of the pose:
+    /// arms swinging with the steps, nine tails flowing, hair, ears and
+    /// the bell swinging on springs. Nothing on a bird.
+    fn child(&mut self, j: &mut [Joint], k: &Shake, lv: &Levels, f: &Out, dt: f32) {
+        let s = k.s;
+        let yaw_acc = (self.yaw.v - self.yaw_v) / dt;
+        self.yaw_v = self.yaw.v;
+        // Arms: each with the other side's leg, smoothed (a planted foot
+        // sweeps back evenly, an arm swings); out a little at each step;
+        // at rest they hang, stirring with her breath.
+        for (side, arm) in self.arms.iter().enumerate() {
+            let Some(a) = *arm else { continue };
+            let sign = if side == 0 { 1.0 } else { -1.0 };
+            let x = self.arm[side].step(-ARM_SWING * s * k.strides[1 - side], 0.0, 5.0, 0.7, dt);
+            let out = ARM_OUT * s * (2.0 * TAU * k.ph).sin().abs() + 1.5 * self.breath;
+            j[a].rot = j[a].rot + v3(x, 0.0, sign * out);
+        }
+        // Tails: the four-legged fox's wave, as slow; asleep they hardly
+        // stir, laughing they thrash, melted they lie limp; pleased, they
+        // wag.
+        if !self.tails.is_empty() {
+            let wag = f.get(Kind::Wag).map_or(0.0, |w| w.0).max(0.85 * f.lively);
+            let hz = (SWISH_HZ.0 + (SWISH_HZ.1 - SWISH_HZ.0) * s) * FLOW_HZ;
+            self.swish = (self.swish + dt * hz * (1.0 + 2.5 * wag)).fract();
+            let wave = Wave {
+                amp: (SWISH_REST + (SWISH_WALK - SWISH_REST) * s)
+                    * (1.0 - 0.75 * k.lie)
+                    * (1.0 + 0.9 * lv.laugh)
+                    * (1.0 - 0.8 * lv.melt)
+                    * (1.0 + 1.6 * wag),
+                swish: self.swish,
+                s,
+                ph: k.ph,
+                pace_acc: k.pace_acc,
+                yaw_acc,
+                flick: lv.flick,
+                flow: true,
+            };
+            for tail in &mut self.tails {
+                tail.wave(j, &wave, dt);
+            }
+        }
+        // Hair hangs: leaning the head, it swings back against the lean;
+        // it streams back at pace, bounces with the steps, and turning
+        // flings it out.
+        let lean = (
+            j[self.body].rot.x + j[self.head].rot.x,
+            j[self.body].rot.z + j[self.head].rot.z,
+        );
+        for (bone, x, z) in &mut self.hair {
+            let rx = x.step(
+                HAIR_TRAIL * s - HAIR_HANG * lean.0,
+                HAIR_BOB * k.acc + HAIR_PACE * k.pace_acc,
+                2.0,
+                0.22,
+                dt,
+            );
+            let rz = z.step(-HAIR_HANG * lean.1, -HAIR_TURN * yaw_acc, 1.8, 0.2, dt);
+            j[*bone].rot = j[*bone].rot + v3(rx.clamp(-40.0, 40.0), 0.0, rz.clamp(-40.0, 40.0));
+        }
+        // Ears bob a beat behind the steps.
+        let e = self
+            .ear
+            .step(0.0, -40.0 * k.acc, 3.5, 0.25, dt)
+            .clamp(-10.0, 10.0);
+        for (side, ear) in self.ears.iter().enumerate() {
+            if let Some(b) = *ear {
+                let sign = if side == 0 { 1.0 } else { -1.0 };
+                j[b].rot.z += sign * e;
+            }
+        }
+        // The bell swings on its cord against the lean, trailing at pace.
+        if let Some(b) = self.bell {
+            let lean = (
+                j[self.body].rot.x + j[0].rot.x,
+                j[self.body].rot.z + j[0].rot.z,
+            );
+            let x = self.bell_swing.0.step(
+                -lean.0,
+                -900.0 * k.pace_acc.max(0.0) - 40.0 * k.acc,
+                1.7,
+                0.12,
+                dt,
+            );
+            let z = self.bell_swing.1.step(-lean.1, 0.0, 1.7, 0.12, dt);
+            j[b].rot.x += x.clamp(-35.0, 35.0);
+            j[b].rot.z += z.clamp(-35.0, 35.0);
+        }
     }
 
     /// A bird's little movements on top of the pose (see
