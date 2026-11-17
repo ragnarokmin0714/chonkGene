@@ -3612,6 +3612,7 @@ impl ApplicationHandler<UserEvent> for App {
                             self.redraw_menu();
                             return;
                         }
+                        diag!("menu: {action:?} (row {row}) for pet {pet}");
                         self.act(el, pet, action);
                     }
                 }
