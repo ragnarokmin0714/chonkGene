@@ -1,28 +1,64 @@
-//! Pet lines (assets/lines/zh-TW.ron, PLAN §1.11).
+//! Pet lines (assets/lines/<lang>.ron, PLAN §1.11), in the language of the
+//! words on screen (`chonkgene_core::i18n`, PLAN §8 twenty-third pass,
+//! item 1). A line not written yet in that language is said in Chinese.
 
 use std::collections::HashMap;
 
+use chonkgene_core::i18n::{self, Lang};
 use chonkgene_core::mind::Line;
 use chonkgene_core::species::Species;
 
-const ZH_TW: &str = include_str!("../../../assets/lines/zh-TW.ron");
-/// Longest a bubble line may be, in characters (PLAN §1.11).
-#[cfg(test)]
-const MAX_LINE: usize = 14;
+type Table = HashMap<String, HashMap<String, Vec<String>>>;
+
 pub const MAX_NAME: usize = 12;
 pub const MAX_YOU: usize = 8;
+/// Longest a bubble line may be: as wide as this many Chinese characters
+/// (PLAN §1.11), measured in the font, with the longest names filled in.
+#[cfg(test)]
+const MAX_LINE: usize = 14;
+
+fn source(lang: Lang) -> (&'static str, &'static str) {
+    match lang {
+        Lang::ZhTw => (
+            "assets/lines/zh-TW.ron",
+            include_str!("../../../assets/lines/zh-TW.ron"),
+        ),
+        Lang::Ja => (
+            "assets/lines/ja.ron",
+            include_str!("../../../assets/lines/ja.ron"),
+        ),
+        Lang::En => (
+            "assets/lines/en.ron",
+            include_str!("../../../assets/lines/en.ron"),
+        ),
+    }
+}
 
 pub struct Lines {
-    table: HashMap<String, HashMap<String, Vec<String>>>,
+    tables: HashMap<Lang, Table>,
 }
 
 impl Lines {
-    pub fn zh_tw() -> Result<Self, String> {
-        let table = ron::from_str(ZH_TW).map_err(|e| format!("assets/lines/zh-TW.ron: {e}"))?;
-        Ok(Self { table })
+    pub fn load() -> Result<Self, String> {
+        let mut tables = HashMap::new();
+        for lang in Lang::ALL {
+            let (path, text) = source(lang);
+            let table: Table = ron::from_str(text).map_err(|e| format!("{path}: {e}"))?;
+            tables.insert(lang, table);
+        }
+        Ok(Self { tables })
     }
 
-    /// A random line for `line`, with `{name}` and `{you}` filled in.
+    fn choices(&self, lang: Lang, species: Species, line: Line) -> Option<&Vec<String>> {
+        self.tables
+            .get(&lang)?
+            .get(species.id())?
+            .get(line.key())
+            .filter(|c| !c.is_empty())
+    }
+
+    /// A random line for `line` in the current language (or in Chinese if
+    /// it has none yet), with `{name}` and `{you}` filled in.
     pub fn pick(
         &self,
         species: Species,
@@ -31,8 +67,10 @@ impl Lines {
         you: &str,
         rng: &mut fastrand::Rng,
     ) -> Option<String> {
-        let choices = self.table.get(species.id())?.get(line.key())?;
-        let text = choices.get(rng.usize(..choices.len().max(1)))?;
+        let choices = self
+            .choices(i18n::current(), species, line)
+            .or_else(|| self.choices(Lang::ZhTw, species, line))?;
+        let text = choices.get(rng.usize(..choices.len()))?;
         Some(text.replace("{name}", name).replace("{you}", you))
     }
 }
@@ -41,43 +79,65 @@ impl Lines {
 mod tests {
     use super::*;
 
+    /// Languages whose lines are written (the others fall back to Chinese
+    /// and are not held to these tests yet).
+    fn written() -> Vec<Lang> {
+        let lines = Lines::load().unwrap();
+        Lang::ALL
+            .into_iter()
+            .filter(|l| lines.tables.get(l).is_some_and(|t| !t.is_empty()))
+            .collect()
+    }
+
     #[test]
-    fn every_species_has_every_line() {
-        let lines = Lines::zh_tw().unwrap();
-        for s in Species::ALL {
-            for l in Line::ALL {
-                if l.only_for().is_some_and(|only| only != s) {
-                    continue;
+    fn every_species_has_every_line_in_every_language_written() {
+        let lines = Lines::load().unwrap();
+        for lang in written() {
+            for s in Species::ALL {
+                for l in Line::ALL {
+                    if l.only_for().is_some_and(|only| only != s) {
+                        continue;
+                    }
+                    assert!(
+                        lines.choices(lang, s, l).is_some(),
+                        "{}: {} has no {}",
+                        lang.id(),
+                        s.id(),
+                        l.key()
+                    );
                 }
-                let choices = lines.table.get(s.id()).and_then(|t| t.get(l.key()));
-                assert!(
-                    choices.is_some_and(|c| !c.is_empty()),
-                    "{} has no {}",
-                    s.id(),
-                    l.key()
-                );
             }
         }
     }
 
     #[test]
     fn every_line_fits_a_bubble_with_the_longest_names() {
-        let lines = Lines::zh_tw().unwrap();
-        let name = "名".repeat(MAX_NAME);
-        let you = "你".repeat(MAX_YOU);
-        for (species, table) in &lines.table {
-            assert!(
-                Species::from_id(species).is_some(),
-                "unknown species {species}"
-            );
-            for (key, choices) in table {
-                for text in choices {
-                    let filled = text.replace("{name}", &name).replace("{you}", &you);
-                    let len = filled.chars().count();
-                    assert!(
-                        len <= MAX_LINE,
-                        "{species}.{key} \"{text}\" is {len} characters"
-                    );
+        let lines = Lines::load().unwrap();
+        let mut face = chonkgene_render::text::Face::ui();
+        let most = face.measure(&"一".repeat(MAX_LINE), 21.0) + 0.5;
+        for lang in written() {
+            // The longest names typed in that language: full-width
+            // characters, or wide Latin letters.
+            let (name, you) = match lang {
+                Lang::En => ("W".repeat(MAX_NAME), "W".repeat(MAX_YOU)),
+                _ => ("名".repeat(MAX_NAME), "你".repeat(MAX_YOU)),
+            };
+            for (species, table) in &lines.tables[&lang] {
+                assert!(
+                    Species::from_id(species).is_some(),
+                    "{}: unknown species {species}",
+                    lang.id()
+                );
+                for (key, choices) in table {
+                    for text in choices {
+                        let filled = text.replace("{name}", &name).replace("{you}", &you);
+                        let width = face.measure(&filled, 21.0);
+                        assert!(
+                            width <= most,
+                            "{}: {species}.{key} \"{text}\" is {width:.0} wide (at most {most:.0})",
+                            lang.id()
+                        );
+                    }
                 }
             }
         }
@@ -87,12 +147,13 @@ mod tests {
     fn lines_use_the_glossary() {
         // PLAN §1.11: words that must never appear.
         let banned = ["隱藏", "最小化", "好感度", "愛心值", "怒氣值", "設置"];
-        let lines = Lines::zh_tw().unwrap();
-        for table in lines.table.values() {
-            for text in table.values().flatten() {
-                for word in banned {
-                    assert!(!text.contains(word), "\"{text}\" uses {word}");
-                }
+        let lines = Lines::load().unwrap();
+        for text in lines.tables[&Lang::ZhTw]
+            .values()
+            .flat_map(|t| t.values().flatten())
+        {
+            for word in banned {
+                assert!(!text.contains(word), "\"{text}\" uses {word}");
             }
         }
     }

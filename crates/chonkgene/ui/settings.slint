@@ -507,6 +507,13 @@ export component SettingsWindow inherits Window {
                                 col: mod(i, 4);
                                 row: floor(i / 4);
                                 height: 194px;
+                                // Four equal columns, however long a name or
+                                // blurb is (Japanese ones run long) and
+                                // whichever card shows its coats: a quarter
+                                // of the page (the window less the 200 px
+                                // sidebar, the page's padding and the gaps),
+                                // not of what is in them.
+                                width: (root.width - 200px - 48px - 30px) / 4;
                                 border-radius: 20px;
                                 background: Theme.card;
                                 border-width: 2.5px;
@@ -525,7 +532,7 @@ export component SettingsWindow inherits Window {
                                         background: s.tint;
                                         Image { source: s.portrait; height: 98px; image-fit: contain; }
                                     }
-                                    Text { text: s.label; color: Theme.ink; font-size: 15px; horizontal-alignment: center; }
+                                    Text { text: s.label; color: Theme.ink; font-size: 15px; horizontal-alignment: center; overflow: elide; min-width: 0; }
                                     if s.id != root.adopt-species: Text {
                                         text: s.blurb;
                                         color: Theme.muted;
@@ -535,17 +542,18 @@ export component SettingsWindow inherits Window {
                                     }
                                     if s.id == root.adopt-species: HorizontalLayout {
                                         height: 32px;
-                                        spacing: 6px;
+                                        spacing: 4px;
                                         alignment: center;
                                         for c in root.adopt-coats: Rectangle {
-                                            width: 30px;
-                                            height: 30px;
-                                            border-radius: 15px;
+                                            width: 28px;
+                                            height: 28px;
+                                            y: 2px;
+                                            border-radius: 14px;
                                             border-width: c.id == root.adopt-coat ? 2.5px : 0px;
                                             border-color: Theme.accent;
                                             Rectangle {
-                                                x: 4px; y: 4px; width: 22px; height: 22px; border-radius: 11px; background: c.main; border-width: 1px; border-color: #00000018;
-                                                Rectangle { y: 16px; height: 6px; border-radius: 3px; background: c.light; }
+                                                x: 4px; y: 4px; width: 20px; height: 20px; border-radius: 10px; background: c.main; border-width: 1px; border-color: #00000018;
+                                                Rectangle { y: 14px; height: 6px; border-radius: 3px; background: c.light; }
                                             }
                                             TouchArea {
                                                 mouse-cursor: pointer;

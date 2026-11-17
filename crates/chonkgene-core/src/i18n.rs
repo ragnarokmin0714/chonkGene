@@ -109,6 +109,13 @@ pub fn tr_in(lang: Lang, zh: &'static str) -> &'static str {
         .unwrap_or(zh)
 }
 
+/// Marks a string to be translated where [`tr`] cannot be called (a
+/// `const`), so `tools/i18n/extract.py` finds it; [`tr`] it where it is
+/// shown.
+pub const fn mark(zh: &'static str) -> &'static str {
+    zh
+}
+
 /// As [`tr`], then each `{key}` replaced by its value.
 pub fn trf(zh: &'static str, args: &[(&str, &str)]) -> String {
     let mut s = tr(zh).to_string();

@@ -45,33 +45,39 @@ fn literal(s: &str) -> Option<String> {
     None
 }
 
-/// The strings a file asks to be translated, as the extractor finds them.
+/// The strings a file asks to be translated, as the extractor finds them:
+/// the string may be on the line after the call.
 fn asked(path: &Path) -> Vec<String> {
     let text = std::fs::read_to_string(path).unwrap_or_default();
+    // Comments out.
+    let text: String = text
+        .lines()
+        .filter(|l| !l.trim_start().starts_with("//"))
+        .collect::<Vec<_>>()
+        .join("\n");
     let slint = path.extension().is_some_and(|e| e == "slint");
+    let calls: &[&str] = if slint {
+        &["@tr("]
+    } else {
+        &["tr(", "trf(", "mark("]
+    };
     let mut out = Vec::new();
-    for line in text.lines() {
-        if line.trim_start().starts_with("//") {
-            continue;
-        }
-        let calls: &[&str] = if slint {
-            &["@tr(\""]
-        } else {
-            &["tr(\"", "trf(\""]
-        };
-        for call in calls {
-            let mut from = 0;
-            while let Some(at) = line[from..].find(call) {
-                let start = from + at;
-                let before = line[..start].chars().next_back();
-                let word = before.is_some_and(|c| c.is_alphanumeric() || c == '_' || c == '@');
-                if (slint || !word)
-                    && let Some(s) = literal(&line[start + call.len()..])
-                    && !s.is_empty()
-                {
-                    out.push(s);
-                }
-                from = start + call.len();
+    for call in calls {
+        let mut from = 0;
+        while let Some(at) = text[from..].find(call) {
+            let start = from + at;
+            from = start + call.len();
+            let before = text[..start].chars().next_back();
+            let word = before.is_some_and(|c| c.is_alphanumeric() || c == '_' || c == '@');
+            if !slint && word {
+                continue;
+            }
+            let rest = text[from..].trim_start();
+            if let Some(after) = rest.strip_prefix('"')
+                && let Some(s) = literal(after)
+                && !s.is_empty()
+            {
+                out.push(s);
             }
         }
     }

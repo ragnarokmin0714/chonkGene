@@ -3,7 +3,8 @@
 
     python3 tools/i18n/extract.py
 
-Finds every `tr("…")`, `trf("…", …)` and `tr_in(…, "…")` in the Rust code and
+Finds every `tr("…")`, `trf("…", …)`, `mark("…")` and `tr_in(…, "…")` in the
+Rust code (the string may be on the line after the call) and
 every `@tr("…")` in the .slint files, and merges them into
 i18n/<lang>/LC_MESSAGES/chonkgene.po for each language there: a string already
 translated keeps its translation, a new one comes in empty (it shows in
@@ -20,7 +21,7 @@ import re
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.normpath(os.path.join(HERE, "..", ".."))
 STRING = r'"((?:[^"\\]|\\.)*)"'
-RUST = re.compile(r'(?<![\w@])(?:tr|trf)\(\s*' + STRING + r'|tr_in\([^,]+,\s*' + STRING)
+RUST = re.compile(r'(?<![\w@])(?:tr|trf|mark)\(\s*' + STRING + r'|tr_in\([^,]+,\s*' + STRING)
 SLINT = re.compile(r'@tr\(\s*' + STRING)
 
 
@@ -36,13 +37,15 @@ def found():
             continue
         pattern = SLINT if path.endswith(".slint") else RUST
         with open(path, encoding="utf-8") as f:
-            for n, line in enumerate(f, 1):
-                if line.lstrip().startswith("//"):
-                    continue
-                for m in pattern.finditer(line):
-                    msgid = next(g for g in m.groups() if g is not None)
-                    if msgid:
-                        out.setdefault(msgid, []).append(f"{rel}:{n}")
+            text = f.read()
+        # Comments blanked out (kept as spaces, so line numbers hold).
+        text = re.sub(r"(?m)^\s*//.*$", lambda m: " " * len(m.group(0)), text)
+        # The call and its string may be on different lines.
+        for m in pattern.finditer(text):
+            msgid = next(g for g in m.groups() if g is not None)
+            if msgid:
+                n = text.count("\n", 0, m.start()) + 1
+                out.setdefault(msgid, []).append(f"{rel}:{n}")
     return out
 
 

@@ -633,7 +633,7 @@ impl App {
             store: pets,
             dirty: fitted,
             kinds,
-            lines: Lines::zh_tw()?,
+            lines: Lines::load()?,
             bubble_face: Face::ui(),
             ui_face: Face::ui(),
             shared: None,
@@ -1417,7 +1417,7 @@ impl App {
                 } else {
                     format!("{pct}%")
                 };
-                items.push(item(label, Some(hint), Icon::Size, false));
+                items.push(item(tr(label), Some(hint), Icon::Size, false));
                 actions.push(Action::SizeAll(pct));
             }
             items.push(item(tr("返回"), None, Icon::Back, true));

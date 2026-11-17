@@ -3,915 +3,952 @@ msgstr ""
 "Content-Type: text/plain; charset=UTF-8\n"
 "Language: en\n"
 
-#: crates/chonkgene-core/src/species.rs:289
+#: crates/chonkgene-core/src/species.rs:277
 msgid "柴犬"
-msgstr ""
+msgstr "Shiba Inu"
+
+#: crates/chonkgene-core/src/species.rs:278
+msgid "曼赤肯貓"
+msgstr "Munchkin cat"
+
+#: crates/chonkgene-core/src/species.rs:279
+msgid "蘇格蘭折耳貓"
+msgstr "Scottish Fold"
+
+#: crates/chonkgene-core/src/species.rs:280
+msgid "貓頭鷹"
+msgstr "Owl"
+
+#: crates/chonkgene-core/src/species.rs:281
+msgid "小雞"
+msgstr "Chick"
+
+#: crates/chonkgene-core/src/species.rs:282
+msgid "小鴨"
+msgstr "Duckling"
+
+#: crates/chonkgene-core/src/species.rs:283
+msgid "九尾狐"
+msgstr "Nine-tailed fox"
+
+#: crates/chonkgene-core/src/species.rs:289
+msgid "阿柴"
+msgstr "Shibby"
 
 #: crates/chonkgene-core/src/species.rs:290
-msgid "曼赤肯貓"
-msgstr ""
+#: crates/chonkgene/src/settings.rs:44
+msgid "奶茶"
+msgstr "Chai"
 
 #: crates/chonkgene-core/src/species.rs:291
-msgid "蘇格蘭折耳貓"
-msgstr ""
+msgid "芋圓"
+msgstr "Taro"
 
 #: crates/chonkgene-core/src/species.rs:292
-msgid "貓頭鷹"
-msgstr ""
+msgid "咕咕"
+msgstr "Hoot"
 
 #: crates/chonkgene-core/src/species.rs:293
-msgid "小雞"
-msgstr ""
+msgid "蛋黃"
+msgstr "Yolky"
 
 #: crates/chonkgene-core/src/species.rs:294
-msgid "小鴨"
-msgstr ""
+msgid "湯圓"
+msgstr "Dumpling"
 
 #: crates/chonkgene-core/src/species.rs:295
-msgid "九尾狐"
-msgstr ""
+msgid "小九"
+msgstr "Kyu"
 
 #: crates/chonkgene-core/src/species.rs:301
-msgid "阿柴"
-msgstr ""
+msgid "主人"
+msgstr "my human"
 
 #: crates/chonkgene-core/src/species.rs:302
-#: crates/chonkgene/src/settings.rs:45
-msgid "奶茶"
-msgstr ""
+msgid "好朋友"
+msgstr "buddy"
 
 #: crates/chonkgene-core/src/species.rs:303
-msgid "芋圓"
-msgstr ""
+msgid "奴才"
+msgstr "servant"
 
 #: crates/chonkgene-core/src/species.rs:304
-msgid "咕咕"
-msgstr ""
+msgid "同學"
+msgstr "student"
 
 #: crates/chonkgene-core/src/species.rs:305
-msgid "蛋黃"
-msgstr ""
+msgid "老大"
+msgstr "boss"
 
 #: crates/chonkgene-core/src/species.rs:306
-msgid "湯圓"
-msgstr ""
+msgid "領隊"
+msgstr "leader"
 
 #: crates/chonkgene-core/src/species.rs:307
-msgid "小九"
-msgstr ""
-
-#: crates/chonkgene-core/src/species.rs:314
-msgid "主人"
-msgstr ""
-
-#: crates/chonkgene-core/src/species.rs:315
-msgid "好朋友"
-msgstr ""
-
-#: crates/chonkgene-core/src/species.rs:316
-msgid "奴才"
-msgstr ""
-
-#: crates/chonkgene-core/src/species.rs:317
-msgid "同學"
-msgstr ""
-
-#: crates/chonkgene-core/src/species.rs:318
-msgid "老大"
-msgstr ""
-
-#: crates/chonkgene-core/src/species.rs:319
-msgid "領隊"
-msgstr ""
-
-#: crates/chonkgene-core/src/species.rs:320
 msgid "小主人"
-msgstr ""
+msgstr "master"
 
-#: crates/chonkgene-core/src/species.rs:371
+#: crates/chonkgene-core/src/species.rs:355
 msgid "肉乾"
-msgstr ""
+msgstr "jerky"
 
-#: crates/chonkgene-core/src/species.rs:372
+#: crates/chonkgene-core/src/species.rs:356
 msgid "罐罐"
-msgstr ""
+msgstr "tuna"
 
-#: crates/chonkgene-core/src/species.rs:373
+#: crates/chonkgene-core/src/species.rs:357
 msgid "小餅乾"
-msgstr ""
+msgstr "cookies"
 
-#: crates/chonkgene-core/src/species.rs:374
+#: crates/chonkgene-core/src/species.rs:358
 msgid "玉米粒"
-msgstr ""
+msgstr "corn"
 
-#: crates/chonkgene-core/src/species.rs:375
+#: crates/chonkgene-core/src/species.rs:359
 msgid "豌豆"
-msgstr ""
+msgstr "peas"
 
-#: crates/chonkgene-core/src/species.rs:377
+#: crates/chonkgene-core/src/species.rs:361
 msgid "豆皮壽司"
-msgstr ""
+msgstr "inari sushi"
 
-#: crates/chonkgene/src/app.rs:1395
-msgid "定身術"
-msgstr ""
+#: crates/chonkgene-platform/src/tray.rs:25
+#: crates/chonkgene/ui/settings.slint:394
+msgid "肉肉賴桌"
+msgstr "chonkGene"
 
-#: crates/chonkgene/src/app.rs:1396
-#: crates/chonkgene/src/app.rs:2031
-#: crates/chonkgene/src/app.rs:2045
+#: crates/chonkgene-platform/src/tray.rs:27
+msgid "收起來 / 叫回來"
+msgstr "Hide / call back"
+
+#: crates/chonkgene-platform/src/tray.rs:28
+msgid "拿狗尾草逗牠們 / 收起來"
+msgstr "Grass to tease them / put away"
+
+#: crates/chonkgene-platform/src/tray.rs:29
+#: crates/chonkgene/src/app.rs:1556
+msgid "丟球給牠們"
+msgstr "Throw them a ball"
+
+#: crates/chonkgene-platform/src/tray.rs:30
+#: crates/chonkgene/src/app.rs:1558
+msgid "丟飛盤給牠們"
+msgstr "Throw them a frisbee"
+
+#: crates/chonkgene-platform/src/tray.rs:31
+#: crates/chonkgene/src/app.rs:1564
+msgid "放一把貓薄荷"
+msgstr "Put down catnip"
+
+#: crates/chonkgene-platform/src/tray.rs:32
+#: crates/chonkgene/src/app.rs:1592
+msgid "設定…"
+msgstr "Settings..."
+
+#: crates/chonkgene-platform/src/tray.rs:33
+#: crates/chonkgene/src/app.rs:1593
+msgid "結束肉肉賴桌"
+msgstr "Quit chonkGene"
+
+#: crates/chonkgene-platform/src/tray.rs:37
+#: crates/chonkgene/ui/settings.slint:875
+msgid "大家的大小"
+msgstr "Everyone's size"
+
+#: crates/chonkgene-platform/src/tray.rs:38
+#: crates/chonkgene/ui/settings.slint:880
+msgid "小"
+msgstr "Small"
+
+#: crates/chonkgene-platform/src/tray.rs:38
+#: crates/chonkgene/ui/settings.slint:880
+msgid "中"
+msgstr "Medium"
+
+#: crates/chonkgene-platform/src/tray.rs:38
+#: crates/chonkgene/ui/settings.slint:880
+msgid "大"
+msgstr "Large"
+
+#: crates/chonkgene-platform/src/tray.rs:38
+#: crates/chonkgene/ui/settings.slint:880
+msgid "特大"
+msgstr "Huge"
+
+#: crates/chonkgene-platform/src/tray.rs:41
+msgid "場景"
+msgstr "Scenes"
+
+#: crates/chonkgene-platform/src/tray.rs:43
+#: crates/chonkgene/src/app.rs:1994
+msgid "玩水池"
+msgstr "Pond"
+
+#: crates/chonkgene-platform/src/tray.rs:44
+#: crates/chonkgene/src/app.rs:1995
+msgid "曬太陽"
+msgstr "Sunbathe"
+
+#: crates/chonkgene-platform/src/tray.rs:45
+#: crates/chonkgene/src/app.rs:1996
+msgid "追蝴蝶"
+msgstr "Chase a butterfly"
+
+#: crates/chonkgene-platform/src/tray.rs:46
+#: crates/chonkgene/src/app.rs:1997
+msgid "啃骨頭"
+msgstr "Chew a bone"
+
+#: crates/chonkgene-platform/src/tray.rs:47
+#: crates/chonkgene/src/app.rs:1998
+msgid "啄種子"
+msgstr "Peck seeds"
+
+#: crates/chonkgene-platform/src/tray.rs:48
+#: crates/chonkgene/src/app.rs:1999
+msgid "飛上樹枝"
+msgstr "Fly to a branch"
+
+#: crates/chonkgene-platform/src/tray.rs:49
+#: crates/chonkgene/src/app.rs:1363
+#: crates/chonkgene/src/app.rs:2000
 msgid "狐火"
-msgstr ""
+msgstr "Fox-fire"
 
-#: crates/chonkgene/src/app.rs:1397
+#: crates/chonkgene/src/app.rs:1362
+msgid "定身術"
+msgstr "Freeze spell"
+
+#: crates/chonkgene/src/app.rs:1364
 msgid "祝福術"
-msgstr ""
+msgstr "Blessing"
+
+#: crates/chonkgene/src/app.rs:1365
+msgid "招喚術"
+msgstr "Summoning"
+
+#: crates/chonkgene/src/app.rs:1372
+#: crates/chonkgene/src/app.rs:1390
+#: crates/chonkgene/src/app.rs:1407
+msgid "返回"
+msgstr "Back"
+
+#: crates/chonkgene/src/app.rs:1383
+msgid "目前"
+msgstr "now"
 
 #: crates/chonkgene/src/app.rs:1398
-msgid "招喚術"
-msgstr ""
-
-#: crates/chonkgene/src/app.rs:1405
-#: crates/chonkgene/src/app.rs:1423
-#: crates/chonkgene/src/app.rs:1440
-msgid "返回"
-msgstr ""
-
-#: crates/chonkgene/src/app.rs:1416
-msgid "目前"
-msgstr ""
-
-#: crates/chonkgene/src/app.rs:1431
 msgid "環抱"
-msgstr ""
+msgstr "Hug from behind"
+
+#: crates/chonkgene/src/app.rs:1399
+msgid "舉高高"
+msgstr "Lift up high"
+
+#: crates/chonkgene/src/app.rs:1400
+msgid "搖搖抱"
+msgstr "Cradle"
 
 #: crates/chonkgene/src/app.rs:1432
-msgid "舉高高"
-msgstr ""
+msgid "從水池上岸"
+msgstr "Get out of the pond"
 
 #: crates/chonkgene/src/app.rs:1433
-msgid "搖搖抱"
-msgstr ""
-
-#: crates/chonkgene/src/app.rs:1465
-msgid "從水池上岸"
-msgstr ""
-
-#: crates/chonkgene/src/app.rs:1466
 msgid "不跳了"
-msgstr ""
+msgstr "Stop dancing"
 
-#: crates/chonkgene/src/app.rs:1467
-#: crates/chonkgene/src/app.rs:4188
+#: crates/chonkgene/src/app.rs:1435
+#: crates/chonkgene/src/app.rs:4128
 msgid "把{thing}收起來"
-msgstr ""
+msgstr "Put the {thing} away"
 
-#: crates/chonkgene/src/app.rs:1474
+#: crates/chonkgene/src/app.rs:1444
 msgid "牠睡著了，醒來再玩"
-msgstr ""
+msgstr "Asleep. Later!"
 
-#: crates/chonkgene/src/app.rs:1478
+#: crates/chonkgene/src/app.rs:1448
 msgid "牠在忙，等等再叫牠"
-msgstr ""
+msgstr "Busy. Try again soon."
 
-#: crates/chonkgene/src/app.rs:1487
+#: crates/chonkgene/src/app.rs:1457
 msgid "在高處"
-msgstr ""
+msgstr "up high"
 
-#: crates/chonkgene/src/app.rs:1505
+#: crates/chonkgene/src/app.rs:1475
 msgid "坐下"
-msgstr ""
+msgstr "Sit"
 
-#: crates/chonkgene/src/app.rs:1505
+#: crates/chonkgene/src/app.rs:1475
 msgid "趴下"
-msgstr ""
+msgstr "Down"
 
-#: crates/chonkgene/src/app.rs:1505
+#: crates/chonkgene/src/app.rs:1475
 msgid "過來"
-msgstr ""
+msgstr "Come here"
 
-#: crates/chonkgene/src/app.rs:1505
+#: crates/chonkgene/src/app.rs:1475
 msgid "轉圈"
-msgstr ""
+msgstr "Spin"
 
-#: crates/chonkgene/src/app.rs:1505
+#: crates/chonkgene/src/app.rs:1475
 msgid "握手"
-msgstr ""
+msgstr "Shake"
 
-#: crates/chonkgene/src/app.rs:1510
-#: crates/chonkgene/src/app.rs:2032
+#: crates/chonkgene/src/app.rs:1480
+#: crates/chonkgene/src/app.rs:2001
 msgid "跳舞"
-msgstr ""
+msgstr "Dance"
+
+#: crates/chonkgene/src/app.rs:1484
+msgid "去抱抱…"
+msgstr "Go hug..."
+
+#: crates/chonkgene/src/app.rs:1494
+msgid "抱抱"
+msgstr "Hug"
+
+#: crates/chonkgene/src/app.rs:1496
+msgid "抱抱…"
+msgstr "Hug..."
+
+#: crates/chonkgene/src/app.rs:1502
+msgid "摸摸頭"
+msgstr "Pat its head"
+
+#: crates/chonkgene/src/app.rs:1504
+msgid "餵零食"
+msgstr "Give a treat"
+
+#: crates/chonkgene/src/app.rs:1506
+msgid "還有 {snacks} 份"
+msgstr "{snacks} left"
+
+#: crates/chonkgene/src/app.rs:1508
+msgid "吃飽了"
+msgstr "full"
+
+#: crates/chonkgene/src/app.rs:1513
+msgid "改名字…"
+msgstr "Rename..."
 
 #: crates/chonkgene/src/app.rs:1514
-msgid "去抱抱…"
-msgstr ""
+msgid "幫牠換造型…"
+msgstr "Change its look..."
 
-#: crates/chonkgene/src/app.rs:1523
-msgid "抱抱"
-msgstr ""
+#: crates/chonkgene/src/app.rs:1524
+msgid "輕輕叫醒牠"
+msgstr "Wake it gently"
 
-#: crates/chonkgene/src/app.rs:1523
-msgid "抱抱…"
-msgstr ""
-
-#: crates/chonkgene/src/app.rs:1528
-msgid "摸摸頭"
-msgstr ""
-
-#: crates/chonkgene/src/app.rs:1530
-msgid "餵零食"
-msgstr ""
+#: crates/chonkgene/src/app.rs:1527
+msgid "讓牠去睡覺"
+msgstr "Put it to bed"
 
 #: crates/chonkgene/src/app.rs:1532
-msgid "還有 {snacks} 份"
-msgstr ""
+msgid "把狗尾草收起來"
+msgstr "Put the grass away"
 
 #: crates/chonkgene/src/app.rs:1534
-msgid "吃飽了"
-msgstr ""
-
-#: crates/chonkgene/src/app.rs:1539
-msgid "改名字…"
-msgstr ""
-
-#: crates/chonkgene/src/app.rs:1540
-msgid "幫牠換造型…"
-msgstr ""
-
-#: crates/chonkgene/src/app.rs:1550
-msgid "輕輕叫醒牠"
-msgstr ""
-
-#: crates/chonkgene/src/app.rs:1553
-msgid "讓牠去睡覺"
-msgstr ""
-
-#: crates/chonkgene/src/app.rs:1558
-msgid "把狗尾草收起來"
-msgstr ""
-
-#: crates/chonkgene/src/app.rs:1560
 msgid "拿狗尾草逗牠們"
-msgstr ""
+msgstr "Tease them with grass"
 
-#: crates/chonkgene/src/app.rs:1570
+#: crates/chonkgene/src/app.rs:1544
 msgid "叫牠…"
-msgstr ""
+msgstr "Ask it to..."
 
-#: crates/chonkgene/src/app.rs:1574
+#: crates/chonkgene/src/app.rs:1548
 msgid "施法…"
-msgstr ""
+msgstr "Cast..."
 
-#: crates/chonkgene/src/app.rs:1577
+#: crates/chonkgene/src/app.rs:1551
 msgid "玩躲貓貓"
-msgstr ""
+msgstr "Hide and seek"
 
-#: crates/chonkgene/src/app.rs:1580
+#: crates/chonkgene/src/app.rs:1554
 msgid "場景…"
-msgstr ""
+msgstr "Scenes..."
+
+#: crates/chonkgene/src/app.rs:1562
+msgid "把貓薄荷收起來"
+msgstr "Put the catnip away"
+
+#: crates/chonkgene/src/app.rs:1573
+msgid "把聚光燈收起來"
+msgstr "Put the spotlight away"
+
+#: crates/chonkgene/src/app.rs:1575
+msgid "放聚光燈"
+msgstr "Put down a spotlight"
 
 #: crates/chonkgene/src/app.rs:1582
-msgid "丟球給牠們"
-msgstr ""
+msgid "大家的大小…"
+msgstr "Everyone's size..."
 
 #: crates/chonkgene/src/app.rs:1584
-msgid "丟飛盤給牠們"
-msgstr ""
-
-#: crates/chonkgene/src/app.rs:1588
-msgid "把貓薄荷收起來"
-msgstr ""
-
-#: crates/chonkgene/src/app.rs:1590
-msgid "放一把貓薄荷"
-msgstr ""
-
-#: crates/chonkgene/src/app.rs:1599
-msgid "把聚光燈收起來"
-msgstr ""
-
-#: crates/chonkgene/src/app.rs:1601
-msgid "放聚光燈"
-msgstr ""
-
-#: crates/chonkgene/src/app.rs:1608
-msgid "大家的大小…"
-msgstr ""
-
-#: crates/chonkgene/src/app.rs:1610
-#: crates/chonkgene/ui/settings.slint:619
+#: crates/chonkgene/ui/settings.slint:607
 msgid "說再見…"
-msgstr ""
+msgstr "Say goodbye..."
 
-#: crates/chonkgene/src/app.rs:1613
+#: crates/chonkgene/src/app.rs:1587
 msgid "全部收起來"
-msgstr ""
+msgstr "Hide them all"
 
-#: crates/chonkgene/src/app.rs:1618
-msgid "設定…"
-msgstr ""
-
-#: crates/chonkgene/src/app.rs:1619
-msgid "結束肉肉賴桌"
-msgstr ""
-
-#: crates/chonkgene/src/app.rs:1642
+#: crates/chonkgene/src/app.rs:1615
 msgid "睡覺中"
-msgstr ""
+msgstr "asleep"
 
-#: crates/chonkgene/src/app.rs:1644
+#: crates/chonkgene/src/app.rs:1617
 msgid "有起床氣"
-msgstr ""
+msgstr "grumpy"
 
-#: crates/chonkgene/src/app.rs:2025
-msgid "玩水池"
-msgstr ""
-
-#: crates/chonkgene/src/app.rs:2026
-msgid "曬太陽"
-msgstr ""
-
-#: crates/chonkgene/src/app.rs:2027
-msgid "追蝴蝶"
-msgstr ""
-
-#: crates/chonkgene/src/app.rs:2028
-msgid "啃骨頭"
-msgstr ""
-
-#: crates/chonkgene/src/app.rs:2029
-msgid "啄種子"
-msgstr ""
-
-#: crates/chonkgene/src/app.rs:2030
-msgid "飛上樹枝"
-msgstr ""
-
-#: crates/chonkgene/src/app.rs:2039
+#: crates/chonkgene/src/app.rs:2007
 msgid "水池"
-msgstr ""
+msgstr "pond"
 
-#: crates/chonkgene/src/app.rs:2040
+#: crates/chonkgene/src/app.rs:2008
 msgid "陽光"
-msgstr ""
+msgstr "sunbeam"
 
-#: crates/chonkgene/src/app.rs:2041
+#: crates/chonkgene/src/app.rs:2009
 msgid "蝴蝶"
-msgstr ""
+msgstr "butterfly"
 
-#: crates/chonkgene/src/app.rs:2042
+#: crates/chonkgene/src/app.rs:2010
 msgid "骨頭"
-msgstr ""
+msgstr "bone"
 
-#: crates/chonkgene/src/app.rs:2043
+#: crates/chonkgene/src/app.rs:2011
 msgid "種子"
-msgstr ""
+msgstr "seeds"
 
-#: crates/chonkgene/src/app.rs:2044
+#: crates/chonkgene/src/app.rs:2012
 msgid "樹枝"
-msgstr ""
+msgstr "branch"
 
-#: crates/chonkgene/src/app.rs:2046
+#: crates/chonkgene/src/app.rs:2014
 msgid "聚光燈"
-msgstr ""
+msgstr "spotlight"
 
-#: crates/chonkgene/src/app.rs:3589
+#: crates/chonkgene/src/app.rs:3530
 msgid "真的要說再見嗎？"
-msgstr ""
+msgstr "Really say goodbye?"
 
-#: crates/chonkgene/src/app.rs:3590
+#: crates/chonkgene/src/app.rs:3531
 msgid "再按一次"
-msgstr ""
+msgstr "click again"
+
+#: crates/chonkgene/src/settings.rs:40
+msgid "赤柴"
+msgstr "Red"
 
 #: crates/chonkgene/src/settings.rs:41
-msgid "赤柴"
-msgstr ""
+msgid "黑色"
+msgstr "Black"
 
 #: crates/chonkgene/src/settings.rs:42
-msgid "黑色"
-msgstr ""
+msgid "胡麻"
+msgstr "Sesame"
 
 #: crates/chonkgene/src/settings.rs:43
-msgid "胡麻"
-msgstr ""
-
-#: crates/chonkgene/src/settings.rs:44
 msgid "白色"
-msgstr ""
+msgstr "White"
+
+#: crates/chonkgene/src/settings.rs:45
+msgid "橘色"
+msgstr "Orange"
 
 #: crates/chonkgene/src/settings.rs:46
-msgid "橘色"
-msgstr ""
+msgid "灰色"
+msgstr "Grey"
 
 #: crates/chonkgene/src/settings.rs:47
-msgid "灰色"
-msgstr ""
+msgid "藍灰"
+msgstr "Blue grey"
 
 #: crates/chonkgene/src/settings.rs:48
-msgid "藍灰"
-msgstr ""
+msgid "奶油"
+msgstr "Cream"
 
 #: crates/chonkgene/src/settings.rs:49
-msgid "奶油"
-msgstr ""
+msgid "銀虎斑"
+msgstr "Silver tabby"
 
 #: crates/chonkgene/src/settings.rs:50
-msgid "銀虎斑"
-msgstr ""
+msgid "褐色"
+msgstr "Brown"
 
 #: crates/chonkgene/src/settings.rs:51
-msgid "褐色"
-msgstr ""
+msgid "雪白"
+msgstr "Snowy"
 
 #: crates/chonkgene/src/settings.rs:52
-msgid "雪白"
-msgstr ""
+msgid "黃色"
+msgstr "Yellow"
 
 #: crates/chonkgene/src/settings.rs:53
-msgid "黃色"
-msgstr ""
-
-#: crates/chonkgene/src/settings.rs:54
 msgid "烏骨"
-msgstr ""
+msgstr "Silkie"
+
+#: crates/chonkgene/src/settings.rs:55
+msgid "金色"
+msgstr "Gold"
 
 #: crates/chonkgene/src/settings.rs:56
-msgid "金色"
-msgstr ""
+msgid "夜色"
+msgstr "Night"
 
 #: crates/chonkgene/src/settings.rs:57
-msgid "夜色"
-msgstr ""
+msgid "雪狐"
+msgstr "Snow fox"
 
 #: crates/chonkgene/src/settings.rs:58
-msgid "雪狐"
-msgstr ""
-
-#: crates/chonkgene/src/settings.rs:59
 msgid "其他"
-msgstr ""
+msgstr "Other"
+
+#: crates/chonkgene/src/settings.rs:64
+msgid "固執又愛笑，被戳會翻肚。"
+msgstr "Stubborn and giggly; poke it and it rolls over."
 
 #: crates/chonkgene/src/settings.rs:65
-msgid "固執又愛笑，被戳會翻肚。"
-msgstr ""
+msgid "腿短但很努力，常常跳不上去。"
+msgstr "Short legs, big effort; often misses the jump."
 
 #: crates/chonkgene/src/settings.rs:66
-msgid "腿短但很努力，常常跳不上去。"
-msgstr ""
+msgid "高冷系，戳多了會厭世。"
+msgstr "Aloof; poke too much and it gives up on you."
 
 #: crates/chonkgene/src/settings.rs:67
-msgid "高冷系，戳多了會厭世。"
-msgstr ""
+msgid "白天打瞌睡，晚上最有精神。"
+msgstr "Dozes by day, wide awake at night."
 
 #: crates/chonkgene/src/settings.rs:68
-msgid "白天打瞌睡，晚上最有精神。"
-msgstr ""
+msgid "好奇又急性子，什麼都想啄一下。"
+msgstr "Curious and hasty; pecks at everything."
 
 #: crates/chonkgene/src/settings.rs:69
-msgid "好奇又急性子，什麼都想啄一下。"
-msgstr ""
+msgid "慢半拍，喜歡跟在別人後面走。"
+msgstr "A beat behind; loves to follow others."
 
 #: crates/chonkgene/src/settings.rs:70
-msgid "慢半拍，喜歡跟在別人後面走。"
-msgstr ""
-
-#: crates/chonkgene/src/settings.rs:71
 msgid "愛惡作劇的小狐仙，坐下會開屏。"
-msgstr ""
+msgstr "A prankish fox spirit; sits and fans her tails."
+
+#: crates/chonkgene/src/settings.rs:99
+msgid "……還不錯。"
+msgstr "...Not bad."
+
+#: crates/chonkgene/src/settings.rs:100
+msgid "……剛好。"
+msgstr "...Just right."
 
 #: crates/chonkgene/src/settings.rs:101
-msgid "……還不錯。"
-msgstr ""
+msgid "……你什麼都沒看到。"
+msgstr "...You saw nothing."
 
 #: crates/chonkgene/src/settings.rs:102
-msgid "……剛好。"
-msgstr ""
-
-#: crates/chonkgene/src/settings.rs:103
-msgid "……你什麼都沒看到。"
-msgstr ""
-
-#: crates/chonkgene/src/settings.rs:104
 msgid "……我只是毛多。"
-msgstr ""
+msgstr "...It's just fluff."
+
+#: crates/chonkgene/src/settings.rs:105
+msgid "……輕飄飄，呱。"
+msgstr "...Light as air. Quack."
+
+#: crates/chonkgene/src/settings.rs:106
+msgid "剛剛好，呱。"
+msgstr "Just right. Quack."
 
 #: crates/chonkgene/src/settings.rs:107
-msgid "……輕飄飄，呱。"
-msgstr ""
+msgid "……變圓了？呱。"
+msgstr "...Rounder? Quack."
 
 #: crates/chonkgene/src/settings.rs:108
-msgid "剛剛好，呱。"
-msgstr ""
-
-#: crates/chonkgene/src/settings.rs:109
-msgid "……變圓了？呱。"
-msgstr ""
-
-#: crates/chonkgene/src/settings.rs:110
 msgid "……麻糬，呱。"
-msgstr ""
+msgstr "...Mochi. Quack."
+
+#: crates/chonkgene/src/settings.rs:111
+msgid "啾！好輕！"
+msgstr "Peep! So light!"
+
+#: crates/chonkgene/src/settings.rs:112
+msgid "啾～剛剛好"
+msgstr "Peep~ just right"
 
 #: crates/chonkgene/src/settings.rs:113
-msgid "啾！好輕！"
-msgstr ""
+msgid "啾？肚子變大了？"
+msgstr "Peep? Bigger tummy?"
 
 #: crates/chonkgene/src/settings.rs:114
-msgid "啾～剛剛好"
-msgstr ""
-
-#: crates/chonkgene/src/settings.rs:115
-msgid "啾？肚子變大了？"
-msgstr ""
-
-#: crates/chonkgene/src/settings.rs:116
 msgid "啾！我是麻糬！"
-msgstr ""
+msgstr "Peep! I'm a mochi!"
+
+#: crates/chonkgene/src/settings.rs:117
+msgid "咕，身輕如燕。"
+msgstr "Hoo. Light as a bird."
+
+#: crates/chonkgene/src/settings.rs:118
+msgid "咕咕，剛剛好。"
+msgstr "Hoo hoo. Just right."
 
 #: crates/chonkgene/src/settings.rs:119
-msgid "咕，身輕如燕。"
-msgstr ""
+msgid "咕？好像變圓了"
+msgstr "Hoo? Rounder, maybe."
 
 #: crates/chonkgene/src/settings.rs:120
-msgid "咕咕，剛剛好。"
-msgstr ""
-
-#: crates/chonkgene/src/settings.rs:121
-msgid "咕？好像變圓了"
-msgstr ""
-
-#: crates/chonkgene/src/settings.rs:122
 msgid "咕……麻糬咕。"
-msgstr ""
+msgstr "Hoo... mochi hoo."
 
-#: crates/chonkgene/src/settings.rs:124
+#: crates/chonkgene/src/settings.rs:123
 msgid "好輕喔！"
-msgstr ""
+msgstr "So light!"
 
 #: crates/chonkgene/src/settings.rs:124
 msgid "剛剛好～"
-msgstr ""
+msgstr "Just right~"
 
-#: crates/chonkgene/src/settings.rs:124
+#: crates/chonkgene/src/settings.rs:125
 msgid "肚子……變大了？"
-msgstr ""
-
-#: crates/chonkgene/src/settings.rs:124
-msgid "我變成麻糬了……"
-msgstr ""
+msgstr "My tummy... grew?"
 
 #: crates/chonkgene/src/settings.rs:126
-msgid "身輕如燕！"
-msgstr ""
-
-#: crates/chonkgene/src/settings.rs:127
-msgid "剛剛好的肉肉～"
-msgstr ""
-
-#: crates/chonkgene/src/settings.rs:128
-msgid "肚子好像變大了？"
-msgstr ""
+msgid "我變成麻糬了……"
+msgstr "I turned into mochi..."
 
 #: crates/chonkgene/src/settings.rs:129
-msgid "我是一顆麻糬。"
-msgstr ""
+msgid "身輕如燕！"
+msgstr "Light as a feather!"
+
+#: crates/chonkgene/src/settings.rs:130
+msgid "剛剛好的肉肉～"
+msgstr "Perfectly chubby~"
+
+#: crates/chonkgene/src/settings.rs:131
+msgid "肚子好像變大了？"
+msgstr "Is my tummy bigger?"
 
 #: crates/chonkgene/src/settings.rs:132
-msgid "輕飄飄，像一陣風～"
-msgstr ""
-
-#: crates/chonkgene/src/settings.rs:133
-msgid "剛剛好，嘻嘻"
-msgstr ""
-
-#: crates/chonkgene/src/settings.rs:134
-msgid "尾巴……變胖了？"
-msgstr ""
+msgid "我是一顆麻糬。"
+msgstr "I am a mochi."
 
 #: crates/chonkgene/src/settings.rs:135
+msgid "輕飄飄，像一陣風～"
+msgstr "Light as a breeze~"
+
+#: crates/chonkgene/src/settings.rs:136
+msgid "剛剛好，嘻嘻"
+msgstr "Just right, hehe"
+
+#: crates/chonkgene/src/settings.rs:137
+msgid "尾巴……變胖了？"
+msgstr "My tails... got fat?"
+
+#: crates/chonkgene/src/settings.rs:138
 msgid "九條尾巴的麻糬！"
-msgstr ""
+msgstr "A nine-tailed mochi!"
+
+#: crates/chonkgene/src/settings.rs:358
+msgid "親密度 Lv.{level}（{progress}%）"
+msgstr "Bond Lv.{level} ({progress}%)"
 
 #: crates/chonkgene/src/settings.rs:509
-msgid "可攜模式："
-msgstr ""
+msgid "可攜模式：{path}"
+msgstr "Portable: {path}"
+
+#: crates/chonkgene/src/settings.rs:730
+msgid "已移除開機自動啟動和應用程式選單的捷徑。要完全移除，請結束肉肉賴桌，再刪除這個資料夾：{path}"
+msgstr "Removed the start-up entry and the app menu shortcut. To remove it completely, quit chonkGene, then delete this folder: {path}"
 
 #: crates/chonkgene/src/settings.rs:768
 msgid "肉肉賴桌目前沒有在執行。改動已經存起來，下次開啟時套用。"
-msgstr ""
+msgstr "chonkGene isn't running. Your changes are saved and apply next time it starts."
 
-#: crates/chonkgene/ui/settings.slint:290
+#: crates/chonkgene/ui/settings.slint:288
 msgid "肉肉賴桌・設定"
-msgstr ""
+msgstr "chonkGene · Settings"
 
-#: crates/chonkgene/ui/settings.slint:403
-msgid "肉肉賴桌"
-msgstr ""
-
-#: crates/chonkgene/ui/settings.slint:405
-#: crates/chonkgene/ui/settings.slint:444
+#: crates/chonkgene/ui/settings.slint:396
+#: crates/chonkgene/ui/settings.slint:434
 msgid "我的寵物"
-msgstr ""
+msgstr "My pets"
 
-#: crates/chonkgene/ui/settings.slint:406
-#: crates/chonkgene/ui/settings.slint:747
+#: crates/chonkgene/ui/settings.slint:397
+#: crates/chonkgene/ui/settings.slint:734
 msgid "互動與聲音"
-msgstr ""
+msgstr "Play & sound"
 
-#: crates/chonkgene/ui/settings.slint:407
-#: crates/chonkgene/ui/settings.slint:803
+#: crates/chonkgene/ui/settings.slint:398
+#: crates/chonkgene/ui/settings.slint:789
 msgid "不打擾"
-msgstr ""
+msgstr "Quiet"
 
-#: crates/chonkgene/ui/settings.slint:408
-#: crates/chonkgene/ui/settings.slint:843
+#: crates/chonkgene/ui/settings.slint:399
+#: crates/chonkgene/ui/settings.slint:828
 msgid "一般"
-msgstr ""
+msgstr "General"
 
-#: crates/chonkgene/ui/settings.slint:444
+#: crates/chonkgene/ui/settings.slint:434
 msgid "領養新寵物"
-msgstr ""
+msgstr "Adopt a pet"
+
+#: crates/chonkgene/ui/settings.slint:441
+msgid "算了"
+msgstr "Never mind"
+
+#: crates/chonkgene/ui/settings.slint:446
+msgid "先點一隻吧"
+msgstr "Pick one first"
+
+#: crates/chonkgene/ui/settings.slint:446
+msgid "帶牠回家"
+msgstr "Take it home"
 
 #: crates/chonkgene/ui/settings.slint:451
-msgid "算了"
-msgstr ""
-
-#: crates/chonkgene/ui/settings.slint:456
-msgid "先點一隻吧"
-msgstr ""
-
-#: crates/chonkgene/ui/settings.slint:456
-msgid "帶牠回家"
-msgstr ""
-
-#: crates/chonkgene/ui/settings.slint:461
 msgid "＋ 領養新寵物"
-msgstr ""
+msgstr "＋ Adopt a pet"
 
-#: crates/chonkgene/ui/settings.slint:503
+#: crates/chonkgene/ui/settings.slint:492
 msgid "挑一隻帶回你的桌面吧，點牠還能選毛色。"
-msgstr ""
+msgstr "Pick one for your desktop; click it to choose a coat."
+
+#: crates/chonkgene/ui/settings.slint:583
+msgid "・"
+msgstr " ·"
+
+#: crates/chonkgene/ui/settings.slint:594
+msgid "在桌面上"
+msgstr "On the desktop"
 
 #: crates/chonkgene/ui/settings.slint:595
-msgid "・"
-msgstr ""
-
-#: crates/chonkgene/ui/settings.slint:606
-msgid "在桌面上"
-msgstr ""
-
-#: crates/chonkgene/ui/settings.slint:607
 msgid "關掉就在寵物窩休息。"
-msgstr ""
+msgstr "Off: it rests in the den."
 
-#: crates/chonkgene/ui/settings.slint:630
+#: crates/chonkgene/ui/settings.slint:618
 msgid "確定要和{}說再見嗎？"
-msgstr ""
+msgstr "Say goodbye to {}?"
 
-#: crates/chonkgene/ui/settings.slint:631
+#: crates/chonkgene/ui/settings.slint:619
 msgid "牠的名字和親密度會一起消失。"
-msgstr ""
+msgstr "Its name and bond will be gone for good."
 
-#: crates/chonkgene/ui/settings.slint:635
+#: crates/chonkgene/ui/settings.slint:623
 msgid "再想想"
-msgstr ""
+msgstr "Wait"
+
+#: crates/chonkgene/ui/settings.slint:624
+msgid "說再見"
+msgstr "Goodbye"
 
 #: crates/chonkgene/ui/settings.slint:636
-msgid "說再見"
-msgstr ""
-
-#: crates/chonkgene/ui/settings.slint:648
 msgid "名字"
-msgstr ""
+msgstr "Name"
 
-#: crates/chonkgene/ui/settings.slint:656
+#: crates/chonkgene/ui/settings.slint:644
 msgid "牠怎麼叫你"
-msgstr ""
+msgstr "What it calls you"
 
-#: crates/chonkgene/ui/settings.slint:663
+#: crates/chonkgene/ui/settings.slint:651
 msgid "牠在對話泡泡裡會這樣叫你。"
-msgstr ""
+msgstr "It calls you this in its speech bubbles."
 
-#: crates/chonkgene/ui/settings.slint:665
+#: crates/chonkgene/ui/settings.slint:653
 msgid "毛色"
-msgstr ""
+msgstr "Coat"
 
-#: crates/chonkgene/ui/settings.slint:690
+#: crates/chonkgene/ui/settings.slint:678
 msgid "體型"
-msgstr ""
+msgstr "Body"
 
-#: crates/chonkgene/ui/settings.slint:698
+#: crates/chonkgene/ui/settings.slint:686
 msgid "標準"
-msgstr ""
+msgstr "Normal"
 
-#: crates/chonkgene/ui/settings.slint:698
+#: crates/chonkgene/ui/settings.slint:686
 msgid "略肥（預設）"
-msgstr ""
+msgstr "Chubby (default)"
 
-#: crates/chonkgene/ui/settings.slint:698
+#: crates/chonkgene/ui/settings.slint:686
 msgid "圓滾滾"
-msgstr ""
+msgstr "Round"
 
-#: crates/chonkgene/ui/settings.slint:698
+#: crates/chonkgene/ui/settings.slint:686
 msgid "麻糬"
-msgstr ""
+msgstr "Mochi"
+
+#: crates/chonkgene/ui/settings.slint:702
+msgid "大小"
+msgstr "Size"
+
+#: crates/chonkgene/ui/settings.slint:712
+msgid "牠在桌面上看起來有多大。"
+msgstr "How big it looks on your desktop."
 
 #: crates/chonkgene/ui/settings.slint:714
-msgid "大小"
-msgstr ""
-
-#: crates/chonkgene/ui/settings.slint:724
-msgid "牠在桌面上看起來有多大。"
-msgstr ""
-
-#: crates/chonkgene/ui/settings.slint:726
 msgid "個性"
-msgstr ""
+msgstr "Personality"
 
-#: crates/chonkgene/ui/settings.slint:727
+#: crates/chonkgene/ui/settings.slint:715
 msgid "怕癢"
-msgstr ""
+msgstr "Ticklish"
 
-#: crates/chonkgene/ui/settings.slint:727
+#: crates/chonkgene/ui/settings.slint:715
 msgid "不怕"
-msgstr ""
+msgstr "Not"
 
-#: crates/chonkgene/ui/settings.slint:727
+#: crates/chonkgene/ui/settings.slint:715
 msgid "超怕"
-msgstr ""
+msgstr "Very"
 
-#: crates/chonkgene/ui/settings.slint:727
+#: crates/chonkgene/ui/settings.slint:715
 msgid "耐性"
-msgstr ""
+msgstr "Patience"
 
-#: crates/chonkgene/ui/settings.slint:727
+#: crates/chonkgene/ui/settings.slint:715
 msgid "沒耐性"
-msgstr ""
+msgstr "Little"
 
-#: crates/chonkgene/ui/settings.slint:727
+#: crates/chonkgene/ui/settings.slint:715
 msgid "很有耐性"
-msgstr ""
+msgstr "Lots"
 
-#: crates/chonkgene/ui/settings.slint:727
+#: crates/chonkgene/ui/settings.slint:715
 msgid "活潑"
-msgstr ""
+msgstr "Energy"
 
-#: crates/chonkgene/ui/settings.slint:727
+#: crates/chonkgene/ui/settings.slint:715
 msgid "懶洋洋"
-msgstr ""
+msgstr "Lazy"
 
-#: crates/chonkgene/ui/settings.slint:727
+#: crates/chonkgene/ui/settings.slint:715
 msgid "停不下來"
-msgstr ""
+msgstr "Nonstop"
 
-#: crates/chonkgene/ui/settings.slint:737
+#: crates/chonkgene/ui/settings.slint:725
 msgid "會影響被戳的時候，是翻肚爆笑還是一臉厭世。"
-msgstr ""
+msgstr "Decides whether a poke gets a belly-up giggle or a weary stare."
 
-#: crates/chonkgene/ui/settings.slint:748
+#: crates/chonkgene/ui/settings.slint:735
 msgid "聲音"
-msgstr ""
+msgstr "Sound"
 
-#: crates/chonkgene/ui/settings.slint:757
+#: crates/chonkgene/ui/settings.slint:744
 msgid "聲音模式"
-msgstr ""
+msgstr "Sounds"
 
-#: crates/chonkgene/ui/settings.slint:758
+#: crates/chonkgene/ui/settings.slint:745
 msgid "讓牠們叫、笑、打呼。全螢幕時會自動安靜。"
-msgstr ""
+msgstr "They call, laugh and snore. Quiet when something is full screen."
 
-#: crates/chonkgene/ui/settings.slint:763
+#: crates/chonkgene/ui/settings.slint:750
 msgid "音量"
-msgstr ""
+msgstr "Volume"
 
-#: crates/chonkgene/ui/settings.slint:773
-#: crates/chonkgene/ui/settings.slint:782
+#: crates/chonkgene/ui/settings.slint:760
+#: crates/chonkgene/ui/settings.slint:769
 msgid "非理性模式"
-msgstr ""
+msgstr "Chaos mode"
 
-#: crates/chonkgene/ui/settings.slint:783
+#: crates/chonkgene/ui/settings.slint:770
 msgid "兩隻以上時，偶爾會為了小事吵起來，最後一定和好。點吵架中的任何一隻可以勸架。"
-msgstr ""
+msgstr "With two or more, they squabble over little things now and then, and always make up. Click either one to break it up."
 
-#: crates/chonkgene/ui/settings.slint:788
+#: crates/chonkgene/ui/settings.slint:775
 msgid "吵架頻率"
-msgstr ""
+msgstr "Squabbles"
 
-#: crates/chonkgene/ui/settings.slint:790
+#: crates/chonkgene/ui/settings.slint:777
 msgid "偶爾"
-msgstr ""
+msgstr "Sometimes"
 
-#: crates/chonkgene/ui/settings.slint:790
+#: crates/chonkgene/ui/settings.slint:777
 msgid "常常"
-msgstr ""
+msgstr "Often"
 
-#: crates/chonkgene/ui/settings.slint:790
+#: crates/chonkgene/ui/settings.slint:777
 msgid "超常"
-msgstr ""
+msgstr "Constantly"
 
-#: crates/chonkgene/ui/settings.slint:812
+#: crates/chonkgene/ui/settings.slint:798
 msgid "全螢幕時躲起來"
-msgstr ""
+msgstr "Hide during full screen"
 
-#: crates/chonkgene/ui/settings.slint:813
+#: crates/chonkgene/ui/settings.slint:799
 msgid "看影片、玩遊戲或簡報時，牠們會先躲起來，結束後再回來。"
-msgstr ""
+msgstr "They hide while you watch, play or present, and come back after."
 
-#: crates/chonkgene/ui/settings.slint:821
+#: crates/chonkgene/ui/settings.slint:807
 msgid "陪你打字和看書"
-msgstr ""
+msgstr "Keep you company"
 
-#: crates/chonkgene/ui/settings.slint:822
+#: crates/chonkgene/ui/settings.slint:808
 msgid "打字時牠們會跟著拍拍腳，滑鼠停著時會趴下來陪你。只看鍵盤和滑鼠有沒有在用，不會讀你打的字。"
-msgstr ""
+msgstr "They tap along as you type and lie down when the mouse rests. Only whether the keyboard and mouse are in use is seen, never what you type."
 
-#: crates/chonkgene/ui/settings.slint:830
+#: crates/chonkgene/ui/settings.slint:816
 msgid "一鍵收起來"
-msgstr ""
+msgstr "Hide with one key"
 
-#: crates/chonkgene/ui/settings.slint:831
+#: crates/chonkgene/ui/settings.slint:817
 msgid "再按一次就叫回來。"
-msgstr ""
+msgstr "Press again to call them back."
 
-#: crates/chonkgene/ui/settings.slint:854
+#: crates/chonkgene/ui/settings.slint:839
 msgid "語言"
-msgstr ""
+msgstr "Language"
 
-#: crates/chonkgene/ui/settings.slint:855
+#: crates/chonkgene/ui/settings.slint:840
 msgid "跟著電腦：照電腦的語言顯示。"
-msgstr ""
+msgstr "System: in your computer's language."
 
-#: crates/chonkgene/ui/settings.slint:858
+#: crates/chonkgene/ui/settings.slint:843
 msgid "跟著電腦"
-msgstr ""
+msgstr "System"
+
+#: crates/chonkgene/ui/settings.slint:852
+msgid "開機時一起醒來"
+msgstr "Start with the computer"
+
+#: crates/chonkgene/ui/settings.slint:853
+msgid "電腦開機後，牠們會自動出現在桌面上。"
+msgstr "They appear on your desktop when the computer starts."
+
+#: crates/chonkgene/ui/settings.slint:861
+msgid "同時在桌面上的寵物"
+msgstr "Pets on the desktop at once"
+
+#: crates/chonkgene/ui/settings.slint:862
+msgid "寵物越多，用的電腦資源也越多。"
+msgstr "More pets use more of the computer."
+
+#: crates/chonkgene/ui/settings.slint:862
+msgid "其他的會在寵物窩休息。"
+msgstr "The rest stay in the den."
 
 #: crates/chonkgene/ui/settings.slint:867
-msgid "開機時一起醒來"
-msgstr ""
-
-#: crates/chonkgene/ui/settings.slint:868
-msgid "電腦開機後，牠們會自動出現在桌面上。"
-msgstr ""
+msgid "{} 隻"
+msgstr "{}"
 
 #: crates/chonkgene/ui/settings.slint:876
-msgid "同時在桌面上的寵物"
-msgstr ""
-
-#: crates/chonkgene/ui/settings.slint:877
-msgid "寵物越多，用的電腦資源也越多。"
-msgstr ""
-
-#: crates/chonkgene/ui/settings.slint:877
-msgid "其他的會在寵物窩休息。"
-msgstr ""
-
-#: crates/chonkgene/ui/settings.slint:882
-msgid "{} 隻"
-msgstr ""
-
-#: crates/chonkgene/ui/settings.slint:890
-msgid "大家的大小"
-msgstr ""
+msgid "一次調整所有寵物的大小。"
+msgstr "Resize every pet at once."
 
 #: crates/chonkgene/ui/settings.slint:891
-msgid "一次調整所有寵物的大小。"
-msgstr ""
-
-#: crates/chonkgene/ui/settings.slint:895
-msgid "小"
-msgstr ""
-
-#: crates/chonkgene/ui/settings.slint:895
-msgid "中"
-msgstr ""
-
-#: crates/chonkgene/ui/settings.slint:895
-msgid "大"
-msgstr ""
-
-#: crates/chonkgene/ui/settings.slint:895
-msgid "特大"
-msgstr ""
-
-#: crates/chonkgene/ui/settings.slint:906
 msgid "資料位置"
-msgstr ""
+msgstr "Data folder"
 
-#: crates/chonkgene/ui/settings.slint:909
+#: crates/chonkgene/ui/settings.slint:894
 msgid "打開資料夾"
-msgstr ""
+msgstr "Open folder"
 
-#: crates/chonkgene/ui/settings.slint:915
+#: crates/chonkgene/ui/settings.slint:900
 msgid "移除所有痕跡"
-msgstr ""
+msgstr "Remove all traces"
 
-#: crates/chonkgene/ui/settings.slint:916
+#: crates/chonkgene/ui/settings.slint:901
 msgid "刪除開機自動啟動和應用程式選單的捷徑。之後結束肉肉賴桌、刪掉資料夾，就完全移除了。"
-msgstr ""
+msgstr "Deletes the start-up entry and the app menu shortcut. Then quit chonkGene and delete the folder, and it's gone completely."
 
-#: crates/chonkgene/ui/settings.slint:918
+#: crates/chonkgene/ui/settings.slint:903
 msgid "移除…"
-msgstr ""
+msgstr "Remove..."
 
-#: crates/chonkgene/ui/settings.slint:922
+#: crates/chonkgene/ui/settings.slint:907
 msgid "肉肉賴桌 {}・不連網，不收集任何資料"
-msgstr ""
+msgstr "chonkGene {} · offline, collects no data"

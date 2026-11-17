@@ -1,0 +1,250 @@
+# English words for the program (PLAN §8, twenty-third pass, item 1).
+# One a line: the Chinese → the English. Filled into the .po with
+#   python3 tools/i18n/fill.py en tools/i18n/en.txt
+# Voice: short, plain, warm; cute without baby talk. 牠/牠們 is just
+# "it"/"them". Glossary: 肉肉賴桌 chonkGene · 戳 poke · 摸摸 pat ·
+# 抱抱 hug · 親密度 bond · 寵物窩 the den · 麻糬 mochi · 非理性模式 chaos mode.
+
+# Species, default names (Roger: translated for new pets), what they call you, snacks.
+柴犬 → Shiba Inu
+曼赤肯貓 → Munchkin cat
+蘇格蘭折耳貓 → Scottish Fold
+貓頭鷹 → Owl
+小雞 → Chick
+小鴨 → Duckling
+九尾狐 → Nine-tailed fox
+阿柴 → Shibby
+奶茶 → Chai
+芋圓 → Taro
+咕咕 → Hoot
+蛋黃 → Yolky
+湯圓 → Dumpling
+小九 → Kyu
+主人 → my human
+好朋友 → buddy
+奴才 → servant
+同學 → student
+老大 → boss
+領隊 → leader
+小主人 → master
+肉乾 → jerky
+罐罐 → tuna
+小餅乾 → cookies
+玉米粒 → corn
+豌豆 → peas
+豆皮壽司 → inari sushi
+
+# The pet's menu.
+定身術 → Freeze spell
+狐火 → Fox-fire
+祝福術 → Blessing
+招喚術 → Summoning
+返回 → Back
+目前 → now
+環抱 → Hug from behind
+舉高高 → Lift up high
+搖搖抱 → Cradle
+從水池上岸 → Get out of the pond
+不跳了 → Stop dancing
+把{thing}收起來 → Put the {thing} away
+牠睡著了，醒來再玩 → Asleep. Later!
+牠在忙，等等再叫牠 → Busy. Try again soon.
+在高處 → up high
+坐下 → Sit
+趴下 → Down
+過來 → Come here
+轉圈 → Spin
+握手 → Shake
+跳舞 → Dance
+去抱抱… → Go hug...
+抱抱 → Hug
+抱抱… → Hug...
+摸摸頭 → Pat its head
+餵零食 → Give a treat
+還有 {snacks} 份 → {snacks} left
+吃飽了 → full
+改名字… → Rename...
+幫牠換造型… → Change its look...
+輕輕叫醒牠 → Wake it gently
+讓牠去睡覺 → Put it to bed
+把狗尾草收起來 → Put the grass away
+拿狗尾草逗牠們 → Tease them with grass
+叫牠… → Ask it to...
+施法… → Cast...
+玩躲貓貓 → Hide and seek
+場景… → Scenes...
+丟球給牠們 → Throw them a ball
+丟飛盤給牠們 → Throw them a frisbee
+把貓薄荷收起來 → Put the catnip away
+放一把貓薄荷 → Put down catnip
+把聚光燈收起來 → Put the spotlight away
+放聚光燈 → Put down a spotlight
+大家的大小… → Everyone's size...
+說再見… → Say goodbye...
+全部收起來 → Hide them all
+設定… → Settings...
+結束肉肉賴桌 → Quit chonkGene
+睡覺中 → asleep
+有起床氣 → grumpy
+玩水池 → Pond
+曬太陽 → Sunbathe
+追蝴蝶 → Chase a butterfly
+啃骨頭 → Chew a bone
+啄種子 → Peck seeds
+飛上樹枝 → Fly to a branch
+水池 → pond
+陽光 → sunbeam
+蝴蝶 → butterfly
+骨頭 → bone
+種子 → seeds
+樹枝 → branch
+聚光燈 → spotlight
+真的要說再見嗎？ → Really say goodbye?
+再按一次 → click again
+
+# Coats.
+赤柴 → Red
+黑色 → Black
+胡麻 → Sesame
+白色 → White
+橘色 → Orange
+灰色 → Grey
+藍灰 → Blue grey
+奶油 → Cream
+銀虎斑 → Silver tabby
+褐色 → Brown
+雪白 → Snowy
+黃色 → Yellow
+烏骨 → Silkie
+金色 → Gold
+夜色 → Night
+雪狐 → Snow fox
+其他 → Other
+
+# Adoption cards.
+固執又愛笑，被戳會翻肚。 → Stubborn and giggly; poke it and it rolls over.
+腿短但很努力，常常跳不上去。 → Short legs, big effort; often misses the jump.
+高冷系，戳多了會厭世。 → Aloof; poke too much and it gives up on you.
+白天打瞌睡，晚上最有精神。 → Dozes by day, wide awake at night.
+好奇又急性子，什麼都想啄一下。 → Curious and hasty; pecks at everything.
+慢半拍，喜歡跟在別人後面走。 → A beat behind; loves to follow others.
+愛惡作劇的小狐仙，坐下會開屏。 → A prankish fox spirit; sits and fans her tails.
+
+# What it says in the preview as its body changes.
+……還不錯。 → ...Not bad.
+……剛好。 → ...Just right.
+……你什麼都沒看到。 → ...You saw nothing.
+……我只是毛多。 → ...It's just fluff.
+……輕飄飄，呱。 → ...Light as air. Quack.
+剛剛好，呱。 → Just right. Quack.
+……變圓了？呱。 → ...Rounder? Quack.
+……麻糬，呱。 → ...Mochi. Quack.
+啾！好輕！ → Peep! So light!
+啾～剛剛好 → Peep~ just right
+啾？肚子變大了？ → Peep? Bigger tummy?
+啾！我是麻糬！ → Peep! I'm a mochi!
+咕，身輕如燕。 → Hoo. Light as a bird.
+咕咕，剛剛好。 → Hoo hoo. Just right.
+咕？好像變圓了 → Hoo? Rounder, maybe.
+咕……麻糬咕。 → Hoo... mochi hoo.
+好輕喔！ → So light!
+剛剛好～ → Just right~
+肚子……變大了？ → My tummy... grew?
+我變成麻糬了…… → I turned into mochi...
+身輕如燕！ → Light as a feather!
+剛剛好的肉肉～ → Perfectly chubby~
+肚子好像變大了？ → Is my tummy bigger?
+我是一顆麻糬。 → I am a mochi.
+輕飄飄，像一陣風～ → Light as a breeze~
+剛剛好，嘻嘻 → Just right, hehe
+尾巴……變胖了？ → My tails... got fat?
+九條尾巴的麻糬！ → A nine-tailed mochi!
+
+# Settings window.
+可攜模式：{path} → Portable: {path}
+肉肉賴桌目前沒有在執行。改動已經存起來，下次開啟時套用。 → chonkGene isn't running. Your changes are saved and apply next time it starts.
+親密度 Lv.{level}（{progress}%） → Bond Lv.{level} ({progress}%)
+已移除開機自動啟動和應用程式選單的捷徑。要完全移除，請結束肉肉賴桌，再刪除這個資料夾：{path} → Removed the start-up entry and the app menu shortcut. To remove it completely, quit chonkGene, then delete this folder: {path}
+肉肉賴桌・設定 → chonkGene · Settings
+肉肉賴桌 → chonkGene
+我的寵物 → My pets
+互動與聲音 → Play & sound
+不打擾 → Quiet
+一般 → General
+領養新寵物 → Adopt a pet
+算了 → Never mind
+先點一隻吧 → Pick one first
+帶牠回家 → Take it home
+＋ 領養新寵物 → ＋ Adopt a pet
+挑一隻帶回你的桌面吧，點牠還能選毛色。 → Pick one for your desktop; click it to choose a coat.
+・ →  ·
+在桌面上 → On the desktop
+關掉就在寵物窩休息。 → Off: it rests in the den.
+確定要和{}說再見嗎？ → Say goodbye to {}?
+牠的名字和親密度會一起消失。 → Its name and bond will be gone for good.
+再想想 → Wait
+說再見 → Goodbye
+名字 → Name
+牠怎麼叫你 → What it calls you
+牠在對話泡泡裡會這樣叫你。 → It calls you this in its speech bubbles.
+毛色 → Coat
+體型 → Body
+標準 → Normal
+略肥（預設） → Chubby (default)
+圓滾滾 → Round
+麻糬 → Mochi
+大小 → Size
+牠在桌面上看起來有多大。 → How big it looks on your desktop.
+個性 → Personality
+怕癢 → Ticklish
+不怕 → Not
+超怕 → Very
+耐性 → Patience
+沒耐性 → Little
+很有耐性 → Lots
+活潑 → Energy
+懶洋洋 → Lazy
+停不下來 → Nonstop
+會影響被戳的時候，是翻肚爆笑還是一臉厭世。 → Decides whether a poke gets a belly-up giggle or a weary stare.
+聲音 → Sound
+聲音模式 → Sounds
+讓牠們叫、笑、打呼。全螢幕時會自動安靜。 → They call, laugh and snore. Quiet when something is full screen.
+音量 → Volume
+非理性模式 → Chaos mode
+兩隻以上時，偶爾會為了小事吵起來，最後一定和好。點吵架中的任何一隻可以勸架。 → With two or more, they squabble over little things now and then, and always make up. Click either one to break it up.
+吵架頻率 → Squabbles
+偶爾 → Sometimes
+常常 → Often
+超常 → Constantly
+全螢幕時躲起來 → Hide during full screen
+看影片、玩遊戲或簡報時，牠們會先躲起來，結束後再回來。 → They hide while you watch, play or present, and come back after.
+陪你打字和看書 → Keep you company
+打字時牠們會跟著拍拍腳，滑鼠停著時會趴下來陪你。只看鍵盤和滑鼠有沒有在用，不會讀你打的字。 → They tap along as you type and lie down when the mouse rests. Only whether the keyboard and mouse are in use is seen, never what you type.
+一鍵收起來 → Hide with one key
+再按一次就叫回來。 → Press again to call them back.
+語言 → Language
+跟著電腦：照電腦的語言顯示。 → System: in your computer's language.
+跟著電腦 → System
+開機時一起醒來 → Start with the computer
+電腦開機後，牠們會自動出現在桌面上。 → They appear on your desktop when the computer starts.
+同時在桌面上的寵物 → Pets on the desktop at once
+寵物越多，用的電腦資源也越多。 → More pets use more of the computer.
+其他的會在寵物窩休息。 → The rest stay in the den.
+{} 隻 → {}
+大家的大小 → Everyone's size
+一次調整所有寵物的大小。 → Resize every pet at once.
+小 → Small
+中 → Medium
+大 → Large
+特大 → Huge
+資料位置 → Data folder
+打開資料夾 → Open folder
+移除所有痕跡 → Remove all traces
+刪除開機自動啟動和應用程式選單的捷徑。之後結束肉肉賴桌、刪掉資料夾，就完全移除了。 → Deletes the start-up entry and the app menu shortcut. Then quit chonkGene and delete the folder, and it's gone completely.
+移除… → Remove...
+肉肉賴桌 {}・不連網，不收集任何資料 → chonkGene {} · offline, collects no data
+
+# The tray.
+收起來 / 叫回來 → Hide / call back
+拿狗尾草逗牠們 / 收起來 → Grass to tease them / put away
+場景 → Scenes

@@ -22,32 +22,37 @@ pub enum TrayCommand {
     Quit,
 }
 
-const TOOLTIP: &str = "肉肉賴桌";
+const TOOLTIP: &str = mark("肉肉賴桌");
 const LABELS: [(&str, TrayCommand); 7] = [
-    ("收起來 / 叫回來", TrayCommand::Toggle),
-    ("拿狗尾草逗牠們 / 收起來", TrayCommand::Toy),
-    ("丟球給牠們", TrayCommand::Ball),
-    ("丟飛盤給牠們", TrayCommand::Frisbee),
-    ("放一把貓薄荷", TrayCommand::Catnip),
-    ("設定…", TrayCommand::Settings),
-    ("結束肉肉賴桌", TrayCommand::Quit),
+    (mark("收起來 / 叫回來"), TrayCommand::Toggle),
+    (mark("拿狗尾草逗牠們 / 收起來"), TrayCommand::Toy),
+    (mark("丟球給牠們"), TrayCommand::Ball),
+    (mark("丟飛盤給牠們"), TrayCommand::Frisbee),
+    (mark("放一把貓薄荷"), TrayCommand::Catnip),
+    (mark("設定…"), TrayCommand::Settings),
+    (mark("結束肉肉賴桌"), TrayCommand::Quit),
 ];
 
 /// The 大家的大小 submenu, after the things to play with: label and percent
 /// (the pet menu and settings offer the same).
-const SIZE_MENU: &str = "大家的大小";
-pub const SIZES: [(&str, u16); 4] = [("小", 70), ("中", 100), ("大", 130), ("特大", 160)];
+const SIZE_MENU: &str = mark("大家的大小");
+pub const SIZES: [(&str, u16); 4] = [
+    (mark("小"), 70),
+    (mark("中"), 100),
+    (mark("大"), 130),
+    (mark("特大"), 160),
+];
 /// The 場景 submenu, before 大家的大小: the pet menu's 「場景…」 rows (the
 /// app maps each place to its scene).
-const SCENE_MENU: &str = "場景";
+const SCENE_MENU: &str = mark("場景");
 pub const SCENES: [&str; 7] = [
-    "玩水池",
-    "曬太陽",
-    "追蝴蝶",
-    "啃骨頭",
-    "啄種子",
-    "飛上樹枝",
-    "狐火",
+    mark("玩水池"),
+    mark("曬太陽"),
+    mark("追蝴蝶"),
+    mark("啃骨頭"),
+    mark("啄種子"),
+    mark("飛上樹枝"),
+    mark("狐火"),
 ];
 /// The submenus go before this entry of [`LABELS`] (設定…).
 const SUBMENUS_BEFORE: usize = 5;
@@ -162,6 +167,7 @@ pub struct Sni {
     on: Box<dyn Fn(TrayCommand) + Send + Sync>,
 }
 
+use chonkgene_core::i18n::mark;
 #[cfg(target_os = "linux")]
 use chonkgene_core::i18n::tr;
 

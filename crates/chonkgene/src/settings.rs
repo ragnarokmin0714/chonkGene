@@ -513,12 +513,13 @@ fn setup(
         ui.set_start_login(s.start_at_login);
         ui.set_desktop_limit(s.on_desktop.min(i32::MAX as u32) as i32);
         ui.set_size_all(common_size(&st.pets));
-        let where_ = if st.data.portable {
-            tr("可攜模式：")
+        let path = st.data.path.display().to_string();
+        let shown = if st.data.portable {
+            trf("可攜模式：{path}", &[("path", &path)])
         } else {
-            ""
+            path
         };
-        ui.set_data_path(format!("{where_}{}", st.data.path.display()).into());
+        ui.set_data_path(shown.into());
         ui.set_version(env!("CARGO_PKG_VERSION").into());
         let species: Vec<SpeciesRow> = Species::ALL
             .into_iter()
@@ -1062,14 +1063,23 @@ mod tests {
         ui.show().unwrap();
         let out = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../target/screens");
         std::fs::create_dir_all(&out).unwrap();
-        for (name, tab, adopting) in [
+        // Each tab in Chinese, then in Japanese and English (the choice in
+        // 一般, as a user would make it: 1 繁體中文, 2 日本語, 3 English).
+        let shots = [
             ("pets", 0, false),
             ("adopt", 0, true),
             ("adopt-fox", 0, true),
             ("play", 1, false),
             ("quiet", 2, false),
             ("general", 3, false),
-        ] {
+        ];
+        for (lang, pick, (name, tab, adopting)) in [("", 1, ()), ("-ja", 2, ()), ("-en", 3, ())]
+            .into_iter()
+            .flat_map(|(l, p, ())| shots.into_iter().map(move |s| (l, p, s)))
+        {
+            if name == "pets" {
+                ui.invoke_language_picked(pick);
+            }
             ui.set_tab(tab);
             ui.set_adopting(adopting);
             if name == "adopt" {
@@ -1091,7 +1101,7 @@ mod tests {
             for (px, d) in buf.iter().zip(dst) {
                 *d = [px.r, px.g, px.b, 255];
             }
-            pm.save_png(out.join(format!("settings-{name}.png")))
+            pm.save_png(out.join(format!("settings-{name}{lang}.png")))
                 .unwrap();
         }
         let _ = std::fs::remove_dir_all(&dir);
