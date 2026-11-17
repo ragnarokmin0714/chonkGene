@@ -136,6 +136,10 @@ struct ModelFile {
     /// The skinned mesh's picture, world units (see [`Model::canvas`]).
     #[serde(default)]
     canvas: Option<(f32, f32)>,
+    /// Hair colours, chosen apart from the coat (see [`Model::hairs`]):
+    /// each names only the slots it changes.
+    #[serde(default)]
+    hairs: Vec<CoatFile>,
 }
 
 #[derive(Deserialize)]
@@ -228,6 +232,10 @@ struct PartFile {
     /// Smooth-union radius with the parts before it.
     #[serde(default)]
     blend: f32,
+    /// Only in this style (a hairdo, see [`Model::styled`]); in every
+    /// style if none.
+    #[serde(default)]
+    style: Option<String>,
     color: String,
     #[serde(default)]
     gloss: f32,
@@ -395,6 +403,8 @@ pub struct Part {
     pub mirror: bool,
     pub zone: u8,
     pub marks: Vec<Mark>,
+    /// The style (hairdo) it belongs to; in all of them if none.
+    pub style: Option<String>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -598,6 +608,16 @@ pub struct Model {
     /// above the floor line), for a pet that reaches further than most
     /// (the fox's fan of tails); none for the usual size.
     pub canvas: Option<(f32, f32)>,
+    /// Hair colours chosen apart from the coat (the fox's human form): the
+    /// slots each one sets, over whatever the coat says.
+    pub hairs: Vec<Dye>,
+}
+
+/// Colours for a few slots, laid over a coat's (a hair colour).
+#[derive(Clone, Debug)]
+pub struct Dye {
+    pub name: String,
+    pub colors: Vec<(usize, [u8; 4])>,
 }
 
 impl Model {
@@ -623,6 +643,55 @@ impl Model {
 
     pub fn part(&self, name: &str) -> Option<usize> {
         self.parts.iter().position(|p| p.name == name)
+    }
+
+    /// The styles (hairdos) its parts name, in the order they first come.
+    pub fn styles(&self) -> Vec<&str> {
+        let mut out: Vec<&str> = Vec::new();
+        for s in self.parts.iter().filter_map(|p| p.style.as_deref()) {
+            if !out.contains(&s) {
+                out.push(s);
+            }
+        }
+        out
+    }
+
+    /// The model in one style: the parts of every other style left out.
+    /// An unknown style, or a model without styles, keeps its first style.
+    pub fn styled(&self, style: &str) -> Model {
+        let styles = self.styles();
+        let Some(&keep) = styles.iter().find(|s| **s == style).or(styles.first()) else {
+            return self.clone();
+        };
+        let mut out = self.clone();
+        let mut index = Vec::with_capacity(self.parts.len());
+        out.parts.clear();
+        for p in &self.parts {
+            if p.style.as_deref().is_none_or(|s| s == keep) {
+                index.push(Some(out.parts.len()));
+                out.parts.push(p.clone());
+            } else {
+                index.push(None);
+            }
+        }
+        // The face is painted on parts every style has (checked on parse).
+        out.face.on = index[self.face.on].unwrap_or(0);
+        out.face.mouth_on = self.face.mouth_on.and_then(|m| index[m]);
+        out
+    }
+
+    /// The model with hair colour `name` laid over every coat; unchanged
+    /// if it has no such hair colour.
+    pub fn dyed(&self, name: &str) -> Model {
+        let mut out = self.clone();
+        if let Some(dye) = self.hairs.iter().find(|d| d.name == name) {
+            for coat in &mut out.coats {
+                for &(slot, c) in &dye.colors {
+                    coat.colors[slot] = c;
+                }
+            }
+        }
+        out
     }
 }
 
@@ -774,6 +843,7 @@ fn resolve(file: ModelFile, shared: HashMap<String, PoseFile>) -> Result<Model, 
             mirror: p.mirror,
             zone: zone(&p.zone)?,
             marks,
+            style: p.style.clone(),
         });
     }
     let part = |name: &str| {
@@ -794,6 +864,15 @@ fn resolve(file: ModelFile, shared: HashMap<String, PoseFile>) -> Result<Model, 
             slot: slot(&s.color)?,
         })
     };
+    for name in std::iter::once(&f.on).chain(f.mouth_on.as_ref()) {
+        if file
+            .parts
+            .iter()
+            .any(|p| p.name == *name && p.style.is_some())
+        {
+            return Err(ctx(format!("face part {name:?} belongs to one style")));
+        }
+    }
     let face = Face {
         on: part(&f.on)?,
         mouth_on: f.mouth_on.as_deref().map(part).transpose()?,
@@ -859,6 +938,21 @@ fn resolve(file: ModelFile, shared: HashMap<String, PoseFile>) -> Result<Model, 
         poses.push(pose);
     }
 
+    let mut hairs = Vec::new();
+    for h in &file.hairs {
+        let mut colors = Vec::new();
+        for (s, hex) in &h.colors {
+            let c = parse_hex(hex)
+                .ok_or_else(|| ctx(format!("hair {:?}: bad colour {hex:?}", h.name)))?;
+            colors.push((slot(s)?, c));
+        }
+        colors.sort_by_key(|(s, _)| *s);
+        hairs.push(Dye {
+            name: h.name.clone(),
+            colors,
+        });
+    }
+
     let mut jiggles = Vec::new();
     for j in &file.jiggles {
         let parent = bones.iter().position(|b| *b == j.parent).ok_or_else(|| {
@@ -905,6 +999,7 @@ fn resolve(file: ModelFile, shared: HashMap<String, PoseFile>) -> Result<Model, 
         canvas: file
             .canvas
             .map(|(w, h)| (w.clamp(2.0, 12.0), h.clamp(2.0, 12.0))),
+        hairs,
     })
 }
 

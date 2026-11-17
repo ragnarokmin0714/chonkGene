@@ -29,7 +29,7 @@ use chonkgene_render::gpu::Gpu;
 use chonkgene_render::mesh::bake;
 use chonkgene_render::mesh_gpu::MeshCanvas;
 use chonkgene_render::raymarch;
-use chonkgene_render::skin::{Gesture, Skeleton, mesh_model};
+use chonkgene_render::skin::{Gesture, Joint, Skeleton, human, mesh_model};
 use chonkgene_render::waddle::Mover;
 use chonkgene_rig::math::v3;
 use chonkgene_rig::{Layer, Look, Model, Pose, PoseId, Scene};
@@ -339,12 +339,21 @@ fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let (Some(mode), Some(id), Some(out)) = (args.first(), args.get(1), args.get(2)) else {
         eprintln!(
-            "usage: mesh peek|walk|sit|lie|look|fidget|life|smile|scene|<gesture> <species> <out dir> [scale] [coat]"
+            "usage: mesh peek|still|walk|sit|lie|look|fidget|life|smile|scene|<gesture> <species> <out dir> [scale] [coat]"
         );
         std::process::exit(2);
     };
     let scale: f32 = args.get(3).and_then(|s| s.parse().ok()).unwrap_or(1.0);
-    let (model, sk) = mesh_model(id).unwrap_or_else(|e| panic!("{e}"));
+    // `fox-human`: her human form, in hairdo `STYLE` and hair colour
+    // `HAIR` from the environment.
+    let (model, sk) = match id.strip_suffix("-human") {
+        Some(id) => {
+            let env = |k: &str| std::env::var(k).unwrap_or_default();
+            human(id, &env("STYLE"), &env("HAIR"))
+        }
+        None => mesh_model(id),
+    }
+    .unwrap_or_else(|e| panic!("{e}"));
     let coat = args
         .get(4)
         .map(|c| model.coat(c).unwrap_or_else(|| panic!("no coat {c:?}")))
@@ -352,6 +361,7 @@ fn main() {
     std::fs::create_dir_all(out).expect("out dir");
     let script = match mode.as_str() {
         "peek" => return peek(&model, out),
+        "still" => return still(&model, &sk, coat, out, scale),
         "walk" => walk(),
         "sit" => sit(),
         "lie" => lie(),
@@ -382,6 +392,47 @@ fn peek(model: &Model, out: &str) {
         px.save_png(format!("{out}/peek-{yaw:03}.png"))
             .expect("png");
     }
+}
+
+/// The mesh at rest from the front, three quarters, the side and the
+/// back, side by side in `still.png`, as the app's renderer draws it.
+fn still(model: &Model, sk: &Skeleton, coat: usize, out: &str, scale: f32) {
+    let mesh = bake(model, sk, coat, 0.33, model.bake_cell).expect("bake");
+    println!(
+        "baked {} vertices, {} bones",
+        mesh.vertices.len(),
+        sk.names.len()
+    );
+    let gpu = Gpu::new().expect("gpu");
+    let (cw, ch) = model.canvas.unwrap_or((4.5, 3.3));
+    let (w, h) = (
+        (cw * PPU * scale).ceil() as u32,
+        (ch * PPU * scale).ceil() as u32,
+    );
+    let mut canvas = MeshCanvas::new(&gpu, &mesh, w, h, scale);
+    let face = Scene::posed(model, coat, 0.33, &Pose::default(), Look::Open, Layer::All);
+    let yaws = [0.0, 35.0, 90.0, 180.0];
+    let mut sheet = Pixmap::new(w * yaws.len() as u32, h).expect("sheet");
+    sheet.fill(Color::from_rgba8(236, 236, 240, 255));
+    let mut frame = Pixmap::new(w, h).expect("frame");
+    for (i, yaw) in yaws.into_iter().enumerate() {
+        let mut joints = vec![Joint::default(); sk.names.len()];
+        joints[0].rot.y = yaw;
+        let bones = sk.pose(&joints);
+        frame.fill(Color::TRANSPARENT);
+        canvas
+            .draw(&gpu, &face, &bones, yaw, &mut frame)
+            .expect("draw");
+        sheet.draw_pixmap(
+            (i as u32 * w) as i32,
+            0,
+            frame.as_ref(),
+            &PixmapPaint::default(),
+            Transform::identity(),
+            None,
+        );
+    }
+    sheet.save_png(format!("{out}/still.png")).expect("png");
 }
 
 fn run(

@@ -5,7 +5,9 @@ use chonkgene_render::gpu::Gpu;
 use chonkgene_render::mesh::bake;
 use chonkgene_render::mesh_gpu::{MAX_BONES, MeshCanvas};
 use chonkgene_render::raymarch;
-use chonkgene_render::skin::{BIPED_SPECIES, QUAD_SPECIES, Skeleton, Walk, mesh_model, quad};
+use chonkgene_render::skin::{
+    BIPED_SPECIES, QUAD_SPECIES, Skeleton, Walk, human, human_model, mesh_model, quad,
+};
 use chonkgene_render::waddle::Mover;
 use chonkgene_rig::math::{M3, V3, v3};
 use chonkgene_rig::{Layer, Look, Model, Pose, Scene};
@@ -2162,4 +2164,50 @@ fn hug_hands_press_in_on_its_sides_and_let_go() {
         after.abs_diff(before) <= 1,
         "let go {after} px wide, {before} before"
     );
+}
+
+#[test]
+fn the_fox_human_form_fits_the_shader_and_stands_on_her_feet() {
+    let model = human_model("fox").unwrap();
+    assert_eq!(model.styles(), ["ponytail", "twintails", "princess"]);
+    let hairs: Vec<&str> = model.hairs.iter().map(|h| h.name.as_str()).collect();
+    assert_eq!(hairs, ["white", "red", "gold", "night"]);
+    // The shaders hold sixteen colours (gpu.rs `PALETTE`).
+    assert!(
+        model.slots.len() <= 16,
+        "{} colour slots",
+        model.slots.len()
+    );
+    for style in model.styles() {
+        let (model, sk) = human("fox", style, "red").unwrap();
+        assert!(
+            sk.names.len() <= MAX_BONES,
+            "{style}: {} bones",
+            sk.names.len()
+        );
+        assert_eq!(model.parts[model.face.on].name, "head", "{style}");
+        assert_eq!(
+            model.face.mouth_on.map(|m| model.parts[m].name.as_str()),
+            Some("mouth")
+        );
+        let mesh = bake(&model, &sk, 0, 0.33, model.bake_cell).unwrap();
+        // The shadow is under her feet and skirt; the tails, held up off
+        // the floor, do not spread it.
+        let (across, along) = mesh.shadow;
+        assert!(
+            (0.3..0.7).contains(&across),
+            "{style}: shadow across {across}"
+        );
+        assert!((0.3..0.7).contains(&along), "{style}: shadow along {along}");
+    }
+    // The hair's colour is laid over every coat; an unknown hairdo is the
+    // first (a save from a later version).
+    let (red, _) = human("fox", "nonsense", "red").unwrap();
+    let hair = red.slots.iter().position(|s| s == "hair").unwrap();
+    assert!(
+        red.coats
+            .iter()
+            .all(|c| c.colors[hair] == [0xD6, 0x3A, 0x2E, 0xFF])
+    );
+    assert!(red.part("pony").is_some() && red.part("twin_l").is_none());
 }

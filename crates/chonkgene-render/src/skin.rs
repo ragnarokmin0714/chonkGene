@@ -91,6 +91,25 @@ pub fn biped(id: &str) -> Result<(Model, Skeleton), String> {
     Ok((model, sk))
 }
 
+/// A pet's human form with every hairdo and hair colour in it (see
+/// [`human`]), for listing them.
+pub fn human_model(id: &str) -> Result<Model, String> {
+    let src = match id {
+        "fox" => include_str!("../../../assets/species/fox/human.ron"),
+        _ => return Err(format!("no human form {id:?}")),
+    };
+    Model::parse(src, builtin::POSES).map_err(|e| e.to_string())
+}
+
+/// A pet's human form (only the fox has one, PLAN §8: her 人型形態): a
+/// two-legged child's model in hairdo `style` and hair colour `hair`
+/// (unknown ones fall back to the first), and its skeleton.
+pub fn human(id: &str, style: &str, hair: &str) -> Result<(Model, Skeleton), String> {
+    let model = human_model(id)?.styled(style).dyed(hair);
+    let sk = Skeleton::new(&model);
+    Ok((model, sk))
+}
+
 /// A four-legged model (`shiba`, `fox`, `munchkin`, `fold`) and its skeleton.
 pub fn quad(id: &str) -> Result<(Model, Skeleton), String> {
     let src = match id {
