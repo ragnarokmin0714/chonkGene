@@ -371,3 +371,120 @@ fn weigh(parts: &[chonkgene_rig::PartView], sk: &Skeleton, p: V3) -> ([u32; 4], 
     }
     (bones, weights)
 }
+
+/// Add a mesh made elsewhere (by a Blender script beside the model, e.g.
+/// `assets/species/fox/hair_blend.py`: hair strands, sharp edges and
+/// tapering tips that a blend of rounded shapes cannot make) to `mesh`,
+/// in zone `zone`. `src` is text, one item a line:
+///
+/// - `v x y z  nx ny nz  slot slot t  gloss fuzz ao  bone weight …`: a
+///   vertex at rest, its normal, its colour (the model's two colour slots
+///   by name, mixed `t` of the way to the second), its shine, fuzz and
+///   ambient occlusion, and up to four bones by name with their weights;
+/// - `f a b c`: a triangle, the vertices counted from 0 in this file.
+///
+/// The colours come from `model`'s coat `coat`, so a dyed model dyes it.
+/// Nothing here is painted (no face) and nothing is a tail.
+pub fn import(
+    mesh: &mut Mesh,
+    model: &Model,
+    sk: &Skeleton,
+    coat: usize,
+    zone: &str,
+    src: &str,
+) -> Result<(), String> {
+    let zone = ZONES
+        .iter()
+        .position(|z| *z == zone)
+        .ok_or_else(|| format!("no zone {zone:?}"))? as u8;
+    let colors = &model
+        .coats
+        .get(coat)
+        .ok_or_else(|| format!("no coat {coat}"))?
+        .colors;
+    let slot = |name: &str| -> Result<V3, String> {
+        let i = model
+            .slots
+            .iter()
+            .position(|s| s == name)
+            .ok_or_else(|| format!("no colour slot {name:?}"))?;
+        let c = colors[i];
+        Ok(v3(c[0] as f32, c[1] as f32, c[2] as f32) / 255.0)
+    };
+    let base = mesh.vertices.len() as u32;
+    let mut count = 0u32;
+    for (n, line) in src.lines().enumerate() {
+        let bad = |what: &str| format!("line {}: {what}: {line:?}", n + 1);
+        let mut it = line.split_whitespace();
+        let num = |s: Option<&str>| -> Result<f32, String> {
+            s.and_then(|s| s.parse().ok())
+                .ok_or_else(|| bad("a number"))
+        };
+        match it.next() {
+            Some("v") => {
+                let mut f = [0.0f32; 6];
+                for x in &mut f {
+                    *x = num(it.next())?;
+                }
+                let a = slot(it.next().ok_or_else(|| bad("a colour"))?)?;
+                let b = slot(it.next().ok_or_else(|| bad("a colour"))?)?;
+                let t = num(it.next())?;
+                let (gloss, fuzz, ao) = (num(it.next())?, num(it.next())?, num(it.next())?);
+                let mut bones = [0u32; 4];
+                let mut weights = [0.0f32; 4];
+                let mut k = 0;
+                while let Some(name) = it.next() {
+                    if k == 4 {
+                        return Err(bad("more than four bones"));
+                    }
+                    let b = sk.bone(name).ok_or_else(|| bad("no such bone"))?;
+                    bones[k] = b as u32;
+                    weights[k] = num(it.next())?;
+                    k += 1;
+                }
+                let sum: f32 = weights.iter().sum();
+                if k == 0 || sum <= 0.0 {
+                    return Err(bad("no bone"));
+                }
+                for w in &mut weights {
+                    *w /= sum;
+                }
+                let c = a.lerp(b, t);
+                mesh.vertices.push(Vertex {
+                    pos: [f[0], f[1], f[2], ao],
+                    normal: [f[3], f[4], f[5], gloss],
+                    color: [c.x, c.y, c.z, fuzz],
+                    eye: [0.0; 4],
+                    mouth: [0.0; 4],
+                    bones,
+                    weights,
+                });
+                mesh.zones.push(zone);
+                count += 1;
+            }
+            Some("f") => {
+                for _ in 0..3 {
+                    let i: u32 = it
+                        .next()
+                        .and_then(|s| s.parse().ok())
+                        .ok_or_else(|| bad("a vertex"))?;
+                    mesh.indices.push(base + i);
+                }
+            }
+            Some(_) => return Err(bad("not a v or an f")),
+            None => {}
+        }
+    }
+    if let Some(&i) = mesh.indices[..].iter().find(|&&i| i >= base + count) {
+        return Err(format!("a triangle names vertex {} of {count}", i - base));
+    }
+    // The crown (where bubbles hang from) may now be the top of the hair.
+    let head = ZONES.iter().position(|z| *z == "head").map(|h| h as u8);
+    if let Some(top) = (0..mesh.vertices.len())
+        .filter(|&i| Some(mesh.zones[i]) == head)
+        .max_by(|&a, &b| mesh.vertices[a].pos[1].total_cmp(&mesh.vertices[b].pos[1]))
+    {
+        mesh.crown = top;
+    }
+    Ok(())
+}

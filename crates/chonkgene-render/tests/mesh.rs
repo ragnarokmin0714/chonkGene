@@ -2291,6 +2291,66 @@ fn the_fox_child_swings_her_arms_and_her_tails_and_hair_flow() {
     }
 }
 
+/// A mesh made in Blender (`assets/species/fox/hair_blend.py`) joins the
+/// baked one: its colours come from the coat (dyed, so the hair's colour
+/// follows), its bones by name, its weights summing to one; the model
+/// without the parts it replaces keeps its face on the head; a bad file
+/// says what is wrong with it.
+#[test]
+fn a_mesh_made_elsewhere_joins_the_baked_one() {
+    use chonkgene_render::mesh::{Mesh, import};
+    let (model, sk) = human("fox", "ponytail", "red").unwrap();
+    let bald = model.only(|p| !p.name.starts_with("pony") && !p.name.starts_with("hair"));
+    assert!(bald.parts.len() < model.parts.len());
+    assert_eq!(bald.parts[bald.face.on].name, "head");
+    let empty = || Mesh {
+        vertices: Vec::new(),
+        indices: Vec::new(),
+        eye_r: V3::ONE,
+        mouth_r: V3::ONE,
+        shadow: (0.5, 0.5),
+        zones: Vec::new(),
+        crown: 0,
+    };
+    let src = "v 0 1.5 0  0 1 0  hair hairtip 0.5  0.45 0.05 0.9  head 3 hair_b 1\n\
+               v 0.1 1.4 0  0 1 0  hair hair 0  0.45 0.05 1  head 1\n\
+               v 0 1.4 0.1  0 1 0  ribbon ribbon 0  0 0 1  hair_b 1\n\
+               f 0 1 2\n";
+    let mut mesh = empty();
+    import(&mut mesh, &model, &sk, 0, "head", src).unwrap();
+    assert_eq!((mesh.vertices.len(), mesh.indices.len()), (3, 3));
+    let v = &mesh.vertices[0];
+    assert_eq!(
+        v.bones[..2],
+        [
+            sk.bone("head").unwrap() as u32,
+            sk.bone("hair_b").unwrap() as u32
+        ]
+    );
+    assert!((v.weights[0] - 0.75).abs() < 1e-6 && (v.weights[1] - 0.25).abs() < 1e-6);
+    assert_eq!(v.pos[3], 0.9);
+    // Red hair (#D8322A) halfway to its gold tips (#F9B84E).
+    let half = |a: u8, b: u8| (a as f32 + b as f32) / 2.0 / 255.0;
+    assert!((v.color[0] - half(0xD8, 0xF9)).abs() < 1e-4);
+    assert!((v.color[2] - half(0x2A, 0x4E)).abs() < 1e-4);
+    assert_eq!(mesh.crown, 0, "the top of the hair is the crown");
+    for (bad, says) in [
+        ("v 0 0 0 0 1 0 hair hair 0 0 0 1 nobone 1\n", "no such bone"),
+        (
+            "v 0 0 0 0 1 0 nocolour hair 0 0 0 1 head 1\n",
+            "no colour slot",
+        ),
+        (
+            "v 0 0 0 0 1 0 hair hair 0 0 0 1 head 1\nf 0 0 1\n",
+            "names vertex 1",
+        ),
+        ("x 1 2 3\n", "not a v or an f"),
+    ] {
+        let err = import(&mut empty(), &model, &sk, 0, "head", bad).unwrap_err();
+        assert!(err.contains(says), "{bad:?}: {err}");
+    }
+}
+
 /// The middle bone of the first tail.
 fn chain_name<'a>(sk: &'a Skeleton, tails: &[Vec<usize>]) -> &'a str {
     &sk.names[tails[0][tails[0].len() / 2]]

@@ -523,7 +523,7 @@ HEADER = '''// 九尾狐's human form (人型形態). Written by gen_human.py (t
     // The hair's colour, chosen apart from the coat (Roger: white by
     // default). 紅髮 is red fading to gold at the ends, as in his picture.
     hairs: [
-        (name: "white", colors: {"hair": "#E9EDF5", "hairtip": "#CCD6E6"}),
+        (name: "white", colors: {"hair": "#E6EBF3", "hairtip": "#B2BDD1"}),
         (name: "red", colors: {"hair": "#D8322A", "hairtip": "#F9B84E"}),
         (name: "gold", colors: {"hair": "#EFA04C", "hairtip": "#FFE3B5"}),
         (name: "night", colors: {"hair": "#4B4262", "hairtip": "#8A96D6"}),

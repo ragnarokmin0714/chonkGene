@@ -26,7 +26,7 @@ use std::time::Instant;
 use chonkgene_core::anim::{Act, gesture_secs};
 use chonkgene_render::fidget::Tongue;
 use chonkgene_render::gpu::Gpu;
-use chonkgene_render::mesh::bake;
+use chonkgene_render::mesh::{Mesh, bake, import};
 use chonkgene_render::mesh_gpu::MeshCanvas;
 use chonkgene_render::raymarch;
 use chonkgene_render::skin::{Gesture, Joint, Skeleton, human, mesh_model};
@@ -381,6 +381,25 @@ fn main() {
     run(&model, &sk, coat, out, scale, mode, script);
 }
 
+/// The parts a hair mesh (`HAIR_MESH`) takes the place of.
+const HAIR_PARTS: [&str; 9] = [
+    "hair", "clump", "lock", "side", "bang", "fringe", "pony", "twin", "mane",
+];
+
+/// The model baked; with `HAIR_MESH=<file>` (a mesh made in Blender, see
+/// `chonkgene_render::mesh::import`), its hair parts left out of the bake
+/// and that mesh added instead.
+fn baked(model: &Model, sk: &Skeleton, coat: usize, cell: f32) -> Mesh {
+    let Ok(file) = std::env::var("HAIR_MESH") else {
+        return bake(model, sk, coat, 0.33, cell).expect("bake");
+    };
+    let bald = model.only(|p| !HAIR_PARTS.iter().any(|h| p.name.starts_with(h)));
+    let mut mesh = bake(&bald, sk, coat, 0.33, cell).expect("bake");
+    let src = std::fs::read_to_string(&file).unwrap_or_else(|e| panic!("{file}: {e}"));
+    import(&mut mesh, model, sk, coat, "head", &src).unwrap_or_else(|e| panic!("{file}: {e}"));
+    mesh
+}
+
 fn peek(model: &Model, out: &str) {
     for yaw in [0.0, 45.0, 90.0, 180.0] {
         let mut pose = model.pose(PoseId::Sit).clone();
@@ -397,7 +416,7 @@ fn peek(model: &Model, out: &str) {
 /// The mesh at rest from the front, three quarters, the side and the
 /// back, side by side in `still.png`, as the app's renderer draws it.
 fn still(model: &Model, sk: &Skeleton, coat: usize, out: &str, scale: f32) {
-    let mesh = bake(model, sk, coat, 0.33, model.bake_cell).expect("bake");
+    let mesh = baked(model, sk, coat, model.bake_cell);
     println!(
         "baked {} vertices, {} bones",
         mesh.vertices.len(),
@@ -450,7 +469,7 @@ fn run(
         .ok()
         .and_then(|c| c.parse().ok())
         .unwrap_or(model.bake_cell);
-    let mesh = bake(model, sk, coat, 0.33, cell).expect("bake");
+    let mesh = baked(model, sk, coat, cell);
     println!(
         "baked {} vertices, {} triangles in {:.2} s",
         mesh.vertices.len(),

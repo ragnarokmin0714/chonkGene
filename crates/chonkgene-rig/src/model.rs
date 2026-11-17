@@ -684,11 +684,18 @@ impl Model {
         let Some(&keep) = styles.iter().find(|s| **s == style).or(styles.first()) else {
             return self.clone();
         };
+        self.only(|p| p.style.as_deref().is_none_or(|s| s == keep))
+    }
+
+    /// The model with only the parts `keep` keeps (the face stays on its
+    /// part, which every caller keeps): parts made elsewhere instead, as a
+    /// mesh (see `chonkgene_render::mesh::import`), are left out of the bake.
+    pub fn only(&self, keep: impl Fn(&Part) -> bool) -> Model {
         let mut out = self.clone();
         let mut index = Vec::with_capacity(self.parts.len());
         out.parts.clear();
         for p in &self.parts {
-            if p.style.as_deref().is_none_or(|s| s == keep) {
+            if keep(p) {
                 index.push(Some(out.parts.len()));
                 out.parts.push(p.clone());
             } else {

@@ -8,3 +8,6 @@ docs/icon-drafts/
 
 # Downloaded sources of the recorded sounds (tools/soundbake).
 /tools/soundbake/cache/
+
+# The Blender hair pilot's output (assets/species/fox/hair_blend.py): not shipped yet.
+/assets/species/*/hair_*.mesh
