@@ -147,6 +147,13 @@ pub fn size(model: &Model, scale: f32) -> (u32, u32) {
     )
 }
 
+/// The scale to draw `model` at: `scale` (the UI's), or less if the menu
+/// would be taller than `room` pixels (the work area), down to half.
+pub fn fit_scale(model: &Model, scale: f32, room: f32) -> f32 {
+    let tall = height(model) + 2.0 * SHADOW;
+    scale.min(room / tall).max(0.5 * scale.min(1.0))
+}
+
 pub fn draw(face: &mut Face, model: &Model, hover: Option<usize>, scale: f32) -> Option<Drawn> {
     let (pw, ph) = size(model, scale);
     let mut pm = Pixmap::new(pw, ph)?;
@@ -818,4 +825,43 @@ pub fn row_at(drawn: &Drawn, x: f32, y: f32) -> Option<usize> {
         .rows
         .iter()
         .position(|r| x >= r.left() && x < r.right() && y >= r.top() && y < r.bottom())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn rows(n: usize) -> Model {
+        Model {
+            name: "小柴".into(),
+            species: "柴犬".into(),
+            level: 1,
+            progress: 0.0,
+            status: None,
+            grumpy: false,
+            avatar: ([0; 4], [0; 4]),
+            items: (0..n)
+                .map(|k| Item {
+                    label: format!("{k}"),
+                    hint: None,
+                    icon: Icon::Paw,
+                    separated: k == n - 1,
+                })
+                .collect(),
+        }
+    }
+
+    /// Roger (2026-11-17): the first page ran off a short screen. A menu
+    /// that fits keeps the UI's scale; one that does not shrinks to fit.
+    #[test]
+    fn a_menu_taller_than_the_screen_is_drawn_smaller_to_fit() {
+        let short = rows(6);
+        assert_eq!(fit_scale(&short, 1.25, 1000.0), 1.25);
+        let long = rows(20);
+        let s = fit_scale(&long, 1.25, 1000.0);
+        assert!(s < 1.25);
+        assert!(size(&long, s).1 <= 1000, "{:?}", size(&long, s));
+        // Never below half, however short the screen.
+        assert_eq!(fit_scale(&long, 1.0, 100.0), 0.5);
+    }
 }

@@ -332,6 +332,10 @@ enum Page {
     HugHow,
     /// Its scenes (場景…), or why not now.
     Scenes,
+    /// Things to take out and play with (一起玩…): the grass stalk, a
+    /// ball, a frisbee, catnip, the spotlight. Kept off the first page so
+    /// it fits on a screen (Roger, 2026-11-17: nineteen rows ran off it).
+    Toys,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -379,6 +383,8 @@ enum Action {
     EndScene,
     /// The page of sizes for every pet at once, and one of them.
     Sizes,
+    /// The page of things to play with (一起玩…).
+    Toys,
     /// Percent.
     SizeAll(u16),
 }
@@ -392,6 +398,8 @@ struct Menu {
     actions: Vec<Action>,
     hover: Option<usize>,
     pos: (i32, i32),
+    /// Drawn at this scale: the UI's, or less to fit on the screen.
+    scale: f32,
     /// Outside clicks count only after every button was released once.
     armed: bool,
     /// The 「說再見」 row was clicked once and now asks to be sure.
@@ -1518,6 +1526,52 @@ impl App {
             actions.push(Action::Back);
             return self.show_menu(el, i, items, actions, at);
         }
+        if page == Page::Toys {
+            let mut items = vec![
+                item(
+                    if self.toy.is_some() {
+                        tr("把狗尾草收起來")
+                    } else {
+                        tr("拿狗尾草逗牠們")
+                    },
+                    None,
+                    Icon::Grass,
+                    false,
+                ),
+                item(tr("丟球給牠們"), None, Icon::Ball, false),
+                item(tr("丟飛盤給牠們"), None, Icon::Frisbee, false),
+                item(
+                    if self.play.has(Thing::Catnip) {
+                        tr("把貓薄荷收起來")
+                    } else {
+                        tr("放一把貓薄荷")
+                    },
+                    None,
+                    Icon::Leaf,
+                    false,
+                ),
+                item(
+                    if self.play.stage.is_some() {
+                        tr("把聚光燈收起來")
+                    } else {
+                        tr("放聚光燈")
+                    },
+                    None,
+                    Icon::Spotlight,
+                    false,
+                ),
+            ];
+            let mut actions = vec![
+                Action::Toy,
+                Action::Throw(Thing::Ball),
+                Action::Throw(Thing::Frisbee),
+                Action::Catnip,
+                Action::Stage,
+            ];
+            items.push(item(tr("返回"), None, Icon::Back, true));
+            actions.push(Action::Back);
+            return self.show_menu(el, i, items, actions, at);
+        }
         if page == Page::Commands {
             let mut items: Vec<Item> = [tr("坐下"), tr("趴下"), tr("過來"), tr("轉圈"), tr("握手")]
                 .iter()
@@ -1574,19 +1628,7 @@ impl App {
             items.push(item(tr("讓牠去睡覺"), None, Icon::Moon, false));
             actions.push(Action::Sleep);
         }
-        items.push(item(
-            if self.toy.is_some() {
-                tr("把狗尾草收起來")
-            } else {
-                tr("拿狗尾草逗牠們")
-            },
-            None,
-            Icon::Grass,
-            false,
-        ));
-        actions.push(Action::Toy);
-        // Things to play with (PLAN §8, Roger's fourth pass, item 2, and
-        // "Catnip"); asking it to do something only while it is awake.
+        // Asking it to do something only while it is awake.
         if !asleep {
             items.push(item(tr("叫牠…"), None, Icon::Paw, false));
             actions.push(Action::Commands);
@@ -1600,32 +1642,10 @@ impl App {
         }
         items.push(item(tr("場景…"), None, Icon::Scenery, false));
         actions.push(Action::Scenes);
-        items.push(item(tr("丟球給牠們"), None, Icon::Ball, false));
-        actions.push(Action::Throw(Thing::Ball));
-        items.push(item(tr("丟飛盤給牠們"), None, Icon::Frisbee, false));
-        actions.push(Action::Throw(Thing::Frisbee));
-        items.push(item(
-            if self.play.has(Thing::Catnip) {
-                tr("把貓薄荷收起來")
-            } else {
-                tr("放一把貓薄荷")
-            },
-            None,
-            Icon::Leaf,
-            false,
-        ));
-        actions.push(Action::Catnip);
-        items.push(item(
-            if self.play.stage.is_some() {
-                tr("把聚光燈收起來")
-            } else {
-                tr("放聚光燈")
-            },
-            None,
-            Icon::Spotlight,
-            false,
-        ));
-        actions.push(Action::Stage);
+        // Things to play with (PLAN §8, Roger's fourth pass, item 2, and
+        // "Catnip"), on a page of their own.
+        items.push(item(tr("一起玩…"), None, Icon::Ball, false));
+        actions.push(Action::Toys);
         items.push(item(tr("大家的大小…"), None, Icon::Size, false));
         actions.push(Action::Sizes);
         items.push(item(tr("說再見…"), None, Icon::Bye, false));
@@ -1676,7 +1696,10 @@ impl App {
             avatar,
             items,
         };
-        let Some(drawn) = menu::draw(&mut self.ui_face, &model, None, self.ui_scale) else {
+        // A long page on a short screen (or a big UI scale) is drawn
+        // smaller rather than run off the bottom.
+        let scale = menu::fit_scale(&model, self.ui_scale, self.area.h);
+        let Some(drawn) = menu::draw(&mut self.ui_face, &model, None, scale) else {
             return;
         };
         let (w, h) = (drawn.pixmap.width() as i32, drawn.pixmap.height() as i32);
@@ -1714,6 +1737,7 @@ impl App {
             actions,
             hover: None,
             pos,
+            scale,
             armed: false,
             sure: false,
         });
@@ -1723,7 +1747,7 @@ impl App {
         let (Some(m), Some(shared)) = (&mut self.menu, &self.shared) else {
             return;
         };
-        if let Some(drawn) = menu::draw(&mut self.ui_face, &m.model, m.hover, self.ui_scale) {
+        if let Some(drawn) = menu::draw(&mut self.ui_face, &m.model, m.hover, m.scale) {
             m.drawn = drawn;
             if let Err(e) = m.presenter.present(shared, &m.drawn.pixmap) {
                 eprintln!("present failed: {e}");
@@ -1742,6 +1766,7 @@ impl App {
             | Action::HugWho
             | Action::Sizes
             | Action::Scenes
+            | Action::Toys
             | Action::HugHow => {
                 let page = match action {
                     Action::Commands => Page::Commands,
@@ -1750,6 +1775,7 @@ impl App {
                     Action::Sizes => Page::Sizes,
                     Action::HugHow => Page::HugHow,
                     Action::Scenes => Page::Scenes,
+                    Action::Toys => Page::Toys,
                     _ => Page::Main,
                 };
                 if let Some(i) = self.pets.iter().position(|p| p.save.id == pet) {
