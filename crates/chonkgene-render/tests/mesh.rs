@@ -2345,8 +2345,9 @@ fn a_mesh_made_elsewhere_joins_the_baked_one() {
             "v 0 0 0 0 1 0 hair hair 0 0 0 1 head 1\nf 0 0 1\n",
             "names vertex 1",
         ),
-        ("x 1 2 3\n", "not a v, an f or a z"),
+        ("x 1 2 3\n", "not a v, an f, a z or a w"),
         ("z elbow\n", "no zone"),
+        ("w 0 0 1 hair\n", "before any vertex"),
     ] {
         let err = import(&mut empty(), &model, &sk, 0, "head", bad).unwrap_err();
         assert!(err.contains(says), "{bad:?}: {err}");
@@ -2358,6 +2359,18 @@ fn a_mesh_made_elsewhere_joins_the_baked_one() {
     import(&mut figure, &model, &sk, 0, "head", src).expect("import");
     let zone = |z: &str| ZONES.iter().position(|n| *n == z).unwrap() as u8;
     assert_eq!(figure.zones, [zone("head"), zone("paw")]);
+    // A woven border's vertex carries where it is on its band and the
+    // pattern's colour, for the shader to weave.
+    let mut band = empty();
+    let src = "v 0 0 0 0 1 0 hair hair 0 0 0 1 head 1\nw 2.5 -0.5 0.03 hair\n";
+    import(&mut band, &model, &sk, 0, "head", src).expect("import");
+    let v = &band.vertices[0];
+    assert_eq!(v.eye, [2.5, -0.5, 0.03, -1.0]);
+    assert_eq!(v.mouth[3], 0.0, "no mouth, no tail");
+    assert!(
+        (v.mouth[0] - v.color[0]).abs() < 1e-6,
+        "the pattern in the hair's colour"
+    );
 }
 
 /// The middle bone of the first tail.

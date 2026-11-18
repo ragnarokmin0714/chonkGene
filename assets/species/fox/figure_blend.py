@@ -11,6 +11,8 @@
 #   `chonkgene_render::mesh::import` (bare legs, feet and hands, the robe
 #   with its borders, the sleeves, the sash with its rope bow, bell and
 #   tassels, the ears), each vertex with its bones and touch zone;
+# - armbands.mesh: 紅髮版's rope rings round the upper sleeves, for the
+#   coats that wear them (the 銀白版 has none);
 # - human_figure.ron: human.ron's coats, hair colours and face, with this
 #   figure's skeleton and only the painted head (the face is painted on an
 #   ellipsoid by our own shaders, so the head stays a baked part).
@@ -101,6 +103,19 @@ def vert(p, a, b="", t=0.0, gloss=0.15, fuzz=0.0, bones=(("body", 1.0),), zone="
     return len(verts) - 1
 
 
+def face_out(first):
+    """Turn the triangles from `first` on outward if they face in (by their
+    signed volume: a closed part's does not depend on where it is), and
+    mark them done, so the piece they are in leaves them be."""
+    vol = sum(verts[a][0].dot(verts[b][0].cross(verts[c][0])) for a, b, c in faces[first:])
+    if vol < 0:
+        faces[first:] = [(a, c, b) for a, b, c in faces[first:]]
+    ORIENTED.update(range(first, len(faces)))
+
+
+ORIENTED = set()
+
+
 def grid(rows, close_around, color, close_top=None, close_bottom=None):
     """Triangles over `rows` (lists of vertex indices, same length each);
     around each row closed if `close_around`. Optional caps: a vertex
@@ -124,8 +139,8 @@ def grid(rows, close_around, color, close_top=None, close_bottom=None):
 # ---- the skin: legs, feet, hands, neck (one metaball, so they are smooth) ----
 def skin():
     mb = bpy.data.metaballs.new("skin")
-    mb.resolution = 0.016
-    mb.render_resolution = 0.016
+    mb.resolution = 0.0085
+    mb.render_resolution = 0.0085
     mb.threshold = 0.6
     obj = bpy.data.objects.new("skin", mb)
     bpy.context.scene.collection.objects.link(obj)
@@ -152,22 +167,53 @@ def skin():
         # A chubby straight leg (thigh under the skirt, a round calf), a
         # little foot with a round heel and its toes.
         x = s * HIP.x
-        top, bot = HIP.y - 0.02, ANKLE_Y + 0.05
-        ball(Vector((x, (top + bot) / 2, 0.0)), 0.085, "CAPSULE",
-             ((top - bot) / 2, 1, 1), up)
-        ball(Vector((x, Y(655), 0.0)), 0.07, "ELLIPSOID", (1.0, 1.5, 1.0))
-        ball(Vector((x * 1.02, FLOOR + 0.05, 0.035)), 0.075, "ELLIPSOID", (1.05, 0.68, 1.55))
-        ball(Vector((x * 1.03, FLOOR + 0.04, 0.115)), 0.05, "ELLIPSOID", (1.35, 0.75, 0.9))
-        # A hand out of the cuff, fingers together, the thumb forward,
-        # pointing down and out along the arm.
+        # The leg as a close chain of balls, so its thickness can change
+        # smoothly down it: a full thigh, a round calf, a slim ankle.
+        top, ankle = HIP.y - 0.02, Y(703)
+        steps = 16
+        for i in range(steps + 1):
+            t = i / steps
+            y = lerp(top, ankle, t)
+            r = 0.088 + 0.006 * math.sin(math.pi * min(1.0, t / 0.8)) - 0.02 * smoothstep(0.7, 1.0, t)
+            ball(Vector((x, y, -0.004 * t)), r)
+        # The foot: heel under the leg, its front no further than the
+        # sheet's side view has it; five round toes along its front, the
+        # big toe on the inside.
+        # A plump foot with a high instep...
+        # (the sheet's side view: the toes reach past the shin, the heel
+        # past the calf)...
+        ball(Vector((x * 1.02, FLOOR + 0.048, 0.0)), 0.07, "ELLIPSOID", (1.05, 0.72, 1.55))
+        # ...and five toes like beans along its front, apart enough for the
+        # grooves between them to show (metaballs run together closer).
+        fore = Quaternion((0, 1, 0), math.radians(-90))  # a capsule's x along z
+        for dx, r, z in ((-0.047, 0.0215, 0.099), (-0.015, 0.0168, 0.11), (0.013, 0.016, 0.107),
+                         (0.038, 0.0148, 0.098), (0.059, 0.0133, 0.084)):
+            ball(Vector((x * 1.02 + s * dx, FLOOR + 0.002 + r, z)), r, "CAPSULE", (0.012, 1, 1), fore)
+        # The forearm out of the cuff and a hand at its end, measured off
+        # the sheet's front view: the wrist 0.12 past the cuff's middle
+        # along the arm, the hand pointing out and only a little down
+        # (17°, flatter than the arm), 0.19 long to the fingertips; flat
+        # across the front, four fingers fanned a little, the thumb on its
+        # upper edge.
         axis = (CUFF - SHOULDER).normalized()
         ax = Vector((s * axis.x, axis.y, axis.z))
-        along = Quaternion((0, 0, 1), math.atan2(ax.y, ax.x))
         cuff = Vector((s * CUFF.x, CUFF.y, CUFF.z))
-        ball(cuff + ax * 0.0, 0.04, "CAPSULE", (0.03, 1, 1), along)
-        ball(cuff + ax * 0.08, 0.05, "ELLIPSOID", (1.25, 1.0, 0.62), along)
-        ball(cuff + ax * 0.14, 0.04, "ELLIPSOID", (1.2, 1.05, 0.55), along)
-        ball(cuff + ax * 0.075 + Vector((0, 0, 0.04)), 0.022)
+        wrist = cuff + ax * 0.12
+        hd = Vector((s * math.cos(math.radians(17)), -math.sin(math.radians(17)), 0.04)).normalized()
+        perp = Vector((-hd.y, hd.x, 0.0)).normalized()
+        if perp.y < 0:
+            perp = -perp
+        along_arm = Quaternion((0, 0, 1), math.atan2(ax.y, ax.x))
+        along = Quaternion((0, 0, 1), math.atan2(hd.y, hd.x))
+        mid = cuff + ax * 0.04
+        ball((mid + wrist) / 2, 0.036, "CAPSULE", (((wrist - mid).length) / 2, 1, 1), along_arm)
+        ball(wrist + hd * 0.065, 0.05, "ELLIPSOID", (1.2, 1.0, 0.58), along)
+        for k, off in enumerate((0.034, 0.011, -0.012, -0.033)):
+            fan = Quaternion((0, 0, 1), math.atan2(hd.y, hd.x) + math.radians(10 * (1.5 - k)) * s)
+            tip = wrist + hd * (0.13 - 0.006 * abs(k - 1.2)) + perp * off
+            ball(tip, 0.0165 - 0.001 * abs(k - 1.2), "CAPSULE", (0.03 - 0.005 * abs(k - 1.2), 1, 1), fan)
+        thumb = Quaternion((0, 0, 1), math.atan2(hd.y, hd.x) + math.radians(35) * s)
+        ball(wrist + hd * 0.05 + perp * 0.042 + Vector((0, 0, 0.012)), 0.021, "CAPSULE", (0.022, 1, 1), thumb)
     # The neck, into the head.
     ball(Vector((0, NECK_Y + 0.03, -0.01)), 0.095, "CAPSULE", (0.035, 1, 1), up)
 
@@ -284,11 +330,13 @@ def catmull(pts, per=12):
 # chest to beside her neck on her left, round the back of the neck, and
 # down the inner panel on her right into the V.
 SKIRT_EDGE = [(-0.175, Y(606)), (-0.165, Y(560)), (-0.15, Y(500)), (-0.13, Y(455))]
-OUTER_LAPEL = [(-0.11, Y(430)), (-0.05, Y(400)), (0.02, Y(362)), (0.07, Y(330))]
-INNER_LAPEL = [(-0.07, Y(330)), (-0.03, Y(352)), (0.0, Y(372))]
-NECK_PY = 327
-BAND = 0.062
-HEM_PY, HEM_W = 590, 0.105
+OUTER_LAPEL = [(-0.11, Y(430)), (-0.05, Y(400)), (0.015, Y(362)), (0.058, Y(326))]
+INNER_LAPEL = [(-0.058, Y(326)), (-0.03, Y(350)), (0.0, Y(372))]
+# High round the neck, so no cloth shows above the collar.
+NECK_PY = 321
+BAND = 0.066
+# The hem's border runs down to the hem itself, as drawn.
+HEM_PY, HEM_W = 597.0, 0.12
 
 
 def robe_bones(p):
@@ -321,46 +369,42 @@ def robe():
     for j in range(AROUND):
         th = 2 * math.pi * j / AROUND
         p = section(ROBE[-1][0] + 1.5, th, out=-0.012)
-        hem.append(vert(p, "trim", bones=robe_bones(p)))
+        hem.append(vert(p, "gold", gloss=0.4, bones=robe_bones(p)))
         p = section(ROBE[-1][0] - 8, th, out=-0.03)
         inner.append(vert(p, "robe", bones=robe_bones(p)))
     grid(rows + [hem, inner], True, "robe", close_top=top)
 
 
 # ---- borders: woven bands laid over the cloth ---------------------------------
-def scroll(u, v, period):
-    """The border's pattern (the sheet's woven scroll): a vine waving along
-    the band with a curl in each bend. u along the band (units), v across
-    the middle of it (-1 … 1). Coverage 0 … 1."""
-    s = u / period
-    w0 = 0.55 * math.sin(2 * math.pi * s)
-    d = abs(v - w0) - 0.13
-    # A curl in each bend, on the inside of it.
-    k = math.floor(s * 2 + 0.5)
-    cx, cy = (k + 0.5) / 2.0 - 0.25, 0.3 * (1 if k % 2 else -1)
-    dx = (s - cx) * 2.2
-    dy = v - cy
-    ring = abs(math.hypot(dx, dy) - 0.24) - 0.07
-    d = min(d, ring)
-    return 1 - smoothstep(-0.04, 0.04, d)
+# A woven border's vertex: where it is on its band, in half-widths (`x`
+# along, `y` across), the band's half width, and the pattern's colour slot.
+# Written as `w` lines; mesh.wgsl `woven` draws the pattern from them.
+WOVEN = {}
+WEAVE = 2.6  # the scroll's period, in half-widths (mesh.wgsl `woven`)
+BANDED = []
 
 
-def band(path_pts, normals, width, bones_fn, closed=False, a="trim", b="gold", lift=0.0065,
-         across=17, zone="back", period=0.07):
+def band(path_pts, normals, width, bones_fn, closed=False, a="trim", b="gold", lift=0.006,
+         across=25, zone="back"):
     """A border strip `width` wide along a line of points on a surface
-    (with the surface's normals there): edged with raised piping, the
-    scroll woven in its middle, standing `lift` proud of the cloth with
-    its edges tucked down into it."""
-    # Even spacing along the line.
-    step = 0.0024
+    (with the surface's normals there): a raised gold cord along each edge,
+    standing `lift` proud of the cloth with its edges tucked down into it;
+    the scroll in its middle is woven by the shader."""
+    half = width / 2
+    step = 0.004
     cum = [0.0]
     for p, q in zip(path_pts, path_pts[1:]):
         cum.append(cum[-1] + (q - p).length)
     total = cum[-1]
     n = max(2, int(total / step))
+    # A closed band holds a whole number of the pattern, so it meets itself.
+    stretch = 1.0
+    if closed:
+        reps = max(1, round(total / half / WEAVE))
+        stretch = reps * WEAVE * half / total
     rows = []
     j = 0
-    for i in range(n + (0 if closed else 1)):
+    for i in range(n + 1):
         u = total * i / n
         while j < len(cum) - 2 and cum[j + 1] < u:
             j += 1
@@ -373,17 +417,14 @@ def band(path_pts, normals, width, bones_fn, closed=False, a="trim", b="gold", l
         for k in range(across):
             v = -1 + 2 * k / (across - 1)
             av = abs(v)
-            h = lift * (1 - smoothstep(0.88, 1.0, av)) - 0.003 * smoothstep(0.9, 1.0, av)
-            pipe = math.exp(-((av - 0.8) / 0.07) ** 2)
-            h += 0.0025 * pipe
-            mid = scroll(u, v / 0.62, period * width / 0.062) if av < 0.62 else 0.0
-            h += 0.0012 * mid
-            tt = max(mid, smoothstep(0.7, 0.75, av) * (1 - smoothstep(0.88, 0.93, av)))
-            q = p + acr * (v * width / 2) + nm * h
-            row.append(vert(q, a, b, tt, gloss=0.35, fuzz=0.02, bones=bones_fn(q), zone=zone))
+            # The cord: a half-round along each edge.
+            cord = math.sqrt(max(0.0, 1 - ((av - 0.9) / 0.1) ** 2))
+            h = lift * (1 - smoothstep(0.96, 1.0, av)) + 0.0045 * cord \
+                - 0.003 * smoothstep(0.97, 1.0, av)
+            q = p + acr * (v * half) + nm * h
+            row.append(vert(q, a, gloss=0.35, fuzz=0.02, bones=bones_fn(q), zone=zone))
+            WOVEN[row[-1]] = (u * stretch / half, v, half, b)
         rows.append(row)
-    if closed:
-        rows.append(rows[0])
     first = len(faces)
     grid(rows, False, a)
     # An open strip has no inside to judge by: face it along the cloth's
@@ -391,17 +432,14 @@ def band(path_pts, normals, width, bones_fn, closed=False, a="trim", b="gold", l
     fa, fb, fc = faces[first]
     if (verts[fb][0] - verts[fa][0]).cross(verts[fc][0] - verts[fa][0]).dot(normals[0]) < 0:
         faces[first:] = [(x, z, y) for x, y, z in faces[first:]]
-    return BANDED.extend(range(first, len(faces)))
-
-
-BANDED = []
+    BANDED.extend(range(first, len(faces)))
 
 
 def borders():
     # The hem's border all round.
     path = [section(HEM_PY, 2 * math.pi * j / 720) for j in range(721)]
     nrm = [robe_normal(HEM_PY, 2 * math.pi * j / 720) for j in range(721)]
-    band(path, nrm, HEM_W, robe_bones)
+    band(path, nrm, HEM_W, robe_bones, closed=True)
     # The collar: one band from the hem up the overlap's edge, across her
     # chest, round the back of her neck and down into the V.
     params = [front_at(x, y) for x, y in catmull(SKIRT_EDGE + OUTER_LAPEL, 16)]
@@ -463,7 +501,7 @@ def sleeve(s):
         rows.append([vert(sleeve_at(s, t, 2 * math.pi * j / n_ar), "robe", gloss=0.18, fuzz=0.05,
                           bones=bones) for j in range(n_ar)])
     # The cuff's edge turned in, so it has a thickness.
-    for color, out, ext in (("trim", -0.012, 0.008), ("robe", -0.022, -0.03)):
+    for color, out, ext in (("gold", -0.012, 0.008), ("robe", -0.022, -0.03)):
         rows.append([vert(sleeve_at(s, 1.0, 2 * math.pi * j / n_ar, out, ext), color,
                           bones=((bone, 1.0),)) for j in range(n_ar)])
     grid(rows, True, "robe")
@@ -474,7 +512,20 @@ def cuff(s):
     t = 0.905
     path = [sleeve_at(s, t, 2 * math.pi * j / 400) for j in range(401)]
     nrm = [sleeve_normal(s, t, 2 * math.pi * j / 400) for j in range(401)]
-    band(path, nrm, 0.085, lambda q: ((bone, 1.0),))
+    band(path, nrm, 0.085, lambda q: ((bone, 1.0),), closed=True)
+
+
+def armband(s):
+    """Up at the shoulder, on 紅髮版's robe only (the 銀白版 has none): a
+    fat rope ring in the sash's colour round the sleeve, a gold braid
+    beside it. Written to a file of its own (armbands.mesh), for the coats
+    that wear it."""
+    bone = f"arm_{'l' if s > 0 else 'r'}"
+    arm = lambda q: ((bone, 0.8), ("body", 0.2))
+    rope([sleeve_at(s, 0.16, 2 * math.pi * j / 72, out=0.016) for j in range(72)], 0.017, "sash",
+         arm, closed=True)
+    rope([sleeve_at(s, 0.225, 2 * math.pi * j / 72, out=0.01) for j in range(72)], 0.009, "gold",
+         arm, closed=True)
 
 
 # ---- tubes: the sash, the rope, the bow, cords --------------------------------
@@ -484,6 +535,7 @@ def tube(path, radius, color, bones, zone="back", closed=False, sides=12, gloss=
     rf = radius if callable(radius) else (lambda t, r=radius: r)
     n = len(path)
     rows = []
+    first = len(faces)
     prev_side = None
     for i, p in enumerate(path):
         if closed:
@@ -513,6 +565,7 @@ def tube(path, radius, color, bones, zone="back", closed=False, sides=12, gloss=
         b = vert(path[-1] + (path[-1] - path[-2]).normalized() * rf(1) * 0.5, color,
                  bones=bones(path[-1]) if callable(bones) else bones, zone=zone)
         grid(rows, True, color, close_top=a if caps else None, close_bottom=b if caps else None)
+    face_out(first)
 
 
 def rope(path, r, color, bones, closed=False):
@@ -541,6 +594,7 @@ def ring_path(y, out, n=96):
 
 
 def sash():
+    body = (("body", 1.0),)
     # The wide sash: a band round her waist over the robe.
     rows = []
     for i in range(9):
@@ -549,36 +603,57 @@ def sash():
         out = 0.012 + (0.004 if edge > 0 else 0.0)
         rows.append([vert(p, "sash", gloss=0.2, fuzz=0.04) for p in ring_path(y, out)])
     grid(rows, True, "sash")
-    # The rope round it, tied at the front in a bow of two rope loops,
-    # a bell hung under the knot, two tassels.
-    yr = lerp(SASH_TOP, SASH_BOT, 0.42)
-    rope(ring_path(yr, 0.034), 0.02, "gold", (("body", 1.0),), closed=True)
-    front = ring_path(yr, 0.034)[0]
-    knot = front + Vector((0, 0, 0.03))
+    # A gold braided cord round the waist (it shows through the bow's
+    # loops); at the front, a fat rope bow in the sash's colour (the
+    # sheet's 紅金編織繩: red rope over gold), its knot, its two ends hanging
+    # in tassels with gold caps; the bell hung under the knot.
+    yr = lerp(SASH_TOP, SASH_BOT, 0.45)
+    rope(ring_path(yr, 0.03), 0.014, "gold", body, closed=True)
+    front = ring_path(yr, 0.03)[0]
+    knot = front + Vector((0, 0.004, 0.04))
     for s in (1, -1):
         loop = []
-        for j in range(33):
-            a = 2 * math.pi * j / 32
-            # A loop out to the side and back: a teardrop round from the knot.
-            x = 0.12 * (1 - math.cos(a))
-            yy = 0.07 * math.sin(a) * (0.55 + 0.45 * (1 - math.cos(a)) / 2)
-            # Round the body's front as it goes out to the side.
-            loop.append(knot + Vector((s * x, yy, -0.06 * ((1 - math.cos(a)) / 2) ** 1.5)))
-        rope(loop, 0.02, "gold", (("body", 1.0),), closed=True)
-    tube([knot + Vector((0, 0.035, 0)), knot + Vector((0, -0.035, 0.006))],
-         lambda t: 0.036, "gold", (("body", 1.0),), sides=16, gloss=0.35)
-    # Tassels: a cord down from the knot, a little cap, a skirt of threads.
+        for j in range(49):
+            a = 2 * math.pi * j / 48
+            # Out to the side and back round: a fat teardrop from the knot.
+            x = 0.108 * (1 - math.cos(a))
+            yy = 0.088 * math.sin(a) * (0.5 + 0.5 * (1 - math.cos(a)) / 2)
+            # Round the body's front as it goes out to the side, the loop
+            # standing out from the sash in the middle.
+            puff = 0.025 * math.sin(a / 2) ** 2
+            loop.append(knot + Vector((s * x, yy, puff - 0.065 * ((1 - math.cos(a)) / 2) ** 1.5)))
+        rope(loop, 0.028, "sash", body, closed=True)
+    # The knot: the rope wound round and round a core, as tied.
+    sphere(knot, Vector((0.046, 0.05, 0.036)), "sash", body, gloss=0.25)
+    for k, dy in enumerate((-0.03, 0.0, 0.03)):
+        ry = math.sqrt(max(0.0, 1 - (dy / 0.058) ** 2))
+        rope([knot + Vector((0.05 * ry * math.sin(2 * math.pi * j / 36), dy,
+                             0.04 * ry * math.cos(2 * math.pi * j / 36))) for j in range(36)],
+             0.0135, "sash", body, closed=True)
     for s in (1, -1):
-        a = knot + Vector((s * 0.03, -0.03, 0.0))
-        b = a + Vector((s * 0.05, -0.13, -0.005))
-        rope([a.lerp(b, i / 8) for i in range(9)], 0.011, "gold", (("body", 1.0),))
-        tube([b, b + Vector((0, -0.025, 0))], 0.018, "gold", (("body", 1.0),), sides=10)
-        tube([b + Vector((0, -0.02, 0)), b + Vector((s * 0.004, -0.1, 0))],
-             lambda t: lerp(0.019, 0.032, t ** 0.7), "gold", (("body", 1.0),), sides=12)
-    # The bell: a ball with a slot, hung under the knot.
-    bc = knot + Vector((0, -0.105, 0.03))
-    sphere(bc, Vector((0.06, 0.056, 0.06)), "gold", (("bell", 1.0),), gloss=0.7,
-           slot=True)
+        a = knot + Vector((s * 0.03, -0.035, 0.0))
+        b = a + Vector((s * 0.05, -0.085, -0.004))
+        rope([a.lerp(b, i / 10) for i in range(11)], 0.017, "sash", body)
+        # The gold cap, then the tassel's threads flaring out below it.
+        tube([b + Vector((0, 0.012, 0)), b + Vector((0, -0.022, 0))], 0.024, "gold", body,
+             sides=14, gloss=0.5)
+        tube([b + Vector((0, -0.018, 0)), b + Vector((s * 0.004, -0.085, 0))],
+             lambda t: lerp(0.019, 0.036, t ** 0.8) * (1 - 0.4 * smoothstep(0.85, 1.0, t)), "sash",
+             body, sides=18, gloss=0.15)
+    # The bell: round, a raised band round its middle, a loop on top, and
+    # a slot from a round hole up its lower half; hung close under the knot.
+    bc = knot + Vector((0, -0.098, 0.03))
+    bell(bc, 0.063)
+
+
+def bell(c, r, bones=(("bell", 1.0),)):
+    sphere(c, Vector((r, r * 0.94, r)), "gold", bones, gloss=0.75, slot=True)
+    tube([c + Vector((r * 1.005 * math.sin(2 * math.pi * j / 64), -0.08 * r,
+                      r * 1.005 * math.cos(2 * math.pi * j / 64))) for j in range(64)],
+         0.11 * r, "gold", bones, closed=True, sides=8, gloss=0.75)
+    tube([c + Vector((0, r * 0.94 + 0.28 * r * (1 - math.cos(2 * math.pi * j / 32)) * 0.5
+                      + 0.0, 0.0)) + Vector((0.3 * r * math.sin(2 * math.pi * j / 32), 0.3 * r * (1 - math.cos(2 * math.pi * j / 32)), 0))
+          for j in range(32)], 0.08 * r, "gold", bones, closed=True, sides=8, gloss=0.75)
 
 
 def sphere(c, r, color, bones, gloss=0.3, slot=False, zone="back", n=20):
@@ -591,14 +666,22 @@ def sphere(c, r, color, bones, gloss=0.3, slot=False, zone="back", n=20):
             u = Vector((math.sin(th) * math.sin(ph), math.cos(th), math.sin(th) * math.cos(ph)))
             # The slot across the bell's lower half: a dark band facing out.
             dark = 0.0
-            if slot and u.y < -0.1 and abs(u.x) < 0.1:
-                dark = 1 - smoothstep(0.06, 0.1, abs(u.x))
+            if slot and u.z > 0:
+                # The slot up from the bottom, a round hole at its top.
+                d = min(max(abs(u.x) - 0.07, u.y + 0.3),
+                        math.hypot(u.x, (u.y + 0.32) * 1.0) - 0.14)
+                dark = 1 - smoothstep(-0.02, 0.02, d)
+                # ...and the slot runs on under the bell's bottom.
+            if slot and u.y < -0.3:
+                dark = max(dark, 1 - smoothstep(0.05, 0.08, abs(u.x)))
             p = c + Vector((r.x * u.x, r.y * u.y, r.z * u.z)) * (1 - 0.15 * dark)
             row.append(vert(p, color, "ink", 0.85 * dark, gloss=gloss, bones=bones, zone=zone))
         rows.append(row)
     top = vert(c + Vector((0, r.y, 0)), color, bones=bones, zone=zone)
     bot = vert(c - Vector((0, r.y, 0)), color, bones=bones, zone=zone)
+    first = len(faces)
     grid([list(reversed(r_)) for r_ in rows], True, color, close_top=top, close_bottom=bot)
+    face_out(first)
 
 
 # ---- ears: big fox ears tilted out, a thick rim, a hollow lined with fluff ----
@@ -687,15 +770,7 @@ def lock(pts, nrm, width, thick, color, bones, zone="head", around=12):
     cap = vert(pts[-1] + (pts[-1] - pts[-2]).normalized() * 0.004, color, bones=bones, zone=zone)
     grid(rows, True, color, close_bottom=cap)
     # Each lock faces out on its own (the ear's own test can't judge them).
-    centre = sum((verts[i][0] for r in rows for i in r), Vector()) / (len(rows) * around)
-    vol = sum((verts[a][0] - centre).dot((verts[b][0] - centre).cross(verts[c][0] - centre))
-              for a, b, c in faces[first:])
-    if vol < 0:
-        faces[first:] = [(x, z, y) for x, y, z in faces[first:]]
-    LOCKS.extend(range(first, len(faces)))
-
-
-LOCKS = []
+    face_out(first)
 
 
 # ---- normals, occlusion, out ---------------------------------------------------
@@ -709,8 +784,9 @@ def piece(build, *args):
     if all(i in banded for i in range(first, len(faces))):
         print(f"{build.__name__}{args}: {len(faces) - first} triangles (bands)")
         return
-    locked = set(LOCKS)
-    own = [i for i in range(first, len(faces)) if i not in locked]
+    # Bands, tubes, balls and locks have faced themselves already.
+    done = ORIENTED | banded
+    own = [i for i in range(first, len(faces)) if i not in done]
     for i in own:
         a, b, c = faces[i]
         vol += verts[a][0].dot(verts[b][0].cross(verts[c][0]))
@@ -752,10 +828,16 @@ def head_proxy():
 AO_REACH, AO_STRENGTH = 0.12, 0.75
 
 
-def occlusion(nrm):
+def occlusion(nrm, others=None):
+    """Each vertex's ambient occlusion; `others` (points, triangles) shade
+    it too without being written (the figure, under its armbands)."""
     hp, hf = head_proxy()
     pts = [v[0] for v in verts] + hp
     polys = [tuple(f) for f in faces] + [tuple(i + len(verts) for i in f) for f in hf]
+    if others:
+        base = len(pts)
+        pts += others[0]
+        polys += [tuple(i + base for i in f) for f in others[1]]
     tree = BVHTree.FromPolygons(pts, polys, all_triangles=False)
     dirs = []
     golden = math.pi * (3 - math.sqrt(5))
@@ -778,12 +860,12 @@ def occlusion(nrm):
     return out
 
 
-def write_mesh(path):
+def write_mesh(path, others=None):
     nrm = normals()
-    ao = occlusion(nrm)
+    ao = occlusion(nrm, others)
     zone = None
     with open(path, "w") as f:
-        for (p, a, b, t, gloss, fuzz, bones, z), n, o in zip(verts, nrm, ao):
+        for i, ((p, a, b, t, gloss, fuzz, bones, z), n, o) in enumerate(zip(verts, nrm, ao)):
             if z != zone:
                 f.write(f"z {z}\n")
                 zone = z
@@ -791,6 +873,9 @@ def write_mesh(path):
             bs = " ".join(f"{name} {w / total:.3f}" for name, w in bones if w > 1e-4)
             f.write(f"v {p.x:.4f} {p.y:.4f} {p.z:.4f} {n.x:.3f} {n.y:.3f} {n.z:.3f} "
                     f"{a} {b} {t:.3f} {gloss} {fuzz} {o:.3f} {bs}\n")
+            if i in WOVEN:
+                x, y, half, slot = WOVEN[i]
+                f.write(f"w {x:.4f} {y:.3f} {half:.4f} {slot}\n")
         for a, b, c in faces:
             f.write(f"f {a} {b} {c}\n")
     print(f"{path}: {len(verts)} vertices, {len(faces)} triangles")
@@ -863,4 +948,13 @@ if __name__ == "__main__":
     piece(ear, 1)
     piece(ear, -1)
     write_mesh(os.path.join(out, "figure.mesh"))
+    # 紅髮版's armbands, in a file of their own, shaded by the figure.
+    figure = ([v[0] for v in verts], list(faces))
+    for store in (verts, faces, BANDED):
+        store.clear()
+    WOVEN.clear()
+    ORIENTED.clear()
+    piece(armband, 1)
+    piece(armband, -1)
+    write_mesh(os.path.join(out, "armbands.mesh"), figure)
     write_ron(os.path.join(out, "human_figure.ron"))

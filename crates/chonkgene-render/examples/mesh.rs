@@ -402,14 +402,18 @@ const HAIR_PARTS: [&str; 9] = [
 
 /// The model baked; with `HAIR_MESH=<file>` (a mesh made in Blender, see
 /// `chonkgene_render::mesh::import`), its hair parts left out of the bake
-/// and that mesh added instead; with `BLEND_MESH=<file>` (a whole figure
-/// made in Blender, beside the `HUMAN_RON` that holds only what is baked:
-/// the painted head), that mesh added to all of it.
+/// and that mesh added instead; with `BLEND_MESH=<file>[,<file>…]` (a
+/// whole figure made in Blender and any accessories, beside the
+/// `HUMAN_RON` that holds only what is baked: the painted head), those
+/// meshes added to all of it.
 fn baked(model: &Model, sk: &Skeleton, coat: usize, cell: f32) -> Mesh {
-    if let Ok(file) = std::env::var("BLEND_MESH") {
+    if let Ok(files) = std::env::var("BLEND_MESH") {
         let mut mesh = bake(model, sk, coat, 0.33, cell).expect("bake");
-        let src = std::fs::read_to_string(&file).unwrap_or_else(|e| panic!("{file}: {e}"));
-        import(&mut mesh, model, sk, coat, "head", &src).unwrap_or_else(|e| panic!("{file}: {e}"));
+        for file in files.split(',') {
+            let src = std::fs::read_to_string(file).unwrap_or_else(|e| panic!("{file}: {e}"));
+            import(&mut mesh, model, sk, coat, "head", &src)
+                .unwrap_or_else(|e| panic!("{file}: {e}"));
+        }
         return mesh;
     }
     let Ok(file) = std::env::var("HAIR_MESH") else {

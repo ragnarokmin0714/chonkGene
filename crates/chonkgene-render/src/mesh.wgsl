@@ -148,6 +148,9 @@ fn fs_pet(i: Out) -> @location(0) vec4<f32> {
     if i.mouth.w > 0.5 {
         color = paint_mouth(i.mouth.xyz, u.mouth_r.xyz, color, px);
     }
+    if i.eye.w < -0.5 {
+        color = woven(i.eye.xy, i.eye.z, color, i.mouth.xyz, px);
+    }
     let pp = i.rest;
     let f = ppu * 0.3;
     let fz = vec3<f32>(vnoise(pp * f), vnoise(pp * f + vec3<f32>(7.1)), vnoise(pp * f + vec3<f32>(13.7)))
@@ -172,6 +175,37 @@ fn fs_pet(i: Out) -> @location(0) vec4<f32> {
     }
     col = flame_tails(i.mouth.w, pp, ao, col);
     return vec4<f32>(col, 1.0);
+}
+
+// A woven border on a figure made in Blender (mesh.rs `import`, its `w`
+// lines): a gold cord along each edge with a fine line inside it, and down
+// the middle a running scroll (卷草紋), a vine waving along the band with a
+// curl hanging in each bend and a bead in each curl, in the pattern's
+// colour `gold` on the band's own. `b`: along the band and across it, in
+// half-widths (`half` wide each side); `px`: a pixel, in model units.
+fn woven(b: vec2<f32>, half: f32, base: vec3<f32>, gold: vec3<f32>, px: f32) -> vec3<f32> {
+    let x = b.x;
+    let y = b.y;
+    let ay = abs(y);
+    var d = 0.8 - ay;
+    d = min(d, abs(ay - 0.67) - 0.025);
+    let period = 2.6;
+    let amp = 0.3;
+    let k = 6.2831853 / period;
+    let y0 = amp * sin(k * x);
+    let slope = amp * k * cos(k * x);
+    d = min(d, abs(y - y0) / sqrt(1.0 + slope * slope) - 0.05);
+    let n = floor(x / (0.5 * period));
+    let side = select(1.0, -1.0, fract(n * 0.5) > 0.25);
+    let bend = (n + 0.5) * 0.5 * period;
+    let q = vec2<f32>(x, y) - vec2<f32>(bend + 0.28, side * (amp - 0.24));
+    d = min(d, abs(length(q) - 0.18) - 0.042);
+    d = min(d, length(q) - 0.06);
+    // A small leaf off the vine before each bend, on its outer side.
+    let lq = vec2<f32>(x, y) - vec2<f32>(bend - 0.42, side * 0.44);
+    d = min(d, length(lq * vec2<f32>(0.75, 1.6)) - 0.07);
+    let aa = 1.2 * px / max(half, 1e-4);
+    return mix(base, gold, 1.0 - ss(-aa, aa, d));
 }
 
 // The fox casting (fwd.w, as her face's glow): her tails burn from white at

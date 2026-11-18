@@ -383,7 +383,11 @@ fn weigh(parts: &[chonkgene_rig::PartView], sk: &Skeleton, p: V3) -> ([u32; 4], 
 ///   ambient occlusion, and up to four bones by name with their weights;
 /// - `f a b c`: a triangle, the vertices counted from 0 in this file;
 /// - `z zone`: the vertices after it are in touch zone `zone` (a figure
-///   made whole in Blender: its hands, robe and ears answer as theirs).
+///   made whole in Blender: its hands, robe and ears answer as theirs);
+/// - `w x y half slot`: the vertex before it is on a woven border, `x`
+///   along the band and `y` across it (-1 … 1), both in half-widths,
+///   the band `half` wide on each side, its pattern in colour `slot`
+///   (mesh.wgsl `woven` draws the pattern, sharp at any size).
 ///
 /// The colours come from `model`'s coat `coat`, so a dyed model dyes it.
 /// Nothing here is painted (no face) and nothing is a tail.
@@ -478,7 +482,19 @@ pub fn import(
                 }
             }
             Some("z") => zone = zone_of(it.next().ok_or_else(|| bad("a zone"))?)?,
-            Some(_) => return Err(bad("not a v, an f or a z")),
+            Some("w") => {
+                let (x, y, half) = (num(it.next())?, num(it.next())?, num(it.next())?);
+                let c = slot(it.next().ok_or_else(|| bad("a colour"))?)?;
+                if count == 0 {
+                    return Err(bad("a woven mark before any vertex"));
+                }
+                let v = mesh.vertices.last_mut().expect("a vertex");
+                // eye.w -1 marks it woven (a face's is +1); mouth.w stays 0
+                // (no mouth painted, no tail).
+                v.eye = [x, y, half, -1.0];
+                v.mouth = [c.x, c.y, c.z, 0.0];
+            }
+            Some(_) => return Err(bad("not a v, an f, a z or a w")),
             None => {}
         }
     }
