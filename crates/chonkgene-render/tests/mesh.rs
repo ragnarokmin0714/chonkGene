@@ -2299,6 +2299,7 @@ fn the_fox_child_swings_her_arms_and_her_tails_and_hair_flow() {
 #[test]
 fn a_mesh_made_elsewhere_joins_the_baked_one() {
     use chonkgene_render::mesh::{Mesh, import};
+    use chonkgene_rig::ZONES;
     let (model, sk) = human("fox", "ponytail", "red").unwrap();
     let bald = model.only(|p| !p.name.starts_with("pony") && !p.name.starts_with("hair"));
     assert!(bald.parts.len() < model.parts.len());
@@ -2344,11 +2345,19 @@ fn a_mesh_made_elsewhere_joins_the_baked_one() {
             "v 0 0 0 0 1 0 hair hair 0 0 0 1 head 1\nf 0 0 1\n",
             "names vertex 1",
         ),
-        ("x 1 2 3\n", "not a v or an f"),
+        ("x 1 2 3\n", "not a v, an f or a z"),
+        ("z elbow\n", "no zone"),
     ] {
         let err = import(&mut empty(), &model, &sk, 0, "head", bad).unwrap_err();
         assert!(err.contains(says), "{bad:?}: {err}");
     }
+    // A whole figure names each piece's touch zone as it goes.
+    let mut figure = empty();
+    let src =
+        "v 0 0 0 0 1 0 hair hair 0 0 0 1 head 1\nz paw\nv 1 0 0 0 1 0 hair hair 0 0 0 1 head 1\n";
+    import(&mut figure, &model, &sk, 0, "head", src).expect("import");
+    let zone = |z: &str| ZONES.iter().position(|n| *n == z).unwrap() as u8;
+    assert_eq!(figure.zones, [zone("head"), zone("paw")]);
 }
 
 /// The middle bone of the first tail.

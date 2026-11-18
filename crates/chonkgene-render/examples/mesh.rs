@@ -345,11 +345,25 @@ fn main() {
     };
     let scale: f32 = args.get(3).and_then(|s| s.parse().ok()).unwrap_or(1.0);
     // `fox-human`: her human form, in hairdo `STYLE` and hair colour
-    // `HAIR` from the environment.
+    // `HAIR` from the environment; `HUMAN_RON=<file>` reads her model from
+    // that file (one written by a Blender script with its figure).
     let (model, sk) = match id.strip_suffix("-human") {
         Some(id) => {
             let env = |k: &str| std::env::var(k).unwrap_or_default();
-            human(id, &env("STYLE"), &env("HAIR"))
+            match std::env::var("HUMAN_RON") {
+                Ok(file) => {
+                    let src =
+                        std::fs::read_to_string(&file).unwrap_or_else(|e| panic!("{file}: {e}"));
+                    Model::parse(&src, chonkgene_rig::builtin::POSES)
+                        .map(|m| m.styled(&env("STYLE")).dyed(&env("HAIR")))
+                        .map(|m| {
+                            let sk = Skeleton::new(&m);
+                            (m, sk)
+                        })
+                        .map_err(|e| format!("{file}: {e}"))
+                }
+                Err(_) => human(id, &env("STYLE"), &env("HAIR")),
+            }
         }
         None => mesh_model(id),
     }
@@ -388,8 +402,16 @@ const HAIR_PARTS: [&str; 9] = [
 
 /// The model baked; with `HAIR_MESH=<file>` (a mesh made in Blender, see
 /// `chonkgene_render::mesh::import`), its hair parts left out of the bake
-/// and that mesh added instead.
+/// and that mesh added instead; with `BLEND_MESH=<file>` (a whole figure
+/// made in Blender, beside the `HUMAN_RON` that holds only what is baked:
+/// the painted head), that mesh added to all of it.
 fn baked(model: &Model, sk: &Skeleton, coat: usize, cell: f32) -> Mesh {
+    if let Ok(file) = std::env::var("BLEND_MESH") {
+        let mut mesh = bake(model, sk, coat, 0.33, cell).expect("bake");
+        let src = std::fs::read_to_string(&file).unwrap_or_else(|e| panic!("{file}: {e}"));
+        import(&mut mesh, model, sk, coat, "head", &src).unwrap_or_else(|e| panic!("{file}: {e}"));
+        return mesh;
+    }
     let Ok(file) = std::env::var("HAIR_MESH") else {
         return bake(model, sk, coat, 0.33, cell).expect("bake");
     };

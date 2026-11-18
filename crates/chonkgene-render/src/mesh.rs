@@ -381,7 +381,9 @@ fn weigh(parts: &[chonkgene_rig::PartView], sk: &Skeleton, p: V3) -> ([u32; 4], 
 ///   vertex at rest, its normal, its colour (the model's two colour slots
 ///   by name, mixed `t` of the way to the second), its shine, fuzz and
 ///   ambient occlusion, and up to four bones by name with their weights;
-/// - `f a b c`: a triangle, the vertices counted from 0 in this file.
+/// - `f a b c`: a triangle, the vertices counted from 0 in this file;
+/// - `z zone`: the vertices after it are in touch zone `zone` (a figure
+///   made whole in Blender: its hands, robe and ears answer as theirs).
 ///
 /// The colours come from `model`'s coat `coat`, so a dyed model dyes it.
 /// Nothing here is painted (no face) and nothing is a tail.
@@ -393,10 +395,14 @@ pub fn import(
     zone: &str,
     src: &str,
 ) -> Result<(), String> {
-    let zone = ZONES
-        .iter()
-        .position(|z| *z == zone)
-        .ok_or_else(|| format!("no zone {zone:?}"))? as u8;
+    let zone_of = |zone: &str| {
+        ZONES
+            .iter()
+            .position(|z| *z == zone)
+            .map(|z| z as u8)
+            .ok_or_else(|| format!("no zone {zone:?}"))
+    };
+    let mut zone = zone_of(zone)?;
     let colors = &model
         .coats
         .get(coat)
@@ -471,7 +477,8 @@ pub fn import(
                     mesh.indices.push(base + i);
                 }
             }
-            Some(_) => return Err(bad("not a v or an f")),
+            Some("z") => zone = zone_of(it.next().ok_or_else(|| bad("a zone"))?)?,
+            Some(_) => return Err(bad("not a v, an f or a z")),
             None => {}
         }
     }
