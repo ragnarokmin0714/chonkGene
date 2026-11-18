@@ -64,37 +64,39 @@ pub(crate) fn fox_marks(uv: P, aa: f32) -> (f32, f32) {
     (ink(d, aa), smoothstep(0.55, 0.86, uv.0.abs()))
 }
 
-/// The fox's seal in her human form, the same in paint.wgsl `seal_marks`
-/// (Roger's sheet of her parts, the 銀白版 face decal at rest): on the
-/// forehead a small crest (a drop with a round hollow, a wing curling up
-/// either side of its foot); a leaf over each eye, slanting up and out;
-/// three short stripes on each cheek under the eye's outer corner, thick
-/// at the outer end and drawn to a point toward the nose. Placed from the
-/// eyes (`eye`: their middle x, y and radii), so it fits any face.
+/// The fox's seal in her human form, the same in paint.wgsl `seal_marks`,
+/// placed from the eyes (`eye`: their middle x, y and radii) as Roger's
+/// sheet has it (the turnaround's front view, measured): low on the
+/// forehead between the brows a small crest (two wings opening up from a
+/// point a little below the tops of the eyes, a drop between them); a leaf
+/// over the inner half of each eye for a brow, slanting up and out; two
+/// short stripes on each cheek under the eye, rising outward, thick at the
+/// outer end.
 pub(crate) fn seal_marks(uv: P, aa: f32, eye: (f32, f32, f32, f32)) -> f32 {
     let (ex, ey, rx, ry) = eye;
-    let foot = ey + ry + 0.1;
-    let mut d = tapered(uv, (0.0, foot), (0.0, foot + 0.25), 0.045, 0.003);
-    d = d.max(-(len(sub(uv, (0.0, foot + 0.08))) - 0.018));
+    let foot = ey + 0.55 * ry;
+    let mut d = tapered(uv, (0.0, foot + 0.04), (0.0, foot + 0.2), 0.026, 0.003);
     for side in [-1.0, 1.0] {
-        let w0 = (0.025 * side, foot - 0.01);
-        let w1 = (0.12 * side, foot + 0.09);
-        d = d.min(leaf(uv, w0, w1, 0.028));
-        d = d.min(tapered(uv, w1, (0.085 * side, foot + 0.19), 0.016, 0.003));
-        let b0 = ((ex - 0.35 * rx) * side, ey + ry + 0.05);
-        let b1 = ((ex + 0.5 * rx) * side, ey + ry + 0.13);
-        d = d.min(leaf(uv, b0, b1, 0.034));
-        for i in 0..3 {
+        d = d.min(leaf(
+            uv,
+            (0.012 * side, foot),
+            (0.085 * side, foot + 0.17),
+            0.024,
+        ));
+        let b0 = ((ex - 1.45 * rx) * side, ey + 1.32 * ry);
+        let b1 = ((ex + 0.2 * rx) * side, ey + 1.93 * ry);
+        d = d.min(leaf(uv, b0, b1, 0.042));
+        for i in 0..2 {
             let fi = i as f32;
             let outer = (
-                (ex + (1.15 - 0.06 * fi) * rx) * side,
-                ey - 0.8 * ry - 0.07 * fi,
+                (ex + (0.42 - 0.08 * fi) * rx) * side,
+                ey - (1.31 + 0.3 * fi) * ry,
             );
             let inner = (
-                (ex + (0.4 + 0.05 * fi) * rx) * side,
-                ey - 1.06 * ry - 0.065 * fi,
+                (ex - (0.58 - 0.12 * fi) * rx) * side,
+                ey - (1.66 + 0.3 * fi) * ry,
             );
-            d = d.min(tapered(uv, outer, inner, 0.024 - 0.003 * fi, 0.004));
+            d = d.min(tapered(uv, outer, inner, 0.034 - 0.006 * fi, 0.005));
         }
     }
     ink(d, aa)
@@ -337,14 +339,14 @@ pub fn mouth(scene: &Scene, shape: Shape, q: V3, base: V3, px: f32) -> V3 {
     c.lerp(ink_c, ink(ridge, aa))
 }
 
-/// A child's mouth at rest (the fox's human form, Roger's sheet): a small
-/// closed smile, its ends turned up, a blush of pink lip under it; no line
-/// up to the nose. The same in paint.wgsl `chibi_smile`.
+/// A child's mouth at rest (the fox's human form, Roger's sheet): a wide,
+/// shallow closed smile (the ends just turned up), a blush of pink lip
+/// under it; no line up to the nose. The same in paint.wgsl `chibi_smile`.
 fn chibi_smile(c: V3, uv: P, ink_c: V3, aa: f32) -> V3 {
-    let lip = ell(uv, (0.0, -0.3), (0.3, 0.14));
-    let c = c.lerp(v3(0.96, 0.62, 0.62), 0.35 * ink(lip, aa * 6.0));
-    let line = arc(uv, (0.0, 0.3), 0.5, 0.045)
-        .max(uv.1 + 0.02)
-        .max(uv.0.abs() - 0.32);
+    let lip = ell(uv, (0.0, -0.32), (0.34, 0.16));
+    let c = c.lerp(v3(0.96, 0.62, 0.62), 0.3 * ink(lip, aa * 6.0));
+    let line = arc(uv, (0.0, 1.0), 1.12, 0.05)
+        .max(uv.1 - 0.1)
+        .max(uv.0.abs() - 0.44);
     c.lerp(ink_c.lerp(v3(0.75, 0.35, 0.35), 0.4), ink(line, aa))
 }

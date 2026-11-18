@@ -136,106 +136,156 @@ def grid(rows, close_around, color, close_top=None, close_bottom=None):
             faces.append((cap, row[j2], row[j]) if flip else (cap, row[j], row[j2]))
 
 
-# ---- the skin: legs, feet, hands, neck (one metaball, so they are smooth) ----
-def skin():
-    mb = bpy.data.metaballs.new("skin")
-    mb.resolution = 0.0085
-    mb.render_resolution = 0.0085
-    mb.threshold = 0.6
-    obj = bpy.data.objects.new("skin", mb)
-    bpy.context.scene.collection.objects.link(obj)
+# ---- the skin: legs, feet, hands, neck --------------------------------------
+# Metaballs, so each part is one smooth surface. Each part is a family of
+# its own (Blender joins metaballs only by name), at its own resolution:
+# the fingers and toes need a fine one, the legs do not.
+#
+# A metaball's field is stiffness × (1 − d²/R²)³, shown where it reaches
+# the threshold, so a lone ball shows at R·√(1 − (threshold/stiffness)^⅓)
+# (0.575 R at stiffness 2: measured the same). A stiff ball's field falls
+# away fast outside what shows: stiff fingers and toes side by side keep
+# the grooves between them (at stiffness 8 two touching ones bridge only
+# 6 % past their own size; at 2, 19 %).
+THRESHOLD = 0.6
 
-    # (A capsule's size_x is its half length in units, not scaled.)
-    # Blender's metaball shows a lone ball at 0.575 of its radius (at
-    # this threshold and stiffness, measured): sizes here are as seen.
-    SEEN = 0.575
 
-    def ball(at, r, kind="BALL", size=(1, 1, 1), rot=None):
-        e = mb.elements.new()
+def seen(stiff):
+    return math.sqrt(1 - (THRESHOLD / stiff) ** (1 / 3))
+
+
+class Balls:
+    def __init__(self, name, res):
+        self.mb = bpy.data.metaballs.new(name)
+        self.mb.resolution = res
+        self.mb.render_resolution = res
+        self.mb.threshold = THRESHOLD
+        self.obj = bpy.data.objects.new(name, self.mb)
+        bpy.context.scene.collection.objects.link(self.obj)
+
+    def ball(self, at, r, kind="BALL", size=(1, 1, 1), rot=None, stiff=2.0):
+        """A ball showing `r` round (a capsule's size_x is its half length
+        in units, unscaled; an ellipsoid's sizes scale `r`; a cube shows
+        as a box `size` from its middle each way plus `r`, rounded `r`)."""
+        e = self.mb.elements.new()
         e.type = kind
         e.co = at
-        e.radius = r / SEEN
-        e.stiffness = 2.0
-        if kind in ("ELLIPSOID", "CAPSULE"):
+        e.radius = r / seen(stiff)
+        e.stiffness = stiff
+        if kind in ("ELLIPSOID", "CAPSULE", "CUBE"):
             e.size_x, e.size_y, e.size_z = size
         if rot is not None:
             e.rotation = rot
 
-    from mathutils import Quaternion
-    up = Quaternion((0, 0, 1), math.radians(90))  # capsule's x along y
+    def capsule(self, a, b, r, stiff=2.0):
+        """A capsule from a to b, `r` round."""
+        d = b - a
+        self.ball((a + b) / 2, r, "CAPSULE", (d.length / 2, 1, 1),
+                  Vector((1, 0, 0)).rotation_difference(d.normalized()), stiff)
+
+    def oriented(self, at, r, size, frame, stiff=2.0):
+        """An ellipsoid with its axes along `frame` (three vectors)."""
+        from mathutils import Matrix
+        m = Matrix((frame[0], frame[1], frame[2])).transposed()
+        self.ball(at, r, "ELLIPSOID", size, m.to_quaternion(), stiff)
+
+    def mesh(self, bones, zone, gloss=0.12, keep=None):
+        """Into the figure; `keep` thins it to that share of its triangles
+        (Blender's Decimate: the fine resolution the toes and fingers need
+        would be wasted on the rest)."""
+        dg = bpy.context.evaluated_depsgraph_get()
+        me = self.obj.evaluated_get(dg).to_mesh()
+        if keep is not None:
+            solid = bpy.data.meshes.new_from_object(self.obj.evaluated_get(dg))
+            thin = bpy.data.objects.new(self.obj.name + "_thin", solid)
+            bpy.context.scene.collection.objects.link(thin)
+            mod = thin.modifiers.new("thin", "DECIMATE")
+            mod.ratio = keep
+            dg = bpy.context.evaluated_depsgraph_get()
+            me = thin.evaluated_get(dg).to_mesh()
+        idx = [vert(v.co.copy(), "skin", gloss=gloss, bones=bones(v.co), zone=zone) for v in me.vertices]
+        for poly in me.polygons:
+            vs = [idx[i] for i in poly.vertices]
+            for k in range(1, len(vs) - 1):
+                faces.append((vs[0], vs[k], vs[k + 1]))
+
+
+def legs():
+    """The legs and the feet as one surface: a close chain of balls down
+    each leg (a full thigh, a round calf, an ankle hardly narrower), plump
+    feet as wide as the legs (the sheet's front view), and along the front
+    of each a row of five toes flush with it, the big toe on the inside,
+    the grooves between them showing (stiff toes keep them); the toes reach
+    a little past the shin (its side view)."""
+    b = Balls("legs", 0.0045)
     for s in (1, -1):
-        # A chubby straight leg (thigh under the skirt, a round calf), a
-        # little foot with a round heel and its toes.
         x = s * HIP.x
-        # The leg as a close chain of balls, so its thickness can change
-        # smoothly down it: a full thigh, a round calf, a slim ankle.
-        top, ankle = HIP.y - 0.02, Y(703)
-        steps = 16
+        top, ankle = HIP.y - 0.02, FLOOR + 0.075
+        steps = 22
         for i in range(steps + 1):
             t = i / steps
-            y = lerp(top, ankle, t)
-            r = 0.088 + 0.006 * math.sin(math.pi * min(1.0, t / 0.8)) - 0.02 * smoothstep(0.7, 1.0, t)
-            ball(Vector((x, y, -0.004 * t)), r)
-        # The foot: heel under the leg, its front no further than the
-        # sheet's side view has it; five round toes along its front, the
-        # big toe on the inside.
-        # A plump foot with a high instep...
-        # (the sheet's side view: the toes reach past the shin, the heel
-        # past the calf)...
-        ball(Vector((x * 1.02, FLOOR + 0.048, 0.0)), 0.07, "ELLIPSOID", (1.05, 0.72, 1.55))
-        # ...and five toes like beans along its front, apart enough for the
-        # grooves between them to show (metaballs run together closer).
-        fore = Quaternion((0, 1, 0), math.radians(-90))  # a capsule's x along z
-        for dx, r, z in ((-0.047, 0.0215, 0.099), (-0.015, 0.0168, 0.11), (0.013, 0.016, 0.107),
-                         (0.038, 0.0148, 0.098), (0.059, 0.0133, 0.084)):
-            ball(Vector((x * 1.02 + s * dx, FLOOR + 0.002 + r, z)), r, "CAPSULE", (0.012, 1, 1), fore)
-        # The forearm out of the cuff and a hand at its end, measured off
-        # the sheet's front view: the wrist 0.12 past the cuff's middle
-        # along the arm, the hand pointing out and only a little down
-        # (17°, flatter than the arm), 0.19 long to the fingertips; flat
-        # across the front, four fingers fanned a little, the thumb on its
-        # upper edge.
-        axis = (CUFF - SHOULDER).normalized()
+            r = 0.088 + 0.006 * math.sin(math.pi * min(1.0, t / 0.75))
+            b.ball(Vector((x, lerp(top, ankle, t), -0.004 * t)), r)
+        # The foot is hardly more than the leg's end (the sheet's side view:
+        # the toes a little past the shin, no heel behind the calf): a flat
+        # sole as wide as the leg, and along its front, low, a row of five
+        # toes taller than they are wide, the big toe on the inside, the
+        # grooves between them showing.
+        fx = x * 1.02
+        # A rounded box, so the front is flat across like the sheet's and
+        # all five toes show along it.
+        b.ball(Vector((fx, FLOOR + 0.04, 0.003)), 0.03, "CUBE", (0.058, 0.008, 0.065))
+        for dx, r, sx in ((-0.066, 0.027, 0.72), (-0.032, 0.025, 0.7), (0.0, 0.0245, 0.7),
+                          (0.031, 0.0235, 0.7), (0.061, 0.022, 0.72)):
+            b.ball(Vector((fx + s * dx, FLOOR + 0.025, 0.104 - 0.15 * abs(dx + 0.01) ** 1.5)),
+                   r, "ELLIPSOID", (sx, 1.0, 0.82), stiff=6.0)
+
+    def bones(p):
+        side = "l" if p.x > 0 else "r"
+        w = smoothstep(HIP.y - 0.12, HIP.y + 0.02, p.y)
+        return ((f"leg_{side}", 1 - w), ("hips", w))
+    b.mesh(bones, "paw", keep=0.3)
+
+
+def hands():
+    """Big chubby hands out of the cuffs, as the sheet draws them: from
+    the side the back of the hand, four fingers side by side front to back
+    with the thumb in front; from the front its edge. They point out and
+    down at 45°, the palm turned to the body."""
+    b = Balls("hands", 0.0045)
+    axis = (CUFF - SHOULDER).normalized()
+    for s in (1, -1):
         ax = Vector((s * axis.x, axis.y, axis.z))
         cuff = Vector((s * CUFF.x, CUFF.y, CUFF.z))
-        wrist = cuff + ax * 0.12
-        hd = Vector((s * math.cos(math.radians(17)), -math.sin(math.radians(17)), 0.04)).normalized()
-        perp = Vector((-hd.y, hd.x, 0.0)).normalized()
-        if perp.y < 0:
-            perp = -perp
-        along_arm = Quaternion((0, 0, 1), math.atan2(ax.y, ax.x))
-        along = Quaternion((0, 0, 1), math.atan2(hd.y, hd.x))
-        mid = cuff + ax * 0.04
-        ball((mid + wrist) / 2, 0.036, "CAPSULE", (((wrist - mid).length) / 2, 1, 1), along_arm)
-        ball(wrist + hd * 0.065, 0.05, "ELLIPSOID", (1.2, 1.0, 0.58), along)
-        for k, off in enumerate((0.034, 0.011, -0.012, -0.033)):
-            fan = Quaternion((0, 0, 1), math.atan2(hd.y, hd.x) + math.radians(10 * (1.5 - k)) * s)
-            tip = wrist + hd * (0.13 - 0.006 * abs(k - 1.2)) + perp * off
-            ball(tip, 0.0165 - 0.001 * abs(k - 1.2), "CAPSULE", (0.03 - 0.005 * abs(k - 1.2), 1, 1), fan)
-        thumb = Quaternion((0, 0, 1), math.atan2(hd.y, hd.x) + math.radians(35) * s)
-        ball(wrist + hd * 0.05 + perp * 0.042 + Vector((0, 0, 0.012)), 0.021, "CAPSULE", (0.022, 1, 1), thumb)
-    # The neck, into the head.
-    ball(Vector((0, NECK_Y + 0.03, -0.01)), 0.095, "CAPSULE", (0.035, 1, 1), up)
+        hd = Vector((s * math.cos(math.radians(45)), -math.sin(math.radians(45)), 0.0))
+        z = Vector((0, 0, 1))
+        w = z
+        n = hd.cross(w)
+        if n.x * s > 0:  # the palm faces the body
+            w = -z
+            n = hd.cross(w)
+        # The wrist at the cuff's opening (its underside reaches further),
+        # the whole hand out of it, 0.23 to the fingertips.
+        wrist = cuff + ax * 0.07
+        b.capsule(cuff - ax * 0.05, wrist, 0.045)
+        b.oriented(wrist + hd * 0.085 + n * 0.004, 0.075, (1.1, 1.15, 0.5), (hd, w, n))
+        for k, (off, ln) in enumerate(((-0.069, 0.04), (-0.023, 0.05), (0.023, 0.052), (0.069, 0.042))):
+            base = wrist + hd * 0.14 + z * off
+            tip = base + (hd + n * 0.18).normalized() * ln
+            b.capsule(base, tip, 0.023, stiff=8.0)
+        tb = wrist + hd * 0.07 + z * 0.088 + n * 0.03
+        b.capsule(tb, tb + (hd * 0.6 + z * 0.5 + n * 0.4).normalized() * 0.055, 0.024, stiff=6.0)
+    b.mesh(lambda p: ((f"arm_{'l' if p.x > 0 else 'r'}", 1.0),), "paw", keep=0.4)
 
-    dg = bpy.context.evaluated_depsgraph_get()
-    me = obj.evaluated_get(dg).to_mesh()
-    idx = []
-    for v in me.vertices:
-        p = v.co.copy()
-        side = "l" if p.x > 0 else "r"
-        if p.y > NECK_Y - 0.12:
-            w = smoothstep(NECK_Y - 0.06, NECK_Y + 0.06, p.y)
-            bones, zone = (("head", w), ("body", 1 - w)), "chin"
-        elif abs(p.x) > 0.3:
-            bones, zone = ((f"arm_{side}", 1.0),), "paw"
-        else:
-            w = smoothstep(HIP.y - 0.12, HIP.y + 0.02, p.y)
-            bones, zone = ((f"leg_{side}", 1 - w), ("hips", w)), "paw"
-        idx.append(vert(p, "skin", gloss=0.12, bones=bones, zone=zone))
-    for poly in me.polygons:
-        vs = [idx[i] for i in poly.vertices]
-        for k in range(1, len(vs) - 1):
-            faces.append((vs[0], vs[k], vs[k + 1]))
+
+def neck():
+    b = Balls("neck", 0.0085)
+    b.capsule(Vector((0, NECK_Y - 0.005, -0.01)), Vector((0, NECK_Y + 0.065, -0.01)), 0.095)
+
+    def bones(p):
+        w = smoothstep(NECK_Y - 0.06, NECK_Y + 0.06, p.y)
+        return (("head", w), ("body", 1 - w))
+    b.mesh(bones, "chin")
 
 
 # ---- the robe -------------------------------------------------------------------
@@ -245,17 +295,26 @@ ROBE = [
     (316, 30, 26, 26),
     (326, 48, 36, 34),
     (338, 62, 42, 40),
-    (360, 66, 46, 44),
-    (400, 67, 48, 45),
-    (440, 69, 50, 46),
+    (360, 66, 48, 44),
+    (400, 67, 51, 45),
+    (440, 69, 52, 46),
     (485, 72, 50, 48),
     (520, 84, 58, 58),
     (560, 100, 72, 76),
     (595, 113, 84, 96),
     (614, 119, 88, 104),
+    # (the back hangs lower than the front: past the hem's front)
+    (660, 133, 99, 120),
 ]
 AROUND = 168
 FOLDS = 9
+HEM_FRONT, HEM_BACK = 614, 632
+
+
+def hem(th):
+    """Where the hem is at turn th: the back hangs longer than the front
+    (the sheet's side view)."""
+    return HEM_FRONT + (HEM_BACK - HEM_FRONT) * (1 - math.cos(th)) / 2
 
 
 def robe_at(py):
@@ -282,8 +341,9 @@ def section(py, th, out=0.0):
     `out` off the cloth."""
     a, f, b = robe_at(py)
     c, s = math.cos(th), math.sin(th)
-    # A soft box: fuller at the sides than an ellipse.
-    e = 2.5
+    # Round, a little fuller at the sides than an ellipse (the sheet's
+    # cloth curves all the way round: its hem and sash show as arcs).
+    e = 2.15
     sx = math.copysign(abs(s) ** (2 / e), s)
     cz = math.copysign(abs(c) ** (2 / e), c)
     depth = f if c > 0 else b
@@ -335,8 +395,9 @@ INNER_LAPEL = [(-0.058, Y(326)), (-0.03, Y(350)), (0.0, Y(372))]
 # High round the neck, so no cloth shows above the collar.
 NECK_PY = 321
 BAND = 0.066
-# The hem's border runs down to the hem itself, as drawn.
-HEM_PY, HEM_W = 597.0, 0.12
+# The hem's border runs down to the hem itself, as drawn (its middle this
+# far above the hem).
+HEM_UP, HEM_W = 17.0, 0.12
 
 
 def robe_bones(p):
@@ -353,26 +414,30 @@ def robe():
     rows = []
     py_rows = []
     y = ROBE[0][0]
-    while y < ROBE[-1][0]:
+    while y < HEM_FRONT:
         py_rows.append(y)
         y += 2.0 if y > 560 else 3.0
-    py_rows.append(ROBE[-1][0])
+    py_rows.append(HEM_FRONT)
+    top_py = ROBE[0][0]
     for py in py_rows:
         row = []
         for j in range(AROUND):
-            p = section(py, 2 * math.pi * j / AROUND)
+            th = 2 * math.pi * j / AROUND
+            # The rows stretch down to wherever the hem is at this turn.
+            at = top_py + (py - top_py) * (hem(th) - top_py) / (HEM_FRONT - top_py)
+            p = section(at, th)
             row.append(vert(p, "robe", gloss=0.18, fuzz=0.05, bones=robe_bones(p)))
         rows.append(row)
     # Closed round the neck; the hem turns in, the cloth's thickness.
     top = vert(Vector((0, Y(ROBE[0][0]) + 0.005, -0.01)), "robe", bones=[("body", 1.0)])
-    hem, inner = [], []
+    lip, inner = [], []
     for j in range(AROUND):
         th = 2 * math.pi * j / AROUND
-        p = section(ROBE[-1][0] + 1.5, th, out=-0.012)
-        hem.append(vert(p, "gold", gloss=0.4, bones=robe_bones(p)))
-        p = section(ROBE[-1][0] - 8, th, out=-0.03)
+        p = section(hem(th) + 1.5, th, out=-0.012)
+        lip.append(vert(p, "gold", gloss=0.4, bones=robe_bones(p)))
+        p = section(hem(th) - 8, th, out=-0.03)
         inner.append(vert(p, "robe", bones=robe_bones(p)))
-    grid(rows + [hem, inner], True, "robe", close_top=top)
+    grid(rows + [lip, inner], True, "robe", close_top=top)
 
 
 # ---- borders: woven bands laid over the cloth ---------------------------------
@@ -437,8 +502,9 @@ def band(path_pts, normals, width, bones_fn, closed=False, a="trim", b="gold", l
 
 def borders():
     # The hem's border all round.
-    path = [section(HEM_PY, 2 * math.pi * j / 720) for j in range(721)]
-    nrm = [robe_normal(HEM_PY, 2 * math.pi * j / 720) for j in range(721)]
+    ths = [2 * math.pi * j / 720 for j in range(721)]
+    path = [section(hem(th) - HEM_UP, th) for th in ths]
+    nrm = [robe_normal(hem(th) - HEM_UP, th) for th in ths]
     band(path, nrm, HEM_W, robe_bones, closed=True)
     # The collar: one band from the hem up the overlap's edge, across her
     # chest, round the back of her neck and down into the V.
@@ -472,14 +538,19 @@ def sleeve_at(s, t, a, out=0.0, ext=0.0):
     """On sleeve s at t (0 shoulder … 1 cuff) and turn a (0 along the top
     of the arm)."""
     sh, axis, side, fwd, length = sleeve_frame(s)
-    r = lerp(0.085, 0.175, min(t, 1.0) ** 1.6) + out
-    # Folds round the sleeve, deeper toward the cuff; it hangs fuller
-    # underneath.
+    tt = min(t, 1.0)
+    # A soft bell: it swells a little on the way out, then opens wide.
+    r = 0.085 + 0.088 * tt ** 1.4 + 0.012 * math.sin(math.pi * tt) + out
+    # Folds round the sleeve, deeper toward the cuff.
     r += 0.006 * t * math.sin(7 * a + 0.8)
     u, v = math.cos(a), math.sin(a)
-    hang = 0.035 * t * t * max(0.0, -u)
-    d = side * (u * r * (1.0 + 0.25 * max(0.0, -u))) + fwd * (v * r * 0.92)
-    return sh + axis * (length * t + ext) + d - Vector((0, hang, 0))
+    # The cloth hangs: fuller underneath, and its underside reaches further
+    # out than its top, so the opening tips down (the sheet's cuffs).
+    under = max(0.0, -u)
+    hang = 0.06 * tt * tt * under
+    reach = 0.045 * tt ** 3 * under
+    d = side * (u * r * (1.0 + 0.25 * under)) + fwd * (v * r * 0.92)
+    return sh + axis * (length * t + ext + reach) + d - Vector((0, hang, 0))
 
 
 def sleeve_normal(s, t, a):
@@ -900,16 +971,19 @@ def write_ron(path):
     # On the head's surface: a little nose, a mouth only just raised.
     def front(dy):
         return hc.z + hr.z * math.sqrt(max(0.0, 1 - (dy / hr.y) ** 2))
-    nose = Vector((0, hc.y - 0.1, front(-0.1) - 0.004))
-    mouth = Vector((0, hc.y - 0.185, front(-0.185) - 0.034))
-    cheek = Vector((0.17, hc.y - 0.17, hc.z + 0.12))
-    # The face: eyes wide apart and low, as on the sheet (measured: the
-    # eyes' middles 46 px either side, 38 px under the head's middle).
+    # (measured: the nose just under the eyes, the mouth 0.12 wide)
+    nose = Vector((0, hc.y - 0.126, front(-0.126) - 0.004))
+    mouth = Vector((0, hc.y - 0.205, front(-0.205) - 0.06 + 0.009))
+    cheek = Vector((0.16, hc.y - 0.15, hc.z + 0.1))
+    # The face, measured off the sheet's front view: the eyes' middles
+    # 51 px either side of the face's (238.5), at y 228, 47 px round; set
+    # 0.02 higher, as the app's camera looks down 9° and the face, in
+    # front, shows lower than the crown.
     tail = tail.replace("nose: (0, -0.18, 0.56)", f"nose: {v3(nose - hc)}")
     tail = tail.replace("eye: (at: (0.34, -0.09), r: (0.205, 0.25)",
-                        "eye: (at: (0.42, -0.13), r: (0.2, 0.23)")
+                        "eye: (at: (0.513, -0.105), r: (0.25, 0.25)")
     tail = tail.replace("blush: (at: (0.5, -0.4), r: (0.2, 0.12)",
-                        "blush: (at: (0.58, -0.45), r: (0.15, 0.09)")
+                        "blush: (at: (0.5, -0.46), r: (0.15, 0.085)")
     head_part = head_part.replace("bake_cell: 0.025", "bake_cell: 0.008")
     out = [head_part, "    pivots: {\n"]
     out += [f'        "{k}": {v3(v)},\n' for k, v in PIVOTS.items()]
@@ -923,9 +997,9 @@ def write_ron(path):
                f'            blend: 0.03, color: "skin", fuzz: 0, zone: "head"),\n')
     out.append(f'        (name: "nose", bone: "head", shape: Ellipsoid((0.018, 0.013, 0.011)), at: {v3(nose)},\n'
                f'            blend: 0.015, color: "skin", fuzz: 0, zone: "head"),\n')
-    out.append(f'        (name: "mouth", bone: "head", shape: Ellipsoid((0.075, 0.05, 0.04)), at: {v3(mouth)},\n'
+    out.append(f'        (name: "mouth", bone: "head", shape: Ellipsoid((0.13, 0.07, 0.06)), at: {v3(mouth)},\n'
                f'            blend: 0.03, color: "skin", fuzz: 0, zone: "chin"),\n')
-    out.append(f'        (name: "cheek", bone: "head", shape: Ellipsoid((0.14, 0.12, 0.13)), at: {v3(cheek)},\n'
+    out.append(f'        (name: "cheek", bone: "head", shape: Ellipsoid((0.12, 0.1, 0.11)), at: {v3(cheek)},\n'
                f'            blend: 0.07, color: "skin", fuzz: 0, mirror: true, zone: "cheek"),\n')
     out.append("    ],\n")
     with open(path, "w", encoding="utf-8") as f:
@@ -937,7 +1011,9 @@ if __name__ == "__main__":
     args = sys.argv[sys.argv.index("--") + 1:] if "--" in sys.argv else []
     out = args[0] if args else "."
     os.makedirs(out, exist_ok=True)
-    piece(skin)
+    piece(legs)
+    piece(hands)
+    piece(neck)
     piece(robe)
     piece(borders)
     piece(sleeve, 1)

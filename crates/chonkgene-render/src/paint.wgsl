@@ -56,32 +56,28 @@ fn fox_marks(uv: vec2<f32>, aa: f32) -> vec2<f32> {
     return vec2<f32>(ink(d, aa), ss(0.55, 0.86, abs(uv.x)));
 }
 
-// The seal in the fox's human form, as face.rs `seal_marks`: a small crest
-// on the forehead (a drop with a round hollow, a wing curling up either
-// side), a leaf over each eye, three short stripes on each cheek, all
-// placed from the eyes (`eye`: their middle x, y and radii). Coverage.
+// The seal in the fox's human form, as face.rs `seal_marks`, placed from
+// the eyes (`eye`: their middle x, y and radii): a small crest low between
+// the brows, a leaf over the inner half of each eye for a brow, two short
+// stripes on each cheek under the eye. Coverage.
 fn seal_marks(uv: vec2<f32>, aa: f32, eye: vec4<f32>) -> f32 {
     let ex = eye.x;
     let ey = eye.y;
     let rx = eye.z;
     let ry = eye.w;
-    let foot = ey + ry + 0.1;
-    var d = tapered(uv, vec2<f32>(0.0, foot), vec2<f32>(0.0, foot + 0.25), 0.045, 0.003);
-    d = max(d, -(length(uv - vec2<f32>(0.0, foot + 0.08)) - 0.018));
+    let foot = ey + 0.55 * ry;
+    var d = tapered(uv, vec2<f32>(0.0, foot + 0.04), vec2<f32>(0.0, foot + 0.2), 0.026, 0.003);
     for (var k = 0; k < 2; k++) {
         let side = select(-1.0, 1.0, k == 1);
-        let w0 = vec2<f32>(0.025 * side, foot - 0.01);
-        let w1 = vec2<f32>(0.12 * side, foot + 0.09);
-        d = min(d, leaf(uv, w0, w1, 0.028));
-        d = min(d, tapered(uv, w1, vec2<f32>(0.085 * side, foot + 0.19), 0.016, 0.003));
-        let b0 = vec2<f32>((ex - 0.35 * rx) * side, ey + ry + 0.05);
-        let b1 = vec2<f32>((ex + 0.5 * rx) * side, ey + ry + 0.13);
-        d = min(d, leaf(uv, b0, b1, 0.034));
-        for (var i = 0; i < 3; i++) {
+        d = min(d, leaf(uv, vec2<f32>(0.012 * side, foot), vec2<f32>(0.085 * side, foot + 0.17), 0.024));
+        let b0 = vec2<f32>((ex - 1.45 * rx) * side, ey + 1.32 * ry);
+        let b1 = vec2<f32>((ex + 0.2 * rx) * side, ey + 1.93 * ry);
+        d = min(d, leaf(uv, b0, b1, 0.042));
+        for (var i = 0; i < 2; i++) {
             let fi = f32(i);
-            let outer = vec2<f32>((ex + (1.15 - 0.06 * fi) * rx) * side, ey - 0.8 * ry - 0.07 * fi);
-            let inner = vec2<f32>((ex + (0.4 + 0.05 * fi) * rx) * side, ey - 1.06 * ry - 0.065 * fi);
-            d = min(d, tapered(uv, outer, inner, 0.024 - 0.003 * fi, 0.004));
+            let outer = vec2<f32>((ex + (0.42 - 0.08 * fi) * rx) * side, ey - (1.31 + 0.3 * fi) * ry);
+            let inner = vec2<f32>((ex - (0.58 - 0.12 * fi) * rx) * side, ey - (1.66 + 0.3 * fi) * ry);
+            d = min(d, tapered(uv, outer, inner, 0.034 - 0.006 * fi, 0.005));
         }
     }
     return ink(d, aa);
@@ -322,12 +318,12 @@ fn tongue(c0: vec3<f32>, uv: vec2<f32>, a: vec2<f32>, b: vec2<f32>, r: f32, aa: 
     return mix(c, vec3<f32>(0.86, 0.36, 0.42), ink(groove, aa));
 }
 
-// A child's mouth at rest, as face.rs `chibi_smile`: a small closed smile,
-// a blush of pink lip under it, no line up to the nose.
+// A child's mouth at rest, as face.rs `chibi_smile`: a wide, shallow closed
+// smile, a blush of pink lip under it, no line up to the nose.
 fn chibi_smile(c0: vec3<f32>, uv: vec2<f32>, ink_c: vec3<f32>, aa: f32) -> vec3<f32> {
-    let lip = ell(uv, vec2<f32>(0.0, -0.3), vec2<f32>(0.3, 0.14));
-    let c = mix(c0, vec3<f32>(0.96, 0.62, 0.62), 0.35 * ink(lip, aa * 6.0));
-    let line = max(max(arc(uv, vec2<f32>(0.0, 0.3), 0.5, 0.045), uv.y + 0.02), abs(uv.x) - 0.32);
+    let lip = ell(uv, vec2<f32>(0.0, -0.32), vec2<f32>(0.34, 0.16));
+    let c = mix(c0, vec3<f32>(0.96, 0.62, 0.62), 0.3 * ink(lip, aa * 6.0));
+    let line = max(max(arc(uv, vec2<f32>(0.0, 1.0), 1.12, 0.05), uv.y - 0.1), abs(uv.x) - 0.44);
     return mix(c, mix(ink_c, vec3<f32>(0.75, 0.35, 0.35), 0.4), ink(line, aa));
 }
 
