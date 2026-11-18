@@ -209,6 +209,7 @@ ROBE = [
     (614, 119, 88, 104),
 ]
 AROUND = 168
+FOLDS = 9
 
 
 def robe_at(py):
@@ -221,8 +222,18 @@ def robe_at(py):
     return [c * K for c in (ROBE[0][1:] if py < ROBE[0][0] else ROBE[-1][1:])]
 
 
+def fold(py, th):
+    """Soft folds falling from the sash, deeper toward the hem; a few
+    creases over the chest."""
+    k = smoothstep(492, 612, py)
+    f = k * (0.010 * math.sin(FOLDS * th + 0.6) + 0.004 * math.sin(23 * th + 1.3))
+    chest = smoothstep(340, 380, py) * (1 - smoothstep(420, 437, py))
+    return f + chest * 0.002 * math.sin(14 * th + 0.4)
+
+
 def section(py, th, out=0.0):
-    """On the robe at height py, turned th (0 facing you, + to her left)."""
+    """On the robe at height py, turned th (0 facing you, + to her left),
+    `out` off the cloth."""
     a, f, b = robe_at(py)
     c, s = math.cos(th), math.sin(th)
     # A soft box: fuller at the sides than an ellipse.
@@ -230,66 +241,54 @@ def section(py, th, out=0.0):
     sx = math.copysign(abs(s) ** (2 / e), s)
     cz = math.copysign(abs(c) ** (2 / e), c)
     depth = f if c > 0 else b
-    p = Vector(((a + out) * sx, Y(py), (depth + out) * cz))
-    return p
+    o = out + fold(py, th)
+    return Vector(((a + o) * sx, Y(py), (depth + o) * cz))
 
 
-def front_point(x, y):
-    """The point on the robe's front at x, model height y."""
+def robe_normal(py, th):
+    dpy = section(py + 0.5, th) - section(py - 0.5, th)
+    dth = section(py, th + 0.003) - section(py, th - 0.003)
+    return dpy.cross(dth).normalized()
+
+
+def front_at(x, y):
+    """(py, th) of the point on the robe's front at x, model height y."""
     py = SOLE_PX - (y - FLOOR) / K
-    a, f, _ = robe_at(py)
-    th = math.asin(max(-1.0, min(1.0, x / max(a, 1e-3)))) if a else 0.0
-    # invert the soft box roughly: search th
-    best, bt = 1e9, 0.0
-    for i in range(-60, 61):
-        t = i / 60 * 1.4
-        d = abs(section(py, t).x - x)
-        if d < best:
-            best, bt = d, t
-    return section(py, bt)
+    lo, hi = -1.5, 1.5
+    for _ in range(40):
+        mid = (lo + hi) / 2
+        if section(py, mid).x < x:
+            lo = mid
+        else:
+            hi = mid
+    return py, (lo + hi) / 2
 
 
-# The crossed collar's edge (her right panel over her left, as in the
-# sheet: from beside her neck on her left, across to her right at the
-# sash), and below the sash the overlap's edge down her right to the hem.
-OUTER_LAPEL = [(0.075, Y(322)), (0.02, Y(360)), (-0.05, Y(400)), (-0.12, Y(445))]
-SKIRT_EDGE = [(-0.15, Y(485)), (-0.16, Y(540)), (-0.175, Y(600))]
-INNER_LAPEL = [(-0.075, Y(322)), (-0.03, Y(350)), (0.0, Y(368))]
+def catmull(pts, per=12):
+    """A smooth curve through 2D points."""
+    out = []
+    ext = [pts[0]] + pts + [pts[-1]]
+    for i in range(1, len(ext) - 2):
+        p0, p1, p2, p3 = ext[i - 1], ext[i], ext[i + 1], ext[i + 2]
+        for k in range(per):
+            t = k / per
+            out.append(tuple(
+                0.5 * (2 * p1[j] + (-p0[j] + p2[j]) * t + (2 * p0[j] - 5 * p1[j] + 4 * p2[j] - p3[j]) * t * t
+                       + (-p0[j] + 3 * p1[j] - 3 * p2[j] + p3[j]) * t ** 3) for j in range(2)))
+    out.append(pts[-1])
+    return out
+
+
+# The crossed collar (her right panel over her left, as in the sheet): the
+# overlap's edge up from the hem on her right, under the sash, across her
+# chest to beside her neck on her left, round the back of the neck, and
+# down the inner panel on her right into the V.
+SKIRT_EDGE = [(-0.175, Y(606)), (-0.165, Y(560)), (-0.15, Y(500)), (-0.13, Y(455))]
+OUTER_LAPEL = [(-0.11, Y(430)), (-0.05, Y(400)), (0.02, Y(362)), (0.07, Y(330))]
+INNER_LAPEL = [(-0.07, Y(330)), (-0.03, Y(352)), (0.0, Y(372))]
+NECK_PY = 327
 BAND = 0.062
-HEM_BAND = (Y(612), Y(574))
-
-
-def seg_dist(p, a, b):
-    ab = b - a
-    t = max(0.0, min(1.0, (p - a).dot(ab) / max(ab.dot(ab), 1e-9)))
-    return (p - (a + ab * t)).length
-
-
-def poly_dist(p, line):
-    pts = [front_point(x, y) for x, y in line]
-    return min(seg_dist(p, a, b) for a, b in zip(pts, pts[1:]))
-
-
-LAPELS = None
-
-
-def trim_amount(p, front):
-    """How much of the border the robe's surface at p is in (0 to 1)."""
-    global LAPELS
-    if LAPELS is None:
-        LAPELS = [[front_point(x, y) for x, y in line]
-                  for line in (OUTER_LAPEL, SKIRT_EDGE, INNER_LAPEL)]
-    t = 0.0
-    if front:
-        for pts in LAPELS:
-            d = min(seg_dist(p, a, b) for a, b in zip(pts, pts[1:]))
-            t = max(t, 1 - smoothstep(BAND * 0.5 - 0.006, BAND * 0.5 + 0.006, d))
-    # The collar's band round the back of the neck.
-    t = max(t, smoothstep(Y(334), Y(328), p.y))
-    # The hem's border.
-    t = max(t, smoothstep(HEM_BAND[1] - 0.008, HEM_BAND[1] + 0.006, -p.y + 2 * HEM_BAND[1])
-            if False else (1 - smoothstep(HEM_BAND[1] - 0.006, HEM_BAND[1] + 0.006, p.y)))
-    return t
+HEM_PY, HEM_W = 590, 0.105
 
 
 def robe_bones(p):
@@ -313,78 +312,169 @@ def robe():
     for py in py_rows:
         row = []
         for j in range(AROUND):
-            th = 2 * math.pi * j / AROUND
-            p = section(py, th)
-            front = math.cos(th) > 0.2
-            t = trim_amount(p, front)
-            # The border stands a little proud of the cloth.
-            p = section(py, th, out=0.008 * t)
-            row.append(vert(p, "robe", "trim", t, gloss=0.18, fuzz=0.05, bones=robe_bones(p)))
+            p = section(py, 2 * math.pi * j / AROUND)
+            row.append(vert(p, "robe", gloss=0.18, fuzz=0.05, bones=robe_bones(p)))
         rows.append(row)
     # Closed round the neck; the hem turns in, the cloth's thickness.
-    top = vert(Vector((0, Y(ROBE[0][0]) + 0.005, -0.01)), "robe", "trim", 1.0,
-               bones=[("body", 1.0)])
-    hem = []
+    top = vert(Vector((0, Y(ROBE[0][0]) + 0.005, -0.01)), "robe", bones=[("body", 1.0)])
+    hem, inner = [], []
     for j in range(AROUND):
         th = 2 * math.pi * j / AROUND
         p = section(ROBE[-1][0] + 1.5, th, out=-0.012)
         hem.append(vert(p, "trim", bones=robe_bones(p)))
-    inner = []
-    for j in range(AROUND):
-        th = 2 * math.pi * j / AROUND
         p = section(ROBE[-1][0] - 8, th, out=-0.03)
         inner.append(vert(p, "robe", bones=robe_bones(p)))
     grid(rows + [hem, inner], True, "robe", close_top=top)
 
 
+# ---- borders: woven bands laid over the cloth ---------------------------------
+def scroll(u, v, period):
+    """The border's pattern (the sheet's woven scroll): a vine waving along
+    the band with a curl in each bend. u along the band (units), v across
+    the middle of it (-1 … 1). Coverage 0 … 1."""
+    s = u / period
+    w0 = 0.55 * math.sin(2 * math.pi * s)
+    d = abs(v - w0) - 0.13
+    # A curl in each bend, on the inside of it.
+    k = math.floor(s * 2 + 0.5)
+    cx, cy = (k + 0.5) / 2.0 - 0.25, 0.3 * (1 if k % 2 else -1)
+    dx = (s - cx) * 2.2
+    dy = v - cy
+    ring = abs(math.hypot(dx, dy) - 0.24) - 0.07
+    d = min(d, ring)
+    return 1 - smoothstep(-0.04, 0.04, d)
+
+
+def band(path_pts, normals, width, bones_fn, closed=False, a="trim", b="gold", lift=0.0065,
+         across=17, zone="back", period=0.07):
+    """A border strip `width` wide along a line of points on a surface
+    (with the surface's normals there): edged with raised piping, the
+    scroll woven in its middle, standing `lift` proud of the cloth with
+    its edges tucked down into it."""
+    # Even spacing along the line.
+    step = 0.0024
+    cum = [0.0]
+    for p, q in zip(path_pts, path_pts[1:]):
+        cum.append(cum[-1] + (q - p).length)
+    total = cum[-1]
+    n = max(2, int(total / step))
+    rows = []
+    j = 0
+    for i in range(n + (0 if closed else 1)):
+        u = total * i / n
+        while j < len(cum) - 2 and cum[j + 1] < u:
+            j += 1
+        t = (u - cum[j]) / max(cum[j + 1] - cum[j], 1e-9)
+        p = path_pts[j].lerp(path_pts[j + 1], t)
+        nm = normals[j].lerp(normals[j + 1], t).normalized()
+        tan = (path_pts[j + 1] - path_pts[j]).normalized()
+        acr = nm.cross(tan).normalized()
+        row = []
+        for k in range(across):
+            v = -1 + 2 * k / (across - 1)
+            av = abs(v)
+            h = lift * (1 - smoothstep(0.88, 1.0, av)) - 0.003 * smoothstep(0.9, 1.0, av)
+            pipe = math.exp(-((av - 0.8) / 0.07) ** 2)
+            h += 0.0025 * pipe
+            mid = scroll(u, v / 0.62, period * width / 0.062) if av < 0.62 else 0.0
+            h += 0.0012 * mid
+            tt = max(mid, smoothstep(0.7, 0.75, av) * (1 - smoothstep(0.88, 0.93, av)))
+            q = p + acr * (v * width / 2) + nm * h
+            row.append(vert(q, a, b, tt, gloss=0.35, fuzz=0.02, bones=bones_fn(q), zone=zone))
+        rows.append(row)
+    if closed:
+        rows.append(rows[0])
+    first = len(faces)
+    grid(rows, False, a)
+    # An open strip has no inside to judge by: face it along the cloth's
+    # normal.
+    fa, fb, fc = faces[first]
+    if (verts[fb][0] - verts[fa][0]).cross(verts[fc][0] - verts[fa][0]).dot(normals[0]) < 0:
+        faces[first:] = [(x, z, y) for x, y, z in faces[first:]]
+    return BANDED.extend(range(first, len(faces)))
+
+
+BANDED = []
+
+
+def borders():
+    # The hem's border all round.
+    path = [section(HEM_PY, 2 * math.pi * j / 720) for j in range(721)]
+    nrm = [robe_normal(HEM_PY, 2 * math.pi * j / 720) for j in range(721)]
+    band(path, nrm, HEM_W, robe_bones)
+    # The collar: one band from the hem up the overlap's edge, across her
+    # chest, round the back of her neck and down into the V.
+    params = [front_at(x, y) for x, y in catmull(SKIRT_EDGE + OUTER_LAPEL, 16)]
+    th0 = params[-1][1]
+    _, th1 = front_at(*INNER_LAPEL[0])
+    ring = []
+    for k in range(1, 60):
+        t = k / 60
+        ring.append((lerp(params[-1][0], NECK_PY, smoothstep(0, 0.15, t)) if t < 0.5 else
+                     lerp(NECK_PY, front_at(*INNER_LAPEL[0])[0], smoothstep(0.85, 1, t)),
+                     lerp(th0, th1 + 2 * math.pi, t)))
+    params += ring + [front_at(x, y) for x, y in catmull(INNER_LAPEL, 16)]
+    band([section(py, th) for py, th in params], [robe_normal(py, th) for py, th in params],
+         BAND, robe_bones)
+
+
 # ---- the sleeves: wide trumpet sleeves, a border at the cuff ------------------
-def sleeve(s):
+def sleeve_frame(s):
     sh = Vector((s * SHOULDER.x * 0.75, SHOULDER.y + 0.01, SHOULDER.z))
     cf = Vector((s * CUFF.x, CUFF.y, CUFF.z))
     axis = (cf - sh).normalized()
-    side = Vector((0, 0, 1)).cross(axis).normalized()  # in the front plane
+    side = Vector((0, 0, 1)).cross(axis).normalized() * (1 if s > 0 else -1)
     fwd = axis.cross(side).normalized()
-    length = (cf - sh).length
-    rows = []
-    n_al, n_ar = 40, 64
+    if fwd.z < 0:
+        fwd = -fwd
+    return sh, axis, side, fwd, (cf - sh).length
+
+
+def sleeve_at(s, t, a, out=0.0, ext=0.0):
+    """On sleeve s at t (0 shoulder … 1 cuff) and turn a (0 along the top
+    of the arm)."""
+    sh, axis, side, fwd, length = sleeve_frame(s)
+    r = lerp(0.085, 0.175, min(t, 1.0) ** 1.6) + out
+    # Folds round the sleeve, deeper toward the cuff; it hangs fuller
+    # underneath.
+    r += 0.006 * t * math.sin(7 * a + 0.8)
+    u, v = math.cos(a), math.sin(a)
+    hang = 0.035 * t * t * max(0.0, -u)
+    d = side * (u * r * (1.0 + 0.25 * max(0.0, -u))) + fwd * (v * r * 0.92)
+    return sh + axis * (length * t + ext) + d - Vector((0, hang, 0))
+
+
+def sleeve_normal(s, t, a):
+    dt = sleeve_at(s, t + 0.003, a) - sleeve_at(s, t - 0.003, a)
+    da = sleeve_at(s, t, a + 0.003) - sleeve_at(s, t, a - 0.003)
+    n = da.cross(dt).normalized()
+    c = sleeve_at(s, t, a) - sleeve_at(s, t, a, out=-0.05)
+    return n if n.dot(c) > 0 else -n
+
+
+def sleeve(s):
     bone = f"arm_{'l' if s > 0 else 'r'}"
+    n_al, n_ar = 40, 72
+    rows = []
     for i in range(n_al + 1):
         t = i / n_al
-        r = lerp(0.085, 0.175, t ** 1.6)
-        # A sleeve hangs: fuller underneath towards the cuff.
-        sag = 0.035 * t * t
-        c = sh + axis * (length * t)
-        row = []
-        for j in range(n_ar):
-            a = 2 * math.pi * j / n_ar
-            u = math.cos(a)  # + towards the top of the arm (side x s)
-            v = math.sin(a)
-            hang = sag * max(0.0, -u)
-            d = side * (u * r * (1.0 + 0.25 * max(0.0, -u))) * (1 if s > 0 else -1) + fwd * (v * r * 0.92)
-            p = c + d + Vector((0, -hang, 0))
-            trim = smoothstep(0.80, 0.82, t)
-            p += d.normalized() * 0.007 * trim
-            w = smoothstep(0.0, 0.3, t)
-            row.append(vert(p, "robe", "trim", trim, gloss=0.18, fuzz=0.05,
-                            bones=((bone, w), ("body", 1 - w)) if w < 1 else ((bone, 1.0),)))
-        rows.append(row)
+        w = smoothstep(0.0, 0.3, t)
+        bones = ((bone, w), ("body", 1 - w)) if w < 1 else ((bone, 1.0),)
+        rows.append([vert(sleeve_at(s, t, 2 * math.pi * j / n_ar), "robe", gloss=0.18, fuzz=0.05,
+                          bones=bones) for j in range(n_ar)])
     # The cuff's edge turned in, so it has a thickness.
-    for k, (dl, dr) in enumerate(((0.008, -0.012), (-0.03, -0.022))):
-        row = []
-        t = 1.0
-        c = sh + axis * (length + dl)
-        r = 0.175 + dr
-        for j in range(n_ar):
-            a = 2 * math.pi * j / n_ar
-            u, v = math.cos(a), math.sin(a)
-            hang = 0.035 * max(0.0, -u)
-            d = side * (u * r * (1.0 + 0.25 * max(0.0, -u))) * (1 if s > 0 else -1) + fwd * (v * r * 0.92)
-            row.append(vert(c + d + Vector((0, -hang, 0)), "trim" if k == 0 else "robe",
-                            bones=((bone, 1.0),)))
-        rows.append(row)
-    if s < 0:
-        rows = [list(reversed(r)) for r in rows]
+    for color, out, ext in (("trim", -0.012, 0.008), ("robe", -0.022, -0.03)):
+        rows.append([vert(sleeve_at(s, 1.0, 2 * math.pi * j / n_ar, out, ext), color,
+                          bones=((bone, 1.0),)) for j in range(n_ar)])
     grid(rows, True, "robe")
+
+
+def cuff(s):
+    bone = f"arm_{'l' if s > 0 else 'r'}"
+    t = 0.905
+    path = [sleeve_at(s, t, 2 * math.pi * j / 400) for j in range(401)]
+    nrm = [sleeve_normal(s, t, 2 * math.pi * j / 400) for j in range(401)]
+    band(path, nrm, 0.085, lambda q: ((bone, 1.0),))
 
 
 # ---- tubes: the sash, the rope, the bow, cords --------------------------------
@@ -511,37 +601,101 @@ def sphere(c, r, color, bones, gloss=0.3, slot=False, zone="back", n=20):
     grid([list(reversed(r_)) for r_ in rows], True, color, close_top=top, close_bottom=bot)
 
 
-# ---- ears: tall fox ears tilted out, white fluff inside -----------------------
+# ---- ears: big fox ears tilted out, a thick rim, a hollow lined with fluff ----
 def ear(s):
-    base = Vector((s * 0.22, HEAD_C.y + 0.24, -0.07))
-    tip = Vector((s * 0.39, HEAD_C.y + 0.6, -0.08))
     bone = f"ear_{'l' if s > 0 else 'r'}"
+    bones = ((bone, 1.0),)
+    # The root sinks well into the head (the hair hides the rest), so
+    # nothing shows between them.
+    base = Vector((s * 0.19, HEAD_C.y + 0.19, -0.06))
+    tip = Vector((s * 0.4, HEAD_C.y + 0.62, -0.075))
     axis = (tip - base).normalized()
     across = Vector((1, 0, 0)) - axis * axis.x
     across.normalize()
     fwd = axis.cross(across).normalized()
     if fwd.z < 0:
         fwd = -fwd
+    # Turned a little out to the side, as the sheet's ears face.
+    turn = math.radians(32) * s
+    fwd, across = (fwd * math.cos(turn) + across * math.sin(turn) * -1,
+                   across * math.cos(turn) + fwd * math.sin(turn))
     length = (tip - base).length
-    for layer, (color, scale, shift) in enumerate((("hair", 1.0, 0.0), ("fluff", 0.6, 0.03))):
-        rows = []
-        for i in range(25):
-            t = i / 24
-            w = 0.2 * scale * (1 - t) ** 0.75 * (1 + 0.3 * math.sin(math.pi * t))
-            d = 0.06 * scale * (1 - t) ** 0.7 + 0.004
-            c = base + axis * (length * (t * (0.96 if layer else 1.0) + (0.05 if layer else 0)))
-            c += fwd * (shift * (1 - t))
-            row = []
-            for j in range(24):
-                a = 2 * math.pi * j / 24
-                ca, sa = math.cos(a), math.sin(a)
-                # Lens-shaped: hollow at the front for the outer ear.
-                hollow = -1.1 * d * max(0.0, sa) * (1 - abs(ca)) ** 0.7 if layer == 0 else 0.0
-                p = c + across * (w * ca) + fwd * (d * sa + hollow)
-                row.append(vert(p, color, gloss=0.3, fuzz=0.2, bones=((bone, 1.0),), zone="head"))
-            rows.append(row)
-        top = vert(tip + fwd * 0.003 * layer, color, bones=((bone, 1.0),), zone="head")
-        grid(rows if s > 0 else [list(reversed(r)) for r in rows], True, color, close_bottom=top)
+    n_al, n_ar = 30, 40
+    rows = []
+    for i in range(n_al + 1):
+        t = i / n_al
+        w = 0.2 * (1 - t) ** 0.72 * (1 + 0.32 * math.sin(math.pi * t)) + 0.004
+        d = 0.085 * (1 - t) ** 0.7 + 0.006
+        cup = 0.75 * d * smoothstep(0.1, 0.25, t) * (1 - smoothstep(0.72, 0.95, t))
+        # The outer edge bows out, the inner edge is straighter.
+        bow = 0.035 * math.sin(math.pi * t) * (1 - t)
+        c = base + axis * (length * t)
+        row = []
+        for j in range(n_ar):
+            a = 2 * math.pi * j / n_ar
+            ca, sa = math.cos(a), math.sin(a)
+            if sa < 0:
+                v = d * sa
+            else:
+                # A rim round the hollow: thick at the edges, sunk between.
+                v = d * 0.55 * sa - cup * max(0.0, 1 - ca * ca) ** 1.5
+            x = w * ca + (bow * max(0.0, ca * s) if s else 0.0)
+            p = c + across * x + fwd * v
+            inner = (sa > 0) * (1 - smoothstep(0.62, 0.8, abs(ca))) * smoothstep(0.06, 0.16, t) \
+                * (1 - smoothstep(0.8, 0.92, t))
+            row.append(vert(p, "hair", "fluff", inner, gloss=0.3, fuzz=0.15, bones=bones, zone="head"))
+        rows.append(row)
+    top = vert(tip, "hair", bones=bones, zone="head")
+    grid(rows, True, "hair", close_bottom=top)
+    # Fluff lining the hollow: soft flat locks overlapping from its foot,
+    # fanned up and out, the tips curling forward over the rim.
+    for ca, t0, ln, wd in ((-0.45, 0.14, 0.13, 0.05), (-0.18, 0.1, 0.17, 0.06),
+                           (0.12, 0.12, 0.16, 0.055), (0.42, 0.16, 0.12, 0.05),
+                           (-0.3, 0.26, 0.1, 0.04), (0.25, 0.27, 0.1, 0.04)):
+        w = 0.2 * (1 - t0) ** 0.72
+        root = base + axis * (length * t0) + across * (w * ca)
+        spread = across * (0.9 * ca)
+        pts, nrm = [], []
+        for i in range(13):
+            u = i / 12
+            pts.append(root + axis * (ln * u) + spread * (0.08 * u)
+                       + fwd * (-0.012 + 0.03 * u * u))
+            nrm.append((fwd - axis * 0.4 * u).normalized())
+        lock(pts, nrm, lambda u, wd=wd: wd * (1 - u) ** 0.8 * min(1.0, 0.5 + 3 * u) + 0.002,
+             0.011, "fluff", bones, zone="head")
+
+
+def lock(pts, nrm, width, thick, color, bones, zone="head", around=12):
+    """A flat lock along `pts`, lens-shaped across (`width(u)` wide,
+    `thick` deep along `nrm`), coming to a point."""
+    rows = []
+    n = len(pts)
+    for i, (p, nm) in enumerate(zip(pts, nrm)):
+        d = (pts[min(i + 1, n - 1)] - pts[max(i - 1, 0)]).normalized()
+        acr = d.cross(nm).normalized()
+        up = acr.cross(d).normalized()
+        u = i / (n - 1)
+        w = width(u)
+        th = thick * (1 - u) ** 0.6 + 0.0015
+        row = []
+        for j in range(around):
+            a = 2 * math.pi * j / around
+            row.append(vert(p + acr * (w * math.cos(a)) + up * (th * math.sin(a)), color,
+                            gloss=0.15, fuzz=0.3, bones=bones, zone=zone))
+        rows.append(row)
+    first = len(faces)
+    cap = vert(pts[-1] + (pts[-1] - pts[-2]).normalized() * 0.004, color, bones=bones, zone=zone)
+    grid(rows, True, color, close_bottom=cap)
+    # Each lock faces out on its own (the ear's own test can't judge them).
+    centre = sum((verts[i][0] for r in rows for i in r), Vector()) / (len(rows) * around)
+    vol = sum((verts[a][0] - centre).dot((verts[b][0] - centre).cross(verts[c][0] - centre))
+              for a, b, c in faces[first:])
+    if vol < 0:
+        faces[first:] = [(x, z, y) for x, y, z in faces[first:]]
+    LOCKS.extend(range(first, len(faces)))
+
+
+LOCKS = []
 
 
 # ---- normals, occlusion, out ---------------------------------------------------
@@ -551,10 +705,19 @@ def piece(build, *args):
     first = len(faces)
     build(*args)
     vol = 0.0
-    for a, b, c in faces[first:]:
+    banded = set(BANDED)
+    if all(i in banded for i in range(first, len(faces))):
+        print(f"{build.__name__}{args}: {len(faces) - first} triangles (bands)")
+        return
+    locked = set(LOCKS)
+    own = [i for i in range(first, len(faces)) if i not in locked]
+    for i in own:
+        a, b, c = faces[i]
         vol += verts[a][0].dot(verts[b][0].cross(verts[c][0]))
     if vol < 0:
-        faces[first:] = [(a, c, b) for a, b, c in faces[first:]]
+        for i in own:
+            a, b, c = faces[i]
+            faces[i] = (a, c, b)
     print(f"{build.__name__}{args}: {len(faces) - first} triangles"
           f"{' (turned)' if vol < 0 else ''}")
 
@@ -649,8 +812,11 @@ def write_ron(path):
     head_part = src[:src.index("    pivots: {")]
     tail = src[src.index("    gait: ("):]
     hc, hr = HEAD_C, HEAD_R
-    nose = Vector((0, hc.y - 0.1, hc.z + 0.3))
-    mouth = Vector((0, hc.y - 0.18, hc.z + 0.262))
+    # On the head's surface: a little nose, a mouth only just raised.
+    def front(dy):
+        return hc.z + hr.z * math.sqrt(max(0.0, 1 - (dy / hr.y) ** 2))
+    nose = Vector((0, hc.y - 0.1, front(-0.1) - 0.004))
+    mouth = Vector((0, hc.y - 0.185, front(-0.185) - 0.034))
     cheek = Vector((0.17, hc.y - 0.17, hc.z + 0.12))
     # The face: eyes wide apart and low, as on the sheet (measured: the
     # eyes' middles 46 px either side, 38 px under the head's middle).
@@ -659,7 +825,7 @@ def write_ron(path):
                         "eye: (at: (0.42, -0.13), r: (0.2, 0.23)")
     tail = tail.replace("blush: (at: (0.5, -0.4), r: (0.2, 0.12)",
                         "blush: (at: (0.58, -0.45), r: (0.15, 0.09)")
-    head_part = head_part.replace("bake_cell: 0.025", "bake_cell: 0.012")
+    head_part = head_part.replace("bake_cell: 0.025", "bake_cell: 0.008")
     out = [head_part, "    pivots: {\n"]
     out += [f'        "{k}": {v3(v)},\n' for k, v in PIVOTS.items()]
     out.append("    },\n    parents: {\n")
@@ -670,10 +836,10 @@ def write_ron(path):
     out.append("    ],\n    parts: [\n")
     out.append(f'        (name: "head", bone: "head", shape: Ellipsoid({v3(hr)}), at: {v3(hc)},\n'
                f'            blend: 0.03, color: "skin", fuzz: 0, zone: "head"),\n')
-    out.append(f'        (name: "nose", bone: "head", shape: Ellipsoid((0.014, 0.01, 0.007)), at: {v3(nose)},\n'
+    out.append(f'        (name: "nose", bone: "head", shape: Ellipsoid((0.018, 0.013, 0.011)), at: {v3(nose)},\n'
                f'            blend: 0.015, color: "skin", fuzz: 0, zone: "head"),\n')
-    out.append(f'        (name: "mouth", bone: "head", shape: Ellipsoid((0.045, 0.02, 0.01)), at: {v3(mouth)},\n'
-               f'            blend: 0.025, color: "skin", fuzz: 0, zone: "chin"),\n')
+    out.append(f'        (name: "mouth", bone: "head", shape: Ellipsoid((0.075, 0.05, 0.04)), at: {v3(mouth)},\n'
+               f'            blend: 0.03, color: "skin", fuzz: 0, zone: "chin"),\n')
     out.append(f'        (name: "cheek", bone: "head", shape: Ellipsoid((0.14, 0.12, 0.13)), at: {v3(cheek)},\n'
                f'            blend: 0.07, color: "skin", fuzz: 0, mirror: true, zone: "cheek"),\n')
     out.append("    ],\n")
@@ -688,8 +854,11 @@ if __name__ == "__main__":
     os.makedirs(out, exist_ok=True)
     piece(skin)
     piece(robe)
+    piece(borders)
     piece(sleeve, 1)
     piece(sleeve, -1)
+    piece(cuff, 1)
+    piece(cuff, -1)
     piece(sash)
     piece(ear, 1)
     piece(ear, -1)

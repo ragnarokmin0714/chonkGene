@@ -65,26 +65,36 @@ pub(crate) fn fox_marks(uv: P, aa: f32) -> (f32, f32) {
 }
 
 /// The fox's seal in her human form, the same in paint.wgsl `seal_marks`
-/// (Roger's picture of her parts, 銀白版 and 紅髮版 faces): on the
-/// forehead a tall drop with a round hollow, a wing curling up either side
-/// of its foot; a leaf over each brow, slanting up and out; three short
-/// stripes on each cheek under the eye's outer corner, thick at the outer
-/// end and drawn to a point toward the nose. Laid out for a round face
-/// with big eyes low on it (eyes about (±0.34, −0.1)).
-pub(crate) fn seal_marks(uv: P, aa: f32) -> f32 {
-    let mut d = tapered(uv, (0.0, 0.25), (0.0, 0.58), 0.058, 0.004);
-    d = d.max(-(len(sub(uv, (0.0, 0.36))) - 0.024));
+/// (Roger's sheet of her parts, the 銀白版 face decal at rest): on the
+/// forehead a small crest (a drop with a round hollow, a wing curling up
+/// either side of its foot); a leaf over each eye, slanting up and out;
+/// three short stripes on each cheek under the eye's outer corner, thick
+/// at the outer end and drawn to a point toward the nose. Placed from the
+/// eyes (`eye`: their middle x, y and radii), so it fits any face.
+pub(crate) fn seal_marks(uv: P, aa: f32, eye: (f32, f32, f32, f32)) -> f32 {
+    let (ex, ey, rx, ry) = eye;
+    let foot = ey + ry + 0.1;
+    let mut d = tapered(uv, (0.0, foot), (0.0, foot + 0.25), 0.045, 0.003);
+    d = d.max(-(len(sub(uv, (0.0, foot + 0.08))) - 0.018));
     for side in [-1.0, 1.0] {
-        let w0 = (0.03 * side, 0.24);
-        let w1 = (0.16 * side, 0.36);
-        d = d.min(leaf(uv, w0, w1, 0.036));
-        d = d.min(tapered(uv, w1, (0.11 * side, 0.5), 0.02, 0.003));
-        d = d.min(leaf(uv, (0.22 * side, 0.2), (0.4 * side, 0.27), 0.05));
+        let w0 = (0.025 * side, foot - 0.01);
+        let w1 = (0.12 * side, foot + 0.09);
+        d = d.min(leaf(uv, w0, w1, 0.028));
+        d = d.min(tapered(uv, w1, (0.085 * side, foot + 0.19), 0.016, 0.003));
+        let b0 = ((ex - 0.35 * rx) * side, ey + ry + 0.05);
+        let b1 = ((ex + 0.5 * rx) * side, ey + ry + 0.13);
+        d = d.min(leaf(uv, b0, b1, 0.034));
         for i in 0..3 {
             let fi = i as f32;
-            let outer = ((0.72 - 0.03 * fi) * side, -0.3 - 0.075 * fi);
-            let inner = ((0.47 + 0.02 * fi) * side, -0.36 - 0.07 * fi);
-            d = d.min(tapered(uv, outer, inner, 0.036, 0.005));
+            let outer = (
+                (ex + (1.15 - 0.06 * fi) * rx) * side,
+                ey - 0.8 * ry - 0.07 * fi,
+            );
+            let inner = (
+                (ex + (0.4 + 0.05 * fi) * rx) * side,
+                ey - 1.06 * ry - 0.065 * fi,
+            );
+            d = d.min(tapered(uv, outer, inner, 0.024 - 0.003 * fi, 0.004));
         }
     }
     ink(d, aa)
@@ -236,7 +246,14 @@ pub fn eyes(scene: &Scene, shape: Shape, q: V3, base: V3, px: f32) -> V3 {
     if let Some(slot) = face.forehead {
         let mark = scene.color(slot);
         if face.seal {
-            c = c.lerp(mark, seal_marks(uv, aa));
+            c = c.lerp(
+                mark,
+                seal_marks(
+                    uv,
+                    aa,
+                    (face.eye_at.0, face.eye_at.1, face.eye_r.0, face.eye_r.1),
+                ),
+            );
         } else {
             let (whole, out) = fox_marks(uv, aa);
             c = c.lerp(mark.lerp(white, 0.35 * out), whole);
@@ -306,6 +323,7 @@ pub fn mouth(scene: &Scene, shape: Shape, q: V3, base: V3, px: f32) -> V3 {
             c = c.lerp(v3(0.55, 0.18, 0.22), ink(m, aa));
             c = tongue(c, uv, (0.0, -0.28), (0.0, -0.64), 0.17, aa);
         }
+        _ if scene.model().face.chibi => return chibi_smile(c, uv, ink_c, aa),
         _ => {
             // ω
             for s in [-1.0, 1.0] {
@@ -317,4 +335,16 @@ pub fn mouth(scene: &Scene, shape: Shape, q: V3, base: V3, px: f32) -> V3 {
     // The line from the nose down to the mouth.
     let ridge = (uv.0.abs() - 0.022).max((uv.1 + 0.10).max(-uv.1 - 0.02));
     c.lerp(ink_c, ink(ridge, aa))
+}
+
+/// A child's mouth at rest (the fox's human form, Roger's sheet): a small
+/// closed smile, its ends turned up, a blush of pink lip under it; no line
+/// up to the nose. The same in paint.wgsl `chibi_smile`.
+fn chibi_smile(c: V3, uv: P, ink_c: V3, aa: f32) -> V3 {
+    let lip = ell(uv, (0.0, -0.3), (0.3, 0.14));
+    let c = c.lerp(v3(0.96, 0.62, 0.62), 0.35 * ink(lip, aa * 6.0));
+    let line = arc(uv, (0.0, 0.3), 0.5, 0.045)
+        .max(uv.1 + 0.02)
+        .max(uv.0.abs() - 0.32);
+    c.lerp(ink_c.lerp(v3(0.75, 0.35, 0.35), 0.4), ink(line, aa))
 }
