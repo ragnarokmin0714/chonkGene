@@ -230,6 +230,7 @@
 同時在桌面上的寵物 → Pets on the desktop at once
 寵物越多，用的電腦資源也越多。 → More pets use more of the computer.
 其他的會在寵物窩休息。 → The rest stay in the den.
+已儲存 → Saved
 常駐 → Stays
 出場中 → Out now
 {} / {} 隻 → {} / {}

@@ -622,6 +622,44 @@ fn common_size(pets: &Pets) -> i32 {
 }
 
 /// Apply an edit to the selected pet: update the preview and mark it for sending.
+/// Store what was typed as the picked pet's name (`you`: 「牠怎麼叫你」):
+/// trimmed, at most so many characters; empty, or the same, it stays as it
+/// was. Gives back what it is now, for the field to show.
+fn commit_text(ui: &SettingsWindow, st: &mut State, you: bool, typed: &str) -> SharedString {
+    let most = if you { MAX_YOU } else { MAX_NAME };
+    let clean: String = typed.trim().chars().take(most).collect::<String>();
+    let clean = clean.trim().to_string();
+    let Some(now) = st
+        .pet()
+        .map(|p| if you { p.you.clone() } else { p.name.clone() })
+    else {
+        return typed.into();
+    };
+    if clean.is_empty() || clean == now {
+        return now.into();
+    }
+    edit(ui, st, |p| {
+        if you {
+            p.you = clean.clone();
+        } else {
+            p.name = clean.clone();
+        }
+    });
+    clean.into()
+}
+
+/// Store both boxes as they stand (another pet picked, the page or the
+/// window left while typing), and show what was stored.
+fn commit_fields(ui: &SettingsWindow, st: &mut State) {
+    if st.pet().is_none() {
+        return;
+    }
+    let name = commit_text(ui, st, false, &ui.get_pet_name());
+    ui.set_pet_name(name);
+    let you = commit_text(ui, st, true, &ui.get_pet_you());
+    ui.set_pet_you(you);
+}
+
 fn edit(ui: &SettingsWindow, st: &mut State, f: impl FnOnce(&mut PetSave)) {
     let Some(p) = st.pet_mut() else {
         return;
@@ -714,6 +752,8 @@ fn setup(
         ui.set_react_input(s.react_to_input);
         ui.set_start_login(s.start_at_login);
         ui.set_desktop_limit(s.on_desktop.min(i32::MAX as u32) as i32);
+        ui.set_name_max(MAX_NAME as i32);
+        ui.set_you_max(MAX_YOU as i32);
         ui.set_rotate(rotate_index(s.rotate_minutes));
         ui.set_size_all(common_size(&st.pets));
         let path = st.data.path.display().to_string();
@@ -759,11 +799,14 @@ fn setup(
     }
 
     on!(on_select_pet, |ui, st, id: SharedString| {
+        // What was typed for the pet picked before is its own.
+        commit_fields(&ui, st);
         st.selected = id.parse().ok();
         ui.set_adopting(false);
         show_pet(&ui, st);
     });
     on!(on_start_adopting, |ui, st| {
+        commit_fields(&ui, st);
         ui.set_adopting(true);
         ui.set_adopt_species(SharedString::new());
         if let Some(old) = st.adopt_species.take() {
@@ -807,21 +850,29 @@ fn setup(
             show_pet(&ui, st);
         }
     });
-    on!(on_name_edited, |ui, st, t: SharedString| {
-        let name: String = t.chars().take(MAX_NAME).collect();
-        edit(&ui, st, |p| {
-            if !name.trim().is_empty() {
-                p.name = name.trim().to_string();
-            }
-        });
+    // The name and 「牠怎麼叫你」 are stored when typing ends (Enter, a
+    // click elsewhere), not at every key (Roger, 2026-11-19).
+    ui.on_keep_first(|t, n| {
+        t.chars()
+            .take(usize::try_from(n).unwrap_or(0))
+            .collect::<String>()
+            .into()
     });
-    on!(on_you_edited, |ui, st, t: SharedString| {
-        let you: String = t.chars().take(MAX_YOU).collect();
-        edit(&ui, st, |p| {
-            if !you.trim().is_empty() {
-                p.you = you.trim().to_string();
-            }
-        });
+    for you in [false, true] {
+        let weak = ui.as_weak();
+        let st = st.clone();
+        let store = move |t: SharedString| -> SharedString {
+            let Some(ui) = weak.upgrade() else { return t };
+            commit_text(&ui, &mut st.borrow_mut(), you, &t)
+        };
+        if you {
+            ui.on_you_committed(store);
+        } else {
+            ui.on_name_committed(store);
+        }
+    }
+    on!(on_commit_fields, |ui, st| {
+        commit_fields(&ui, st);
     });
     on!(on_coat_picked, |ui, st, id: SharedString| {
         ui.set_coat(id.clone());
@@ -1103,6 +1154,8 @@ pub fn run(data: Option<PathBuf>, pet: Option<u64>) -> Result<(), String> {
     let _icon = use_program_icon(&ui);
     ui.run().map_err(|e| e.to_string())?;
     let mut st = st.borrow_mut();
+    // Closed while typing: what was typed is kept.
+    commit_fields(&ui, &mut st);
     if st.settings_dirty {
         st.send_settings();
     }
@@ -1380,6 +1433,111 @@ mod tests {
         }
         assert_eq!(st.borrow().selected, Some(1), "picked by the click");
         assert!(st.borrow().pets.pets[0].pinned, "pinned by a double-click");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Roger, 2026-11-19: the name boxes took more than fits and finishing
+    /// an entry was unclear. Typed on the window: no more than 12 go into
+    /// the name, Enter stores it; a box emptied and left with a click
+    /// elsewhere is put back; Esc drops what was typed.
+    #[test]
+    fn a_name_is_stored_when_typing_ends_and_kept_short() {
+        use slint::LogicalPosition;
+        use slint::platform::{Key, PointerEventButton, WindowEvent};
+        let window = MinimalSoftwareWindow::new(RepaintBufferType::NewBuffer);
+        slint::platform::set_platform(Box::new(Headless(window.clone()))).unwrap();
+        window.set_size(slint::PhysicalSize::new(880, 620));
+        let dir = std::env::temp_dir().join(format!("chonkgene-typing-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let data = DataDir::locate(Some(dir.clone())).unwrap();
+        let mut rng = fastrand::Rng::with_seed(4);
+        let mut pets = Pets::default();
+        pets.pets
+            .push(PetSave::adopt(1, Species::Shiba, "", &mut rng));
+        pets.next_id = 2;
+        store::save(&data.pets(), &pets).unwrap();
+        let ui = SettingsWindow::new().unwrap();
+        let (st, _timers) = setup(&ui, data, Some(1)).unwrap();
+        ui.invoke_language_picked(1);
+        // No pet process here: the note saying so is on top from the
+        // start (it comes with the first thing stored), so nothing moves.
+        st.borrow_mut().reachable = false;
+        ui.show().unwrap();
+        let draw = || {
+            slint::platform::update_timers_and_animations();
+            window.request_redraw();
+            let mut buf = vec![slint::Rgb8Pixel::default(); 880 * 620];
+            window.draw_if_needed(|r| {
+                r.render(&mut buf, 880);
+            });
+        };
+        std::thread::sleep(SEND_EVERY * 2);
+        draw();
+        draw();
+        assert!(!ui.get_notice().is_empty());
+        let send = |e: WindowEvent| {
+            std::thread::sleep(Duration::from_millis(20));
+            slint::platform::update_timers_and_animations();
+            window.dispatch_event(e);
+            draw();
+        };
+        let click = |x: f32, y: f32| {
+            let position = LogicalPosition::new(x, y);
+            let button = PointerEventButton::Left;
+            send(WindowEvent::PointerMoved { position });
+            send(WindowEvent::PointerPressed { position, button });
+            send(WindowEvent::PointerReleased { position, button });
+        };
+        let key = |text: SharedString| {
+            send(WindowEvent::KeyPressed { text: text.clone() });
+            send(WindowEvent::KeyReleased { text });
+        };
+        // The boxes' places on this page (one pet, the note on top): under
+        // 「名字」 and 「牠怎麼叫你」, beside the pet's picture.
+        let field = |name: &str| match name {
+            "name" => (564.0, 402.0),
+            _ => (736.0, 402.0),
+        };
+        let (x, y) = field("name");
+        click(x, y);
+        key(Key::End.into());
+        for _ in 0..4 {
+            key(Key::Backspace.into());
+        }
+        for ch in "一二三四五六七八九十甲乙丙".chars() {
+            key(ch.to_string().into());
+        }
+        assert_eq!(
+            ui.get_pet_name().chars().count(),
+            12,
+            "{}",
+            ui.get_pet_name()
+        );
+        assert_eq!(
+            st.borrow().pets.pets[0].name,
+            "阿柴",
+            "not stored while typing"
+        );
+        key(Key::Return.into());
+        assert_eq!(st.borrow().pets.pets[0].name, "一二三四五六七八九十甲乙");
+        // 「牠怎麼叫你」 emptied, then a click on the page's title: put back.
+        let (x, y) = field("you");
+        click(x, y);
+        key(Key::End.into());
+        for _ in 0..4 {
+            key(Key::Backspace.into());
+        }
+        assert_eq!(ui.get_pet_you(), "");
+        click(480.0, 93.0);
+        assert_eq!(ui.get_pet_you(), "主人");
+        assert_eq!(st.borrow().pets.pets[0].you, "主人");
+        // Typing, then Esc: dropped, the stored name back.
+        let (x, y) = field("name");
+        click(x, y);
+        key("丁".into());
+        key(Key::Escape.into());
+        assert_eq!(ui.get_pet_name(), "一二三四五六七八九十甲乙");
+        assert_eq!(st.borrow().pets.pets[0].name, "一二三四五六七八九十甲乙");
         let _ = std::fs::remove_dir_all(&dir);
     }
 

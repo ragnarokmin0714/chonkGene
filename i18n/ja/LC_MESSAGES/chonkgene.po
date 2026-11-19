@@ -39,7 +39,7 @@ msgstr "しばまる"
 
 #: crates/chonkgene-core/src/species.rs:296
 #: crates/chonkgene/src/settings.rs:48
-#: crates/chonkgene/src/store.rs:566
+#: crates/chonkgene/src/store.rs:576
 msgid "奶茶"
 msgstr "チャイ"
 
@@ -68,7 +68,7 @@ msgid "主人"
 msgstr "ご主人"
 
 #: crates/chonkgene-core/src/species.rs:312
-#: crates/chonkgene/src/store.rs:559
+#: crates/chonkgene/src/store.rs:569
 msgid "好朋友"
 msgstr "ともだち"
 
@@ -117,7 +117,7 @@ msgid "豆皮壽司"
 msgstr "いなり寿司"
 
 #: crates/chonkgene-platform/src/tray.rs:25
-#: crates/chonkgene/ui/settings.slint:539
+#: crates/chonkgene/ui/settings.slint:625
 msgid "肉肉賴桌"
 msgstr "chonkGene"
 
@@ -155,27 +155,27 @@ msgid "結束肉肉賴桌"
 msgstr "chonkGene を終了"
 
 #: crates/chonkgene-platform/src/tray.rs:37
-#: crates/chonkgene/ui/settings.slint:1012
+#: crates/chonkgene/ui/settings.slint:1105
 msgid "大家的大小"
 msgstr "みんなの大きさ"
 
 #: crates/chonkgene-platform/src/tray.rs:39
-#: crates/chonkgene/ui/settings.slint:1017
+#: crates/chonkgene/ui/settings.slint:1110
 msgid "小"
 msgstr "小"
 
 #: crates/chonkgene-platform/src/tray.rs:40
-#: crates/chonkgene/ui/settings.slint:1017
+#: crates/chonkgene/ui/settings.slint:1110
 msgid "中"
 msgstr "中"
 
 #: crates/chonkgene-platform/src/tray.rs:41
-#: crates/chonkgene/ui/settings.slint:1017
+#: crates/chonkgene/ui/settings.slint:1110
 msgid "大"
 msgstr "大"
 
 #: crates/chonkgene-platform/src/tray.rs:42
-#: crates/chonkgene/ui/settings.slint:1017
+#: crates/chonkgene/ui/settings.slint:1110
 msgid "特大"
 msgstr "特大"
 
@@ -396,7 +396,7 @@ msgid "大家的大小…"
 msgstr "みんなの大きさ…"
 
 #: crates/chonkgene/src/app.rs:1763
-#: crates/chonkgene/ui/settings.slint:588
+#: crates/chonkgene/ui/settings.slint:674
 msgid "說再見…"
 msgstr "さよならする…"
 
@@ -657,356 +657,360 @@ msgid "九條尾巴的麻糬！"
 msgstr "九本尻尾のおもち！"
 
 #: crates/chonkgene/src/settings.rs:382
-#: crates/chonkgene/ui/settings.slint:299
+#: crates/chonkgene/ui/settings.slint:367
 msgid "常駐"
 msgstr "ずっと"
 
-#: crates/chonkgene/src/settings.rs:522
+#: crates/chonkgene/src/settings.rs:554
 msgid "親密度 Lv.{level}（{progress}%）"
 msgstr "なかよし度 Lv.{level}（{progress}%）"
 
-#: crates/chonkgene/src/settings.rs:677
+#: crates/chonkgene/src/settings.rs:745
 msgid "可攜模式：{path}"
 msgstr "ポータブル：{path}"
 
-#: crates/chonkgene/src/settings.rs:946
+#: crates/chonkgene/src/settings.rs:1035
 msgid "已移除開機自動啟動和應用程式選單的捷徑。要完全移除，請結束肉肉賴桌，再刪除這個資料夾：{path}"
 msgstr "自動起動とアプリメニューのショートカットを削除しました。完全に消すには、chonkGene を終了してこのフォルダを削除してください：{path}"
 
-#: crates/chonkgene/src/settings.rs:984
+#: crates/chonkgene/src/settings.rs:1073
 msgid "肉肉賴桌目前沒有在執行。改動已經存起來，下次開啟時套用。"
 msgstr "chonkGene は起動していません。変更は保存され、次に起動したときに反映されます。"
 
-#: crates/chonkgene/ui/settings.slint:424
+#: crates/chonkgene/ui/settings.slint:121
+msgid "已儲存"
+msgstr "保存しました"
+
+#: crates/chonkgene/ui/settings.slint:492
 msgid "肉肉賴桌・設定"
 msgstr "chonkGene・設定"
 
-#: crates/chonkgene/ui/settings.slint:541
-#: crates/chonkgene/ui/settings.slint:581
+#: crates/chonkgene/ui/settings.slint:627
+#: crates/chonkgene/ui/settings.slint:667
 msgid "我的寵物"
 msgstr "うちの子"
 
-#: crates/chonkgene/ui/settings.slint:542
-#: crates/chonkgene/ui/settings.slint:858
+#: crates/chonkgene/ui/settings.slint:628
+#: crates/chonkgene/ui/settings.slint:951
 msgid "互動與聲音"
 msgstr "あそびと音"
 
-#: crates/chonkgene/ui/settings.slint:543
-#: crates/chonkgene/ui/settings.slint:913
+#: crates/chonkgene/ui/settings.slint:629
+#: crates/chonkgene/ui/settings.slint:1006
 msgid "不打擾"
 msgstr "じゃましない"
 
-#: crates/chonkgene/ui/settings.slint:544
-#: crates/chonkgene/ui/settings.slint:952
+#: crates/chonkgene/ui/settings.slint:630
+#: crates/chonkgene/ui/settings.slint:1045
 msgid "一般"
 msgstr "一般"
 
-#: crates/chonkgene/ui/settings.slint:581
+#: crates/chonkgene/ui/settings.slint:667
 msgid "領養新寵物"
 msgstr "新しい子をむかえる"
 
-#: crates/chonkgene/ui/settings.slint:594
+#: crates/chonkgene/ui/settings.slint:680
 msgid "算了"
 msgstr "やめる"
 
-#: crates/chonkgene/ui/settings.slint:599
+#: crates/chonkgene/ui/settings.slint:685
 msgid "先點一隻吧"
 msgstr "まず一匹えらんでね"
 
-#: crates/chonkgene/ui/settings.slint:599
+#: crates/chonkgene/ui/settings.slint:685
 msgid "帶牠回家"
 msgstr "おうちにつれて帰る"
 
-#: crates/chonkgene/ui/settings.slint:604
+#: crates/chonkgene/ui/settings.slint:690
 msgid "＋ 領養新寵物"
 msgstr "＋ 新しい子をむかえる"
 
-#: crates/chonkgene/ui/settings.slint:614
+#: crates/chonkgene/ui/settings.slint:700
 msgid "確定要和{}說再見嗎？"
 msgstr "本当に{}とさよならしますか？"
 
-#: crates/chonkgene/ui/settings.slint:615
+#: crates/chonkgene/ui/settings.slint:701
 msgid "牠的名字和親密度會一起消失。"
 msgstr "名前となかよし度もいっしょに消えます。"
 
-#: crates/chonkgene/ui/settings.slint:617
+#: crates/chonkgene/ui/settings.slint:703
 msgid "再想想"
 msgstr "もう少し考える"
 
-#: crates/chonkgene/ui/settings.slint:618
+#: crates/chonkgene/ui/settings.slint:704
 msgid "說再見"
 msgstr "さよなら"
 
-#: crates/chonkgene/ui/settings.slint:625
+#: crates/chonkgene/ui/settings.slint:711
 msgid "出場中"
 msgstr "デスクにいる子"
 
-#: crates/chonkgene/ui/settings.slint:626
+#: crates/chonkgene/ui/settings.slint:712
 msgid "{} / {} 隻"
 msgstr "{} / {} 匹"
 
-#: crates/chonkgene/ui/settings.slint:627
+#: crates/chonkgene/ui/settings.slint:713
 msgid "拖進來就會出場；點兩下設為常駐，就不會被換下來。"
 msgstr "ここにドラッグするとデスクに出ます。ダブルクリックでずっといる子に。"
 
-#: crates/chonkgene/ui/settings.slint:636
+#: crates/chonkgene/ui/settings.slint:722
 msgid "在寵物窩休息"
 msgstr "おうちでおやすみ"
 
-#: crates/chonkgene/ui/settings.slint:637
-#: crates/chonkgene/ui/settings.slint:991
+#: crates/chonkgene/ui/settings.slint:723
+#: crates/chonkgene/ui/settings.slint:1084
 msgid "{} 隻"
 msgstr "{} 匹"
 
-#: crates/chonkgene/ui/settings.slint:638
+#: crates/chonkgene/ui/settings.slint:724
 msgid "拖到上面就會出場。"
 msgstr "上にドラッグするとデスクに出ます。"
 
-#: crates/chonkgene/ui/settings.slint:638
+#: crates/chonkgene/ui/settings.slint:724
 msgid "把寵物拖到這裡，牠就會回寵物窩休息。"
 msgstr "ここにドラッグすると、おうちでおやすみします。"
 
-#: crates/chonkgene/ui/settings.slint:651
+#: crates/chonkgene/ui/settings.slint:737
 msgid "挑一隻帶回你的桌面吧，點牠還能選毛色。"
 msgstr "デスクにむかえる子をえらんでね。クリックすると毛色もえらべます。"
 
-#: crates/chonkgene/ui/settings.slint:749
+#: crates/chonkgene/ui/settings.slint:835
 msgid "・"
 msgstr "・"
 
-#: crates/chonkgene/ui/settings.slint:760
+#: crates/chonkgene/ui/settings.slint:848
 msgid "名字"
 msgstr "名前"
 
-#: crates/chonkgene/ui/settings.slint:768
+#: crates/chonkgene/ui/settings.slint:859
 msgid "牠怎麼叫你"
 msgstr "あなたの呼び方"
 
-#: crates/chonkgene/ui/settings.slint:775
+#: crates/chonkgene/ui/settings.slint:868
 msgid "牠在對話泡泡裡會這樣叫你。"
 msgstr "ふきだしの中で、あなたをこう呼びます。"
 
-#: crates/chonkgene/ui/settings.slint:777
+#: crates/chonkgene/ui/settings.slint:870
 msgid "毛色"
 msgstr "毛色"
 
-#: crates/chonkgene/ui/settings.slint:802
+#: crates/chonkgene/ui/settings.slint:895
 msgid "體型"
 msgstr "体型"
 
-#: crates/chonkgene/ui/settings.slint:810
+#: crates/chonkgene/ui/settings.slint:903
 msgid "標準"
 msgstr "ふつう"
 
-#: crates/chonkgene/ui/settings.slint:810
+#: crates/chonkgene/ui/settings.slint:903
 msgid "略肥（預設）"
 msgstr "ぽっちゃり（標準）"
 
-#: crates/chonkgene/ui/settings.slint:810
+#: crates/chonkgene/ui/settings.slint:903
 msgid "圓滾滾"
 msgstr "まんまる"
 
-#: crates/chonkgene/ui/settings.slint:810
+#: crates/chonkgene/ui/settings.slint:903
 msgid "麻糬"
 msgstr "おもち"
 
-#: crates/chonkgene/ui/settings.slint:826
+#: crates/chonkgene/ui/settings.slint:919
 msgid "大小"
 msgstr "大きさ"
 
-#: crates/chonkgene/ui/settings.slint:836
+#: crates/chonkgene/ui/settings.slint:929
 msgid "牠在桌面上看起來有多大。"
 msgstr "デスクでの見た目の大きさ。"
 
-#: crates/chonkgene/ui/settings.slint:838
+#: crates/chonkgene/ui/settings.slint:931
 msgid "個性"
 msgstr "性格"
 
-#: crates/chonkgene/ui/settings.slint:839
+#: crates/chonkgene/ui/settings.slint:932
 msgid "怕癢"
 msgstr "くすぐったがり"
 
-#: crates/chonkgene/ui/settings.slint:839
+#: crates/chonkgene/ui/settings.slint:932
 msgid "不怕"
 msgstr "平気"
 
-#: crates/chonkgene/ui/settings.slint:839
+#: crates/chonkgene/ui/settings.slint:932
 msgid "超怕"
 msgstr "とても"
 
-#: crates/chonkgene/ui/settings.slint:839
+#: crates/chonkgene/ui/settings.slint:932
 msgid "耐性"
 msgstr "がまん強さ"
 
-#: crates/chonkgene/ui/settings.slint:839
+#: crates/chonkgene/ui/settings.slint:932
 msgid "沒耐性"
 msgstr "せっかち"
 
-#: crates/chonkgene/ui/settings.slint:839
+#: crates/chonkgene/ui/settings.slint:932
 msgid "很有耐性"
 msgstr "のんびり"
 
-#: crates/chonkgene/ui/settings.slint:839
+#: crates/chonkgene/ui/settings.slint:932
 msgid "活潑"
 msgstr "元気さ"
 
-#: crates/chonkgene/ui/settings.slint:839
+#: crates/chonkgene/ui/settings.slint:932
 msgid "懶洋洋"
 msgstr "ぐうたら"
 
-#: crates/chonkgene/ui/settings.slint:839
+#: crates/chonkgene/ui/settings.slint:932
 msgid "停不下來"
 msgstr "止まらない"
 
-#: crates/chonkgene/ui/settings.slint:849
+#: crates/chonkgene/ui/settings.slint:942
 msgid "會影響被戳的時候，是翻肚爆笑還是一臉厭世。"
 msgstr "つつかれたとき、おなかを見せて大笑いするか、うんざり顔をするかが変わります。"
 
-#: crates/chonkgene/ui/settings.slint:859
+#: crates/chonkgene/ui/settings.slint:952
 msgid "聲音"
 msgstr "音"
 
-#: crates/chonkgene/ui/settings.slint:868
+#: crates/chonkgene/ui/settings.slint:961
 msgid "聲音模式"
 msgstr "鳴き声"
 
-#: crates/chonkgene/ui/settings.slint:869
+#: crates/chonkgene/ui/settings.slint:962
 msgid "讓牠們叫、笑、打呼。全螢幕時會自動安靜。"
 msgstr "鳴いたり、笑ったり、いびきをかいたり。全画面のときは自動で静かになります。"
 
-#: crates/chonkgene/ui/settings.slint:874
+#: crates/chonkgene/ui/settings.slint:967
 msgid "音量"
 msgstr "音量"
 
-#: crates/chonkgene/ui/settings.slint:884
-#: crates/chonkgene/ui/settings.slint:893
+#: crates/chonkgene/ui/settings.slint:977
+#: crates/chonkgene/ui/settings.slint:986
 msgid "非理性模式"
 msgstr "わちゃわちゃモード"
 
-#: crates/chonkgene/ui/settings.slint:894
+#: crates/chonkgene/ui/settings.slint:987
 msgid "兩隻以上時，偶爾會為了小事吵起來，最後一定和好。點吵架中的任何一隻可以勸架。"
 msgstr "二匹以上いると、ときどき小さなことでけんかします。最後はかならず仲直り。けんか中の子をクリックすると止められます。"
 
-#: crates/chonkgene/ui/settings.slint:899
+#: crates/chonkgene/ui/settings.slint:992
 msgid "吵架頻率"
 msgstr "けんかの多さ"
 
-#: crates/chonkgene/ui/settings.slint:901
+#: crates/chonkgene/ui/settings.slint:994
 msgid "偶爾"
 msgstr "ときどき"
 
-#: crates/chonkgene/ui/settings.slint:901
+#: crates/chonkgene/ui/settings.slint:994
 msgid "常常"
 msgstr "よく"
 
-#: crates/chonkgene/ui/settings.slint:901
+#: crates/chonkgene/ui/settings.slint:994
 msgid "超常"
 msgstr "しょっちゅう"
 
-#: crates/chonkgene/ui/settings.slint:922
+#: crates/chonkgene/ui/settings.slint:1015
 msgid "全螢幕時躲起來"
 msgstr "全画面のときは隠れる"
 
-#: crates/chonkgene/ui/settings.slint:923
+#: crates/chonkgene/ui/settings.slint:1016
 msgid "看影片、玩遊戲或簡報時，牠們會先躲起來，結束後再回來。"
 msgstr "動画やゲーム、プレゼンのあいだは隠れて、終わったら戻ってきます。"
 
-#: crates/chonkgene/ui/settings.slint:931
+#: crates/chonkgene/ui/settings.slint:1024
 msgid "陪你打字和看書"
 msgstr "タイピングや読書につきあう"
 
-#: crates/chonkgene/ui/settings.slint:932
+#: crates/chonkgene/ui/settings.slint:1025
 msgid "打字時牠們會跟著拍拍腳，滑鼠停著時會趴下來陪你。只看鍵盤和滑鼠有沒有在用，不會讀你打的字。"
 msgstr "タイピングに合わせて足踏みし、マウスが止まると寝そべってそばにいます。キーボードとマウスを使っているかだけを見て、打った文字は読みません。"
 
-#: crates/chonkgene/ui/settings.slint:940
+#: crates/chonkgene/ui/settings.slint:1033
 msgid "一鍵收起來"
 msgstr "ワンキーで隠す"
 
-#: crates/chonkgene/ui/settings.slint:941
+#: crates/chonkgene/ui/settings.slint:1034
 msgid "再按一次就叫回來。"
 msgstr "もう一度押すと戻ってきます。"
 
-#: crates/chonkgene/ui/settings.slint:963
+#: crates/chonkgene/ui/settings.slint:1056
 msgid "語言"
 msgstr "言語"
 
-#: crates/chonkgene/ui/settings.slint:964
+#: crates/chonkgene/ui/settings.slint:1057
 msgid "跟著電腦：照電腦的語言顯示。"
 msgstr "システム：パソコンの言語で表示します。"
 
-#: crates/chonkgene/ui/settings.slint:967
+#: crates/chonkgene/ui/settings.slint:1060
 msgid "跟著電腦"
 msgstr "システム"
 
-#: crates/chonkgene/ui/settings.slint:976
+#: crates/chonkgene/ui/settings.slint:1069
 msgid "開機時一起醒來"
 msgstr "パソコンといっしょに起きる"
 
-#: crates/chonkgene/ui/settings.slint:977
+#: crates/chonkgene/ui/settings.slint:1070
 msgid "電腦開機後，牠們會自動出現在桌面上。"
 msgstr "パソコンを起動すると、自動でデスクにあらわれます。"
 
-#: crates/chonkgene/ui/settings.slint:985
+#: crates/chonkgene/ui/settings.slint:1078
 msgid "同時在桌面上的寵物"
 msgstr "デスクにいる数"
 
-#: crates/chonkgene/ui/settings.slint:986
+#: crates/chonkgene/ui/settings.slint:1079
 msgid "寵物越多，用的電腦資源也越多。"
 msgstr "多いほど、パソコンの負担も増えます。"
 
-#: crates/chonkgene/ui/settings.slint:986
+#: crates/chonkgene/ui/settings.slint:1079
 msgid "其他的會在寵物窩休息。"
 msgstr "ほかの子はおうちでおやすみします。"
 
-#: crates/chonkgene/ui/settings.slint:999
+#: crates/chonkgene/ui/settings.slint:1092
 msgid "隨機輪班"
 msgstr "ランダムに交代"
 
-#: crates/chonkgene/ui/settings.slint:1000
+#: crates/chonkgene/ui/settings.slint:1093
 msgid "每隔一段時間，隨機和寵物窩裡的換班。"
 msgstr "ときどき、おうちの子とランダムに交代します。"
 
-#: crates/chonkgene/ui/settings.slint:1003
+#: crates/chonkgene/ui/settings.slint:1096
 msgid "不輪班"
 msgstr "しない"
 
-#: crates/chonkgene/ui/settings.slint:1003
+#: crates/chonkgene/ui/settings.slint:1096
 msgid "30 分鐘"
 msgstr "30 分"
 
-#: crates/chonkgene/ui/settings.slint:1003
+#: crates/chonkgene/ui/settings.slint:1096
 msgid "1 小時"
 msgstr "1 時間"
 
-#: crates/chonkgene/ui/settings.slint:1003
+#: crates/chonkgene/ui/settings.slint:1096
 msgid "3 小時"
 msgstr "3 時間"
 
-#: crates/chonkgene/ui/settings.slint:1013
+#: crates/chonkgene/ui/settings.slint:1106
 msgid "一次調整所有寵物的大小。"
 msgstr "全員の大きさをまとめて変えます。"
 
-#: crates/chonkgene/ui/settings.slint:1028
+#: crates/chonkgene/ui/settings.slint:1121
 msgid "資料位置"
 msgstr "データの場所"
 
-#: crates/chonkgene/ui/settings.slint:1031
+#: crates/chonkgene/ui/settings.slint:1124
 msgid "打開資料夾"
 msgstr "フォルダを開く"
 
-#: crates/chonkgene/ui/settings.slint:1037
+#: crates/chonkgene/ui/settings.slint:1130
 msgid "移除所有痕跡"
 msgstr "痕跡をすべて消す"
 
-#: crates/chonkgene/ui/settings.slint:1038
+#: crates/chonkgene/ui/settings.slint:1131
 msgid "刪除開機自動啟動和應用程式選單的捷徑。之後結束肉肉賴桌、刪掉資料夾，就完全移除了。"
 msgstr "自動起動とアプリメニューのショートカットを削除します。そのあと chonkGene を終了してフォルダを消せば、完全に削除できます。"
 
-#: crates/chonkgene/ui/settings.slint:1040
+#: crates/chonkgene/ui/settings.slint:1133
 msgid "移除…"
 msgstr "削除…"
 
-#: crates/chonkgene/ui/settings.slint:1044
+#: crates/chonkgene/ui/settings.slint:1137
 msgid "肉肉賴桌 {}・不連網，不收集任何資料"
 msgstr "chonkGene {}・オフライン、データは一切収集しません"

@@ -1,7 +1,7 @@
 // The settings window (PLAN §1.6–§1.11, mockup in §1.9).
 // Labels are plain; the cuteness lives in hints and the pet's own lines.
 
-import { AboutSlint, LineEdit, ScrollView } from "std-widgets.slint";
+import { AboutSlint, ScrollView } from "std-widgets.slint";
 import "../../../assets/fonts/jf-openhuninn-2.1.ttf";
 
 export struct PetRow {
@@ -58,6 +58,102 @@ component Hint inherits Text {
     color: Theme.muted;
     font-size: 13px;
     wrap: word-wrap;
+}
+
+/// A one-line text box in the window's own look (Roger, 2026-11-19: the
+/// standard box did not match it, finishing an entry was unclear, and it
+/// took more than fits): a rounded white field, a peach ring while typing,
+/// how many characters of `max` on its right; no more than `max` go in.
+/// Typing ends with Enter or a click elsewhere (or the page or the window
+/// closing, see the settings code): `committed` stores it and gives back
+/// what was stored (an empty entry is put back), and 「已儲存」 shows a
+/// moment.
+component CuteField inherits Rectangle {
+    in-out property <string> text;
+    in property <int> max: 12;
+    pure callback keep-first(string, int) -> string;
+    callback committed(string) -> string;
+    property <bool> typing: input.has-focus;
+    property <bool> saved;
+    height: 44px;
+    min-width: 120px;
+    preferred-width: 160px;
+    horizontal-stretch: 1;
+    border-radius: 22px;
+    background: Theme.card;
+    border-width: 2px;
+    border-color: typing ? Theme.peach : area.has-hover ? Theme.peach.with-alpha(0.55) : Theme.line;
+    animate border-color { duration: 150ms; }
+    changed typing => {
+        if !self.typing {
+            self.text = self.committed(self.text);
+            self.saved = true;
+        } else {
+            self.saved = false;
+        }
+    }
+    area := TouchArea {
+        mouse-cursor: MouseCursor.text;
+        clicked => { input.focus(); }
+    }
+    // The text slides along under a clip so the cursor stays in sight
+    // (as the standard box does): twelve characters do not fit beside the
+    // count.
+    Rectangle {
+        x: 16px;
+        width: root.width - 32px - count.preferred-width - 8px;
+        height: root.height;
+        clip: true;
+        input := TextInput {
+            property <length> slide;
+            x: Math.min(0px, Math.max(parent.width - self.width - self.text-cursor-width, self.slide));
+            width: Math.max(parent.width - self.text-cursor-width, self.preferred-width);
+            height: 100%;
+            vertical-alignment: center;
+            single-line: true;
+            font-size: 15px;
+            color: Theme.ink;
+            selection-background-color: Theme.peach.with-alpha(0.45);
+            selection-foreground-color: Theme.ink;
+            text <=> root.text;
+            cursor-position-changed(at) => {
+                if at.x + self.slide < 0px {
+                    self.slide = -at.x;
+                } else if at.x + self.slide > parent.width - self.text-cursor-width {
+                    self.slide = parent.width - at.x - self.text-cursor-width;
+                }
+            }
+            edited => {
+                if self.text.character-count > root.max {
+                    self.text = root.keep-first(self.text, root.max);
+                }
+            }
+            accepted => { self.clear-focus(); }
+            // Esc: what was typed is dropped, the stored one comes back (an
+            // empty entry is put back when stored).
+            key-pressed(event) => {
+                if event.text == Key.Escape {
+                    self.text = "";
+                    self.clear-focus();
+                    return accept;
+                }
+                return reject;
+            }
+        }
+    }
+    count := Text {
+        x: root.width - 16px - self.preferred-width;
+        height: root.height;
+        vertical-alignment: center;
+        font-size: 12px;
+        text: root.saved ? @tr("已儲存") : root.typing ? "\{root.text.character-count}/\{root.max}" : "";
+        color: root.saved ? Theme.accent : root.text.character-count >= root.max ? Theme.accent : Theme.muted;
+    }
+    Timer {
+        interval: 1.6s;
+        running: root.saved;
+        triggered => { root.saved = false; }
+    }
 }
 
 component PawSwitch inherits Rectangle {
@@ -475,8 +571,16 @@ export component SettingsWindow inherits Window {
     in property <string> preview-line;
     in property <string> level-text;
     in-out property <bool> confirm-release;
-    callback name-edited(string);
-    callback you-edited(string);
+    // The name and 「牠怎麼叫你」 as typed: stored, and what was stored
+    // given back (see CuteField); `keep-first` keeps the first so many
+    // characters; `commit-fields` stores both as they stand (the page
+    // changed).
+    callback name-committed(string) -> string;
+    callback you-committed(string) -> string;
+    pure callback keep-first(string, int) -> string;
+    callback commit-fields();
+    in property <int> name-max: 12;
+    in property <int> you-max: 8;
     callback coat-picked(string);
     callback chonk-changed(float);
     callback size-changed(float);
@@ -533,6 +637,16 @@ export component SettingsWindow inherits Window {
         height: 100%;
         background: Theme.bg.with-alpha(Math.mod(root.repaint, 2) == 0 ? 1.0 : 0.99);
     }
+    // A click on the window's background ends typing in a box (the focus
+    // goes here, so the box stores what was typed).
+    TouchArea {
+        clicked => { focus-sink.focus(); }
+    }
+    focus-sink := FocusScope {
+        width: 0px;
+        height: 0px;
+    }
+    changed tab => { root.commit-fields(); }
 
     HorizontalLayout {
         // Sidebar.
@@ -770,20 +884,27 @@ export component SettingsWindow inherits Window {
                             alignment: start;
                             HorizontalLayout {
                                 spacing: 12px;
+                                // Two boxes of one width, sharing the row.
                                 VerticalLayout {
                                     spacing: 6px;
+                                    horizontal-stretch: 1;
                                     Label { text: @tr("名字"); }
-                                    LineEdit {
+                                    CuteField {
                                         text <=> root.pet-name;
-                                        edited(t) => { root.name-edited(t); }
+                                        max: root.name-max;
+                                        keep-first(t, n) => { return root.keep-first(t, n); }
+                                        committed(t) => { return root.name-committed(t); }
                                     }
                                 }
                                 VerticalLayout {
                                     spacing: 6px;
+                                    horizontal-stretch: 1;
                                     Label { text: @tr("牠怎麼叫你"); }
-                                    LineEdit {
+                                    CuteField {
                                         text <=> root.pet-you;
-                                        edited(t) => { root.you-edited(t); }
+                                        max: root.you-max;
+                                        keep-first(t, n) => { return root.keep-first(t, n); }
+                                        committed(t) => { return root.you-committed(t); }
                                     }
                                 }
                             }

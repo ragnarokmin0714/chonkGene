@@ -1548,6 +1548,14 @@ What it was before: the order was the adoption order and could not be changed; o
 3. 「說再見的按鈕一樣放在右上方（領養新寵物）旁邊會不會比較好操作」: yes; 「說再見…」 is in the title row beside 「＋ 領養新寵物」, and asking first takes that row (「確定要和{}說再見嗎？」, 再想想 / 說再見). The pet's column has only its picture now.
 - **Owed**: Roger's look on Windows (dragging with a real mouse; the hand on each pet).
 
+#### The name boxes (Roger, 2026-11-19, same day)
+
+「名字和牠怎麼叫你的輸入框還是沒有改善」: asked what, he answered the look does not match, finishing an entry (stored when you leave the box, closing) is not done well, and the length should be held to 12 or fewer. Before: the standard `LineEdit` (Fluent, square, small type), stored at every key (an emptied box showed empty while the old name stayed), no end to an entry (Enter did nothing, a click elsewhere left the cursor in the box), and as many characters as typed went in, cut to 12 (8) only when stored. **Changed** (`CuteField` in settings.slint, `commit_text`/`commit_fields` in settings.rs):
+- A rounded white box like the names' chips, a peach ring while typing, 15 px type; while typing the count on its right (「3/12」, orange at the limit); the text slides under a clip to keep the cursor in sight. Both boxes one width, sharing the row (160 px each as before).
+- No more than 12 characters go into the name, 8 into 「牠怎麼叫你」 (`MAX_NAME`, `MAX_YOU`; IME composition is not cut, only what it commits).
+- Stored when typing ends: Enter, a click on the window's background (the focus goes to a `FocusScope` there), another pet picked, adopting begun, another page, the window closed; then 「已儲存」 shows in the box a moment. Trimmed; empty or unchanged, the stored one comes back into the box. Esc drops what was typed.
+- Test `a_name_is_stored_when_typing_ends_and_kept_short` types on the window (13 characters → 12, nothing stored until Enter, an emptied box left by a click put back, Esc). Review `inbox/name-boxes.png` (typing, three languages).
+
 ### New species: eleven more pets (Roger, 2026-11-13; planned, none built)
 
 Roger, 2026-11-13: 「這是 chonkGene 接下來要新增的寵物」, with a concept picture he made with Gemini (`inbox/Gemini_Generated_Image_1w2xeh1w2xeh1w2x.jpeg`, 「超萌動物大集合」; a reference for look only, nothing from it ships). It shows nine animals; the Munchkin is already in the cast, so eight are new. Roger then added three not in the picture (same day: 「再加個 無尾熊 和 熊貓 台灣黑熊」): the koala, the giant panda and the Formosan black bear, eleven in all. When they come relative to the open items above is Roger's call (his order of 2026-11-13 is to clear what is planned first).
