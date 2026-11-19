@@ -2370,6 +2370,192 @@ pub fn draw_hug_hands(pm: &mut Pixmap, hands: &HugHands, layer: HandLayer, s: f3
     pm.draw_pixmap(0, 0, sheet.as_ref(), &paint, Transform::identity(), None);
 }
 
+/// How your hand pats its head (「摸摸頭」 from its menu; Roger,
+/// 2026-11-19: no hand came, and the pat wanted more going on).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PatKind {
+    /// Awake and willing: in from above, three pats (it squishes and
+    /// squints at each), stroked back and forth (it leans into the hand,
+    /// eyes shut), and away.
+    Pat,
+    /// Asleep: stroked gently and slowly, no pats; it sleeps on.
+    Asleep,
+    /// In a mood (有起床氣): the hand comes down, it ducks, the hand goes.
+    Dodge,
+}
+
+/// The pat's beats, seconds: coming in from above, one pat (down, a rest,
+/// up), one stroke (to the back of its head and forward again), going.
+const PAT_IN: f32 = 0.35;
+const PAT_EACH: f32 = 0.42;
+const PATS: f32 = 3.0;
+const STROKE_EACH: f32 = 0.7;
+const STROKES: f32 = 2.0;
+const PAT_OUT: f32 = 0.4;
+/// Asleep, each stroke slower and shorter.
+const SLEEPY_STROKE: f32 = 1.0;
+/// How high over its head the hand comes in from, and how high each pat
+/// lifts it, pixels at 100%.
+const PAT_HIGH: f32 = 40.0;
+const PAT_UP: f32 = 11.0;
+
+impl PatKind {
+    /// How long the hand is there, seconds.
+    pub fn secs(self) -> f32 {
+        match self {
+            PatKind::Pat => PAT_IN + PATS * PAT_EACH + STROKES * STROKE_EACH + PAT_OUT,
+            PatKind::Asleep => PAT_IN + STROKES * SLEEPY_STROKE + PAT_OUT,
+            PatKind::Dodge => 1.1,
+        }
+    }
+
+    /// When the stroking starts (what it says comes then), seconds.
+    pub fn strokes_from(self) -> f32 {
+        match self {
+            PatKind::Pat => PAT_IN + PATS * PAT_EACH,
+            PatKind::Asleep | PatKind::Dodge => PAT_IN,
+        }
+    }
+}
+
+/// Where a pat is, `t` seconds in (see [`pat_pose`]).
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct PatPose {
+    /// How far the hand has come in, 0 … 1 (it fades in and out).
+    pub reach: f32,
+    /// How high over its head the hand is, pixels at 100% (0: on it).
+    pub lift: f32,
+    /// Where along its head, as a share of a stroke's reach: + toward its
+    /// face, − toward the back of its head.
+    pub slide: f32,
+    /// On its head, pressing in.
+    pub down: bool,
+    /// Stroking it (back and forth), not patting.
+    pub stroking: bool,
+}
+
+/// Where your hand is `t` seconds into a pat of `kind`; none before or
+/// after it.
+pub fn pat_pose(kind: PatKind, t: f32) -> Option<PatPose> {
+    let secs = kind.secs();
+    if !(0.0..secs).contains(&t) {
+        return None;
+    }
+    let arrive = smooth(0.0, PAT_IN, t);
+    let away = smooth(secs - PAT_OUT, secs, t);
+    let reach = arrive * (1.0 - away);
+    let gone = away * PAT_HIGH;
+    let pose = |lift: f32, slide: f32, stroking: bool| PatPose {
+        reach,
+        lift,
+        slide,
+        down: lift < 1.5,
+        stroking,
+    };
+    Some(match kind {
+        PatKind::Pat => {
+            let strokes = kind.strokes_from();
+            if t < PAT_IN {
+                // Down from on high to the top of the first pat.
+                pose(PAT_UP + (PAT_HIGH - PAT_UP) * (1.0 - arrive), 0.0, false)
+            } else if t < strokes {
+                // Each pat: quickly down, a rest on its head, up again;
+                // the last stays down and goes on into the stroking.
+                let n = ((t - PAT_IN) / PAT_EACH).floor();
+                let u = (t - PAT_IN) / PAT_EACH - n;
+                let up = if u < 0.3 {
+                    1.0 - smooth(0.0, 0.3, u)
+                } else if u < 0.62 || n + 1.0 >= PATS {
+                    0.0
+                } else {
+                    smooth(0.62, 1.0, u)
+                };
+                pose(PAT_UP * up, 0.0, false)
+            } else if t < secs - PAT_OUT {
+                // To the back of its head and forward again, twice.
+                let u = (t - strokes) / STROKE_EACH;
+                pose(0.0, -(TAU * u).sin(), true)
+            } else {
+                pose(gone, 0.0, false)
+            }
+        }
+        PatKind::Asleep => {
+            if t < PAT_IN {
+                pose(PAT_HIGH * (1.0 - arrive), 0.0, false)
+            } else if t < secs - PAT_OUT {
+                let u = (t - PAT_IN) / SLEEPY_STROKE;
+                pose(0.0, -0.6 * (TAU * u).sin(), true)
+            } else {
+                pose(gone, 0.0, false)
+            }
+        }
+        PatKind::Dodge => {
+            // Down to just over its head, a moment, back up: it ducked.
+            let back = smooth(0.6, secs, t);
+            let low = PAT_UP * 0.6;
+            pose(
+                low + (PAT_HIGH - low) * ((1.0 - arrive) + back).min(1.0),
+                0.0,
+                false,
+            )
+        }
+    })
+}
+
+/// Your hand patting its head this frame (see [`pat_hand`]).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct PatHand {
+    pub hand: HugHand,
+    /// How far it has come in (0 … 1).
+    pub reach: f32,
+    /// The hand's size, as the `s` it is drawn at.
+    pub scale: f32,
+}
+
+/// The patting hand against a hugging one: big enough to cover the top of
+/// its head (at the hug's size it read as a small fist floating over it).
+const PAT_HAND: f32 = 2.1;
+
+/// Your hand on its head for `pose`: `crown` the top of its head
+/// (pixels, on the picture shown), `facing` +1 right. A child's hand seen
+/// from the back, laid flat on top of its head, the fingers toward the
+/// back of its head and tipped down a little with its curve: fingers
+/// pointing down over it covered the eyes of a pet facing you. It strokes
+/// from the forehead back.
+pub fn pat_hand(crown: (f32, f32), facing: f32, s: f32, pose: &PatPose) -> PatHand {
+    let f = if facing < 0.0 { -1.0 } else { 1.0 };
+    let scale = s * PAT_HAND;
+    let l = HAND_LEN * scale;
+    let along = 0.16 * l * pose.slide * f;
+    let press = (crown.0 + along, crown.1 + HAND_IN * s);
+    PatHand {
+        hand: HugHand {
+            at: (press.0 + f * 0.2 * l, crown.1 - 0.06 * l - pose.lift * s),
+            press,
+            angle: if f > 0.0 { PI - 0.22 } else { 0.22 },
+            side: f,
+            grip: Grip::Back,
+        },
+        reach: pose.reach,
+        scale,
+    }
+}
+
+/// Your hand patting its head (see [`pat_hand`]), over its picture,
+/// a little see-through (more solid than a hug's, being over its head
+/// rather than holding it); the fingers move a little, `t` seconds in.
+pub fn draw_pat_hand(pm: &mut Pixmap, pat: &PatHand, t: f32) {
+    let Some(mut one) = Pixmap::new(pm.width(), pm.height()) else {
+        return;
+    };
+    child_hand(&mut one, &pat.hand, Part::Back, pat.scale, t);
+    let paint = PixmapPaint {
+        opacity: 0.78 * pat.reach.clamp(0.0, 1.0),
+        ..PixmapPaint::default()
+    };
+    pm.draw_pixmap(0, 0, one.as_ref(), &paint, Transform::identity(), None);
+}
+
 /// Which of a hand [`child_hand`] draws.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Part {
@@ -2922,6 +3108,74 @@ pub fn foxfire(pm: &mut Pixmap, at: (f32, f32), reach: (f32, f32), s: f32, t: f3
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Roger, 2026-11-19: 「摸摸頭」 showed no hand. A pat: three times
+    /// down on its head, then stroked to and fro, the hand away by the
+    /// end; asleep only stroked; in a mood never on it.
+    #[test]
+    fn a_pat_comes_down_three_times_then_strokes() {
+        let frames = |kind: PatKind| {
+            let n = (kind.secs() * 120.0) as usize + 12;
+            (0..n)
+                .map(|k| pat_pose(kind, k as f32 / 120.0))
+                .collect::<Vec<_>>()
+        };
+        let downs = |poses: &[Option<PatPose>]| {
+            poses
+                .windows(2)
+                .filter(|w| !w[0].is_some_and(|p| p.down) && w[1].is_some_and(|p| p.down))
+                .count()
+        };
+        let pat = frames(PatKind::Pat);
+        assert_eq!(downs(&pat), 3, "three pats, the last going on into strokes");
+        let from = PatKind::Pat.strokes_from();
+        let stroking: Vec<f32> = pat
+            .iter()
+            .enumerate()
+            .filter(|(_, p)| p.is_some_and(|p| p.stroking))
+            .map(|(k, p)| {
+                let p = p.unwrap();
+                assert!(p.down && k as f32 / 120.0 >= from - 1e-3);
+                p.slide
+            })
+            .collect();
+        let (lo, hi) = stroking
+            .iter()
+            .fold((0.0f32, 0.0f32), |(a, b), &v| (a.min(v), b.max(v)));
+        assert!(
+            lo < -0.95 && hi > 0.95,
+            "strokes reach both ways: {lo} … {hi}"
+        );
+        assert!(pat.last().unwrap().is_none(), "gone at the end");
+        let first = pat[0].unwrap();
+        assert!(
+            first.reach < 0.05 && first.lift > 30.0,
+            "from on high, faded"
+        );
+
+        let asleep = frames(PatKind::Asleep);
+        assert_eq!(downs(&asleep), 1);
+        assert!(
+            asleep
+                .iter()
+                .flatten()
+                .all(|p| !p.stroking || p.slide.abs() <= 0.6)
+        );
+        assert_eq!(downs(&frames(PatKind::Dodge)), 0, "it ducks");
+    }
+
+    #[test]
+    fn the_patting_hand_sits_on_the_crown_and_keeps_off_the_face() {
+        let pose = pat_pose(PatKind::Pat, PatKind::Pat.strokes_from()).unwrap();
+        for facing in [1.0, -1.0] {
+            let h = pat_hand((100.0, 60.0), facing, 1.0, &pose).hand;
+            assert!(h.at.1 < 60.0, "palm over the crown");
+            assert!((h.press.1 - 60.0 - HAND_IN).abs() < 1e-3);
+            // The fingers point toward the back of its head and down.
+            let (dx, dy) = (h.angle.cos(), h.angle.sin());
+            assert!(dx * facing < -0.8 && dy > 0.2, "{facing}: {dx}, {dy}");
+        }
+    }
 
     #[test]
     fn the_sand_heap_covers_the_body_and_leaves_the_head_clear() {

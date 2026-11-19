@@ -753,6 +753,14 @@ pub(super) struct Fun {
     /// Cradled (搖搖抱): when it says something drowsy (the fox: melts).
     pub cradle_melt: Option<f64>,
     pub hands: Option<props::HugHands>,
+    /// 摸摸頭 from its menu: your hand patting its head since when, and
+    /// how (see `Pet::pat_step`); where the hand is this frame; whether it
+    /// was on its head last frame; what the pat made it feel, shown as the
+    /// hand gets to it (the words once stroked, the happy hop after).
+    pub pat_by_you: Option<(f64, props::PatKind)>,
+    pub pat_hand: Option<props::PatHand>,
+    pub pat_down: bool,
+    pub pat_out: Option<chonkgene_core::mind::Out>,
     /// When it last finished a 肉肉舞 (it does not dance again at once).
     pub danced: f64,
     /// When it last went into a pond to join the others.
@@ -1298,6 +1306,7 @@ impl Pet {
         let any = sun > 0.0
             || lifted
             || self.fun.hands.is_some()
+            || self.fun.pat_hand.is_some()
             || !self.fun.fx.is_empty()
             || self.fun.carry.is_some()
             || in_pond
@@ -1403,6 +1412,10 @@ impl Pet {
         }
         if let Some(hands) = &self.fun.hands {
             props::draw_hug_hands(canvas, hands, props::HandLayer::Front, s, hug_t);
+        }
+        // Your hand patting its head (摸摸頭), over it.
+        if let (Some(hand), Some((since, _))) = (&self.fun.pat_hand, self.fun.pat_by_you) {
+            props::draw_pat_hand(canvas, hand, (t - since) as f32);
         }
         if let Some(thing) = self.fun.carry {
             let at = self.renderer.mouth(self.anim.facing);

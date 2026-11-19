@@ -232,6 +232,15 @@
 同時在桌面上的寵物 → Pets on the desktop at once
 寵物越多，用的電腦資源也越多。 → More pets use more of the computer.
 其他的會在寵物窩休息。 → The rest stay in the den.
+按 ‹ › 調整順序，排越前面越先上桌面。 → Use ‹ › to reorder. The first ones come out first.
+一直待在桌面上 → Always stay out
+換班時不會換到牠。 → Never swapped back to the den.
+隨機輪班 → Take turns at random
+每隔一段時間，隨機和寵物窩裡的換班。 → Every so often, one swaps places with one from the den.
+不輪班 → Off
+30 分鐘 → 30 min
+1 小時 → 1 hour
+3 小時 → 3 hours
 {} 隻 → {}
 大家的大小 → Everyone's size
 一次調整所有寵物的大小。 → Resize every pet at once.

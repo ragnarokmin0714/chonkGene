@@ -6,7 +6,8 @@
 //! four times slower, to check a gait frame by frame; `GLOW=1`: the fox
 //! casting all through, her flame tails). Scenes: `poke` (a quick poke in
 //! the belly), `rub` (a long belly rub), `chin`, `head`, `cheek`, `tail`,
-//! `paw`, `bottom`, `back`, `wing` (each held, then let go), `trap` (the
+//! `paw`, `bottom`, `back`, `wing` (each held, then let go), `pat` (your
+//! hand patting its head, 摸摸頭 from its menu), `trap` (the
 //! 曼赤肯's belly rubbed into its trap), `scratch` (held on the head
 //! and rubbed about), `laugh`, `fedup`, `sulk`, `jog` and `run` (running
 //! at pace 1.6, half way into a gallop, and 2.2, a full one),
@@ -163,6 +164,8 @@ fn scenes() -> Vec<Scene> {
         touch("trap", Zone::Belly, 0.3, 5.5, 6.5),
         touch("scratch", Zone::Head, 0.3, 3.0, 4.0),
         feel("laugh", Expression::Giggle, 3.0),
+        // 摸摸頭 from its menu: your hand pats its head, from 0.3 s.
+        feel("pat", Expression::Neutral, 4.4),
         feel("fedup", Expression::FedUp, 3.0),
         feel("sulk", Expression::Sulk, 4.5),
         sleep("sleep-chin", SleepPose::Chin),
@@ -232,6 +235,7 @@ fn main() {
         }
         let mut pressed = None;
         let mut hugged = false;
+        let (mut pat_down, mut pat_was) = (false, false);
         let mut mound = None;
         let frames = (scene.secs * FPS * slow).round() as u32;
         for f in 0..frames {
@@ -297,6 +301,39 @@ fn main() {
                 a.pace = pace;
                 a.walking = true;
             }
+            // 摸摸頭, as the app drives it (`Pet::pat_step`): pressed in at
+            // each pat and let go between, rubbed along while stroked;
+            // happy once the hand has gone.
+            use chonkgene_render::props::{PatKind, draw_pat_hand, pat_hand, pat_pose};
+            let pat_t = t - 0.3;
+            let pat = (scene.name == "pat")
+                .then(|| pat_pose(PatKind::Pat, pat_t))
+                .flatten();
+            if scene.name == "pat" {
+                let crown = r.anchor();
+                let at = |p: &chonkgene_render::props::PatPose| {
+                    pat_hand(crown, a.facing, 1.0, p).hand.press
+                };
+                match pat {
+                    Some(p) if p.down && !pat_down => {
+                        a.press(Zone::Head, at(&p));
+                        a.fond = Some(species.fondness(Zone::Head));
+                    }
+                    Some(p) if p.down && p.stroking => a.knead(at(&p)),
+                    Some(p) if !p.down && pat_down => a.poke(Zone::Head),
+                    None if pat_down => a.poke(Zone::Head),
+                    _ => {}
+                }
+                if pat_was && pat.is_none() {
+                    a.expression = Expression::Happy;
+                    a.cheer();
+                }
+                pat_down = pat.is_some_and(|p| p.down);
+                pat_was = pat.is_some();
+                if a.expression == Expression::Happy {
+                    expression = Expression::Happy;
+                }
+            }
             a.expression = expression;
             for _ in 0..4 {
                 a.step(0.25 / FPS / slow);
@@ -340,6 +377,13 @@ fn main() {
                 r.finish();
             }
             let path = format!("{out}/{}-{f:03}.png", scene.name);
+            if let Some(p) = pat {
+                let mut pm = r.pixmap().clone();
+                let hand = pat_hand(r.anchor(), a.facing, 1.0, &p);
+                draw_pat_hand(&mut pm, &hand, pat_t);
+                pm.save_png(&path).expect("write frame");
+                continue;
+            }
             if by_you {
                 // The hands over it; held up in front, it is lifted too (the
                 // app moves its window).

@@ -38,13 +38,16 @@ use crate::brand;
 use crate::diag::diag;
 use crate::ipc::{self, Claim, Msg};
 use crate::lines::Lines;
-use crate::store::{self, DataDir, PetSave, Pets, Settings};
+use crate::store::{self, DataDir, PetSave, Pets, Room, Settings};
 use chonkgene_render::props::{self, Fx};
 
 mod play;
 
 const STATS_EVERY: Duration = Duration::from_secs(5);
 const SAVE_EVERY: Duration = Duration::from_secs(5);
+/// A pet gone to rest in 寵物窩 says goodbye this long before its window
+/// goes (換班, 輪班).
+const LEAVE_SECS: f64 = 2.2;
 const POLL_EVERY: Duration = Duration::from_secs(1);
 /// How often to read the windows pets stand on: calm, and while a pet is on
 /// a window or in the air.
@@ -266,6 +269,11 @@ struct Pet {
     happy_until: f64,
     asleep_since: f64,
     hello_at: Option<f64>,
+    /// Gone to rest in 寵物窩 (換班, 輪班, a lower limit, switched off by
+    /// hand): it says goodbye and its window goes at this time.
+    leave_at: Option<f64>,
+    /// It has said its goodbye (see `leave_at`).
+    said_bye: bool,
     act: Option<(Grumpiness, f64)>,
     bubble: Option<Bubble>,
     /// Walking is up to the skit director while this is set.
@@ -570,7 +578,8 @@ struct App {
     /// `CHONKGENE_STAGE=dance`: 跳舞 asked of the first pet instead;
     /// `pond`: the duckling's pond scene started; `hug`: the first pet
     /// hugged by you (your hands, dumped with `CHONKGENE_DUMP`);
-    /// `hug-asleep`: put to sleep first, hugged 3 s later.
+    /// `hug-asleep`: put to sleep first, hugged 3 s later; `pat`: 摸摸頭
+    /// from the first pet's menu (your hand on its head).
     stage_test: String,
     sounds: Sounds,
     tray: Option<Tray>,
@@ -588,6 +597,12 @@ struct App {
     wake: Option<Instant>,
     /// When the log next sums up how the frames went.
     perf_at: Instant,
+    /// When 隨機輪班 next changes a pet out for one resting (seconds, as
+    /// `secs`); none while it is off.
+    shift_at: Option<f64>,
+    /// Where pets just gone to rest stood (their feet's middle, x): the
+    /// ones coming out in their place appear there (換班).
+    handover: Vec<f32>,
 }
 
 impl App {
@@ -686,6 +701,8 @@ impl App {
             presenting: Duration::ZERO,
             wake: None,
             perf_at: now + PERF_EVERY,
+            shift_at: None,
+            handover: Vec::new(),
         };
         // Trying the skits out: the next one soon, of the kind named.
         if let Ok(kind) = std::env::var("CHONKGENE_SKIT") {
@@ -868,7 +885,12 @@ impl App {
         }
     }
 
-    /// Spawn and remove pet windows so the desktop matches the saves.
+    /// Spawn and remove pet windows so the desktop matches the saves. A pet
+    /// gone to rest in 寵物窩 (換班, 輪班, a lower limit, switched off by
+    /// hand) first says goodbye where it stands and goes [`LEAVE_SECS`]
+    /// later (not while you hold it); one coming out then appears where it
+    /// stood, in a puff (Roger, 2026-11-19). One released, or any while
+    /// they are put away, goes at once.
     fn sync_desktop(&mut self, el: &ActiveEventLoop) {
         self.collect_affinity();
         let Some(shared) = &self.shared else {
@@ -882,17 +904,42 @@ impl App {
             .take(self.settings.on_desktop as usize)
             .map(|p| p.id)
             .collect();
-        let mut removed = false;
-        self.pets.retain(|p| {
-            let keep = wanted.contains(&p.save.id);
-            removed |= !keep;
-            keep
-        });
-        if removed && self.menu.as_ref().is_some_and(|m| !wanted.contains(&m.pet)) {
-            self.menu = None;
-        }
         let now = Instant::now();
         let t = self.secs(now);
+        let shown = !self.hidden && !self.fullscreen;
+        let (store, handover) = (&self.store, &mut self.handover);
+        self.pets.retain_mut(|p| {
+            if wanted.contains(&p.save.id) {
+                // Called back out while saying goodbye: it stays.
+                p.leave_at = None;
+                return true;
+            }
+            let resting = store.pets.iter().any(|s| s.id == p.save.id);
+            match p.leave_at {
+                None if resting && shown => {
+                    p.leave_at = Some(t + LEAVE_SECS);
+                    p.next = now;
+                    true
+                }
+                Some(at) if shown && (t < at || p.press.is_some()) => true,
+                Some(_) => {
+                    handover.push(p.body.feet().0);
+                    false
+                }
+                None => false,
+            }
+        });
+        if self
+            .menu
+            .as_ref()
+            .is_some_and(|m| !self.pets.iter().any(|p| p.save.id == m.pet))
+        {
+            self.menu = None;
+        }
+        // The ones coming out wait for those saying goodbye to go.
+        if self.pets.iter().any(|p| p.leave_at.is_some()) {
+            return;
+        }
         for (slot, id) in wanted.iter().enumerate() {
             if self.pets.iter().any(|p| p.save.id == *id) {
                 continue;
@@ -912,16 +959,105 @@ impl App {
                 t,
                 now,
             ) {
-                Ok(pet) => {
+                Ok(mut pet) => {
                     if self.hidden || self.fullscreen {
                         pet.window.set_visible(false);
                         pet.presenter.restyle();
+                    }
+                    if !self.handover.is_empty() {
+                        // In the place of one just gone, in a puff, and
+                        // hello at once.
+                        let x = self.handover.remove(0);
+                        let (w, _) = pet.body.size;
+                        pet.body = Body::on_ground(
+                            &self.terrain,
+                            x - w / 2.0,
+                            pet.body.size,
+                            pet.body.foot,
+                        );
+                        pet.fun.effect(Fx::Dust, t);
+                        pet.fun.effect(Fx::Sparkles, t);
+                        pet.hello_at = Some(t + 0.4);
+                        pet.switch_at = t + 3.0;
                     }
                     self.pets.push(pet);
                 }
                 Err(e) => eprintln!("cannot place a pet: {e}"),
             }
         }
+        self.handover.clear();
+    }
+
+    /// A pet called out by hand or just adopted with every other one out
+    /// 常駐: the limit grows to match (the settings window raises its own
+    /// the same way).
+    fn limit_to_fit(&mut self) {
+        let out = self.store.out() as u32;
+        if out > self.settings.on_desktop {
+            self.settings.on_desktop = out;
+            if let Err(e) = store::save(&self.data.settings(), &self.settings) {
+                eprintln!("{e}");
+            }
+        }
+    }
+
+    /// 隨機輪班 (Roger, 2026-11-19; off by default): about every
+    /// 「rotate_minutes」 (a fifth either way, so it does not run like a
+    /// clock) one pet out that is free to go changes places with one
+    /// resting in 寵物窩, both picked at random. Not while they are put
+    /// away, a menu is open or one is still saying goodbye; with nobody
+    /// free or resting, it tries again in a minute.
+    fn rotate_step(&mut self, el: &ActiveEventLoop, t: f64) {
+        let minutes = self.settings.rotate_minutes;
+        if minutes == 0 {
+            self.shift_at = None;
+            return;
+        }
+        // `CHONKGENE_SHIFT=<seconds>`: a shorter round, for trying it out.
+        let round = std::env::var("CHONKGENE_SHIFT")
+            .ok()
+            .and_then(|s| s.parse::<f64>().ok())
+            .unwrap_or(60.0 * f64::from(minutes.max(5)));
+        let Some(at) = self.shift_at else {
+            self.shift_at = Some(t + round * (0.8 + 0.4 * self.rng.f64()));
+            return;
+        };
+        if t < at {
+            return;
+        }
+        let again = t + round.min(60.0);
+        if self.hidden
+            || self.fullscreen
+            || self.menu.is_some()
+            || self.pets.iter().any(|p| p.leave_at.is_some())
+        {
+            self.shift_at = Some(again);
+            return;
+        }
+        let pets = &self.pets;
+        let free = |id: u64| pets.iter().any(|p| p.save.id == id && p.free_to_go());
+        let Some((going, coming)) = self.store.pick_shift(&mut self.rng, free) else {
+            self.shift_at = Some(again);
+            return;
+        };
+        self.collect_affinity();
+        self.store.swap(going, coming);
+        let name = |id: u64| {
+            self.store
+                .pets
+                .iter()
+                .find(|p| p.id == id)
+                .map_or(String::new(), |p| p.name.clone())
+        };
+        diag!(
+            "shift: {} goes to rest, {} comes out",
+            name(going),
+            name(coming)
+        );
+        // Now, so the settings window reads it back at once.
+        self.save_now();
+        self.sync_desktop(el);
+        self.shift_at = Some(t + round * (0.8 + 0.4 * self.rng.f64()));
     }
 
     /// Every pet `size` at once (Roger's nineteenth pass: 一鍵式調整寵物大
@@ -1291,6 +1427,9 @@ impl App {
                     self.dirty |= self.store.fit_to(s.on_desktop);
                 }
                 let new_language = s.lang() != self.settings.lang();
+                if s.rotate_minutes != self.settings.rotate_minutes {
+                    self.shift_at = None;
+                }
                 self.settings = s;
                 if let Err(e) = store::save(&self.data.settings(), &self.settings) {
                     eprintln!("{e}");
@@ -1329,15 +1468,9 @@ impl App {
                 save.set_affinity(&affinity);
                 let save = save.clone();
                 self.dirty = true;
-                // Called out by hand with the desktop full: the limit makes
-                // room (the settings window raises its own the same way).
-                let out = self.store.out() as u32;
-                if out > self.settings.on_desktop {
-                    self.settings.on_desktop = out;
-                    if let Err(e) = store::save(&self.data.settings(), &self.settings) {
-                        eprintln!("{e}");
-                    }
-                }
+                // More out than the limit (an old settings window): the
+                // limit grows to match, as it always did.
+                self.limit_to_fit();
                 if let Some(i) = self.pets.iter().position(|p| p.save.id == save.id) {
                     let resized = (self.pets[i].save.size - save.size).abs() > 1e-3;
                     if resized {
@@ -1364,12 +1497,27 @@ impl App {
                 };
                 let id = self.store.next_id;
                 self.store.next_id += 1;
-                let mut save = PetSave::adopt(id, s, &coat, &mut self.rng);
-                let on_desktop = self.store.pets.iter().filter(|p| p.on_desktop).count();
-                save.on_desktop = on_desktop < self.settings.on_desktop as usize;
-                self.store.pets.push(save);
+                let save = PetSave::adopt(id, s, &coat, &mut self.rng);
+                self.collect_affinity();
+                // Out at once, in the place of the last one out if the
+                // desktop is full.
+                if self.store.adopt(save, self.settings.on_desktop) == Room::Over {
+                    self.limit_to_fit();
+                }
                 self.dirty = true;
                 self.sync_desktop(el);
+            }
+            Msg::CallOut(id) => {
+                self.collect_affinity();
+                if self.store.call_out(id, self.settings.on_desktop) == Room::Over {
+                    self.limit_to_fit();
+                }
+                self.dirty = true;
+                self.sync_desktop(el);
+            }
+            Msg::Order(ids) => {
+                self.collect_affinity();
+                self.dirty |= self.store.reorder(&ids);
             }
             Msg::SizeAll(size) => self.size_all(el, size),
             Msg::Release(id) => {
@@ -1964,7 +2112,12 @@ impl App {
             world,
         };
         let out = match action {
-            Action::Pat => p.mind.pat(&world, Zone::Head),
+            Action::Pat => {
+                p.pat_you(&mut ctx);
+                p.next = now;
+                *dirty = true;
+                return;
+            }
             Action::Feed => p.mind.feed(&world),
             Action::Sleep => {
                 let mut rng = p.rng.clone();
@@ -2546,6 +2699,8 @@ fn spawn(
         happy_until: 0.0,
         asleep_since: 0.0,
         hello_at: Some(t + 1.2 + slot as f64 * 1.4),
+        leave_at: None,
+        said_bye: false,
         act: None,
         bubble: None,
         in_skit: false,
@@ -2768,6 +2923,121 @@ impl Pet {
             out.expression
         );
         self.apply(ctx, out);
+    }
+
+    /// 摸摸頭 from its menu (Roger, 2026-11-19: no hand came, and it wanted
+    /// more going on): your hand comes down onto its head and pats it
+    /// three times, then strokes it to and fro, and goes (see
+    /// [`props::pat_pose`]). Asleep it is only stroked and sleeps on; in a
+    /// mood it ducks the hand. What it says comes once it is being
+    /// stroked, the happy hop and hearts once the hand has gone. Without
+    /// the hand (dragged, in a skit, in the air, up to something, already
+    /// in your hands) it is pleased at once, as before.
+    fn pat_you(&mut self, ctx: &mut Ctx) {
+        let now = ctx.world.now;
+        let out = self.mind.pat(&ctx.world, Zone::Head);
+        let asleep = out.line == Some(Line::TurnOver);
+        let kind = if asleep {
+            props::PatKind::Asleep
+        } else if out.line == Some(Line::GrudgePat) {
+            props::PatKind::Dodge
+        } else {
+            props::PatKind::Pat
+        };
+        let why_not = if self.in_skit {
+            Some("in a skit")
+        } else if self.press.is_some() {
+            Some("being held")
+        } else if !asleep && !matches!(self.body.motion, Motion::Idle | Motion::Walk) {
+            Some("not on its feet")
+        } else if self.fun.engaged() {
+            Some("busy")
+        } else if self.fun.hug_by_you.is_some() || self.fun.pat_by_you.is_some() {
+            Some("in your hands")
+        } else if self.leave_at.is_some() {
+            Some("going to rest")
+        } else {
+            None
+        };
+        if let Some(why) = why_not {
+            diag!("{}: patted on the head, no hand ({why})", self.save.name);
+            self.apply(ctx, out);
+            return;
+        }
+        diag!("{}: patted on the head ({kind:?})", self.save.name);
+        self.fun.end_leisure();
+        if !asleep {
+            self.body.motion = Motion::Idle;
+            self.body.speed = 0.0;
+        }
+        self.fun.pat_by_you = Some((now, kind));
+        self.fun.pat_down = false;
+        self.fun.pat_out = Some(out);
+        self.switch_at = self.switch_at.max(now + f64::from(kind.secs()) + 1.0);
+    }
+
+    /// The pat under way, every frame: its body pressed in under the hand
+    /// at each pat and let go between (it squishes, squints, pops back),
+    /// rubbed along while stroked (it leans into the hand, eyes shut, the
+    /// dent following); ducking in a mood. Cut short if you take hold of
+    /// it or a skit takes it.
+    fn pat_step(&mut self, ctx: &mut Ctx) {
+        let Some((since, kind)) = self.fun.pat_by_you else {
+            return;
+        };
+        let now = ctx.world.now;
+        let t = (now - since) as f32;
+        let pose = props::pat_pose(kind, t).filter(|_| self.press.is_none() && !self.in_skit);
+        let crown = self.renderer.anchor();
+        let (facing, scale) = (self.anim.facing, self.fun.scale);
+        let at = |p: &props::PatPose| props::pat_hand(crown, facing, scale, p).hand.press;
+        let feels = kind != props::PatKind::Asleep;
+        match pose {
+            Some(p) if feels && p.down && !self.fun.pat_down => {
+                self.anim.press(Zone::Head, at(&p));
+                self.anim.fond = Some(self.species.fondness(Zone::Head));
+            }
+            Some(p) if feels && p.down && p.stroking => self.anim.knead(at(&p)),
+            Some(p) if !p.down && self.fun.pat_down => self.anim.poke(Zone::Head),
+            None if self.fun.pat_down => self.anim.poke(Zone::Head),
+            _ => {}
+        }
+        self.fun.pat_down = feels && pose.is_some_and(|p| p.down);
+        // The words: once it is being stroked; at once for a duck, as it
+        // flinches from the hand.
+        let say_at = match kind {
+            props::PatKind::Dodge => 0.3,
+            _ => kind.strokes_from(),
+        };
+        if t >= say_at
+            && let Some(out) = self.fun.pat_out.as_mut()
+            && let Some(line) = out.line.take()
+        {
+            if kind == props::PatKind::Dodge {
+                self.anim.flinch(at(&props::PatPose::default()));
+            }
+            self.say(ctx, line);
+        }
+        if pose.is_none() {
+            self.fun.pat_by_you = None;
+            self.fun.pat_down = false;
+            if let Some(out) = self.fun.pat_out.take() {
+                self.apply(ctx, out);
+            }
+        }
+    }
+
+    /// Free to go to rest for 隨機輪班: not in your hands (held, hugged,
+    /// patted), not in a skit or up to something, on its feet or asleep,
+    /// not already going.
+    fn free_to_go(&self) -> bool {
+        self.press.is_none()
+            && self.leave_at.is_none()
+            && !self.in_skit
+            && self.fun.hug_by_you.is_none()
+            && self.fun.pat_by_you.is_none()
+            && !self.fun.engaged()
+            && (self.mind.asleep() || matches!(self.body.motion, Motion::Idle | Motion::Walk))
     }
 
     /// 抱抱 (the menu, or a double-click): it says how it takes it, and if
@@ -3160,6 +3430,7 @@ impl Pet {
         self.fidget_sound(ctx);
         self.touch_step(ctx);
         self.cradle_step(ctx);
+        self.pat_step(ctx);
         if let Some((due, zone)) = self.poke_due
             && now >= due
         {
@@ -3174,6 +3445,23 @@ impl Pet {
                 self.say(ctx, Line::Hello);
                 self.anim.gesture(Act::Wave);
             }
+        }
+        // Gone to rest in 寵物窩: stops where it is, waves and says so (a
+        // sleeping one just goes).
+        match self.leave_at {
+            Some(_) if !self.said_bye => {
+                self.said_bye = true;
+                self.hello_at = None;
+                if !self.mind.asleep() && self.press.is_none() {
+                    self.body.motion = Motion::Idle;
+                    self.body.speed = 0.0;
+                    self.switch_at = self.switch_at.max(t + LEAVE_SECS + 1.0);
+                    self.say(ctx, Line::ToDen);
+                    self.anim.gesture(Act::Wave);
+                }
+            }
+            None => self.said_bye = false,
+            _ => {}
         }
 
         let floating = self.float(t, dt);
@@ -3461,6 +3749,16 @@ impl Pet {
         self.fun.hands = self
             .renderer
             .hug_hands(hug, self.anim.facing, self.fun.scale);
+        // Your hand patting its head, on the top of its head as last shown.
+        self.fun.pat_hand = self.fun.pat_by_you.and_then(|(since, kind)| {
+            let pose = props::pat_pose(kind, (t - since) as f32)?;
+            Some(props::pat_hand(
+                self.renderer.anchor(),
+                self.anim.facing,
+                self.fun.scale,
+                &pose,
+            ))
+        });
         if self.mind.asleep() {
             self.renderer
                 .render_asleep(&params, (t - self.asleep_since) as f32);
@@ -3485,6 +3783,7 @@ impl Pet {
             && (self.fun.pond.lately(t)
                 || self.fun.on_sand
                 || self.anim.doing() == Some(Act::Hug)
+                || self.fun.pat_by_you.is_some()
                 || move_test())
         {
             let wading = if self.fun.pond.now.is_some() { "w" } else { "" };
@@ -3983,6 +4282,17 @@ impl ApplicationHandler<UserEvent> for App {
             }
         }
 
+        // 換班: those saying goodbye go when it is time; 隨機輪班.
+        let t = self.secs(now);
+        if self
+            .pets
+            .iter()
+            .any(|p| p.leave_at.is_some_and(|at| t >= at))
+        {
+            self.sync_desktop(el);
+        }
+        self.rotate_step(el, t);
+
         if now >= self.terrain_at {
             self.refresh_terrain();
             // Quickly while a pet stands on a window (to ride along when it
@@ -4129,6 +4439,9 @@ impl ApplicationHandler<UserEvent> for App {
             } else if self.stage_test == "hug" {
                 self.act(el, pet, Action::Hug);
                 diag!("CHONKGENE_STAGE=hug: hugged the first pet");
+            } else if self.stage_test == "pat" {
+                self.act(el, pet, Action::Pat);
+                diag!("CHONKGENE_STAGE=pat: patted the first pet on the head");
             } else if let Some(hold) = match self.stage_test.as_str() {
                 "wrap" => Some(HugHold::Wrap),
                 "carry" => Some(HugHold::Carry),

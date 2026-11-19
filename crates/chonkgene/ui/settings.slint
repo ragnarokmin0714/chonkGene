@@ -331,6 +331,8 @@ export component SettingsWindow inherits Window {
     in-out property <float> patience;
     in-out property <float> energy;
     in-out property <bool> on-desktop;
+    // 常駐: never swapped back to 寵物窩 (換班, 隨機輪班).
+    in-out property <bool> pinned;
     in property <image> preview;
     in property <color> preview-tint;
     in property <string> preview-line;
@@ -343,6 +345,9 @@ export component SettingsWindow inherits Window {
     callback size-changed(float);
     callback trait-changed(int, float);
     callback desktop-toggled(bool);
+    callback pin-toggled(bool);
+    // The selected pet one place earlier (−1) or later (+1): 上場順序.
+    callback move-pet(int);
     callback release();
 
     // Interaction & sound.
@@ -367,6 +372,9 @@ export component SettingsWindow inherits Window {
     // General.
     in-out property <bool> start-login;
     in-out property <int> desktop-limit;
+    // 隨機輪班: an index into store::ROTATE_CHOICES (0 off).
+    in-out property <int> rotate;
+    callback rotate-picked(int);
     in property <string> data-path;
     in property <string> notice;
     in property <string> version;
@@ -463,28 +471,32 @@ export component SettingsWindow inherits Window {
                         }
                     }
 
+                    // The names in 上場順序 (Roger, 2026-11-19): the one
+                    // picked has ‹ › to move it earlier or later.
                     if !root.adopting: FlexboxLayout {
                         spacing: 10px;
-                        for p in root.pets: Rectangle {
+                        for p[i] in root.pets: Rectangle {
+                            property <bool> moving: p.id == root.selected-pet && root.pets.length > 1;
                             height: 44px;
-                            width: chip-text.preferred-width + 58px;
+                            width: chip-text.preferred-width + 58px + (moving ? 60px : 0px);
                             border-radius: 22px;
                             background: Theme.card;
                             border-width: 2px;
                             border-color: p.id == root.selected-pet ? Theme.accent : Theme.line;
-                            opacity: p.resting ? 0.6 : 1.0;
                             Rectangle {
                                 x: 8px;
                                 width: 28px;
                                 height: 28px;
                                 border-radius: 14px;
                                 background: p.dot;
+                                opacity: p.resting ? 0.6 : 1.0;
                                 Rectangle { y: 20px; height: 8px; border-radius: 4px; background: p.ring; }
                             }
                             chip-text := Text {
                                 x: 44px;
                                 text: p.name;
                                 color: Theme.ink;
+                                opacity: p.resting ? 0.6 : 1.0;
                                 font-size: 15px;
                                 vertical-alignment: center;
                             }
@@ -492,7 +504,32 @@ export component SettingsWindow inherits Window {
                                 mouse-cursor: pointer;
                                 clicked => { root.select-pet(p.id); }
                             }
+                            for d[k] in (moving ? [-1, 1] : []): Rectangle {
+                                property <bool> can: d < 0 ? i > 0 : i < root.pets.length - 1;
+                                x: chip-text.x + chip-text.preferred-width + 10px + k * 30px;
+                                y: 8px;
+                                width: 28px;
+                                height: 28px;
+                                border-radius: 14px;
+                                background: arrow-touch.has-hover && can ? Theme.track : Theme.side;
+                                opacity: can ? 1.0 : 0.35;
+                                Text {
+                                    text: d < 0 ? "‹" : "›";
+                                    color: Theme.ink;
+                                    font-size: 20px;
+                                    horizontal-alignment: center;
+                                    vertical-alignment: center;
+                                }
+                                arrow-touch := TouchArea {
+                                    enabled: can;
+                                    mouse-cursor: can ? pointer : default;
+                                    clicked => { root.move-pet(d); }
+                                }
+                            }
                         }
+                    }
+                    if !root.adopting && root.pets.length > 1: Hint {
+                        text: @tr("按 ‹ › 調整順序，排越前面越先上桌面。");
                     }
 
                     // Adoption: four small cards a row, so all seven show at
@@ -603,20 +640,49 @@ export component SettingsWindow inherits Window {
                                     Text { text: root.species-label + @tr("・") + root.level-text; color: Theme.muted; font-size: 13px; horizontal-alignment: center; }
                                 }
                             }
+                            // 一直待在桌面上 only matters once some have to
+                            // take turns: more pets than the desktop holds.
                             Section {
-                                height: 76px;
-                                Row {
-                                    padding-left: 18px;
-                                    padding-right: 18px;
-                                    VerticalLayout {
-                                        alignment: center;
-                                        spacing: 4px;
-                                        Label { text: @tr("在桌面上"); }
-                                        Hint { text: @tr("關掉就在寵物窩休息。"); }
+                                height: root.pets.length > root.desktop-limit ? 152px : 76px;
+                                VerticalLayout {
+                                    Row {
+                                        height: 76px;
+                                        padding-left: 18px;
+                                        padding-right: 18px;
+                                        // 「關掉就在寵物窩休息。」 is 130 px
+                                        // at 13 px: with the usual 16 px
+                                        // gap it broke 休/息 in the card.
+                                        alignment: stretch;
+                                        spacing: 8px;
+                                        VerticalLayout {
+                                            alignment: center;
+                                            spacing: 4px;
+                                            horizontal-stretch: 1;
+                                            Label { text: @tr("在桌面上"); }
+                                            Hint { text: @tr("關掉就在寵物窩休息。"); }
+                                        }
+                                        PawSwitch {
+                                            checked <=> root.on-desktop;
+                                            toggled(v) => { root.desktop-toggled(v); }
+                                        }
                                     }
-                                    PawSwitch {
-                                        checked <=> root.on-desktop;
-                                        toggled(v) => { root.desktop-toggled(v); }
+                                    if root.pets.length > root.desktop-limit: Row {
+                                        height: 76px;
+                                        padding-left: 18px;
+                                        padding-right: 18px;
+                                        alignment: stretch;
+                                        spacing: 8px;
+                                        VerticalLayout {
+                                            alignment: center;
+                                            spacing: 4px;
+                                            horizontal-stretch: 1;
+                                            Label { text: @tr("一直待在桌面上"); }
+                                            Hint { text: @tr("換班時不會換到牠。"); }
+                                        }
+                                        PawSwitch {
+                                            checked <=> root.pinned;
+                                            toggled(v) => { root.pin-toggled(v); }
+                                        }
                                     }
                                 }
                             }
@@ -889,6 +955,19 @@ export component SettingsWindow inherits Window {
                                     CuteButton { text: "－"; primary: false; enabled: root.desktop-limit > 1; clicked => { root.desktop-limit-changed(root.desktop-limit - 1); } }
                                     Text { text: @tr("{} 隻", root.desktop-limit); color: Theme.ink; font-size: 15px; vertical-alignment: center; min-width: 44px; horizontal-alignment: center; }
                                     CuteButton { text: "＋"; primary: false; clicked => { root.desktop-limit-changed(root.desktop-limit + 1); } }
+                                }
+                            }
+                            Row {
+                                VerticalLayout {
+                                    alignment: center;
+                                    spacing: 4px;
+                                    Label { text: @tr("隨機輪班"); }
+                                    Hint { text: @tr("每隔一段時間，隨機和寵物窩裡的換班。"); }
+                                }
+                                Segmented {
+                                    options: [@tr("不輪班"), @tr("30 分鐘"), @tr("1 小時"), @tr("3 小時")];
+                                    selected <=> root.rotate;
+                                    picked(i) => { root.rotate-picked(i); }
                                 }
                             }
                             Row {

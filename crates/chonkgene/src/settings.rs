@@ -24,7 +24,7 @@ use slint::{
 use crate::brand;
 use crate::ipc::{self, Msg};
 use crate::lines::{MAX_NAME, MAX_YOU};
-use crate::store::{self, DataDir, PetSave, Pets, Settings};
+use crate::store::{self, DataDir, PetSave, Pets, ROTATE_CHOICES, Room, Settings};
 
 slint::include_modules!();
 
@@ -35,6 +35,10 @@ slint::include_modules!();
 const PREVIEW_TICK: Duration = Duration::from_micros(16_667);
 const PREVIEW_FPS: u32 = 30;
 const SEND_EVERY: Duration = Duration::from_millis(150);
+/// After we call a pet out or send one to rest, the pets' file is left
+/// unread for who is out this long (the pet process saves it at once on
+/// the message; this covers a busy moment).
+const DESK_SETTLE: Duration = Duration::from_secs(2);
 
 fn coat_label(coat: &str) -> &'static str {
     match coat {
@@ -208,6 +212,9 @@ struct State {
     pet_dirty: bool,
     settings_dirty: bool,
     preview: Option<Preview>,
+    /// When we last called a pet out or sent one to rest: the pets' file is
+    /// not read back for who is out until the pet process has saved it.
+    desk_at: Instant,
 }
 
 impl State {
@@ -254,11 +261,22 @@ impl State {
                 if let Some(s) = Species::from_id(&species) {
                     let id = self.pets.next_id;
                     self.pets.next_id += 1;
-                    self.pets
-                        .pets
-                        .push(PetSave::adopt(id, s, &coat, &mut fastrand::Rng::new()));
+                    let save = PetSave::adopt(id, s, &coat, &mut fastrand::Rng::new());
+                    if self.pets.adopt(save, self.settings.on_desktop) == Room::Over {
+                        self.settings.on_desktop = self.pets.out() as u32;
+                        let _ = store::save(&self.data.settings(), &self.settings);
+                    }
                     let _ = store::save(&self.data.pets(), &self.pets);
                 }
+            }
+            // Already done to our list (`on_desktop_toggled`,
+            // `on_move_pet`), the limit too.
+            Msg::CallOut(_) => {
+                let _ = store::save(&self.data.settings(), &self.settings);
+                let _ = store::save(&self.data.pets(), &self.pets);
+            }
+            Msg::Order(_) => {
+                let _ = store::save(&self.data.pets(), &self.pets);
             }
             Msg::Release(id) => {
                 self.pets.pets.retain(|p| p.id != id);
@@ -276,6 +294,17 @@ impl State {
         let s = self.settings.clone();
         self.send(Msg::Settings(s));
     }
+}
+
+/// 「隨機輪班」's choice for `minutes`: the nearest of [`ROTATE_CHOICES`]
+/// (a hand-edited number shows as the closest), off only for 0.
+fn rotate_index(minutes: u32) -> i32 {
+    if minutes == 0 {
+        return 0;
+    }
+    (1..ROTATE_CHOICES.len())
+        .min_by_key(|&i| ROTATE_CHOICES[i].abs_diff(minutes))
+        .unwrap_or(0) as i32
 }
 
 fn pet_rows(st: &State) -> ModelRc<PetRow> {
@@ -360,6 +389,7 @@ fn show_pet(ui: &SettingsWindow, st: &mut State) {
     ui.set_patience(p.patience);
     ui.set_energy(p.energy);
     ui.set_on_desktop(p.on_desktop);
+    ui.set_pinned(p.pinned);
     ui.set_preview_tint(tint(species));
     ui.set_preview_line(body_line(species, p.chonk).into());
     let progress = p.xp * 100 / XP_PER_LEVEL;
@@ -494,6 +524,7 @@ fn setup(
         reachable: true,
         pet_dirty: false,
         settings_dirty: false,
+        desk_at: Instant::now(),
         preview: None,
     }));
 
@@ -515,6 +546,7 @@ fn setup(
         ui.set_react_input(s.react_to_input);
         ui.set_start_login(s.start_at_login);
         ui.set_desktop_limit(s.on_desktop.min(i32::MAX as u32) as i32);
+        ui.set_rotate(rotate_index(s.rotate_minutes));
         ui.set_size_all(common_size(&st.pets));
         let path = st.data.path.display().to_string();
         let shown = if st.data.portable {
@@ -649,14 +681,40 @@ fn setup(
         });
     });
     on!(on_desktop_toggled, |ui, st, v: bool| {
-        edit(&ui, st, |p| p.on_desktop = v);
-        // Called out with the desktop full: the limit makes room (the pet
-        // process raises its own the same way).
-        let out = st.pets.out() as u32;
-        if out > st.settings.on_desktop {
+        st.desk_at = Instant::now();
+        let Some(id) = st.selected else { return };
+        if !v {
+            edit(&ui, st, |p| p.on_desktop = false);
+            return;
+        }
+        // Called out with the desktop full: the last one out goes to rest
+        // in its place (換班); every other one 常駐, the limit makes room.
+        // The pet process does the same to its list.
+        if st.pets.call_out(id, st.settings.on_desktop) == Room::Over {
+            let out = st.pets.out() as u32;
             st.settings.on_desktop = out;
             ui.set_desktop_limit(out.min(i32::MAX as u32) as i32);
         }
+        st.send(Msg::CallOut(id));
+        ui.set_pets(pet_rows(st));
+    });
+    on!(on_pin_toggled, |ui, st, v: bool| {
+        edit(&ui, st, |p| p.pinned = v);
+    });
+    on!(on_move_pet, |ui, st, by: i32| {
+        let Some(id) = st.selected else { return };
+        if st.pets.shift(id, by) {
+            let order = st.pets.order();
+            st.send(Msg::Order(order));
+            ui.set_pets(pet_rows(st));
+        }
+    });
+    on!(on_rotate_picked, |_ui, st, i: i32| {
+        let i = usize::try_from(i)
+            .unwrap_or(0)
+            .min(ROTATE_CHOICES.len() - 1);
+        st.settings.rotate_minutes = ROTATE_CHOICES[i];
+        st.send_settings();
     });
     on!(on_release, |ui, st| {
         let Some(id) = st.selected else { return };
@@ -707,6 +765,7 @@ fn setup(
         st.send_settings();
     });
     on!(on_desktop_limit_changed, |ui, st, v: i32| {
+        st.desk_at = Instant::now();
         st.settings.on_desktop = v.max(1) as u32;
         ui.set_desktop_limit(v.max(1));
         // Pets go to rest or come out at once, here as on the desktop.
@@ -796,6 +855,25 @@ fn setup(
                     }
                     show_pet(&ui, &mut st);
                 } else if !st.pet_dirty {
+                    // Who is out changed in the pet process (隨機輪班):
+                    // take it, unless a change of ours is still on its way.
+                    if st.desk_at.elapsed() > DESK_SETTLE {
+                        let mut moved = false;
+                        for p in &mut st.pets.pets {
+                            if let Some(f) = fresh.pets.iter().find(|f| f.id == p.id)
+                                && f.on_desktop != p.on_desktop
+                            {
+                                p.on_desktop = f.on_desktop;
+                                moved = true;
+                            }
+                        }
+                        if moved {
+                            ui.set_pets(pet_rows(&st));
+                            if let Some(out) = st.pet().map(|p| p.on_desktop) {
+                                ui.set_on_desktop(out);
+                            }
+                        }
+                    }
                     // Sizes changed for everyone at once (「大家的大小」 from
                     // the menu or the tray): take them, unless an edit of
                     // ours is still on its way.
@@ -1049,6 +1127,9 @@ mod tests {
             (Species::Owl, "brown"),
             (Species::Chick, "yellow"),
             (Species::Fox, "white"),
+            // An eighth, resting in 寵物窩: one more than the desktop
+            // holds, so 「一直待在桌面上」 shows.
+            (Species::Shiba, "black"),
         ]
         .into_iter()
         .enumerate()
@@ -1056,9 +1137,10 @@ mod tests {
             let mut p = PetSave::adopt(i as u64 + 1, s, coat, &mut rng);
             p.level = 3;
             p.xp = 60;
+            p.on_desktop = i < 7;
             pets.pets.push(p);
         }
-        pets.next_id = 8;
+        pets.next_id = 9;
         store::save(&data.pets(), &pets).unwrap();
 
         let ui = SettingsWindow::new().unwrap();

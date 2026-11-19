@@ -30,6 +30,12 @@ pub enum Msg {
     },
     /// Say goodbye to a pet for good.
     Release(u64),
+    /// Call a pet out onto the desktop (「在桌面上」 switched on); with the
+    /// desktop full, the last one out goes to rest in its place (換班, see
+    /// `Pets::call_out`).
+    CallOut(u64),
+    /// The pets' order (上場順序), as ids (see `Pets::reorder`).
+    Order(Vec<u64>),
     /// Every pet this size at once (「大家的大小」, Roger: 一鍵式調整).
     SizeAll(f32),
     /// Remove start-at-login and menu entries (「移除所有痕跡」).

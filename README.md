@@ -8,13 +8,14 @@ A gang of chubby desktop pets that lounge on your desktop all day being cute.
 
 - **Seven pets**: a Shiba Inu, a Munchkin cat, a Scottish Fold, a nine-tailed fox, an owl, a chick and a duckling, each with its own personality (the fox is a bossy big sister to the others, and tsundere to you).
 - **Touch them**: bellies squish and jiggle; every pet has spots it loves (a cat's chin and belly, the Shiba's tail base) and spots it would rather you left alone; keep poking and some roll over laughing while others look thoroughly fed up. The Munchkin's belly is a trap.
-- **Hugs**: double-click a pet (or 抱抱 in its menu) and a child's see-through hands hold it by its sides, pressing into its fur; the pets hug each other too, and the fox bear-hugs whoever it likes.
+- **Hugs and pats**: double-click a pet (or 抱抱 in its menu) and a child's see-through hands hold it by its sides, pressing into its fur; 摸摸頭 brings a hand down to pat its head and stroke it while it leans in, eyes shut. The pets hug each other too, and the fox bear-hugs whoever it likes.
 - **They get about**: walking, running, sliding along on their bellies, gliding down from window tops, flying off under balloons or a bamboo-copter; they hop onto windows and ride along when you move them.
 - **Their own little scenes**: the duckling's pond with a golden beach (everyone wades in for a water fight), a sunbeam for the cats, a bone, seeds, a butterfly, the fox's spells, the 肉肉舞 in a spotlight.
 - **Irrational mode** (on by default): with two or more pets they squabble over small things and always make up with a hug; the chick and duckling talk past each other (雞同鴨講).
 - **They sleep**: snot bubbles, sleep talk, bellies rising and falling; wake them gently and all is well, shake them awake and they get grumpy.
 - **Sound mode** (on by default): real animal recordings, a little tune for the dance; muted automatically in full screen.
 - **Your pets, your way**: names, coat, body shape (slightly chubby by default), size (one click for all of them), personality.
+- **More pets than room on the desktop**: put them in order, keep a favourite always out, or let them take turns at random (off by default); one going back to the den waves goodbye and the next pops up in its place.
 - **Doesn't get in the way**: clicks pass through transparent areas; pets hide in full screen; one key hides them all.
 - **Portable**: unpack and run on Windows and Linux; no administrator rights, no network access.
 

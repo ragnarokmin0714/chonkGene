@@ -121,10 +121,12 @@ pub enum Line {
     /// Buried in the beach's sand up to its neck, grinning at you (the
     /// Shiba, Roger's twentieth pass, item 5).
     Buried,
+    /// Going to rest in 寵物窩, another taking its place (換班, 輪班).
+    ToDen,
 }
 
 impl Line {
-    pub const ALL: [Line; 59] = [
+    pub const ALL: [Line; 60] = [
         Line::Hello,
         Line::WelcomeBack,
         Line::PokeSmall,
@@ -184,6 +186,7 @@ impl Line {
         Line::Cradled,
         Line::CradleMelt,
         Line::Buried,
+        Line::ToDen,
     ];
 
     /// Key in the line tables.
@@ -248,6 +251,7 @@ impl Line {
             Line::BearHugged => "bear_hugged",
             Line::Cradled => "cradled",
             Line::CradleMelt => "cradle_melt",
+            Line::ToDen => "to_den",
         }
     }
 

@@ -66,6 +66,7 @@
         "cradled": ["Rock-a-bye~ so nice~", "Warm hands~"],
         "cradle_melt": ["...so... sleepy...", "...{you}..."],
         "bear_hugged": ["Whoa~ tight, Sis~", "Hehe, caught~"],
+        "to_den": ["Your turn! Nap time~", "See you, {you}~"],
     },
     "munchkin": {
         "hello": ["Morning, {you}"],
@@ -126,6 +127,7 @@
         "cradled": ["Eh? I'm upside down", "Hehe, rock-a-bye~"],
         "cradle_melt": ["...eyes won't open..."],
         "bear_hugged": ["C-can't breathe", "Sis... gentler..."],
+        "to_den": ["I-I'll go rest now..."],
     },
     "fold": {
         "hello": ["...Oh. You."],
@@ -185,6 +187,7 @@
         "cradled": ["...Why hold me so.", "...Hmph. Suit yourself."],
         "cradle_melt": ["...purr...", "...mm..."],
         "bear_hugged": ["...Let go...", "...Too tight."],
+        "to_den": ["...Your turn. Bye."],
     },
     "owl": {
         "hello": ["Hoo hoo, hi {you}."],
@@ -244,6 +247,7 @@
         "cradled": ["Hoo? Holding me?", "Hoo~ rock-a-bye~"],
         "cradle_melt": ["Hoo... hoo..."],
         "bear_hugged": ["Hoo! Feet off the ground!", "Hoo... caught"],
+        "to_den": ["Hoo... shift's over."],
     },
     "chick": {
         "hello": ["Peep! Hi, {you}!"],
@@ -303,6 +307,7 @@
         "cradled": ["Peep! Scooped up!", "Peep~ rock-a-bye~"],
         "cradle_melt": ["Peep... peep..."],
         "bear_hugged": ["Peep! I'm flying!", "Peep peep! Put me down!"],
+        "to_den": ["Peep! Swap!"],
     },
     "duck": {
         "hello": ["...{you}. Quack."],
@@ -362,6 +367,7 @@
         "cradled": ["...Rock-a-bye... quack."],
         "cradle_melt": ["...Sleepy... quack..."],
         "bear_hugged": ["...Quack, feet up.", "...Sis... quack."],
+        "to_den": ["...Your turn. Quack."],
     },
     "fox": {
         "hello": ["{you}. Sis is here.", "Hmph, remembered me?"],
@@ -421,5 +427,6 @@
         "cradled": ["Hmph! Not like this!", "P-put me down!"],
         "cradle_melt": ["...Just a little while.", "...Hmph, you win."],
         "bear_hugged": ["...Let go of Sis."],
+        "to_den": ["Your turn. Sis rests.", "Minions, take over."],
     },
 }
