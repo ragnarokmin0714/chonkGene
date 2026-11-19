@@ -212,9 +212,14 @@ struct State {
     pet_dirty: bool,
     settings_dirty: bool,
     preview: Option<Preview>,
-    /// When we last called a pet out or sent one to rest: the pets' file is
-    /// not read back for who is out until the pet process has saved it.
+    /// When we last moved a pet between 「出場中」 and 「在寵物窩休息」 (or
+    /// along one, or made it 常駐): the pets' file is not read back for who
+    /// is where until the pet process has saved it.
     desk_at: Instant,
+    /// For drawing a name as it is dragged (`chip_image`), and those drawn
+    /// (by name, coat, 常駐 and scale).
+    face: chonkgene_render::text::Face,
+    chips: HashMap<String, (Image, i32)>,
 }
 
 impl State {
@@ -269,13 +274,10 @@ impl State {
                     let _ = store::save(&self.data.pets(), &self.pets);
                 }
             }
-            // Already done to our list (`on_desktop_toggled`,
-            // `on_move_pet`), the limit too.
-            Msg::CallOut(_) => {
+            // Already done to our list (`on_pet_dropped`, `on_pin_pet`),
+            // the limit too.
+            Msg::Roster(_) => {
                 let _ = store::save(&self.data.settings(), &self.settings);
-                let _ = store::save(&self.data.pets(), &self.pets);
-            }
-            Msg::Order(_) => {
                 let _ = store::save(&self.data.pets(), &self.pets);
             }
             Msg::Release(id) => {
@@ -307,25 +309,191 @@ fn rotate_index(minutes: u32) -> i32 {
         .unwrap_or(0) as i32
 }
 
-fn pet_rows(st: &State) -> ModelRc<PetRow> {
-    let rows: Vec<PetRow> = st
-        .pets
-        .pets
-        .iter()
-        .filter_map(|p| {
-            let s = p.species()?;
-            let model = &st.kinds[&s].model;
-            let (dot, ring) = model.coats[model.coat(&p.coat).unwrap_or(0)].swatch();
-            Some(PetRow {
-                id: p.id.to_string().into(),
-                name: p.name.clone().into(),
-                dot: color(dot),
-                ring: color(ring),
-                resting: !p.on_desktop,
-            })
-        })
-        .collect();
-    ModelRc::new(VecModel::from(rows))
+/// Both lists of names: 「出場中」 (out on the desktop, in order) and
+/// 「在寵物窩休息」, each name with its picture for dragging. With the same
+/// pets in the same places, the rows are updated where they changed rather
+/// than made anew: a new row is a new name under the mouse, and Slint then
+/// counts a click on it as a first click (picking a pet broke the
+/// double-click that makes it 常駐).
+fn show_rows(ui: &SettingsWindow, st: &mut State) {
+    let scale = ui.window().scale_factor();
+    let (mut desk, mut den) = (Vec::new(), Vec::new());
+    for p in &st.pets.pets {
+        let Some(s) = p.species() else { continue };
+        let model = &st.kinds[&s].model;
+        let (dot, ring) = model.coats[model.coat(&p.coat).unwrap_or(0)].swatch();
+        let key = format!("{}|{dot:?}|{ring:?}|{}|{scale}", p.name, p.pinned);
+        let (chip, hot) = match st.chips.get(&key) {
+            Some(c) => c.clone(),
+            None => {
+                let c = chip_image(&mut st.face, &p.name, dot, ring, p.pinned, scale);
+                st.chips.insert(key, c.clone());
+                c
+            }
+        };
+        let row = PetRow {
+            id: p.id.to_string().into(),
+            name: p.name.clone().into(),
+            dot: color(dot),
+            ring: color(ring),
+            pinned: p.pinned,
+            chip,
+            hot,
+        };
+        if p.on_desktop {
+            desk.push(row);
+        } else {
+            den.push(row);
+        }
+    }
+    let put = |model: ModelRc<PetRow>, rows: Vec<PetRow>, set: &dyn Fn(ModelRc<PetRow>)| {
+        use slint::Model as _;
+        let same = model.row_count() == rows.len()
+            && rows
+                .iter()
+                .enumerate()
+                .all(|(i, r)| model.row_data(i).is_some_and(|o| o.id == r.id));
+        match model.as_any().downcast_ref::<VecModel<PetRow>>() {
+            Some(vec) if same => {
+                for (i, r) in rows.into_iter().enumerate() {
+                    let old = vec.row_data(i);
+                    let changed = old.is_none_or(|o| {
+                        (o.name.as_str(), o.dot, o.ring, o.pinned, o.hot)
+                            != (r.name.as_str(), r.dot, r.ring, r.pinned, r.hot)
+                    });
+                    if changed {
+                        vec.set_row_data(i, r);
+                    }
+                }
+            }
+            Some(vec) => vec.set_vec(rows),
+            None => set(ModelRc::new(VecModel::from(rows))),
+        }
+    };
+    put(ui.get_desk_pets(), desk, &|m| ui.set_desk_pets(m));
+    put(ui.get_den_pets(), den, &|m| ui.set_den_pets(m));
+}
+
+/// A pet's name as `PetChip` draws it (picked, lifted a little with a soft
+/// shadow), at `scale` device pixels a point, for under the cursor while it
+/// is dragged; and where the cursor holds it (the dot's middle), pixels.
+fn chip_image(
+    face: &mut chonkgene_render::text::Face,
+    name: &str,
+    dot: [u8; 4],
+    ring: [u8; 4],
+    pinned: bool,
+    scale: f32,
+) -> (Image, i32) {
+    use tiny_skia::{FillRule, Paint, PathBuilder, Pixmap, Rect, Stroke, Transform};
+    const PAD: f32 = 6.0;
+    let tag = tr("常駐");
+    let (text_w, tag_w) = (face.measure(name, 15.0), face.measure(tag, 12.0));
+    let w = text_w + 58.0 + if pinned { tag_w + 20.0 } else { 0.0 };
+    let h = 44.0;
+    let size = |v: f32| ((v + 2.0 * PAD) * scale).ceil() as u32;
+    let Some(mut pm) = Pixmap::new(size(w), size(h)) else {
+        return (Image::default(), 0);
+    };
+    let ts = Transform::from_scale(scale, scale).pre_translate(PAD, PAD);
+    let fill = |c: [u8; 4]| {
+        let mut p = Paint::default();
+        p.set_color_rgba8(c[0], c[1], c[2], c[3]);
+        p.anti_alias = true;
+        p
+    };
+    let pill = |x: f32, y: f32, w: f32, h: f32| {
+        let r = h / 2.0;
+        let mut pb = PathBuilder::new();
+        pb.push_rect(Rect::from_xywh(x + r, y, (w - 2.0 * r).max(0.0), h)?);
+        pb.push_circle(x + r, y + r, r);
+        pb.push_circle(x + w - r, y + r, r);
+        pb.finish()
+    };
+    let rounded = |x: f32, y: f32, w: f32, h: f32| {
+        // A rounded rectangle drawn as one outline, for the border.
+        let r = h / 2.0;
+        let mut pb = PathBuilder::new();
+        pb.move_to(x + r, y);
+        pb.line_to(x + w - r, y);
+        pb.quad_to(x + w, y, x + w, y + r);
+        pb.quad_to(x + w, y + h, x + w - r, y + h);
+        pb.line_to(x + r, y + h);
+        pb.quad_to(x, y + h, x, y + r);
+        pb.quad_to(x, y, x + r, y);
+        pb.close();
+        pb.finish()
+    };
+    // A soft shadow under it: lifted.
+    for k in 0..4 {
+        let g = k as f32;
+        if let Some(p) = pill(-g + 1.0, -g + 3.0, w + 2.0 * g - 2.0, h + 2.0 * g - 2.0) {
+            pm.fill_path(
+                &p,
+                &fill([0xE0, 0x8A, 0x4E, 18]),
+                FillRule::Winding,
+                ts,
+                None,
+            );
+        }
+    }
+    if let Some(p) = rounded(1.0, 1.0, w - 2.0, h - 2.0) {
+        pm.fill_path(
+            &p,
+            &fill([0xFF, 0xFF, 0xFF, 255]),
+            FillRule::Winding,
+            ts,
+            None,
+        );
+        let st = Stroke {
+            width: 2.0,
+            ..Stroke::default()
+        };
+        pm.stroke_path(&p, &fill([0xD9, 0x77, 0x2F, 255]), &st, ts, None);
+    }
+    if let Some(p) = PathBuilder::from_circle(22.0, 22.0, 14.0) {
+        pm.fill_path(&p, &fill(dot), FillRule::Winding, ts, None);
+    }
+    if let Some(p) = pill(8.0, 28.0, 28.0, 8.0) {
+        pm.fill_path(&p, &fill(ring), FillRule::Winding, ts, None);
+    }
+    let baseline = |size: f32, mid: f32, face: &chonkgene_render::text::Face| {
+        let (a, d) = face.extent(size);
+        mid + (a - d) / 2.0
+    };
+    // Text drawn in device pixels, so it stays sharp.
+    let at = |x: f32, y: f32| ((x + PAD) * scale, (y + PAD) * scale);
+    let (x, y) = at(44.0, baseline(15.0, 22.0, face));
+    face.draw(
+        &mut pm,
+        name,
+        x,
+        y,
+        15.0 * scale,
+        &fill([0x4B, 0x35, 0x28, 255]),
+    );
+    if pinned {
+        let tx = 44.0 + text_w + 8.0;
+        if let Some(p) = pill(tx, 11.0, tag_w + 12.0, 22.0) {
+            pm.fill_path(
+                &p,
+                &fill([0xFF, 0xB3, 0x7A, 255]),
+                FillRule::Winding,
+                ts,
+                None,
+            );
+        }
+        let (x, y) = at(tx + 6.0, baseline(12.0, 22.0, face));
+        face.draw(
+            &mut pm,
+            tag,
+            x,
+            y,
+            12.0 * scale,
+            &fill([0xFF, 0xFF, 0xFF, 255]),
+        );
+    }
+    (image(&pm), ((PAD + 22.0) * scale).round() as i32)
 }
 
 fn coat_rows(coats: Vec<(String, [u8; 4], [u8; 4])>) -> ModelRc<CoatRow> {
@@ -368,7 +536,7 @@ fn use_language(ui: &SettingsWindow, st: &mut State) {
 }
 
 fn show_pet(ui: &SettingsWindow, st: &mut State) {
-    ui.set_pets(pet_rows(st));
+    show_rows(ui, st);
     let Some(p) = st.pet().cloned() else {
         ui.set_selected_pet(SharedString::new());
         st.preview = None;
@@ -388,8 +556,6 @@ fn show_pet(ui: &SettingsWindow, st: &mut State) {
     ui.set_ticklish(p.ticklish);
     ui.set_patience(p.patience);
     ui.set_energy(p.energy);
-    ui.set_on_desktop(p.on_desktop);
-    ui.set_pinned(p.pinned);
     ui.set_preview_tint(tint(species));
     ui.set_preview_line(body_line(species, p.chonk).into());
     let progress = p.xp * 100 / XP_PER_LEVEL;
@@ -476,7 +642,7 @@ fn edit(ui: &SettingsWindow, st: &mut State, f: impl FnOnce(&mut PetSave)) {
             pv.anim.poke(chonkgene_core::Zone::Belly);
         }
     }
-    ui.set_pets(pet_rows(st));
+    show_rows(ui, st);
 }
 
 /// Fill `ui` from the saves in `data` and wire up every callback. The timers
@@ -525,6 +691,8 @@ fn setup(
         pet_dirty: false,
         settings_dirty: false,
         desk_at: Instant::now(),
+        face: chonkgene_render::text::Face::ui(),
+        chips: HashMap::new(),
         preview: None,
     }));
 
@@ -680,34 +848,73 @@ fn setup(
             _ => p.energy = v,
         });
     });
-    on!(on_desktop_toggled, |ui, st, v: bool| {
-        st.desk_at = Instant::now();
-        let Some(id) = st.selected else { return };
-        if !v {
-            edit(&ui, st, |p| p.on_desktop = false);
+    // Dragging names (Roger, 2026-11-19): each carries its pet's id.
+    ui.on_drag_data(slint::DataTransfer::from);
+    on!(on_pet_dropped, |ui,
+                         st,
+                         data: slint::DataTransfer,
+                         to_desk: bool,
+                         on: SharedString,
+                         after: bool| {
+        let Some(id) = data.plain_text().ok().and_then(|t| t.parse::<u64>().ok()) else {
+            return;
+        };
+        let on: Option<u64> = on.parse().ok();
+        // On its own name: it stays where it is.
+        if on == Some(id) {
             return;
         }
-        // Called out with the desktop full: the last one out goes to rest
-        // in its place (換班); every other one 常駐, the limit makes room.
-        // The pet process does the same to its list.
-        if st.pets.call_out(id, st.settings.on_desktop) == Room::Over {
-            let out = st.pets.out() as u32;
-            st.settings.on_desktop = out;
-            ui.set_desktop_limit(out.min(i32::MAX as u32) as i32);
+        // On a name: before it, or (its right half) before the one after
+        // it, none after the last.
+        let side: Vec<u64> = st
+            .pets
+            .pets
+            .iter()
+            .filter(|p| p.on_desktop == to_desk)
+            .map(|p| p.id)
+            .collect();
+        let before = on.and_then(|o| {
+            let i = side.iter().position(|&x| x == o)?;
+            if after {
+                side.get(i + 1).copied()
+            } else {
+                Some(o)
+            }
+        });
+        if before == Some(id) {
+            return;
         }
-        st.send(Msg::CallOut(id));
-        ui.set_pets(pet_rows(st));
-    });
-    on!(on_pin_toggled, |ui, st, v: bool| {
-        edit(&ui, st, |p| p.pinned = v);
-    });
-    on!(on_move_pet, |ui, st, by: i32| {
-        let Some(id) = st.selected else { return };
-        if st.pets.shift(id, by) {
-            let order = st.pets.order();
-            st.send(Msg::Order(order));
-            ui.set_pets(pet_rows(st));
+        st.desk_at = Instant::now();
+        // Onto a full desktop: the last one out goes to rest (換班); all
+        // of them 常駐, the limit makes room. The pet process takes the
+        // list as it is now.
+        let over = st.pets.seat(id, to_desk, before, st.settings.on_desktop) == Room::Over;
+        let roster = st.pets.roster();
+        st.send(Msg::Roster(roster));
+        if over {
+            st.settings.on_desktop = st.pets.out() as u32;
+            ui.set_desktop_limit(st.settings.on_desktop.min(i32::MAX as u32) as i32);
+            st.send_settings();
         }
+        st.selected = Some(id);
+        show_pet(&ui, st);
+    });
+    on!(on_pin_pet, |ui, st, id: SharedString| {
+        let Ok(id) = id.parse::<u64>() else { return };
+        let Some(pinned) = st
+            .pets
+            .pets
+            .iter()
+            .find(|p| p.id == id && p.on_desktop)
+            .map(|p| p.pinned)
+        else {
+            return;
+        };
+        st.desk_at = Instant::now();
+        st.pets.pin(id, !pinned);
+        let roster = st.pets.roster();
+        st.send(Msg::Roster(roster));
+        show_rows(&ui, st);
     });
     on!(on_rotate_picked, |_ui, st, i: i32| {
         let i = usize::try_from(i)
@@ -771,10 +978,7 @@ fn setup(
         // Pets go to rest or come out at once, here as on the desktop.
         let cap = st.settings.on_desktop;
         if st.pets.fit_to(cap) {
-            ui.set_pets(pet_rows(st));
-            if let Some(p) = st.pet() {
-                ui.set_on_desktop(p.on_desktop);
-            }
+            show_rows(&ui, st);
         }
         st.send_settings();
     });
@@ -855,23 +1059,12 @@ fn setup(
                     }
                     show_pet(&ui, &mut st);
                 } else if !st.pet_dirty {
-                    // Who is out changed in the pet process (隨機輪班):
+                    // Who is where changed in the pet process (隨機輪班):
                     // take it, unless a change of ours is still on its way.
                     if st.desk_at.elapsed() > DESK_SETTLE {
-                        let mut moved = false;
-                        for p in &mut st.pets.pets {
-                            if let Some(f) = fresh.pets.iter().find(|f| f.id == p.id)
-                                && f.on_desktop != p.on_desktop
-                            {
-                                p.on_desktop = f.on_desktop;
-                                moved = true;
-                            }
-                        }
-                        if moved {
-                            ui.set_pets(pet_rows(&st));
-                            if let Some(out) = st.pet().map(|p| p.on_desktop) {
-                                ui.set_on_desktop(out);
-                            }
+                        let roster = fresh.roster();
+                        if st.pets.take_roster(&roster) {
+                            show_rows(&ui, &mut st);
                         }
                     }
                     // Sizes changed for everyone at once (「大家的大小」 from
@@ -1069,6 +1262,125 @@ mod tests {
         fn create_window_adapter(&self) -> Result<Rc<dyn WindowAdapter>, slint::PlatformError> {
             Ok(self.0.clone())
         }
+    }
+
+    /// Roger, 2026-11-19: names are dragged between 「出場中」 and
+    /// 「在寵物窩休息」, a double-click makes one 常駐. Real pointer events
+    /// on the window: the eighth pet, resting, dropped on the left half of
+    /// the second name out goes before it, and the last one out rests in
+    /// its place; a double-click on the first name pins it.
+    #[test]
+    fn dragging_names_moves_pets_and_a_double_click_pins() {
+        use slint::LogicalPosition;
+        use slint::platform::{PointerEventButton, WindowEvent};
+        let window = MinimalSoftwareWindow::new(RepaintBufferType::NewBuffer);
+        slint::platform::set_platform(Box::new(Headless(window.clone()))).unwrap();
+        window.set_size(slint::PhysicalSize::new(880, 620));
+        let dir = std::env::temp_dir().join(format!("chonkgene-drag-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let data = DataDir::locate(Some(dir.clone())).unwrap();
+        let mut rng = fastrand::Rng::with_seed(4);
+        let mut pets = Pets::default();
+        for (i, s) in [
+            Species::Shiba,
+            Species::Fold,
+            Species::Duck,
+            Species::Munchkin,
+            Species::Owl,
+            Species::Chick,
+            Species::Fox,
+            Species::Shiba,
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let mut p = PetSave::adopt(i as u64 + 1, s, "", &mut rng);
+            p.on_desktop = i < 7;
+            pets.pets.push(p);
+        }
+        pets.next_id = 9;
+        store::save(&data.pets(), &pets).unwrap();
+        let ui = SettingsWindow::new().unwrap();
+        let (st, _timers) = setup(&ui, data, Some(1)).unwrap();
+        // In Chinese, so the names sit where the screenshots show them.
+        ui.invoke_language_picked(1);
+        ui.show().unwrap();
+        let draw = || {
+            slint::platform::update_timers_and_animations();
+            window.request_redraw();
+            let mut buf = vec![slint::Rgb8Pixel::default(); 880 * 620];
+            window.draw_if_needed(|r| {
+                r.render(&mut buf, 880);
+            });
+        };
+        // Twice: names changed in place (the language) settle in the
+        // layout on the second frame, and the pointer finds them there.
+        draw();
+        draw();
+        let at = |x: f32, y: f32| LogicalPosition::new(x, y);
+        // A little time between events, as a hand gives them (a click
+        // and a drag both need the clock to move on).
+        let send = |e: WindowEvent| {
+            std::thread::sleep(Duration::from_millis(20));
+            slint::platform::update_timers_and_animations();
+            window.dispatch_event(e);
+            draw();
+        };
+        let left = PointerEventButton::Left;
+        // The resting one's name (in 「在寵物窩休息」), to 芋圓's left half
+        // (the second name in 「出場中」), in small steps.
+        let (from, to) = ((285.0, 380.0), (362.0, 188.0));
+        // A mouse comes over a name before it presses it.
+        send(WindowEvent::PointerMoved {
+            position: at(from.0, from.1),
+        });
+        send(WindowEvent::PointerPressed {
+            position: at(from.0, from.1),
+            button: left,
+        });
+        for k in 1..=12 {
+            let u = k as f32 / 12.0;
+            send(WindowEvent::PointerMoved {
+                position: at(from.0 + (to.0 - from.0) * u, from.1 + (to.1 - from.1) * u),
+            });
+        }
+        send(WindowEvent::PointerReleased {
+            position: at(to.0, to.1),
+            button: left,
+        });
+        let out: Vec<u64> = st
+            .borrow()
+            .pets
+            .pets
+            .iter()
+            .filter(|p| p.on_desktop)
+            .map(|p| p.id)
+            .collect();
+        assert_eq!(
+            out,
+            [1, 8, 2, 3, 4, 5, 6],
+            "dropped before 芋圓, 小九 rested"
+        );
+        assert_eq!(slint::Model::row_count(&ui.get_den_pets()), 1);
+        // Saved for the pet process (not running here).
+        let saved = store::load::<Pets>(&dir.join("pets.ron")).unwrap().unwrap();
+        assert_eq!(saved.roster(), st.borrow().pets.roster());
+        // A double-click on 阿柴's name: picked, then 常駐.
+        let first = at(285.0, 188.0);
+        send(WindowEvent::PointerMoved { position: first });
+        for _ in 0..2 {
+            send(WindowEvent::PointerPressed {
+                position: first,
+                button: left,
+            });
+            send(WindowEvent::PointerReleased {
+                position: first,
+                button: left,
+            });
+        }
+        assert_eq!(st.borrow().selected, Some(1), "picked by the click");
+        assert!(st.borrow().pets.pets[0].pinned, "pinned by a double-click");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     /// Bumping `repaint` redraws the whole window, even when the renderer

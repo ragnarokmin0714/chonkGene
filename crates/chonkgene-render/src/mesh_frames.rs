@@ -921,8 +921,12 @@ impl MeshRenderer {
             let live = self.live.as_ref()?;
             Some(live.mesh.vertices[i].bones[0] as usize)
         });
-        // Asleep or sulking it does not turn to you.
-        let gaze = (touch.attending() && mood != Mood::Sulk && expression != Expression::Asleep)
+        // Asleep or sulking it does not turn to you; patted from above it
+        // does not look up at the hand (its face came under it).
+        let gaze = (touch.attending()
+            && !touch.from_above
+            && mood != Mood::Sulk
+            && expression != Expression::Asleep)
             .then(|| touch.at())
             .flatten()
             .map(|at| {

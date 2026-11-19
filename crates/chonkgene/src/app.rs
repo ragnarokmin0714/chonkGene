@@ -1464,13 +1464,14 @@ impl App {
                 };
                 // Affinity lives in the pet process; never take it from settings.
                 let affinity = save.affinity();
+                // Nor who is out or 常駐: only `Msg::Roster` moves those (an
+                // edit sent just after 隨機輪班 moved this pet would undo it).
+                update.on_desktop = save.on_desktop;
+                update.pinned = save.pinned;
                 *save = update;
                 save.set_affinity(&affinity);
                 let save = save.clone();
                 self.dirty = true;
-                // More out than the limit (an old settings window): the
-                // limit grows to match, as it always did.
-                self.limit_to_fit();
                 if let Some(i) = self.pets.iter().position(|p| p.save.id == save.id) {
                     let resized = (self.pets[i].save.size - save.size).abs() > 1e-3;
                     if resized {
@@ -1507,17 +1508,15 @@ impl App {
                 self.dirty = true;
                 self.sync_desktop(el);
             }
-            Msg::CallOut(id) => {
+            Msg::Roster(seats) => {
                 self.collect_affinity();
-                if self.store.call_out(id, self.settings.on_desktop) == Room::Over {
+                if self.store.take_roster(&seats) {
+                    // All of them 常駐 and one more called out: the limit
+                    // grows to match, as the settings window's did.
                     self.limit_to_fit();
+                    self.dirty = true;
+                    self.sync_desktop(el);
                 }
-                self.dirty = true;
-                self.sync_desktop(el);
-            }
-            Msg::Order(ids) => {
-                self.collect_affinity();
-                self.dirty |= self.store.reorder(&ids);
             }
             Msg::SizeAll(size) => self.size_all(el, size),
             Msg::Release(id) => {
@@ -2990,7 +2989,7 @@ impl Pet {
         let pose = props::pat_pose(kind, t).filter(|_| self.press.is_none() && !self.in_skit);
         let crown = self.renderer.anchor();
         let (facing, scale) = (self.anim.facing, self.fun.scale);
-        let at = |p: &props::PatPose| props::pat_hand(crown, facing, scale, p).hand.press;
+        let at = |p: &props::PatPose| props::pat_hand(crown, facing, scale, p).press;
         let feels = kind != props::PatKind::Asleep;
         match pose {
             Some(p) if feels && p.down && !self.fun.pat_down => {
@@ -3003,6 +3002,8 @@ impl Pet {
             _ => {}
         }
         self.fun.pat_down = feels && pose.is_some_and(|p| p.down);
+        // Under the hand it does not look up at it.
+        self.anim.patted = pose.is_some();
         // The words: once it is being stroked; at once for a duck, as it
         // flinches from the hand.
         let say_at = match kind {

@@ -417,6 +417,10 @@ pub struct Touch {
     pub fond: Option<Fondness>,
     /// The 曼赤肯's belly trap: clutching the hand and bunny-kicking, 0 … 1.
     pub trap: f32,
+    /// Your hand is patting its head from above (摸摸頭): it does not turn
+    /// to look up at it (that brought its face under the hand), it squints
+    /// and takes it.
+    pub from_above: bool,
 }
 
 impl Touch {
@@ -591,6 +595,8 @@ pub struct Animator {
     pub hug: Hug,
     /// See [`Touch::fond`]; set by the app with each press.
     pub fond: Option<Fondness>,
+    /// See [`Touch::from_above`]; set by the app while it pats the head.
+    pub patted: bool,
     /// The belly trap springs until then (the animator's clock).
     trap_until: f32,
     /// See [`PoseParams::licks`].
@@ -652,6 +658,7 @@ impl Animator {
             hops_left: 0,
             pressed: false,
             fond: None,
+            patted: false,
             hug: Hug::default(),
             trap_until: 0.0,
             held: None,
@@ -1247,6 +1254,7 @@ impl Animator {
                     // In fast, out over its last quarter second.
                     (left / 0.25).clamp(0.0, 1.0)
                 },
+                from_above: self.patted,
             },
             posture: self.posture,
             lively: match self.expression {

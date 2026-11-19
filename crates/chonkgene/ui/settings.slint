@@ -9,7 +9,13 @@ export struct PetRow {
     name: string,
     dot: color,
     ring: color,
-    resting: bool,
+    // 常駐: never swapped back to 寵物窩 (換班, 隨機輪班).
+    pinned: bool,
+    // The name as it looks, drawn under the cursor while it is dragged,
+    // and the point in it the cursor holds (the dot's middle), in its
+    // pixels.
+    chip: image,
+    hot: int,
 }
 
 export struct CoatRow {
@@ -280,6 +286,138 @@ component Row inherits HorizontalLayout {
     alignment: space-between;
 }
 
+/// One pet's name, with its coat's dot, in 「出場中」 or 「在寵物窩休息」
+/// (Roger, 2026-11-19): click to pick it, drag it to another place,
+/// double-click to make it 常駐 (or not).
+component PetChip inherits Rectangle {
+    in property <PetRow> pet;
+    in property <bool> picked;
+    in property <data-transfer> data;
+    callback select();
+    callback double-clicked();
+    // A name dropped on this one: before it, or after it (on its right
+    // half).
+    callback dropped-on(data-transfer, bool);
+    property <bool> after;
+    tag-size := Text { visible: false; text: @tr("常駐"); font-size: 12px; }
+    height: 44px;
+    width: name.preferred-width + 58px + (pet.pinned ? tag-size.preferred-width + 20px : 0px);
+    border-radius: 22px;
+    background: Theme.card;
+    border-width: 2px;
+    border-color: picked ? Theme.accent : Theme.line;
+    opacity: drag.dragging ? 0.35 : 1.0;
+    Rectangle {
+        x: 8px;
+        width: 28px;
+        height: 28px;
+        border-radius: 14px;
+        background: pet.dot;
+        Rectangle { y: 20px; height: 8px; border-radius: 4px; background: pet.ring; }
+    }
+    name := Text {
+        x: 44px;
+        text: pet.name;
+        color: Theme.ink;
+        font-size: 15px;
+        vertical-alignment: center;
+    }
+    if pet.pinned: Rectangle {
+        x: name.x + name.preferred-width + 8px;
+        y: 11px;
+        width: tag-size.preferred-width + 12px;
+        height: 22px;
+        border-radius: 11px;
+        background: Theme.peach;
+        Text {
+            text: tag-size.text;
+            color: white;
+            font-size: 12px;
+            font-weight: 600;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+        }
+    }
+    drag := DragArea {
+        data: root.data;
+        allow-move: true;
+        drag-image: root.pet.chip;
+        drag-image-offset-x: root.pet.hot;
+        drag-image-offset-y: root.pet.hot;
+        TouchArea {
+            mouse-cursor: pointer;
+            clicked => { root.select(); }
+            double-clicked => { root.double-clicked(); }
+        }
+    }
+    // Where it would go: a bar on the side it would be dropped.
+    if drop.has-drag: Rectangle {
+        x: root.after ? root.width + 2px : -6px;
+        y: 4px;
+        width: 4px;
+        height: root.height - 8px;
+        border-radius: 2px;
+        background: Theme.accent;
+    }
+    drop := DropArea {
+        can-drop(e) => {
+            root.after = e.position.x > root.width / 2;
+            return DragAction.move;
+        }
+        dropped(e) => {
+            root.dropped-on(e.data, e.position.x > root.width / 2);
+            return DragAction.move;
+        }
+    }
+}
+
+/// 「出場中」 or 「在寵物窩休息」: its pets' names; a name dropped on the
+/// card, not on another name, goes last.
+component PetCard inherits Section {
+    in property <string> title;
+    in property <string> count;
+    in property <string> hint;
+    in property <[PetRow]> pets;
+    in property <string> selected-pet;
+    pure callback drag-data(string) -> data-transfer;
+    callback select-pet(string);
+    callback double-clicked(string);
+    // A name dropped here: on the name with this id ("" on the card), and
+    // after it.
+    callback dropped(data-transfer, string, bool);
+    background: card-drop.has-drag ? Theme.hover : Theme.card;
+    border-color: card-drop.has-drag ? Theme.peach : Theme.line;
+    card-drop := DropArea {
+        can-drop(e) => { return DragAction.move; }
+        dropped(e) => {
+            root.dropped(e.data, "", false);
+            return DragAction.move;
+        }
+    }
+    VerticalLayout {
+        padding: 16px;
+        padding-top: 12px;
+        spacing: 10px;
+        HorizontalLayout {
+            spacing: 8px;
+            Text { text: root.title; color: Theme.ink; font-size: 16px; font-weight: 600; vertical-alignment: center; }
+            Text { text: root.count; color: Theme.muted; font-size: 13px; vertical-alignment: center; horizontal-stretch: 1; }
+        }
+        FlexboxLayout {
+            spacing: 10px;
+            for p in root.pets: PetChip {
+                pet: p;
+                picked: p.id == root.selected-pet;
+                data: root.drag-data(p.id);
+                select => { root.select-pet(p.id); }
+                double-clicked => { root.double-clicked(p.id); }
+                dropped-on(d, after) => { root.dropped(d, p.id, after); }
+            }
+        }
+        Hint { text: root.hint; }
+    }
+}
+
 component SectionTitle inherits Text {
     color: Theme.muted;
     font-size: 13px;
@@ -306,8 +444,10 @@ export component SettingsWindow inherits Window {
     // Navigation.
     in-out property <int> tab: 0;
 
-    // Pets.
-    in property <[PetRow]> pets;
+    // Pets: 「出場中」 (out on the desktop, in order) and 「在寵物窩休息」
+    // (the first is the next to come out).
+    in property <[PetRow]> desk-pets;
+    in property <[PetRow]> den-pets;
     in-out property <string> selected-pet;
     in property <bool> adopting;
     in property <[SpeciesRow]> species;
@@ -330,9 +470,6 @@ export component SettingsWindow inherits Window {
     in-out property <float> ticklish;
     in-out property <float> patience;
     in-out property <float> energy;
-    in-out property <bool> on-desktop;
-    // 常駐: never swapped back to 寵物窩 (換班, 隨機輪班).
-    in-out property <bool> pinned;
     in property <image> preview;
     in property <color> preview-tint;
     in property <string> preview-line;
@@ -344,10 +481,12 @@ export component SettingsWindow inherits Window {
     callback chonk-changed(float);
     callback size-changed(float);
     callback trait-changed(int, float);
-    callback desktop-toggled(bool);
-    callback pin-toggled(bool);
-    // The selected pet one place earlier (−1) or later (+1): 上場順序.
-    callback move-pet(int);
+    // Dragging names: what one carries (its id); a name dropped in
+    // 「出場中」 (true) or 「在寵物窩休息」, on the name with this id ("": on
+    // the card), after it; a double-click on a name out (常駐).
+    pure callback drag-data(string) -> data-transfer;
+    callback pet-dropped(data-transfer, bool, string, bool);
+    callback pin-pet(string);
     callback release();
 
     // Interaction & sound.
@@ -446,7 +585,9 @@ export component SettingsWindow inherits Window {
                     // end of a sideways-scrolling row of names, out of sight
                     // with the seven pets a new desk starts with. Now it has
                     // its own place on top, and the names wrap onto rows.
-                    HorizontalLayout {
+                    // 說再見… sits here too (Roger, 2026-11-19: easier to
+                    // reach than under the pet), asking first in this row.
+                    if !root.confirm-release || root.adopting: HorizontalLayout {
                         spacing: 12px;
                         Text {
                             text: root.adopting ? @tr("領養新寵物") : @tr("我的寵物");
@@ -455,7 +596,13 @@ export component SettingsWindow inherits Window {
                             vertical-alignment: center;
                             horizontal-stretch: 1;
                         }
-                        if root.adopting && root.pets.length > 0: CuteButton {
+                        if !root.adopting && root.selected-pet != "": CuteButton {
+                            text: @tr("說再見…");
+                            primary: false;
+                            danger: true;
+                            clicked => { root.confirm-release = true; }
+                        }
+                        if root.adopting && root.desk-pets.length + root.den-pets.length > 0: CuteButton {
                             text: @tr("算了");
                             primary: false;
                             clicked => { root.select-pet(root.selected-pet); }
@@ -470,66 +617,44 @@ export component SettingsWindow inherits Window {
                             clicked => { root.start-adopting(); }
                         }
                     }
-
-                    // The names in 上場順序 (Roger, 2026-11-19): the one
-                    // picked has ‹ › to move it earlier or later.
-                    if !root.adopting: FlexboxLayout {
-                        spacing: 10px;
-                        for p[i] in root.pets: Rectangle {
-                            property <bool> moving: p.id == root.selected-pet && root.pets.length > 1;
-                            height: 44px;
-                            width: chip-text.preferred-width + 58px + (moving ? 60px : 0px);
-                            border-radius: 22px;
-                            background: Theme.card;
-                            border-width: 2px;
-                            border-color: p.id == root.selected-pet ? Theme.accent : Theme.line;
-                            Rectangle {
-                                x: 8px;
-                                width: 28px;
-                                height: 28px;
-                                border-radius: 14px;
-                                background: p.dot;
-                                opacity: p.resting ? 0.6 : 1.0;
-                                Rectangle { y: 20px; height: 8px; border-radius: 4px; background: p.ring; }
-                            }
-                            chip-text := Text {
-                                x: 44px;
-                                text: p.name;
-                                color: Theme.ink;
-                                opacity: p.resting ? 0.6 : 1.0;
-                                font-size: 15px;
-                                vertical-alignment: center;
-                            }
-                            TouchArea {
-                                mouse-cursor: pointer;
-                                clicked => { root.select-pet(p.id); }
-                            }
-                            for d[k] in (moving ? [-1, 1] : []): Rectangle {
-                                property <bool> can: d < 0 ? i > 0 : i < root.pets.length - 1;
-                                x: chip-text.x + chip-text.preferred-width + 10px + k * 30px;
-                                y: 8px;
-                                width: 28px;
-                                height: 28px;
-                                border-radius: 14px;
-                                background: arrow-touch.has-hover && can ? Theme.track : Theme.side;
-                                opacity: can ? 1.0 : 0.35;
-                                Text {
-                                    text: d < 0 ? "‹" : "›";
-                                    color: Theme.ink;
-                                    font-size: 20px;
-                                    horizontal-alignment: center;
-                                    vertical-alignment: center;
-                                }
-                                arrow-touch := TouchArea {
-                                    enabled: can;
-                                    mouse-cursor: can ? pointer : default;
-                                    clicked => { root.move-pet(d); }
-                                }
-                            }
+                    if root.confirm-release && !root.adopting: HorizontalLayout {
+                        spacing: 12px;
+                        VerticalLayout {
+                            alignment: center;
+                            spacing: 4px;
+                            horizontal-stretch: 1;
+                            Label { text: @tr("確定要和{}說再見嗎？", root.pet-name); }
+                            Hint { text: @tr("牠的名字和親密度會一起消失。"); }
                         }
+                        CuteButton { text: @tr("再想想"); primary: false; clicked => { root.confirm-release = false; } }
+                        CuteButton { text: @tr("說再見"); primary: false; danger: true; clicked => { root.release(); } }
                     }
-                    if !root.adopting && root.pets.length > 1: Hint {
-                        text: @tr("按 ‹ › 調整順序，排越前面越先上桌面。");
+
+                    // Who is out (Roger, 2026-11-19): 「出場中」 on top,
+                    // 「在寵物窩休息」 under it. Drag a name from one to the
+                    // other, or along one to change its place; double-click
+                    // one out to make it 常駐.
+                    if !root.adopting: PetCard {
+                        title: @tr("出場中");
+                        count: @tr("{} / {} 隻", root.desk-pets.length, root.desktop-limit);
+                        hint: @tr("拖進來就會出場；點兩下設為常駐，就不會被換下來。");
+                        pets: root.desk-pets;
+                        selected-pet: root.selected-pet;
+                        drag-data(id) => { return root.drag-data(id); }
+                        select-pet(id) => { root.select-pet(id); }
+                        double-clicked(id) => { root.pin-pet(id); }
+                        dropped(d, on, after) => { root.pet-dropped(d, true, on, after); }
+                    }
+                    if !root.adopting: PetCard {
+                        title: @tr("在寵物窩休息");
+                        count: root.den-pets.length > 0 ? @tr("{} 隻", root.den-pets.length) : "";
+                        hint: root.den-pets.length > 0 ? @tr("拖到上面就會出場。") : @tr("把寵物拖到這裡，牠就會回寵物窩休息。");
+                        pets: root.den-pets;
+                        selected-pet: root.selected-pet;
+                        drag-data(id) => { return root.drag-data(id); }
+                        select-pet(id) => { root.select-pet(id); }
+                        double-clicked(id) => { root.select-pet(id); }
+                        dropped(d, on, after) => { root.pet-dropped(d, false, on, after); }
                     }
 
                     // Adoption: four small cards a row, so all seven show at
@@ -607,9 +732,8 @@ export component SettingsWindow inherits Window {
                     if !root.adopting && root.selected-pet != "": HorizontalLayout {
                         spacing: 20px;
                         alignment: start;
-                        // The pet, and under it whether it is out and saying
-                        // goodbye (Roger's seventeenth pass: 說再見 was below
-                        // the fold when the page opened).
+                        // The pet (whether it is out and 說再見 moved to the
+                        // cards and the title row, Roger 2026-11-19).
                         VerticalLayout {
                             spacing: 14px;
                             alignment: start;
@@ -638,77 +762,6 @@ export component SettingsWindow inherits Window {
                                     Image { source: root.preview; height: 220px; image-fit: contain; }
                                     Text { text: root.pet-name; color: Theme.ink; font-size: 22px; horizontal-alignment: center; }
                                     Text { text: root.species-label + @tr("・") + root.level-text; color: Theme.muted; font-size: 13px; horizontal-alignment: center; }
-                                }
-                            }
-                            // 一直待在桌面上 only matters once some have to
-                            // take turns: more pets than the desktop holds.
-                            Section {
-                                height: root.pets.length > root.desktop-limit ? 152px : 76px;
-                                VerticalLayout {
-                                    Row {
-                                        height: 76px;
-                                        padding-left: 18px;
-                                        padding-right: 18px;
-                                        // 「關掉就在寵物窩休息。」 is 130 px
-                                        // at 13 px: with the usual 16 px
-                                        // gap it broke 休/息 in the card.
-                                        alignment: stretch;
-                                        spacing: 8px;
-                                        VerticalLayout {
-                                            alignment: center;
-                                            spacing: 4px;
-                                            horizontal-stretch: 1;
-                                            Label { text: @tr("在桌面上"); }
-                                            Hint { text: @tr("關掉就在寵物窩休息。"); }
-                                        }
-                                        PawSwitch {
-                                            checked <=> root.on-desktop;
-                                            toggled(v) => { root.desktop-toggled(v); }
-                                        }
-                                    }
-                                    if root.pets.length > root.desktop-limit: Row {
-                                        height: 76px;
-                                        padding-left: 18px;
-                                        padding-right: 18px;
-                                        alignment: stretch;
-                                        spacing: 8px;
-                                        VerticalLayout {
-                                            alignment: center;
-                                            spacing: 4px;
-                                            horizontal-stretch: 1;
-                                            Label { text: @tr("一直待在桌面上"); }
-                                            Hint { text: @tr("換班時不會換到牠。"); }
-                                        }
-                                        PawSwitch {
-                                            checked <=> root.pinned;
-                                            toggled(v) => { root.pin-toggled(v); }
-                                        }
-                                    }
-                                }
-                            }
-
-                            if !root.confirm-release: HorizontalLayout {
-                                alignment: end;
-                                CuteButton {
-                                    text: @tr("說再見…");
-                                    primary: false;
-                                    danger: true;
-                                    clicked => { root.confirm-release = true; }
-                                }
-                            }
-                            if root.confirm-release: Section {
-                                height: 120px;
-                                VerticalLayout {
-                                    padding: 16px;
-                                    spacing: 10px;
-                                    Label { text: @tr("確定要和{}說再見嗎？", root.pet-name); }
-                                    Hint { text: @tr("牠的名字和親密度會一起消失。"); }
-                                    HorizontalLayout {
-                                        alignment: end;
-                                        spacing: 10px;
-                                        CuteButton { text: @tr("再想想"); primary: false; clicked => { root.confirm-release = false; } }
-                                        CuteButton { text: @tr("說再見"); primary: false; danger: true; clicked => { root.release(); } }
-                                    }
                                 }
                             }
                         }

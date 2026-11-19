@@ -2505,52 +2505,77 @@ pub fn pat_pose(kind: PatKind, t: f32) -> Option<PatPose> {
 /// Your hand patting its head this frame (see [`pat_hand`]).
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct PatHand {
-    pub hand: HugHand,
+    /// Where the middle of the palm is, on top of its head, pixels.
+    pub palm: (f32, f32),
+    /// Where it presses in, on the pet (the dent's middle), pixels.
+    pub press: (f32, f32),
+    /// The way it faces (+1 right): the fingers point the other way,
+    /// toward the back of its head.
+    pub facing: f32,
     /// How far it has come in (0 … 1).
     pub reach: f32,
     /// The hand's size, as the `s` it is drawn at.
     pub scale: f32,
+    /// How hard it presses now, 0 … 1: the fingers follow the head's curve
+    /// further down.
+    pub press_in: f32,
 }
 
 /// The patting hand against a hugging one: big enough to cover the top of
 /// its head (at the hug's size it read as a small fist floating over it).
-const PAT_HAND: f32 = 2.1;
+const PAT_HAND: f32 = 2.4;
 
 /// Your hand on its head for `pose`: `crown` the top of its head
-/// (pixels, on the picture shown), `facing` +1 right. A child's hand seen
-/// from the back, laid flat on top of its head, the fingers toward the
-/// back of its head and tipped down a little with its curve: fingers
-/// pointing down over it covered the eyes of a pet facing you. It strokes
-/// from the forehead back.
+/// (pixels, on the picture shown), `facing` +1 right. Laid over the top
+/// of the head from above, the back of the hand toward you, the fingers
+/// down over the crown and a little toward the back of the head, their
+/// tips short of the eyes; the palm and wrist above (Roger, 2026-11-19:
+/// beside the head, fingers sideways, it did not read as pressing on
+/// it). It strokes from the forehead back.
 pub fn pat_hand(crown: (f32, f32), facing: f32, s: f32, pose: &PatPose) -> PatHand {
     let f = if facing < 0.0 { -1.0 } else { 1.0 };
     let scale = s * PAT_HAND;
     let l = HAND_LEN * scale;
-    let along = 0.16 * l * pose.slide * f;
+    let along = 0.14 * l * pose.slide * f;
     let press = (crown.0 + along, crown.1 + HAND_IN * s);
+    // Down, it sinks a little into the dent.
+    let sink = if pose.down { 0.04 * l } else { 0.0 };
     PatHand {
-        hand: HugHand {
-            at: (press.0 + f * 0.2 * l, crown.1 - 0.06 * l - pose.lift * s),
-            press,
-            angle: if f > 0.0 { PI - 0.22 } else { 0.22 },
-            side: f,
-            grip: Grip::Back,
-        },
+        palm: (
+            press.0 + f * 0.1 * l,
+            crown.1 - 0.22 * l + sink - pose.lift * s,
+        ),
+        press,
+        facing: f,
         reach: pose.reach,
         scale,
+        press_in: if pose.down { 1.0 } else { 0.0 },
     }
 }
 
+/// Which way the patting hand's fingers point (see [`pat_hand`]):
+/// down, tipped toward the back of its head.
+fn pat_angle(facing: f32) -> f32 {
+    PI / 2.0 + facing * 0.32
+}
+
 /// Your hand patting its head (see [`pat_hand`]), over its picture,
-/// a little see-through (more solid than a hug's, being over its head
-/// rather than holding it); the fingers move a little, `t` seconds in.
+/// a little see-through as a hug's hands are; the fingers move a little
+/// as they stroke, `t` seconds in.
 pub fn draw_pat_hand(pm: &mut Pixmap, pat: &PatHand, t: f32) {
     let Some(mut one) = Pixmap::new(pm.width(), pm.height()) else {
         return;
     };
-    child_hand(&mut one, &pat.hand, Part::Back, pat.scale, t);
+    let hand = HugHand {
+        at: pat.palm,
+        press: pat.press,
+        angle: pat_angle(pat.facing),
+        side: -pat.facing,
+        grip: Grip::Back,
+    };
+    child_hand(&mut one, &hand, Part::Back, pat.scale, t);
     let paint = PixmapPaint {
-        opacity: 0.78 * pat.reach.clamp(0.0, 1.0),
+        opacity: 0.8 * pat.reach.clamp(0.0, 1.0),
         ..PixmapPaint::default()
     };
     pm.draw_pixmap(0, 0, one.as_ref(), &paint, Transform::identity(), None);
@@ -3167,13 +3192,39 @@ mod tests {
     #[test]
     fn the_patting_hand_sits_on_the_crown_and_keeps_off_the_face() {
         let pose = pat_pose(PatKind::Pat, PatKind::Pat.strokes_from()).unwrap();
+        assert!(pose.down);
+        let l = HAND_LEN * PAT_HAND;
         for facing in [1.0, -1.0] {
-            let h = pat_hand((100.0, 60.0), facing, 1.0, &pose).hand;
-            assert!(h.at.1 < 60.0, "palm over the crown");
-            assert!((h.press.1 - 60.0 - HAND_IN).abs() < 1e-3);
-            // The fingers point toward the back of its head and down.
-            let (dx, dy) = (h.angle.cos(), h.angle.sin());
-            assert!(dx * facing < -0.8 && dy > 0.2, "{facing}: {dx}, {dy}");
+            let h = pat_hand((110.0, 80.0), facing, 1.0, &pose);
+            assert!((h.press.1 - 80.0 - HAND_IN).abs() < 1e-3);
+            let mut pm = Pixmap::new(220, 200).unwrap();
+            draw_pat_hand(&mut pm, &h, 0.0);
+            // Over the crown: the hand covers it, reaches down onto the
+            // head, but not as far as the eyes (about 0.7 l under the
+            // crown on these pets, the hand's own length l), and leans
+            // toward the back of the head.
+            let drawn = |x: u32, y: u32| pm.pixel(x, y).unwrap().alpha() > 60;
+            let lowest = (0..200)
+                .rev()
+                .find(|&y| (0..220).any(|x| drawn(x, y)))
+                .unwrap();
+            assert!(drawn(110, 80), "the crown is under the hand");
+            let below = lowest as f32 - 80.0;
+            assert!(
+                below > 0.3 * l && below < 0.62 * l,
+                "{facing}: reaches {below} under the crown"
+            );
+            // The fingertips (its lowest rows) toward the back of the head
+            // from the palm.
+            let tips: Vec<u32> = (lowest - 6..=lowest)
+                .flat_map(|y| (0..220).filter(move |&x| drawn(x, y)))
+                .collect();
+            let mid = tips.iter().sum::<u32>() as f32 / tips.len() as f32;
+            assert!(
+                (mid - h.palm.0) * facing < 0.0,
+                "{facing}: tips at {mid}, palm at {}",
+                h.palm.0
+            );
         }
     }
 

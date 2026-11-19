@@ -311,9 +311,8 @@ fn main() {
                 .flatten();
             if scene.name == "pat" {
                 let crown = r.anchor();
-                let at = |p: &chonkgene_render::props::PatPose| {
-                    pat_hand(crown, a.facing, 1.0, p).hand.press
-                };
+                let at =
+                    |p: &chonkgene_render::props::PatPose| pat_hand(crown, a.facing, 1.0, p).press;
                 match pat {
                     Some(p) if p.down && !pat_down => {
                         a.press(Zone::Head, at(&p));
@@ -330,6 +329,7 @@ fn main() {
                 }
                 pat_down = pat.is_some_and(|p| p.down);
                 pat_was = pat.is_some();
+                a.patted = pat.is_some();
                 if a.expression == Expression::Happy {
                     expression = Expression::Happy;
                 }

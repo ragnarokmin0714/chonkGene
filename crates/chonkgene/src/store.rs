@@ -290,7 +290,17 @@ impl PetSave {
     }
 }
 
-/// What calling a pet out did to the desktop (see [`Pets::call_out`]).
+/// Where one pet is, for `Msg::Roster` (see [`Pets::roster`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Seat {
+    pub id: u64,
+    /// Out on the desktop (not resting in 寵物窩).
+    pub out: bool,
+    /// 常駐.
+    pub pinned: bool,
+}
+
+/// What calling a pet out did to the desktop (see [`Pets::seat`]).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Room {
     /// There was room.
@@ -316,12 +326,22 @@ impl Pets {
         self.pets.iter().filter(|p| p.on_desktop).count()
     }
 
+    /// The order kept: those out on the desktop first, then those resting
+    /// in 寵物窩, each in their own order (「出場中」 and 「在寵物窩休息」
+    /// in the settings, Roger 2026-11-19). The first resting is the next to
+    /// come out; the last out is the next to rest.
+    pub fn normalize(&mut self) {
+        // A stable sort: each side keeps its order.
+        self.pets.sort_by_key(|p| !p.on_desktop);
+    }
+
     /// Make as many pets as `cap` allows be out on the desktop: over it, the
-    /// last ones out in the order go to rest in 寵物窩 (常駐 ones only once
-    /// no other is left out); under it, resting ones come out, first in the
-    /// order first. True if any pet moved. (Both processes run it on a
-    /// change of 「同時在桌面上的寵物」, so their lists agree.)
+    /// last ones out go to rest in 寵物窩 (常駐 ones only once no other is
+    /// left out), first in line to come back; under it, the first resting
+    /// come out. True if any pet moved. (Both processes run it on a change
+    /// of 「同時在桌面上的寵物」, so their lists agree.)
     pub fn fit_to(&mut self, cap: u32) -> bool {
+        self.normalize();
         let cap = cap as usize;
         let mut out = self.out();
         let mut moved = false;
@@ -345,40 +365,65 @@ impl Pets {
                 (out, moved) = (out + 1, true);
             }
         }
+        self.normalize();
         moved
     }
 
-    /// Call pet `id` out onto a desktop that holds `cap` (by hand, or just
-    /// adopted). With the desktop full, the last one out in the order that
-    /// is not 常駐 goes to rest in 寵物窩 in its place (換班, Roger
-    /// 2026-11-19: no longer a silently higher limit). Both processes run
-    /// it, so their lists agree.
-    pub fn call_out(&mut self, id: u64, cap: u32) -> Room {
+    /// Put pet `id` out on the desktop (`out`) or to rest in 寵物窩, just
+    /// before pet `before` there (none: last), the desktop holding `cap`:
+    /// a pet dragged between 「出場中」 and 「在寵物窩休息」, or within one
+    /// (Roger 2026-11-19). Coming out onto a full desktop, the last one out
+    /// that is not 常駐 goes to rest in its place, first in line to come
+    /// back (換班; no longer a silently higher limit). Both processes end
+    /// with the same list (the settings window sends it, `Msg::Roster`).
+    pub fn seat(&mut self, id: u64, out: bool, before: Option<u64>, cap: u32) -> Room {
+        self.normalize();
         let Some(i) = self.pets.iter().position(|p| p.id == id) else {
             return Room::Free;
         };
-        self.pets[i].on_desktop = true;
-        if self.out() <= cap as usize {
+        // Dropped on itself: it stays where it is.
+        if before == Some(id) && self.pets[i].on_desktop == out {
             return Room::Free;
         }
-        match self
-            .pets
-            .iter_mut()
-            .rev()
-            .find(|p| p.on_desktop && !p.pinned && p.id != id)
-        {
-            Some(p) => {
-                p.on_desktop = false;
-                Room::Swapped(p.id)
+        let mut pet = self.pets.remove(i);
+        pet.on_desktop = out;
+        let at = before
+            .and_then(|b| {
+                self.pets
+                    .iter()
+                    .position(|p| p.id == b && p.on_desktop == out)
+            })
+            .unwrap_or(if out { self.out() } else { self.pets.len() });
+        self.pets.insert(at, pet);
+        let room = if out && self.out() > cap as usize {
+            match self
+                .pets
+                .iter_mut()
+                .rev()
+                .find(|p| p.on_desktop && !p.pinned && p.id != id)
+            {
+                Some(p) => {
+                    p.on_desktop = false;
+                    Room::Swapped(p.id)
+                }
+                None => Room::Over,
             }
-            None => Room::Over,
-        }
+        } else {
+            Room::Free
+        };
+        self.normalize();
+        room
+    }
+
+    /// Call pet `id` out, last of those out (see [`Pets::seat`]).
+    pub fn call_out(&mut self, id: u64, cap: u32) -> Room {
+        self.seat(id, true, None, cap)
     }
 
     /// Adopt `save` onto a desktop that holds `cap`: it comes out at once,
-    /// making room as [`Pets::call_out`] does (Roger 2026-11-19: one just
-    /// adopted rested unseen in 寵物窩 when the desktop was full). Last in
-    /// the order.
+    /// last of those out, making room as [`Pets::seat`] does (Roger
+    /// 2026-11-19: one just adopted rested unseen in 寵物窩 when the
+    /// desktop was full).
     pub fn adopt(&mut self, mut save: PetSave, cap: u32) -> Room {
         let id = save.id;
         save.on_desktop = false;
@@ -386,34 +431,43 @@ impl Pets {
         self.call_out(id, cap)
     }
 
-    /// Move pet `id` `by` places in the order (−1 earlier, +1 later),
-    /// within the list. True if it moved.
-    pub fn shift(&mut self, id: u64, by: i32) -> bool {
-        let Some(i) = self.pets.iter().position(|p| p.id == id) else {
-            return false;
-        };
-        let to = (i as i64 + i64::from(by)).clamp(0, self.pets.len() as i64 - 1) as usize;
-        if to == i {
-            return false;
-        }
-        let p = self.pets.remove(i);
-        self.pets.insert(to, p);
-        true
+    /// 常駐 or not (double-click in 「出場中」): never the one sent to rest
+    /// to make room, nor by 隨機輪班. True if it changed.
+    pub fn pin(&mut self, id: u64, pinned: bool) -> bool {
+        self.pets
+            .iter_mut()
+            .find(|p| p.id == id && p.pinned != pinned)
+            .map(|p| p.pinned = pinned)
+            .is_some()
     }
 
-    /// Put the pets in the order of `ids`; any not named keep their order
-    /// after those named (a pet adopted meanwhile). True if it changed.
-    pub fn reorder(&mut self, ids: &[u64]) -> bool {
-        let rank = |id: u64| ids.iter().position(|&i| i == id).unwrap_or(usize::MAX);
-        let before: Vec<u64> = self.pets.iter().map(|p| p.id).collect();
-        // A stable sort: those not named stay in their order, at the end.
+    /// Who is where, in order (for the other process, `Msg::Roster`).
+    pub fn roster(&self) -> Vec<Seat> {
+        self.pets
+            .iter()
+            .map(|p| Seat {
+                id: p.id,
+                out: p.on_desktop,
+                pinned: p.pinned,
+            })
+            .collect()
+    }
+
+    /// Take `roster` from the other process: the order, who is out, who is
+    /// 常駐. Pets it does not name (adopted meanwhile) keep their place
+    /// after those it does. True if anything changed.
+    pub fn take_roster(&mut self, roster: &[Seat]) -> bool {
+        let before = self.roster();
+        let rank = |id: u64| roster.iter().position(|s| s.id == id).unwrap_or(usize::MAX);
         self.pets.sort_by_key(|p| rank(p.id));
-        self.pets.iter().map(|p| p.id).ne(before)
-    }
-
-    /// The order, as ids (for [`Pets::reorder`] in the other process).
-    pub fn order(&self) -> Vec<u64> {
-        self.pets.iter().map(|p| p.id).collect()
+        for p in &mut self.pets {
+            if let Some(s) = roster.iter().find(|s| s.id == p.id) {
+                p.on_desktop = s.out;
+                p.pinned = s.pinned;
+            }
+        }
+        self.normalize();
+        self.roster() != before
     }
 
     /// 隨機輪班: one pet out (not 常駐, and `free` to go: not in your hands,
@@ -445,21 +499,25 @@ impl Pets {
         ))
     }
 
-    /// Pet `going` goes to rest in 寵物窩 and `coming` comes out in its
-    /// place (隨機輪班). True if both were where they should be.
+    /// Pet `going` goes to rest in 寵物窩, last in line, and `coming` comes
+    /// out in its place in the order (隨機輪班). True if both were where
+    /// they should be.
     pub fn swap(&mut self, going: u64, coming: u64) -> bool {
-        let ok = self.pets.iter().any(|p| p.id == going && p.on_desktop)
-            && self.pets.iter().any(|p| p.id == coming && !p.on_desktop);
-        if ok {
-            for p in &mut self.pets {
-                if p.id == going {
-                    p.on_desktop = false;
-                } else if p.id == coming {
-                    p.on_desktop = true;
-                }
-            }
-        }
-        ok
+        self.normalize();
+        let a = self.pets.iter().position(|p| p.id == going && p.on_desktop);
+        let b = self
+            .pets
+            .iter()
+            .position(|p| p.id == coming && !p.on_desktop);
+        let (Some(a), Some(b)) = (a, b) else {
+            return false;
+        };
+        self.pets[b].on_desktop = true;
+        let came = self.pets.remove(b);
+        let mut went = std::mem::replace(&mut self.pets[a], came);
+        went.on_desktop = false;
+        self.pets.push(went);
+        true
     }
 
     /// Every pet's untouched default name and 「牠怎麼叫你」 in the language
@@ -475,6 +533,7 @@ impl Pets {
         for p in &mut self.pets {
             p.sanitise();
         }
+        self.normalize();
         let max = self.pets.iter().map(|p| p.id).max().unwrap_or(0);
         self.next_id = self.next_id.max(max + 1);
     }
@@ -586,10 +645,11 @@ mod tests {
         assert!(pets.fit_to(3));
         assert_eq!(out(&pets), [1, 2, 3]);
         assert!(!pets.fit_to(3));
-        // One rested by hand comes back out before the later ones.
+        // One rested by hand comes back out before the later ones (first
+        // in line in 寵物窩, last of those out).
         pets.pets[1].on_desktop = false;
         assert!(pets.fit_to(4));
-        assert_eq!(out(&pets), [1, 2, 3, 4]);
+        assert_eq!(out(&pets), [1, 3, 2, 4]);
         // A limit over the number of pets brings them all out.
         assert!(pets.fit_to(10));
         assert_eq!(pets.out(), 7);
@@ -615,6 +675,10 @@ mod tests {
             .collect()
     }
 
+    fn ids(p: &Pets) -> Vec<u64> {
+        p.pets.iter().map(|p| p.id).collect()
+    }
+
     /// Roger, 2026-11-19: with the desktop full, calling one out (or
     /// adopting one) swaps it with the last one out, instead of raising the
     /// limit; 常駐 ones are never the ones swapped.
@@ -623,9 +687,10 @@ mod tests {
         let mut pets = shibas(5, 3);
         assert_eq!(pets.call_out(5, 3), Room::Swapped(3));
         assert_eq!(out_ids(&pets), [1, 2, 5]);
-        // Room to spare: it just comes out.
+        assert_eq!(ids(&pets), [1, 2, 5, 3, 4], "3 first in line to come back");
+        // Room to spare: it just comes out, last of those out.
         assert_eq!(pets.call_out(4, 4), Room::Free);
-        assert_eq!(out_ids(&pets), [1, 2, 4, 5]);
+        assert_eq!(out_ids(&pets), [1, 2, 5, 4]);
         // The last one out is 常駐: the one before it goes instead.
         let mut pets = shibas(5, 3);
         pets.pets[2].pinned = true;
@@ -645,30 +710,53 @@ mod tests {
         let mut rng = fastrand::Rng::with_seed(2);
         let new = PetSave::adopt(4, Species::Owl, "brown", &mut rng);
         assert_eq!(pets.adopt(new, 3), Room::Swapped(3));
+        assert_eq!(ids(&pets), [1, 2, 4, 3]);
         assert_eq!(out_ids(&pets), [1, 2, 4]);
-        assert_eq!(pets.order(), [1, 2, 3, 4], "last in the order");
         let new = PetSave::adopt(5, Species::Chick, "yellow", &mut rng);
         assert_eq!(pets.adopt(new, 7), Room::Free);
         assert_eq!(out_ids(&pets), [1, 2, 4, 5]);
     }
 
-    /// 上場順序: the order decides who comes out first and who rests first.
+    /// 上場順序 by dragging (Roger, 2026-11-19): a name dropped on another
+    /// goes just before it, in 「出場中」 or 「在寵物窩休息」; dropped on
+    /// the card, last. The limit follows the order.
     #[test]
-    fn the_order_can_be_changed_and_the_limit_follows_it() {
+    fn a_pet_dragged_takes_its_place_and_the_limit_follows_the_order() {
         let mut pets = shibas(4, 4);
-        assert!(pets.shift(4, -1));
-        assert!(pets.shift(4, -1));
-        assert_eq!(pets.order(), [1, 4, 2, 3]);
-        assert!(!pets.shift(1, -1), "already first");
-        assert!(!pets.shift(3, 1), "already last");
+        assert_eq!(pets.seat(4, true, Some(2), 4), Room::Free);
+        assert_eq!(ids(&pets), [1, 4, 2, 3]);
+        assert_eq!(pets.seat(1, false, None, 4), Room::Free);
+        assert_eq!(ids(&pets), [4, 2, 3, 1]);
+        assert_eq!(out_ids(&pets), [4, 2, 3]);
+        // Dropped on itself: stays.
+        assert_eq!(pets.seat(2, true, Some(2), 4), Room::Free);
+        assert_eq!(ids(&pets), [4, 2, 3, 1]);
+        // Into a full desktop, at the front: the last one out rests.
+        assert_eq!(pets.seat(1, true, Some(4), 3), Room::Swapped(3));
+        assert_eq!(ids(&pets), [1, 4, 2, 3]);
+        assert_eq!(out_ids(&pets), [1, 4, 2]);
+        // A lower limit rests the last ones out, first in line to come back.
         assert!(pets.fit_to(2));
+        assert_eq!(ids(&pets), [1, 4, 2, 3]);
         assert_eq!(out_ids(&pets), [1, 4]);
-        // The other process takes the order as ids; one it does not know
-        // of (adopted meanwhile) stays at the end.
-        let mut other = shibas(5, 4);
-        assert!(other.reorder(&pets.order()));
-        assert_eq!(other.order(), [1, 4, 2, 3, 5]);
-        assert!(!other.reorder(&[1, 4, 2, 3, 5]));
+        assert!(pets.fit_to(3));
+        assert_eq!(out_ids(&pets), [1, 4, 2]);
+    }
+
+    /// The settings window sends who is where; the pet process takes it.
+    #[test]
+    fn the_roster_carries_order_place_and_pinning() {
+        let mut pets = shibas(4, 2);
+        assert!(pets.pin(2, true));
+        assert!(!pets.pin(2, true));
+        pets.seat(4, true, Some(1), 3);
+        let mut other = shibas(5, 2);
+        assert!(other.take_roster(&pets.roster()));
+        // 5 was adopted meanwhile: it keeps its place after the rest.
+        assert_eq!(ids(&other), [4, 1, 2, 3, 5]);
+        assert_eq!(out_ids(&other), [4, 1, 2]);
+        assert!(other.pets[2].pinned);
+        assert!(!other.take_roster(&pets.roster()));
     }
 
     #[test]
@@ -681,9 +769,15 @@ mod tests {
         assert_eq!(pets.out(), 0);
     }
 
-    /// 隨機輪班: never a 常駐 one or one busy, and everyone gets a turn.
+    /// 隨機輪班: never a 常駐 one or one busy, and everyone gets a turn;
+    /// the one coming out takes the place of the one going.
     #[test]
     fn a_random_shift_swaps_a_free_pet_out_for_a_resting_one() {
+        let mut swapped = shibas(5, 3);
+        assert!(swapped.swap(2, 5));
+        assert_eq!(ids(&swapped), [1, 5, 3, 4, 2]);
+        assert_eq!(out_ids(&swapped), [1, 5, 3]);
+
         let mut pets = shibas(6, 3);
         pets.pets[0].pinned = true;
         let mut rng = fastrand::Rng::with_seed(7);

@@ -180,8 +180,6 @@
 ＋ 領養新寵物 → ＋ Adopt a pet
 挑一隻帶回你的桌面吧，點牠還能選毛色。 → Pick one for your desktop; click it to choose a coat.
 ・ →  ·
-在桌面上 → On the desktop
-關掉就在寵物窩休息。 → Off: it rests in the den.
 確定要和{}說再見嗎？ → Say goodbye to {}?
 牠的名字和親密度會一起消失。 → Its name and bond will be gone for good.
 再想想 → Wait
@@ -232,9 +230,13 @@
 同時在桌面上的寵物 → Pets on the desktop at once
 寵物越多，用的電腦資源也越多。 → More pets use more of the computer.
 其他的會在寵物窩休息。 → The rest stay in the den.
-按 ‹ › 調整順序，排越前面越先上桌面。 → Use ‹ › to reorder. The first ones come out first.
-一直待在桌面上 → Always stay out
-換班時不會換到牠。 → Never swapped back to the den.
+常駐 → Stays
+出場中 → Out now
+{} / {} 隻 → {} / {}
+拖進來就會出場；點兩下設為常駐，就不會被換下來。 → Drag a pet here to bring it out; double-click to keep it out for good.
+在寵物窩休息 → Resting in the den
+拖到上面就會出場。 → Drag one up to bring it out.
+把寵物拖到這裡，牠就會回寵物窩休息。 → Drag a pet here and it rests in the den.
 隨機輪班 → Take turns at random
 每隔一段時間，隨機和寵物窩裡的換班。 → Every so often, one swaps places with one from the den.
 不輪班 → Off
