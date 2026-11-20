@@ -1495,12 +1495,14 @@ impl App {
             }
             Msg::Pet(mut update) => {
                 update.sanitise();
+                let update_id = update.id;
                 self.collect_affinity();
                 let Some(save) = self.store.pets.iter_mut().find(|p| p.id == update.id) else {
                     return;
                 };
                 // Affinity lives in the pet process; never take it from settings.
                 let affinity = save.affinity();
+                let renamed_you = save.you != update.you;
                 // Nor who is out or 常駐: only `Msg::Roster` moves those (an
                 // edit sent just after 隨機輪班 moved this pet would undo it).
                 update.on_desktop = save.on_desktop;
@@ -1526,6 +1528,17 @@ impl App {
                         p.save = save;
                         p.next = Instant::now();
                     }
+                }
+                // Told what to call you: it tries the new name out at once
+                // (Roger, 2026-11-20: the lines never seemed to use it).
+                if renamed_you {
+                    let now = Instant::now();
+                    let world = self.world(now);
+                    self.with_pet(el, update_id, world, now, |_, p, ctx| {
+                        if !p.mind.asleep() {
+                            p.say(ctx, Line::CalledYou);
+                        }
+                    });
                 }
                 self.sync_desktop(el);
             }

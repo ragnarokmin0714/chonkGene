@@ -123,10 +123,14 @@ pub enum Line {
     Buried,
     /// Going to rest in 寵物窩, another taking its place (換班, 輪班).
     ToDen,
+    /// Just told what to call you (「牠怎麼叫你」 changed in the settings):
+    /// trying the new name out at once (Roger, 2026-11-20: changed, and the
+    /// lines never seemed to use it).
+    CalledYou,
 }
 
 impl Line {
-    pub const ALL: [Line; 60] = [
+    pub const ALL: [Line; 61] = [
         Line::Hello,
         Line::WelcomeBack,
         Line::PokeSmall,
@@ -187,6 +191,7 @@ impl Line {
         Line::CradleMelt,
         Line::Buried,
         Line::ToDen,
+        Line::CalledYou,
     ];
 
     /// Key in the line tables.
@@ -252,6 +257,7 @@ impl Line {
             Line::Cradled => "cradled",
             Line::CradleMelt => "cradle_melt",
             Line::ToDen => "to_den",
+            Line::CalledYou => "called_you",
         }
     }
 
