@@ -1969,7 +1969,7 @@ impl App {
             gpu += f.gpu_secs;
             let ms = 1000.0 * f.gpu_secs / f64::from(f.gpu_frames.max(1));
             diag!(
-                "frames: {} {:.1}/s shown of {:.1}/s asked; sent {} ({} past the budget, {} walking), held back {}; GPU {ms:.1} ms a frame",
+                "frames: {} {:.1}/s shown of {:.1}/s asked; sent {} ({} past the budget, {} walking), held back {}, late {}; GPU {ms:.1} ms a frame",
                 p.save.name,
                 f64::from(f.shown) / secs,
                 f64::from(draws) / secs,
@@ -1977,6 +1977,7 @@ impl App {
                 f.pushed,
                 f.forced,
                 f.held_back,
+                f.late,
             );
         }
         if let Some(g) = chonkgene_render::shared_gpu() {

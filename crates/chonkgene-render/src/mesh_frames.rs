@@ -27,7 +27,7 @@ use chonkgene_rig::{FLOOR, Layer, Look, Model, Pose, Scene, ZONES};
 use tiny_skia::{Pixmap, Transform};
 
 use crate::fidget::{Kind, Tongue};
-use crate::gpu::{Ask, Gpu};
+use crate::gpu::{Ask, Gpu, Wait};
 use crate::mesh::{Mesh, bake};
 use crate::mesh_gpu::{MeshCanvas, Press};
 use crate::props::Grip;
@@ -79,7 +79,8 @@ const SMOOTH_FALL: f32 = 90.0;
 /// pictures shown, frames sent to the GPU (`pushed`: past the budget,
 /// touched or held back too long; `forced`: walking, flying or falling,
 /// counted against its share like the rest), times the budget held one
-/// back, and the GPU time the drawn ones took.
+/// back, times a moving pet's frame was not there after the short wait
+/// ([`KEEP_UP_WAIT`]), and the GPU time the drawn ones took.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct FrameStats {
     pub shown: u32,
@@ -87,6 +88,7 @@ pub struct FrameStats {
     pub pushed: u32,
     pub forced: u32,
     pub held_back: u32,
+    pub late: u32,
     pub gpu_secs: f64,
     pub gpu_frames: u32,
 }
@@ -99,6 +101,10 @@ const SLEEP_SHIFT: f32 = 45.0;
 /// finger is beside the head, of tilt per unit below it, and the most.
 const GAZE_TURN: (f32, f32) = (28.0, 40.0);
 const GAZE_TILT: (f32, f32) = (22.0, 28.0);
+
+/// The longest the app's thread waits for a moving pet's frame on its way:
+/// most land within a frame's time; one that does not shows next time.
+const KEEP_UP_WAIT: Duration = Duration::from_millis(12);
 
 /// Held by you, the lowest of the pet stays this far above its picture's
 /// floor (world units), so none of it is cut off along the bottom.
@@ -448,7 +454,7 @@ impl MeshRenderer {
         if self.live.as_ref().is_some_and(|l| !l.canvas.pending()) && self.unsent {
             self.push(Ask::Now, false);
         }
-        self.collect(true);
+        self.collect(Wait::Done);
         self.pixmap.data_mut().copy_from_slice(self.base.data());
     }
 
@@ -711,7 +717,9 @@ impl MeshRenderer {
         // every frame (slowing to a stop too): its frames skip the budget,
         // and if the last one is still on its way it is waited for rather
         // than skipped (a skipped frame shows the legs standing still while
-        // the window slides on). So must a flight, a fall or a leap.
+        // the window slides on). So must a flight, a fall or a leap. Waited
+        // for briefly: every pet and window waits with it, and a frame the
+        // GPU is slow over (seconds, on Roger's) froze them all.
         let keep_up = walking || params.travelling || self.walk.speed() > 0.0;
         // Touched (held, rubbed, or let go just now): the answer must show
         // at once, so its frames go past the budget (the others wait).
@@ -719,16 +727,20 @@ impl MeshRenderer {
         self.urgent = touch.held.is_some()
             || touch.scratch > 0.0
             || touch.last.is_some_and(|(.., ago)| ago < URGENT_SECS);
-        let mut arrived = self.collect(false);
+        let mut arrived = self.collect(Wait::No);
         let pending = |r: &Self| r.live.as_ref().is_some_and(|l| l.canvas.pending());
         if keep_up && pending(self) {
-            arrived |= self.collect(true);
+            let got = self.collect(Wait::Upto(KEEP_UP_WAIT));
+            if !got && pending(self) {
+                self.stats.late += 1;
+            }
+            arrived |= got;
         }
         if self.live.is_some() && !pending(self) {
             self.send(keep_up);
         }
         if self.eager && pending(self) {
-            arrived |= self.collect(true);
+            arrived |= self.collect(Wait::Done);
         }
         arrived
     }
@@ -812,9 +824,9 @@ impl MeshRenderer {
         }
     }
 
-    /// Take in the frame on its way if it has arrived (`wait`: wait for
-    /// it): it becomes the picture shown. True if one did.
-    fn collect(&mut self, wait: bool) -> bool {
+    /// Take in the frame on its way if it has arrived (waiting for it as
+    /// `wait` says): it becomes the picture shown. True if one did.
+    fn collect(&mut self, wait: Wait) -> bool {
         let Some(live) = self.live.as_mut() else {
             return false;
         };

@@ -4,12 +4,13 @@
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU8, Ordering};
+use std::time::{Duration, Instant};
 
 use chonkgene_rig::Scene;
 use chonkgene_rig::math::V3;
 use tiny_skia::Pixmap;
 
-use crate::gpu::{Ask, Frame, Gpu, MAP_FAILED, MAPPED, MAPPING, Vec4, uniforms, v4};
+use crate::gpu::{Ask, Frame, Gpu, MAP_FAILED, MAPPED, MAPPING, Vec4, Wait, uniforms, v4};
 use crate::mesh::{Mesh, Vertex};
 use crate::raymarch::Camera;
 use crate::skin::{Affine, ROOT_PIVOT};
@@ -46,8 +47,11 @@ pub struct MeshCanvas {
     mouth_r: V3,
     /// The shadow's radii (see [`Mesh::shadow`]).
     shadow_r: (f32, f32),
-    /// A frame on its way: set once its picture can be read.
+    /// A frame on its way: set once its picture can be read; and the
+    /// submission it went in, so a wait is for it alone (not for every
+    /// other pet's frame queued after it).
     pending: Option<Arc<AtomicU8>>,
+    submitted: Option<wgpu::SubmissionIndex>,
     /// Expected GPU seconds a frame, what the frame on its way was charged
     /// to the budget, and what the last measured frame took.
     cost: f32,
@@ -261,6 +265,7 @@ impl MeshCanvas {
             mouth_r: mesh.mouth_r,
             shadow_r: mesh.shadow,
             pending: None,
+            submitted: None,
             cost: GUESS * (w * h) as f32 / GUESS_PIXELS,
             charged: 0.0,
             user: gpu.new_user(),
@@ -302,7 +307,7 @@ impl MeshCanvas {
     ) -> Result<Option<f32>, String> {
         self.charged = 0.0;
         self.submit(gpu, scene, bones, yaw)?;
-        self.collect(gpu, out, true)?;
+        self.collect(gpu, out, Wait::Done)?;
         Ok(self.last_secs)
     }
 
@@ -435,7 +440,7 @@ impl MeshCanvas {
                 16,
             );
         }
-        queue.submit([enc.finish()]);
+        self.submitted = Some(queue.submit([enc.finish()]));
         let arrived = Arc::new(AtomicU8::new(MAPPING));
         let flag = Arc::clone(&arrived);
         self.readback
@@ -450,28 +455,46 @@ impl MeshCanvas {
         Ok(())
     }
 
-    /// Copy the frame on its way into `out` if it has arrived (`wait`: wait
-    /// for it). True if `out` now holds it. Learns what frames cost and
+    /// Copy the frame on its way into `out` if it has arrived, waiting for
+    /// it as `wait` says. True if `out` now holds it; false if it is still
+    /// on its way (it is kept for next time). Learns what frames cost and
     /// settles the budget when the GPU can time them.
-    pub fn collect(&mut self, gpu: &Gpu, out: &mut Pixmap, wait: bool) -> Result<bool, String> {
+    pub fn collect(&mut self, gpu: &Gpu, out: &mut Pixmap, wait: Wait) -> Result<bool, String> {
         let Some(arrived) = self.pending.clone() else {
             return Ok(false);
         };
         if out.width() != self.cam.w || out.height() != self.cam.h {
             return Err("canvas and pixmap sizes differ".into());
         }
-        let poll = if wait {
-            wgpu::PollType::wait_indefinitely()
-        } else {
-            wgpu::PollType::Poll
+        let started = Instant::now();
+        let poll = match wait {
+            Wait::No => wgpu::PollType::Poll,
+            Wait::Upto(limit) => wgpu::PollType::Wait {
+                submission_index: self.submitted.clone(),
+                timeout: Some(limit),
+            },
+            Wait::Done => wgpu::PollType::Wait {
+                submission_index: self.submitted.clone(),
+                timeout: None,
+            },
         };
-        gpu.device().poll(poll).map_err(|e| format!("GPU: {e}"))?;
-        if wait {
-            crate::gpu::settle_map(gpu.device(), &arrived, MAPPING)?;
+        match gpu.device().poll(poll) {
+            Ok(_) => {}
+            // Not done in time: it stays on its way.
+            Err(wgpu::PollError::Timeout) => return Ok(false),
+            Err(e) => return Err(format!("GPU: {e}")),
+        }
+        let limit = match wait {
+            Wait::No => Duration::ZERO,
+            Wait::Upto(limit) => limit.saturating_sub(started.elapsed()),
+            Wait::Done => crate::gpu::MAP_LANDS,
+        };
+        if wait != Wait::No {
+            crate::gpu::settle_map(gpu.device(), &arrived, MAPPING, limit)?;
         }
         match arrived.load(Ordering::Acquire) {
             MAPPED => {}
-            MAPPING if !wait => return Ok(false),
+            MAPPING if wait != Wait::Done => return Ok(false),
             _ => {
                 // Failed to map (or never did): drop the frame.
                 self.pending = None;

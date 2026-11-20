@@ -827,7 +827,7 @@ impl Gpu {
         };
         self.device.poll(poll).map_err(|e| format!("GPU: {e}"))?;
         if wait {
-            settle_map(&self.device, &arrived, MAPPING)?;
+            settle_map(&self.device, &arrived, MAPPING, MAP_LANDS)?;
         }
         match arrived.load(Ordering::Acquire) {
             MAPPED => {}
@@ -893,7 +893,22 @@ const UNIFORM_VECS: usize = 14 + PALETTE;
 
 /// Waiting for a frame, how long its map may still take to land after the
 /// wait returns.
-const MAP_LANDS: Duration = Duration::from_secs(2);
+pub(crate) const MAP_LANDS: Duration = Duration::from_secs(2);
+
+/// How long to wait for a frame on its way to arrive.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Wait {
+    /// Not at all: take it if it is there.
+    No,
+    /// At most this long, then leave it on its way to be taken next time.
+    /// The app's thread waits so at most: everything else (every pet's
+    /// window moving, the mouse) waits with it, and Roger's integrated GPU
+    /// has taken seconds over a frame (the pets froze in mid-fall, his
+    /// twenty-sixth pass, item 4).
+    Upto(Duration),
+    /// Until it comes (tests, screenshots, a renderer drawing every frame).
+    Done,
+}
 
 /// After waiting on the device, the map's callback can still land a little
 /// later when another thread polls the same device (it runs on whichever
@@ -904,8 +919,9 @@ pub(crate) fn settle_map(
     device: &wgpu::Device,
     arrived: &AtomicU8,
     mapping: u8,
+    limit: Duration,
 ) -> Result<(), String> {
-    let until = Instant::now() + MAP_LANDS;
+    let until = Instant::now() + limit;
     while arrived.load(Ordering::Acquire) == mapping && Instant::now() < until {
         std::thread::sleep(Duration::from_micros(200));
         device

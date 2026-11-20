@@ -2509,3 +2509,36 @@ fn a_pet_held_in_your_arms_is_never_cut_off() {
     }
     assert!(short.is_empty(), "{}", short.join("\n"));
 }
+
+/// Roger's twenty-sixth pass, item 4: the pets froze in mid-fall for
+/// seconds while the app's thread waited for a frame the GPU was slow over.
+/// A wait now has a limit; when it runs out the frame is still on its way,
+/// not lost, and is taken the next time.
+#[test]
+fn a_frame_waited_for_briefly_stays_on_its_way_and_is_taken_later() {
+    use chonkgene_render::gpu::Wait;
+    let Ok(gpu) = Gpu::new() else {
+        eprintln!("skipped: no GPU");
+        return;
+    };
+    let (model, sk) = shiba();
+    let mesh = bake(&model, &sk, 0, 0.33, 0.025).unwrap();
+    let scene = Scene::posed(&model, 0, 0.33, &Pose::default(), Look::Open, Layer::All);
+    let (w, h) = (200, 160);
+    let mut canvas = MeshCanvas::new(&gpu, &mesh, w, h, 1.0);
+    let mut pm = Pixmap::new(w, h).unwrap();
+    for _ in 0..5 {
+        canvas.submit(&gpu, &scene, &sk.pose(&[]), 0.0).unwrap();
+        let got = canvas
+            .collect(&gpu, &mut pm, Wait::Upto(std::time::Duration::ZERO))
+            .unwrap();
+        if got {
+            assert!(!canvas.pending(), "taken, so no longer on its way");
+            continue;
+        }
+        assert!(canvas.pending(), "not ready in time: kept on its way");
+        assert!(canvas.collect(&gpu, &mut pm, Wait::Done).unwrap());
+        assert!(!canvas.pending());
+    }
+    assert!(opaque(&pm) > 1000, "the picture came through");
+}
