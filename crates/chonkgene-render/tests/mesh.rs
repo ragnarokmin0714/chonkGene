@@ -2437,3 +2437,75 @@ fn picking_up_brings_the_mouth_down_to_the_floor() {
     }
     assert!(short.is_empty(), "{}", short.join("\n"));
 }
+
+/// How many solid pixels `pm` has along its bottom row (the shadow's faint
+/// fringe, a little alpha, does not count): a pet standing on it touches it
+/// with its feet; one cut off there, with a long flat edge.
+fn bottom_row(pm: &Pixmap) -> u32 {
+    let (w, h) = (pm.width(), pm.height());
+    let d = pm.data();
+    (0..w)
+        .filter(|&x| d[(((h - 1) * w + x) * 4 + 3) as usize] > 120)
+        .count() as u32
+}
+
+/// Roger (2026-11-20): held in any of the three ways (環抱, 舉高高, 搖搖抱),
+/// the fox's lower tails were cut off along the bottom of its window. Held
+/// by you, awake or asleep, no pet reaches the left, top or right edge of
+/// its picture, and along the bottom it touches no more than it does
+/// standing on its feet.
+#[test]
+fn a_pet_held_in_your_arms_is_never_cut_off() {
+    use chonkgene_core::anim::{Animator, Expression, Hug, HugHold};
+    use chonkgene_render::skin::SleepPose;
+    let mut short = Vec::new();
+    for id in QUAD_SPECIES.iter().chain(&BIPED_SPECIES) {
+        let Some(mut r) = app_renderer(id) else {
+            eprintln!("skipped: no GPU");
+            return;
+        };
+        for (hold, asleep) in [
+            (HugHold::Wrap, false),
+            (HugHold::Carry, false),
+            (HugHold::Cradle, false),
+            (HugHold::Cradle, true),
+        ] {
+            let mut a = Animator::new(1, 0.33, 0.0).with_pops(false);
+            let e = if asleep {
+                Expression::Asleep
+            } else {
+                Expression::Happy
+            };
+            r.sleep_in(None);
+            let mut standing = 0;
+            for _ in 0..20 {
+                a.step(0.1);
+                r.render(&a.params(), Expression::Neutral);
+                r.finish();
+                standing = standing.max(bottom_row(r.pixmap()));
+            }
+            r.sleep_in(asleep.then_some(SleepPose::Curl));
+            a.hug(Hug::ByYou(hold));
+            let (mut bottom, mut edges) = (0, [u32::MAX; 3]);
+            for i in 0..((hold.secs() + 0.5) / 0.05) as usize {
+                a.step(0.05);
+                r.render(&a.params(), e);
+                r.finish();
+                // (Put down again after, it stands or lies on its floor.)
+                if (i as f32) * 0.05 < hold.secs() - 0.3 {
+                    bottom = bottom.max(bottom_row(r.pixmap()));
+                }
+                let m = margins(r.pixmap());
+                edges = [edges[0].min(m[0]), edges[1].min(m[1]), edges[2].min(m[2])];
+            }
+            if bottom > standing + 4 || edges.iter().any(|&m| m < 3) {
+                short.push(format!(
+                    "{id} {hold:?}{}: {bottom} px along the bottom (standing, {standing}), \
+                     {edges:?} px from the left, top and right",
+                    if asleep { " asleep" } else { "" }
+                ));
+            }
+        }
+    }
+    assert!(short.is_empty(), "{}", short.join("\n"));
+}

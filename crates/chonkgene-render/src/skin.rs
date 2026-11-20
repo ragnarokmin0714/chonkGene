@@ -603,6 +603,19 @@ const PICK_BODY: f32 = 18.0;
 const PICK_HEAD: f32 = 50.0;
 const PICK_LEGS: f32 = 16.0;
 
+/// Held by you (Roger, 2026-11-20: the fox's lower tails were cut off by
+/// her window's bottom in all three holds; the renderer now holds every
+/// pet up as far as it needs, `MeshRenderer::settle`). How far her tails
+/// tip down, degrees: wrapped round you (環抱), held up upright (舉高高,
+/// curling up from low down), and draped over your hands in 搖搖抱 (each
+/// tail's root, then each segment). 舉高高 for everyone: how far the body
+/// tips upright and the hind legs hang, degrees, short enough that feet to
+/// ears it fits its picture.
+const HELD_TAILS: (f32, f32, f32) = (5.0, 15.0, 0.0);
+const CARRY_TAILS: f32 = -35.0;
+const CARRY_PITCH: f32 = 22.0;
+const CARRY_DANGLE: f32 = 22.0;
+
 /// Steps a second at full walking pace.
 const STEP_HZ: f32 = 2.0;
 /// Leg swing either way, degrees: with legs 0.45 long and 62% of each step
@@ -2091,15 +2104,18 @@ impl Walk {
                                 let rock = (TAU * 0.45 * g.t).sin();
                                 j[0].rot.z += e * 8.0 * rock;
                                 j[b.head].rot.z += e * 12.0;
+                                // Her tails draped over your hands, not
+                                // hanging down past her picture's bottom
+                                // (Roger, 2026-11-20: cut off).
                                 let n = self.tails.len() as f32;
                                 for (k, tail) in self.tails.iter().enumerate() {
                                     let side = (k as f32 + 0.5) / n * 2.0 - 1.0;
                                     if let Some(&root) = tail.bones.first() {
                                         j[root].rot.y += e * side * 30.0;
-                                        j[root].rot.x += e * -60.0;
+                                        j[root].rot.x += e * -HELD_TAILS.1;
                                     }
                                     for &seg in tail.bones.iter().skip(1) {
-                                        j[seg].rot.x += e * -20.0;
+                                        j[seg].rot.x += e * -HELD_TAILS.2;
                                     }
                                 }
                             }
@@ -2122,13 +2138,11 @@ impl Walk {
                                 // hanging down and swinging; a cat hangs
                                 // long (its hips sag away from its chest).
                                 let long = if self.kneads { 1.0 } else { 0.0 };
-                                let pitch = 48.0 + 14.0 * long;
+                                let pitch = CARRY_PITCH + 10.0 * long;
                                 j[b.body].rot.x -= e * pitch;
-                                // Up off the bottom of its picture so the
-                                // hanging legs stay in it (the fox, tall
-                                // with her tails, more).
-                                let fox = if self.tails.len() > 1 { 0.3 } else { 0.0 };
-                                j[0].shift.y += e * (0.34 + 0.06 * long + fox) * self.leg_len;
+                                // (Held up off the bottom of its picture
+                                // as far as the hanging legs need: see
+                                // `MeshRenderer::settle`.)
                                 j[b.head].rot.x += e * (pitch - 10.0);
                                 j[b.hips].shift.y -= e * 0.1 * long;
                                 j[b.hips].rot.x += e * 8.0 * long;
@@ -2144,17 +2158,22 @@ impl Walk {
                                 } else if lifted {
                                     // Straight down from the upright body.
                                     let dangle = (TAU * 0.9 * g.t + PI * k).sin();
-                                    j[leg].rot.x += e * (50.0 + 8.0 * dangle);
+                                    j[leg].rot.x += e * (CARRY_DANGLE + 8.0 * dangle);
                                     k += 1.0;
                                 }
                             }
                             if self.tails.len() > 1 {
+                                // Her tails round you at her middle, not
+                                // hanging past her picture.
                                 let n = self.tails.len() as f32;
                                 for (k, tail) in self.tails.iter().enumerate() {
                                     let side = (k as f32 + 0.5) / n * 2.0 - 1.0;
                                     if let Some(&root) = tail.bones.first() {
                                         j[root].rot.y += e * side * 85.0;
-                                        j[root].rot.x -= e * (25.0 + 6.0 * squeeze);
+                                        // Held up upright, her tails curl up
+                                        // round her front from low down.
+                                        let tip = if lifted { CARRY_TAILS } else { HELD_TAILS.0 };
+                                        j[root].rot.x -= e * (tip + 6.0 * squeeze);
                                     }
                                     for &seg in tail.bones.iter().skip(1) {
                                         j[seg].rot.y += e * side * 18.0;

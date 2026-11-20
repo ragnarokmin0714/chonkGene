@@ -100,6 +100,10 @@ const SLEEP_SHIFT: f32 = 45.0;
 const GAZE_TURN: (f32, f32) = (28.0, 40.0);
 const GAZE_TILT: (f32, f32) = (22.0, 28.0);
 
+/// Held by you, the lowest of the pet stays this far above its picture's
+/// floor (world units), so none of it is cut off along the bottom.
+const HELD_CLEAR: f32 = 0.05;
+
 /// How far into its pose a gesture `secs` long is, `t` seconds in (0 … 1):
 /// eased in and out over [`GESTURE_EASE`] at each end, held between. It
 /// was `sqrt(sin)`, steepest at the very ends: the last frame of a yawn
@@ -1137,7 +1141,12 @@ impl MeshRenderer {
         let lean = Affine::about(M3::rot_z(params.sway.to_radians()), feet);
         let mut world = lean.then(&squash);
         let g = self.walk.ground();
-        if g > 0.0
+        // Held in your hands (Roger, 2026-11-20: the fox's tails, and a
+        // sleeping chick, cut off along the bottom of the window): nothing
+        // hangs below its picture's floor; it is lifted as far as needed.
+        let held =
+            params.act == Act::Hug && matches!(params.hug, chonkgene_core::anim::Hug::ByYou(_));
+        if (g > 0.0 || held)
             && let Some(live) = &self.live
         {
             // The lowest of the skin (a sample of it) comes to the floor,
@@ -1159,6 +1168,10 @@ impl MeshRenderer {
             if low < f32::MAX {
                 world.t.y += (FLOOR - low) * g;
                 world.t.x -= 0.5 * (left + right) * g;
+                let low = low + (FLOOR - low) * g;
+                if held && low < FLOOR + HELD_CLEAR {
+                    world.t.y += FLOOR + HELD_CLEAR - low;
+                }
             }
         }
         for b in &mut self.bones {

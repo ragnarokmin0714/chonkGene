@@ -738,10 +738,12 @@ impl Waddle {
             j[i].shift = v3(0.0, y.clamp(-0.09, 0.09), 0.0);
         }
         // Some gestures are done sitting (see `Act::seated`); the rest
-        // standing.
+        // standing. A hug is had either way: held in your hands sitting or
+        // asleep, it was left out, and nothing held it up off its
+        // picture's bottom (Roger, 2026-11-20).
         if let Some(g) = self
             .gesture
-            .filter(|g| s < 0.5 && (sit < 0.5 || g.act.seated()))
+            .filter(|g| s < 0.5 && (sit < 0.5 || g.act.seated() || g.act == Act::Hug))
         {
             let e = g.e;
             match g.act {
@@ -823,8 +825,10 @@ impl Waddle {
                             j[w].rot.x -= e * 0.5 * wings;
                         }
                     }
-                    if lift > 0.0 {
-                        j[0].shift.y += e * lift;
+                    j[0].shift.y += e * lift;
+                    // Lifted off its feet in the fox's bear hug, its feet
+                    // paddle (in your hands it sits still).
+                    if self.hug == Hug::Squeezed {
                         for (k, &leg) in self.legs.iter().enumerate() {
                             let kick = (TAU * 3.2 * g.t + PI * k as f32).sin();
                             j[leg].rot.x -= e * 22.0 * kick;
