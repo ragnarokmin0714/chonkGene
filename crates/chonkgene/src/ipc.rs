@@ -37,6 +37,9 @@ pub enum Msg {
     SizeAll(f32),
     /// Remove start-at-login and menu entries (「移除所有痕跡」).
     RemoveTraces,
+    /// 「現在換一次」: one pet out and one resting change places now, as
+    /// 隨機輪班 would (Roger, 2026-11-20: to try it without waiting).
+    ShiftNow,
     Quit,
 }
 

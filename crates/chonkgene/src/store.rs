@@ -109,8 +109,9 @@ pub struct Settings {
     pub rotate_minutes: u32,
 }
 
-/// The intervals 「讓牠們隨機輪班」 offers, minutes (0: off).
-pub const ROTATE_CHOICES: [u32; 4] = [0, 30, 60, 180];
+/// The intervals 「讓牠們隨機輪班」 offers, minutes (0: off). 15 minutes
+/// added (Roger, 2026-11-20: 「時間都太久了」).
+pub const ROTATE_CHOICES: [u32; 5] = [0, 15, 30, 60, 180];
 
 impl Default for Settings {
     fn default() -> Self {

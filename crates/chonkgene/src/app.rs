@@ -1043,11 +1043,22 @@ impl App {
             self.shift_at = Some(again);
             return;
         }
+        if !self.shift_now(el) {
+            self.shift_at = Some(again);
+            return;
+        }
+        self.shift_at = Some(t + round * (0.8 + 0.4 * self.rng.f64()));
+    }
+
+    /// One pet out that is free to go changes places with one resting in
+    /// 寵物窩, both picked at random (隨機輪班, or 「現在換一次」 from the
+    /// settings). False if there is nobody free or resting.
+    fn shift_now(&mut self, el: &ActiveEventLoop) -> bool {
         let pets = &self.pets;
         let free = |id: u64| pets.iter().any(|p| p.save.id == id && p.free_to_go());
         let Some((going, coming)) = self.store.pick_shift(&mut self.rng, free) else {
-            self.shift_at = Some(again);
-            return;
+            diag!("shift: nobody free to go, or nobody resting");
+            return false;
         };
         self.collect_affinity();
         self.store.swap(going, coming);
@@ -1066,7 +1077,7 @@ impl App {
         // Now, so the settings window reads it back at once.
         self.save_now();
         self.sync_desktop(el);
-        self.shift_at = Some(t + round * (0.8 + 0.4 * self.rng.f64()));
+        true
     }
 
     /// Every pet `size` at once (Roger's nineteenth pass: 一鍵式調整寵物大
@@ -1574,6 +1585,12 @@ impl App {
                 self.store.pets.retain(|p| p.id != id);
                 self.dirty = true;
                 self.sync_desktop(el);
+            }
+            Msg::ShiftNow => {
+                // The next round counts from now.
+                if self.shift_now(el) {
+                    self.shift_at = None;
+                }
             }
             Msg::RemoveTraces => {
                 self.settings.start_at_login = false;

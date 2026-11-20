@@ -977,6 +977,9 @@ fn setup(
         st.settings.rotate_minutes = ROTATE_CHOICES[i];
         st.send_settings();
     });
+    on!(on_shift_now, |_ui, st| {
+        st.send(Msg::ShiftNow);
+    });
     on!(on_release, |ui, st| {
         let Some(id) = st.selected else { return };
         st.send(Msg::Release(id));
@@ -1372,6 +1375,20 @@ mod tests {
         fn duration_since_start(&self) -> Duration {
             CLOCK.with(std::cell::Cell::get)
         }
+    }
+
+    /// 「隨機輪班」 shows the choice a stored interval is (15 minutes one of
+    /// them since Roger found the others too long, 2026-11-20), and a
+    /// hand-edited one as the nearest; only 0 is off.
+    #[test]
+    fn the_rotation_interval_shows_as_its_choice() {
+        assert_eq!(ROTATE_CHOICES, [0, 15, 30, 60, 180]);
+        for (i, &m) in ROTATE_CHOICES.iter().enumerate() {
+            assert_eq!(rotate_index(m), i as i32);
+        }
+        assert_eq!(rotate_index(20), 1);
+        assert_eq!(rotate_index(1), 1, "on, however short");
+        assert_eq!(rotate_index(500), 4);
     }
 
     /// The pet process quitting tells an open settings window to close

@@ -632,6 +632,7 @@ export component SettingsWindow inherits Window {
     // 隨機輪班: an index into store::ROTATE_CHOICES (0 off).
     in-out property <int> rotate;
     callback rotate-picked(int);
+    callback shift-now();
     in property <string> data-path;
     in property <string> notice;
     in property <string> version;
@@ -1153,10 +1154,25 @@ export component SettingsWindow inherits Window {
                                     Label { text: @tr("隨機輪班"); }
                                     Hint { text: @tr("每隔一段時間，隨機和寵物窩裡的換班。"); }
                                 }
-                                Segmented {
-                                    options: [@tr("不輪班"), @tr("30 分鐘"), @tr("1 小時"), @tr("3 小時")];
-                                    selected <=> root.rotate;
-                                    picked(i) => { root.rotate-picked(i); }
+                                VerticalLayout {
+                                    spacing: 8px;
+                                    alignment: center;
+                                    Segmented {
+                                        options: [@tr("不輪班"), @tr("15 分鐘"), @tr("30 分鐘"), @tr("1 小時"), @tr("3 小時")];
+                                        selected <=> root.rotate;
+                                        picked(i) => { root.rotate-picked(i); }
+                                    }
+                                    // Roger, 2026-11-20: to try it now
+                                    // rather than wait for the next round.
+                                    HorizontalLayout {
+                                        alignment: end;
+                                        CuteButton {
+                                            text: @tr("現在換一次");
+                                            primary: false;
+                                            enabled: root.den-pets.length > 0;
+                                            clicked => { root.shift-now(); }
+                                        }
+                                    }
                                 }
                             }
                             Row {
