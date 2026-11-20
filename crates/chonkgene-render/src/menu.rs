@@ -67,6 +67,9 @@ pub struct Item {
     pub icon: Icon,
     /// Draw a separator line above this item.
     pub separated: bool,
+    /// A small heading for the section this item starts (「施法」,
+    /// 「場景」), on the separator line: implies `separated`.
+    pub caption: Option<String>,
 }
 
 #[derive(Clone, Debug)]
@@ -96,6 +99,8 @@ const PAD: f32 = 8.0;
 const HEAD: f32 = 66.0;
 const ROW: f32 = 44.0;
 const SEP: f32 = 13.0;
+/// The gap above a row with a caption: the heading's line of text.
+const CAPTION: f32 = 26.0;
 const RADIUS: f32 = 20.0;
 const SHADOW: f32 = 8.0;
 
@@ -134,9 +139,20 @@ pub(crate) fn rounded(x: f32, y: f32, w: f32, h: f32, r: f32) -> Option<Path> {
     pb.finish()
 }
 
+/// The gap drawn above `item`.
+fn gap(item: &Item) -> f32 {
+    if item.caption.is_some() {
+        CAPTION
+    } else if item.separated {
+        SEP
+    } else {
+        0.0
+    }
+}
+
 fn height(model: &Model) -> f32 {
-    let seps = model.items.iter().filter(|i| i.separated).count() as f32;
-    PAD * 2.0 + HEAD + ROW * model.items.len() as f32 + SEP * seps
+    let gaps: f32 = model.items.iter().map(gap).sum();
+    PAD * 2.0 + HEAD + ROW * model.items.len() as f32 + gaps
 }
 
 /// Size in pixels at `scale`, shadow included.
@@ -264,10 +280,23 @@ pub fn draw(face: &mut Face, model: &Model, hover: Option<usize>, scale: f32) ->
     let mut rows = Vec::with_capacity(model.items.len());
     let mut y = PAD + HEAD;
     for (i, item) in model.items.iter().enumerate() {
-        if item.separated {
+        let g = gap(item);
+        if g > 0.0 {
+            // A caption sits at the left of its line, the line running on
+            // after it; low in the gap, nearer the rows it heads.
+            let mid = if item.caption.is_some() {
+                y + g - 9.0
+            } else {
+                y + g / 2.0
+            };
+            let mut from = PAD + 8.0;
+            if let Some(caption) = &item.caption {
+                text(&mut pm, face, caption, PAD + 12.0, mid + 4.0, 12.0, MUTED);
+                from = PAD + 12.0 + face.measure(caption, 12.0) + 8.0;
+            }
             let mut line = PathBuilder::new();
-            line.move_to(PAD + 8.0, y + SEP / 2.0);
-            line.line_to(W - PAD - 8.0, y + SEP / 2.0);
+            line.move_to(from, mid);
+            line.line_to(W - PAD - 8.0, mid);
             if let Some(line) = line.finish() {
                 pm.stroke_path(
                     &line,
@@ -280,7 +309,7 @@ pub fn draw(face: &mut Face, model: &Model, hover: Option<usize>, scale: f32) ->
                     None,
                 );
             }
-            y += SEP;
+            y += g;
         }
         let row = Rect::from_xywh(PAD, y, W - 2.0 * PAD, ROW)?;
         let bg = if hover == Some(i) {
@@ -846,9 +875,24 @@ mod tests {
                     hint: None,
                     icon: Icon::Paw,
                     separated: k == n - 1,
+                    caption: None,
                 })
                 .collect(),
         }
+    }
+
+    /// A caption (「施法」) heads its section in a taller gap than a plain
+    /// separator's, and the rows below it move down by that much.
+    #[test]
+    fn a_caption_heads_its_section_in_a_taller_gap() {
+        let mut m = rows(3);
+        m.items[2].separated = false;
+        let plain = size(&m, 1.0).1;
+        m.items[1].caption = Some("施法".into());
+        assert_eq!(size(&m, 1.0).1, plain + CAPTION as u32);
+        let drawn = draw(&mut Face::ui(), &m, None, 1.0).unwrap();
+        let step = drawn.rows[1].y() - drawn.rows[0].y();
+        assert_eq!(step, ROW + CAPTION);
     }
 
     /// Roger (2026-11-17): the first page ran off a short screen. A menu

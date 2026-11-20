@@ -1558,6 +1558,7 @@ impl App {
             hint,
             icon,
             separated,
+            caption: None,
         };
         if page == Page::Spells {
             let spells = [

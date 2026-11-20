@@ -250,6 +250,7 @@ fn pet_menu() {
         hint: hint.map(Into::into),
         icon,
         separated,
+        caption: None,
     };
     let model = Model {
         name: "阿柴".into(),
