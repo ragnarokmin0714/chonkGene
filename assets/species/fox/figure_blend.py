@@ -889,6 +889,405 @@ def normals():
     return [n.normalized() if n.length > 1e-12 else Vector((0, 1, 0)) for n in acc]
 
 
+# ---- hair: long and straight, three hairdos ---------------------------------
+# Measured off the sheet's turnaround (its hair is let down): the crown at
+# y 65, the sides 0.41 out at the cheeks, the back of the head 0.47 behind
+# her middle, the fringe bulging to 0.35 forward over the brow; the long
+# hair hangs behind her arms and shoulders as a curtain (0.44 out at the
+# sides, 0.47 to 0.40 behind), the tips at the sash (y 495). The hairdos
+# (三款直髮造型) share the fringe and the locks framing the face.
+SHELL_C = Vector((0.0, 0.76, -0.06))
+SHELL_R = Vector((0.41, 0.42, 0.41))
+HAIR_TIPS = Y(497)
+HAIR_GLOSS, HAIR_FUZZ = 0.45, 0.05
+# A little of the tips' colour all over, so the white hair has some depth.
+HAIR_SHADE = 0.18
+# How dark the grooves between clumps are (as occlusion).
+GROOVE_DARK = 0.6
+GROOVES = {}
+ALONG, AROUND = 32, 14
+# The parting, on her left (the sheet's front view), degrees round from
+# the front.
+PART = 22
+
+
+def ediv(a, b):
+    return Vector((a.x / b.x, a.y / b.y, a.z / b.z))
+
+
+def emul(a, b):
+    return Vector((a.x * b.x, a.y * b.y, a.z * b.z))
+
+
+def on_shell(phi, theta, off=0.0):
+    """On the hair's shell at turn `phi` (degrees, 0 facing you, + to her
+    left) and height `theta`, `off` further out."""
+    p, t = math.radians(phi), math.radians(theta)
+    u = Vector((math.sin(p) * math.cos(t), math.sin(t), math.cos(p) * math.cos(t)))
+    q = SHELL_C + emul(SHELL_R, u)
+    n = ediv(q - SHELL_C, emul(SHELL_R, SHELL_R)).normalized()
+    return q + n * off
+
+
+def off_head(p, clear):
+    """`p` pushed out of the head (and her lower face) until `clear` off it."""
+    for c, r in ((HEAD_C, HEAD_R), (JAW_C, JAW_R)):
+        q = ediv(p - c, r)
+        want = 1.0 + clear / min(r)
+        if q.length < want:
+            p = c + emul(r, q * (want / q.length))
+    return p
+
+
+def curve(pts, n):
+    """`n` points along a Catmull-Rom curve through `pts` (3D)."""
+    pts = [Vector(p) for p in pts]
+    ext = [pts[0] * 2 - pts[1]] + pts + [pts[-1] * 2 - pts[-2]]
+    segs = len(pts) - 1
+    out = []
+    for i in range(n):
+        u = i / (n - 1) * segs
+        k = min(int(u), segs - 1)
+        t = u - k
+        p0, p1, p2, p3 = ext[k], ext[k + 1], ext[k + 2], ext[k + 3]
+        out.append(0.5 * ((2 * p1) + (-p0 + p2) * t + (2 * p0 - 5 * p1 + 4 * p2 - p3) * t * t
+                          + (-p0 + 3 * p1 - 3 * p2 + p3) * t * t * t))
+    return out
+
+
+def clump(path, width, thick, *, clear=0.02, up=None, colors=("hair", "hairtip"), tip=0.72,
+          bones=lambda t: (("head", 1.0),), root=0.15, point=1.6, flat=0.45, closed=False,
+          edge=0.7, gloss=HAIR_GLOSS):
+    """A lock of hair along `path`: a lens-shaped section (full on top,
+    flatter underneath, sharp at its edges) `width` across and `thick` deep
+    (numbers, or functions of t: 0 root … 1 tip), kept `clear` off the
+    head; `up` the way its top faces (out from the head by default). Its
+    colour turns to the tip's from `tip` of the way on; it swells from
+    `root` to full and tapers to a point (`point`: higher keeps it full
+    longer). Its edges and underside are shaded as grooves (`edge`), so
+    each lock stands out from the ones beside it."""
+    pts = [off_head(p, clear) for p in curve(path, ALONG)]
+    first, first_face = len(verts), len(faces)
+    rings = []
+    for i, p in enumerate(pts):
+        t = i / (ALONG - 1)
+        tan = (pts[min(i + 1, ALONG - 1)] - pts[max(i - 1, 0)]).normalized()
+        n = up(p, t) if up else ediv(p - HEAD_C, emul(HEAD_R, HEAD_R)).normalized()
+        b = tan.cross(n).normalized()
+        n = b.cross(tan).normalized()
+        if closed:
+            k = 1.0
+        else:
+            k = (smoothstep(0.0, root, t) * 0.6 + 0.4) if root > 0 else 1.0
+            k *= max(1.0 - t ** point, 0.0) ** 0.55
+        w = max((width(t) if callable(width) else width) * k, 0.003)
+        h = (thick(t) if callable(thick) else thick) * (1.0 if closed else max(k, 0.25))
+        h = max(h * (k ** 0.3 if not closed else 1.0), 0.003)
+        ring = []
+        for j in range(AROUND):
+            a = 2 * math.pi * j / AROUND
+            x, y = math.cos(a), math.sin(a)
+            q = p + b * (w * x) + n * (h * y * (1.0 if y > 0 else flat))
+            mix = smoothstep(tip, 1.0, t) if tip < 1.0 else 0.0
+            if colors[0] == "hair":
+                mix = HAIR_SHADE + (1.0 - HAIR_SHADE) * mix
+            i_v = vert(q, colors[0], colors[1], mix, gloss, HAIR_FUZZ, bones(t), "head")
+            GROOVES[i_v] = edge * min(smoothstep(0.7, 1.0, abs(x)) * 0.9 + (0.3 if y < -0.5 else 0.0), 1.0)
+            ring.append(i_v)
+        rings.append(ring)
+    grid(rings, True, None)
+    for ring, top in ((rings[0], True), (rings[-1], False)):
+        c = sum((verts[i][0] for i in ring), Vector()) / AROUND
+        v0 = verts[ring[0]]
+        centre = vert(c, v0[1], v0[2], v0[3], gloss, HAIR_FUZZ, v0[6], "head")
+        for j in range(AROUND):
+            a, b_ = ring[j], ring[(j + 1) % AROUND]
+            faces.append((centre, b_, a) if top else (centre, a, b_))
+    face_out(first_face)
+
+
+def hairline(phi):
+    """How far down the hair's main mass comes (shell height, degrees) at
+    turn `phi`: above the brow in front (the fringe covers the rest),
+    down past the temples at the sides, to the nape behind."""
+    a = abs(phi)
+    if a < 40:
+        return 42.0
+    if a < 100:
+        return 42.0 - 50.0 * smoothstep(40, 100, a)
+    # Behind, it ends under the top of the long hair (which carries on
+    # down from it).
+    return -8.0 + 13.0 * smoothstep(100, 140, a)
+
+
+def scalp(knot=None, grooves=9):
+    """The hair's main mass: one sheet over the shell down to the hairline,
+    its lower edge coming in onto the head; with `knot` (a point on the
+    shell), grooved along the way the hair is combed to it, gathered tight
+    there."""
+    rows, cols = 48, 220
+    if knot is not None:
+        toward = ediv(knot - SHELL_C, SHELL_R).normalized()
+        e1 = (Vector((1, 0, 0)) - toward * toward.x).normalized()
+        e2 = toward.cross(e1)
+    first_face = len(faces)
+    rows_v = []
+    for i in range(rows + 1):
+        row = []
+        for j in range(cols):
+            phi = -180 + 360 * j / cols
+            low = hairline(phi)
+            u = i / rows
+            theta = low + (89.5 - low) * u
+            pr, tr = math.radians(phi), math.radians(theta)
+            q = Vector((math.sin(pr) * math.cos(tr), math.sin(tr), math.cos(pr) * math.cos(tr)))
+            off, groove = 0.0, 0.0
+            if knot is not None:
+                ang = math.acos(max(-1.0, min(1.0, q.dot(toward))))
+                psi = math.atan2(q.dot(e2), q.dot(e1))
+                g = (0.5 + 0.5 * math.cos(grooves * psi)) ** 0.6
+                amp = 0.01 * smoothstep(0.15, 0.7, ang) * smoothstep(0.0, 0.1, u)
+                off += amp * (g - 0.6)
+                groove = 0.35 * (1.0 - g) ** 2 * smoothstep(0.15, 0.7, ang)
+                off -= 0.02 * (1.0 - smoothstep(0.0, 0.3, ang))
+            else:
+                # Combed straight down from the crown.
+                g = (0.5 + 0.5 * math.cos(grooves * pr)) ** 0.6
+                off += 0.012 * (g - 0.6) * smoothstep(0.0, 0.1, u)
+                groove = 0.7 * (1.0 - g) ** 2 * (1 - smoothstep(0.8, 1.0, u))
+            pos = on_shell(phi, theta, off)
+            # The lower edge comes in onto the head, so no edge hangs in
+            # the air.
+            tuck = 1.0 - smoothstep(95, 125, abs(phi))
+            if u < 0.25 and tuck > 0:
+                on_head = HEAD_C + emul(HEAD_R, ediv(pos - HEAD_C, HEAD_R).normalized())
+                pos = pos.lerp(off_head(on_head, 0.01), tuck * (1.0 - smoothstep(0.0, 0.25, u)))
+            i_v = vert(pos, "hair", "hairtip", HAIR_SHADE, HAIR_GLOSS, HAIR_FUZZ, (("head", 1.0),), "head")
+            GROOVES[i_v] = groove
+            row.append(i_v)
+        rows_v.append(row)
+    grid(rows_v, True, None)
+    # Out from the head.
+    a, b, c = faces[first_face + cols * rows]
+    nrm = (verts[b][0] - verts[a][0]).cross(verts[c][0] - verts[a][0])
+    if nrm.dot(verts[a][0] - SHELL_C) < 0:
+        faces[first_face:] = [(x, z, y) for x, y, z in faces[first_face:]]
+    ORIENTED.update(range(first_face, len(faces)))
+
+
+def face_point(x, y, out):
+    """In front of her face at (x, y), `out` off it."""
+    k = 1.0 - (x / HEAD_R.x) ** 2 - ((y - HEAD_C.y) / HEAD_R.y) ** 2
+    p = Vector((x, y, HEAD_C.z + HEAD_R.z * math.sqrt(max(k, 0.0))))
+    n = ediv(p - HEAD_C, emul(HEAD_R, HEAD_R)).normalized()
+    return p + n * out
+
+
+def fringe_and_locks():
+    """The fringe, parted on her left: big locks sweep from the parting
+    across her brow to her right, ending above the brows (higher in the
+    middle, where the crest shows), smaller ones fall over her left
+    temple; full, bulging out over the brow (0.35 forward at y 0.94). Then
+    the locks framing her face: from the temples down beside the cheeks,
+    turning in under the jaw (y 0.36)."""
+    # (turn and height on the way down, then points in front of the face:
+    # x, y, out), width, thickness. Broad locks that overlap, so the
+    # fringe reads as a few big shapes, as the sheet draws it: the big
+    # sweep over to her right brow on top, the shorter ones under it.
+    fringe = [
+        # her right temple, under the big sweep
+        ((-62, 44), [(-0.33, 0.86, 0.05), (-0.37, 0.72, 0.02)], 0.16, 0.045),
+        # the big sweep across to her right brow
+        ((-30, 58), [(-0.08, 1.0, 0.1), (-0.2, 0.9, 0.08), (-0.28, 0.8, 0.05), (-0.3, 0.74, 0.03)],
+         0.27, 0.075),
+        # under it, ending higher (the crest shows in the middle)
+        ((-10, 62), [(0.02, 1.0, 0.1), (-0.07, 0.9, 0.08), (-0.12, 0.82, 0.05)], 0.22, 0.07),
+        ((8, 64), [(0.1, 0.99, 0.1), (0.07, 0.9, 0.075), (0.04, 0.84, 0.05)], 0.19, 0.065),
+        # her left, falling over the temple
+        ((30, 58), [(0.2, 0.96, 0.09), (0.21, 0.86, 0.065), (0.2, 0.79, 0.04)], 0.2, 0.065),
+        ((52, 48), [(0.3, 0.9, 0.065), (0.33, 0.8, 0.045), (0.33, 0.71, 0.025)], 0.17, 0.045),
+    ]
+    for (phi, theta), front, w, h in fringe:
+        # Down the front of the hair's shell (it stands 0.15 to 0.2 off the
+        # brow: the sheet's fringe bulges 0.35 forward at y 0.94), then in
+        # to just off the face at its end.
+        x_end, y_end, _ = front[-1]
+        phi_end = math.degrees(math.asin(max(-0.95, min(0.95, x_end / 0.4))))
+        # (its middle set in from the shell by about its thickness, so its
+        # outside lies where the sheet's fringe does)
+        path = [on_shell(PART + (phi - PART) * 0.35, 66, -0.04), on_shell((PART + phi) / 2, 52, -0.03),
+                on_shell(phi, 34, -0.035),
+                on_shell(phi_end, 14, -0.05), face_point(x_end, y_end, 0.02)]
+        clump(path, w, h, clear=0.03, tip=0.75, point=1.6, root=0.3, edge=0.4)
+    # Framing the face: from the temples down beside the cheeks to the
+    # jaw, the end turning in.
+    for s in (1, -1):
+        def locks(t, s=s):
+            w = smoothstep(0.15, 0.5, t)
+            side = "l" if s > 0 else "r"
+            return (("head", 1.0 - w), (f"hair_{side}", w))
+        clump([on_shell(62 * s, 30, -0.05), Vector((0.39 * s, 0.68, 0.12)), Vector((0.4 * s, 0.52, 0.11)),
+               Vector((0.38 * s, 0.4, 0.1)), Vector((0.33 * s, 0.34, 0.14))],
+              0.16, 0.05, clear=0.03, tip=0.65, point=1.15, bones=locks, edge=0.4,
+              up=lambda p, t, s=s: Vector((s * 0.9, 0.0, 0.45)).normalized())
+# The curtain's outline round her back, from the sheet's back and side
+# views: its outside's half width, how far behind her middle at the back,
+# and at the sides, at each height.
+# (Over the shoulders it is as wide as they are, so from the front it shows
+# either side of her, outside the sleeves, as the sheet's front view has
+# it; its sides are hidden behind her arms from the side.)
+CURTAIN = [(0.5, 0.46, -0.46, -0.04), (0.28, 0.5, -0.47, -0.12), (0.02, 0.5, -0.44, -0.16),
+           (-0.16, 0.48, -0.41, -0.18)]
+
+
+def curtain_at(u, y):
+    """On the curtain's outside at `u` round her back (−1 her right side,
+    0 the middle of her back, 1 her left side) and height `y`."""
+    rows = CURTAIN
+    if y >= rows[0][0]:
+        r = rows[0]
+    elif y <= rows[-1][0]:
+        r = rows[-1]
+    else:
+        for r0, r1 in zip(rows, rows[1:]):
+            if r1[0] <= y <= r0[0]:
+                t = smoothstep(r0[0], r1[0], y)
+                r = tuple(lerp(a, b, t) for a, b in zip(r0, r1))
+                break
+    _, half, back, side = r
+    a = u * math.pi / 2
+    return Vector((half * math.sin(a), y, side + (back - side) * math.cos(a)))
+
+
+def curtain(grooves=14):
+    """The long hair let down behind her arms and shoulders to the sash: one
+    slab of hair round her back from one side to the other, hanging from
+    under the shell, with `grooves` grooves down it; low down each strip
+    between them ends in a point (the sheet: one smooth mass, splitting
+    into pointed locks at the ends)."""
+    def bones(v):
+        w = smoothstep(0.1, 0.5, v)
+        return (("head", 1.0 - w), ("hair_b", 0.6 * w), ("body", 0.4 * w))
+    cols, rows = 15 * grooves, 44
+    first_face = len(faces)
+    outer, inner = [], []
+    for i in range(rows + 1):
+        v = i / rows
+        o_row, i_row = [], []
+        for j in range(cols + 1):
+            u = -1.0 + 2.0 * j / cols
+            # Each strip between grooves ends in a point, the middle of the
+            # strip lowest; a strip's length varies a little.
+            k = (u + 1.0) / 2.0 * grooves
+            f = k - math.floor(k)
+            strip = int(min(k, grooves - 1))
+            tip = HAIR_TIPS + 0.025 * math.cos(2.3 * strip) - 0.07 * (1 - abs(2 * f - 1))
+            # From under the shell round the back and sides, then down.
+            phi = math.copysign(180 - abs(u) * 98, u) if u else 180.0
+            first = curtain_at(u, 0.5)
+            if v < 0.12:
+                # From under the shell's lower edge, down its outside (so it
+                # carries on from the hair over her head, no ledge), into
+                # the curtain.
+                w_ = v / 0.12
+                on = on_shell(phi, lerp(18.0, -26.0, w_), lerp(-0.04, 0.015, smoothstep(0.0, 0.3, w_)))
+                p = on.lerp(first, smoothstep(0.55, 1.0, w_))
+            else:
+                y = lerp(0.5, tip + 0.07 * (1 - abs(2 * f - 1)), (v - 0.12) / 0.88)
+                y = min(y, 0.5)
+                # The last stretch runs down to the strip's point.
+                y = lerp(y, tip, smoothstep(0.86, 1.0, v))
+                p = curtain_at(u, y)
+                # Ends turned in a little.
+                p += Vector((-p.x, 0, -(p.z + 0.2))).normalized() * 0.03 * smoothstep(0.8, 1.0, v)
+            out = Vector((p.x, 0.0, p.z + 0.2)).normalized()
+            g = (0.5 + 0.5 * math.cos(2 * math.pi * k)) ** 0.5
+            groove = (1.0 - g) ** 2
+            p = p + out * (0.014 * (g - 0.7) * smoothstep(0.08, 0.2, v))
+            # Thinning to the points; the side edges rounded off.
+            th = 0.065 * (1.0 - smoothstep(0.82, 1.0, v)) + 0.004
+            th *= 0.4 + 0.6 * math.sqrt(max(0.0, 1.0 - abs(u) ** 6))
+            mix = HAIR_SHADE + (1.0 - HAIR_SHADE) * smoothstep(0.55, 1.0, v)
+            a = vert(p, "hair", "hairtip", mix, HAIR_GLOSS, HAIR_FUZZ, bones(v), "head")
+            b = vert(p - out * th, "hair", "hairtip", mix, HAIR_GLOSS, HAIR_FUZZ, bones(v), "head")
+            GROOVES[a] = 0.8 * groove * smoothstep(0.08, 0.2, v)
+            GROOVES[b] = 0.6
+            o_row.append(a)
+            i_row.append(b)
+        outer.append(o_row)
+        inner.append(i_row)
+    grid(outer, False, None)
+    grid([list(reversed(r)) for r in inner], False, None)
+    # Close the edges: the sides, the top and the points.
+    for side in (0, cols):
+        col_o = [r[side] for r in outer]
+        col_i = [r[side] for r in inner]
+        grid([col_o, col_i] if side else [col_i, col_o], False, None)
+    grid([outer[0], inner[0]], False, None)
+    grid([inner[-1], outer[-1]], False, None)
+    face_out(first_face)
+
+
+def ribbon(at, axis, bone, k=1.8):
+    """A thin red cord round a knot at `at` (the hair gathered along
+    `axis`), tied in a bow: a band, two loops and two long ends; `k` times
+    the size first drawn (the sheet's bow is as wide as the gathered
+    hair)."""
+    rb = lambda t: ((bone, 1.0),)
+    V = lambda x, y, z: Vector((x, y, z)) * k
+    axis = axis.normalized()
+    u = Vector((1, 0, 0))
+    v = axis.cross(u).normalized()
+    band = [at + (u * math.cos(a) + v * math.sin(a)) * 0.045 for a in [2 * math.pi * i / 16 for i in range(17)]]
+    clump(band, 0.012, 0.008, clear=0.0, root=0.0, colors=("ribbon", "ribbon"), edge=0.0, bones=rb,
+          closed=True, gloss=0.3, up=lambda p, t: (p - at - axis * (p - at).dot(axis)).normalized())
+    back = lambda p, t: (-axis + Vector((0, 0.3, 0))).normalized()
+    bow = at - axis * 0.03
+    for s in (1, -1):
+        loop = [bow, bow + V(s * 0.05, 0.04, 0.0), bow + V(s * 0.11, 0.035, -0.005),
+                bow + V(s * 0.115, -0.02, -0.005), bow + V(s * 0.045, -0.015, 0.0), bow]
+        clump(loop, 0.012 * k, 0.007 * k, clear=0.0, root=0.0, colors=("ribbon", "ribbon"), edge=0.0, bones=rb,
+              closed=True, gloss=0.3, up=back)
+        clump([bow, bow + V(s * 0.025, -0.07, -0.01), bow + V(s * 0.05, -0.15, -0.02),
+               bow + V(s * 0.06, -0.21, -0.015)],
+              0.012 * k, 0.006 * k, clear=0.0, root=0.0, point=6.0, colors=("ribbon", "ribbon"), edge=0.0,
+              bones=rb, gloss=0.3, up=back)
+    clump([bow + axis * 0.012, bow - axis * 0.012], 0.02 * k, 0.016 * k, clear=0.0, root=0.0, point=8.0,
+          colors=("ribbon", "ribbon"), edge=0.0, bones=rb, gloss=0.3, up=lambda p, t: Vector((0, 1, 0)))
+
+
+def hair_ponytail():
+    """綁單馬尾 (the sheet's hairdos, front and back): the hair let down,
+    and its top layer gathered high on the back of her head, tied with a
+    thin red cord in a bow, the gathered lock hanging down the middle of
+    her back over the rest, swinging a little to one side."""
+    knot = on_shell(180, 30, -0.01)
+    fringe_and_locks()
+    curtain()
+    scalp(knot=knot)
+    def tail_bones(t):
+        w = smoothstep(0.0, 0.35, t)
+        return (("head", 1.0 - w), ("hair_b", w))
+    out = (knot - SHELL_C).normalized()
+    # The gathered lock: out of the knot and down the middle of her back,
+    # lying on the curtain, swinging a little to her left and back.
+    def on_curtain(u, y, off):
+        return curtain_at(u, y) + Vector((0, 0, -off))
+    for k, (du, w, ln) in enumerate(((0.02, 0.1, 0.0), (-0.04, 0.08, 0.1))):
+        clump([knot + Vector((du * 0.2, 0.0, 0.0)),
+               knot + Vector((du * 0.4, -0.1, -0.08)),
+               on_curtain(du + 0.02, 0.5, 0.08),
+               on_curtain(du + 0.12, 0.27, 0.07),
+               on_curtain(du - 0.02, 0.06 + ln, 0.06),
+               on_curtain(du + 0.1, -0.08 + ln, 0.05)],
+              w, 0.085, clear=0.02, root=0.0, point=1.6, tip=0.6, bones=tail_bones, edge=0.4,
+              flat=0.8, up=lambda p, t: Vector((0, 0.15, -1)).normalized())
+    ribbon(knot + out * 0.035, out, "hair_b")
+
+
+HAIRDOS = {"ponytail": hair_ponytail}
+
+
 def head_proxy():
     pts, polys = [], []
     n = 24
@@ -950,6 +1349,7 @@ def write_mesh(path, others=None):
             if z != zone:
                 f.write(f"z {z}\n")
                 zone = z
+            o *= 1.0 - GROOVE_DARK * GROOVES.get(i, 0.0)
             total = sum(w for _, w in bones) or 1.0
             bs = " ".join(f"{name} {w / total:.3f}" for name, w in bones if w > 1e-4)
             f.write(f"v {p.x:.4f} {p.y:.4f} {p.z:.4f} {n.x:.3f} {n.y:.3f} {n.z:.3f} "
@@ -1050,4 +1450,13 @@ if __name__ == "__main__":
     piece(armband, 1)
     piece(armband, -1)
     write_mesh(os.path.join(out, "armbands.mesh"), figure)
+    # Each hairdo in a file of its own, shaded by the figure and the head.
+    for style, build in HAIRDOS.items():
+        for store in (verts, faces, BANDED):
+            store.clear()
+        WOVEN.clear()
+        ORIENTED.clear()
+        GROOVES.clear()
+        build()
+        write_mesh(os.path.join(out, f"hair_{style}.mesh"), figure)
     write_ron(os.path.join(out, "human_figure.ron"))
