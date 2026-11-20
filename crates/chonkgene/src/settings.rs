@@ -783,6 +783,9 @@ fn setup(
             ui.set_adopting(true);
         }
         show_pet(ui, &mut st);
+        if pet.is_some() {
+            ask_for_name(ui);
+        }
     }
 
     macro_rules! on {
@@ -1167,6 +1170,14 @@ pub fn run(data: Option<PathBuf>, pet: Option<u64>) -> Result<(), String> {
     Ok(())
 }
 
+/// Opened on a pet from its menu's 設定… (Roger's twenty-sixth pass, item
+/// 1: renaming lives here now): its page, the name box focused and its
+/// text selected, ready to type over.
+fn ask_for_name(ui: &SettingsWindow) {
+    ui.set_tab(0);
+    ui.set_name_focus(true);
+}
+
 /// The pet process asks an open settings window to come to the front (its
 /// 「設定」 or 「幫牠換造型」 was used again) with a line on our stdin:
 /// `show`, or `show <pet id>` to open on that pet. A thread reads the lines;
@@ -1200,6 +1211,7 @@ fn come_forward_when_asked(ui: &SettingsWindow, st: &Rc<RefCell<State>>) -> Time
                 st.selected = Some(id);
                 ui.set_adopting(false);
                 show_pet(&ui, &mut st);
+                ask_for_name(&ui);
             }
             // A restored window may come back with its picture lost.
             ui.set_repaint(ui.get_repaint().wrapping_add(1));

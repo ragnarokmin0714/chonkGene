@@ -37,7 +37,7 @@ Download the archive for your system from [Releases](https://github.com/ragnarok
 
 - Click a pet to poke it; keep poking and it laughs belly-up or looks thoroughly fed up. Hold a finger on a spot it loves; double-click to hug it.
 - Drag to lift it, shake it, let go to throw it.
-- Right-click a pet for its menu: hug, pat, snacks, sleep, things to ask it, toys, everyone's size, settings.
+- Right-click a pet for its menu: hug, pat, snacks, sleep; things to ask it (the fox's spells among them) and things to play (hide-and-seek, its scenes, toys); settings opened on that pet (name, look, goodbye). Everyone's size is in the settings.
 - Ctrl+Alt+P hides every pet; press it again to bring them back.
 
 Building from source: `cargo run --release -p chonkgene`. The pets are 3D models in `assets/species/<id>/model.ron`; `cargo run --release -p chonkgene-render --example sprites -- shiba out` renders every pose of one into `out/` for a look.

@@ -13,8 +13,8 @@ pub enum TrayCommand {
     Frisbee,
     /// Put down a sprig of catnip.
     Catnip,
-    /// Every pet this size at once, percent (大家的大小).
-    Size(u16),
+    /// Put down the spotlight, or take it away.
+    Stage,
     /// A scene, by its place in [`SCENES`]: called up for a pet that can,
     /// or put away if one is in it.
     Scene(u8),
@@ -23,27 +23,29 @@ pub enum TrayCommand {
 }
 
 const TOOLTIP: &str = mark("肉肉賴桌");
-const LABELS: [(&str, TrayCommand); 7] = [
+/// The menu's own entries; the submenus go before [`SUBMENUS_BEFORE`], a
+/// separator after them (Roger's twenty-sixth pass, item 1: the tray in the
+/// pet menu's groups, everyone's size left to the settings window).
+const LABELS: [(&str, TrayCommand); 3] = [
     (mark("收起來 / 叫回來"), TrayCommand::Toggle),
+    (mark("設定…"), TrayCommand::Settings),
+    (mark("結束肉肉賴桌"), TrayCommand::Quit),
+];
+/// The submenus go before this entry of [`LABELS`] (設定…).
+const SUBMENUS_BEFORE: usize = 1;
+
+/// The 一起玩 submenu: the things for them all, as in the pet menu's
+/// 一起玩….
+const PLAY_MENU: &str = mark("一起玩");
+const PLAY: [(&str, TrayCommand); 5] = [
     (mark("拿狗尾草逗牠們 / 收起來"), TrayCommand::Toy),
     (mark("丟球給牠們"), TrayCommand::Ball),
     (mark("丟飛盤給牠們"), TrayCommand::Frisbee),
     (mark("放一把貓薄荷"), TrayCommand::Catnip),
-    (mark("設定…"), TrayCommand::Settings),
-    (mark("結束肉肉賴桌"), TrayCommand::Quit),
+    (mark("放聚光燈 / 收起來"), TrayCommand::Stage),
 ];
-
-/// The 大家的大小 submenu, after the things to play with: label and percent
-/// (the pet menu and settings offer the same).
-const SIZE_MENU: &str = mark("大家的大小");
-pub const SIZES: [(&str, u16); 4] = [
-    (mark("小"), 70),
-    (mark("中"), 100),
-    (mark("大"), 130),
-    (mark("特大"), 160),
-];
-/// The 場景 submenu, before 大家的大小: the pet menu's 「場景…」 rows (the
-/// app maps each place to its scene).
+/// The 場景 submenu, after 一起玩: the pet menu's 場景 rows (the app maps
+/// each place to its scene).
 const SCENE_MENU: &str = mark("場景");
 pub const SCENES: [&str; 7] = [
     mark("玩水池"),
@@ -54,25 +56,17 @@ pub const SCENES: [&str; 7] = [
     mark("飛上樹枝"),
     mark("狐火"),
 ];
-/// The submenus go before this entry of [`LABELS`] (設定…).
-const SUBMENUS_BEFORE: usize = 5;
 
 /// The submenus, in order: title and entries.
 fn submenus() -> [(&'static str, Vec<(&'static str, TrayCommand)>); 2] {
     [
+        (PLAY_MENU, PLAY.to_vec()),
         (
             SCENE_MENU,
             SCENES
                 .iter()
                 .enumerate()
                 .map(|(i, &label)| (label, TrayCommand::Scene(i as u8)))
-                .collect(),
-        ),
-        (
-            SIZE_MENU,
-            SIZES
-                .iter()
-                .map(|&(label, pct)| (label, TrayCommand::Size(pct)))
                 .collect(),
         ),
     ]
@@ -178,8 +172,6 @@ mod imp {
                     }
                     menu.append(&sub).map_err(|e| e.to_string())?;
                 }
-            }
-            if i == LABELS.len() - 1 {
                 menu.append(&PredefinedMenuItem::separator())
                     .map_err(|e| e.to_string())?;
             }
@@ -275,8 +267,6 @@ impl ksni::Tray for Sni {
                         .into(),
                     );
                 }
-            }
-            if i == LABELS.len() - 1 {
                 items.push(ksni::MenuItem::Separator);
             }
             let command = *command;

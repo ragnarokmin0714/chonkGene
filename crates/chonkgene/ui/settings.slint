@@ -73,6 +73,9 @@ component CuteField inherits Rectangle {
     in property <int> max: 12;
     pure callback keep-first(string, int) -> string;
     callback committed(string) -> string;
+    // Set to have the box take the focus with its text selected, as soon
+    // as it is shown (or at once if it is); it clears itself.
+    in-out property <bool> focus-ask;
     property <bool> typing: input.has-focus;
     property <bool> saved;
     height: 44px;
@@ -92,6 +95,15 @@ component CuteField inherits Rectangle {
             self.saved = false;
         }
     }
+    function take-focus() {
+        if root.focus-ask {
+            root.focus-ask = false;
+            input.focus();
+            input.select-all();
+        }
+    }
+    init => { root.take-focus(); }
+    changed focus-ask => { root.take-focus(); }
     area := TouchArea {
         mouse-cursor: MouseCursor.text;
         clicked => { input.focus(); }
@@ -558,6 +570,8 @@ export component SettingsWindow inherits Window {
 
     in property <string> species-label;
     in-out property <string> pet-name;
+    // Focus the name box, its text selected (opened from a pet's 設定…).
+    in-out property <bool> name-focus;
     in-out property <string> pet-you;
     in property <[CoatRow]> coats;
     in-out property <string> coat;
@@ -891,6 +905,7 @@ export component SettingsWindow inherits Window {
                                     Label { text: @tr("名字"); }
                                     CuteField {
                                         text <=> root.pet-name;
+                                        focus-ask <=> root.name-focus;
                                         max: root.name-max;
                                         keep-first(t, n) => { return root.keep-first(t, n); }
                                         committed(t) => { return root.name-committed(t); }

@@ -318,7 +318,8 @@ struct Pet {
     fun: play::Fun,
 }
 
-/// What the fox's spells page offers (PLAN §8, Roger's thirteenth pass).
+/// What the fox's spells offer (PLAN §8, Roger's thirteenth pass): the
+/// 施法 section of 叫牠….
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Magic {
     Spell(Spell),
@@ -330,19 +331,15 @@ enum Magic {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Page {
     Main,
+    /// Things to ask it (叫牠…), the fox's spells in a section of it.
     Commands,
-    Spells,
     /// Whom to go and hug (叫牠… › 去抱抱…).
     HugWho,
-    /// 大家的大小: every pet's size at once.
-    Sizes,
     /// How to hold it (抱抱…): 環抱, 舉高高, 搖搖抱.
     HugHow,
-    /// Its scenes (場景…), or why not now.
-    Scenes,
-    /// Things to take out and play with (一起玩…): the grass stalk, a
-    /// ball, a frisbee, catnip, the spotlight. Kept off the first page so
-    /// it fits on a screen (Roger, 2026-11-17: nineteen rows ran off it).
+    /// Playing (一起玩…): hide-and-seek, its scenes (or why not now), and
+    /// the things for them all: the grass stalk, a ball, a frisbee,
+    /// catnip, the spotlight.
     Toys,
 }
 
@@ -354,17 +351,13 @@ enum Action {
     Sleep,
     Wake,
     HideAll,
-    Settings,
     Quit,
-    /// Say goodbye to this pet for good (asks once more first).
-    Bye,
     /// Take out the grass stalk, or put it away.
     Toy,
     /// The page of things to ask it (叫牠…), and back from it.
     Commands,
     Back,
-    /// The fox's page of spells (施法…), and one of them.
-    Spells,
+    /// One of the fox's spells.
     Magic(Magic),
     Command(Ask),
     /// Throw a ball or a frisbee; put down catnip (or take it away).
@@ -385,16 +378,11 @@ enum Action {
     /// The page of whom it could go and hug, and one of them.
     HugWho,
     HugWith(u64),
-    /// The page of its scenes, one of them, and putting one away.
-    Scenes,
+    /// One of its scenes, and putting one away.
     CallScene(Scene),
     EndScene,
-    /// The page of sizes for every pet at once, and one of them.
-    Sizes,
     /// The page of things to play with (一起玩…).
     Toys,
-    /// Percent.
-    SizeAll(u16),
 }
 
 struct Menu {
@@ -410,8 +398,6 @@ struct Menu {
     scale: f32,
     /// Outside clicks count only after every button was released once.
     armed: bool,
-    /// The 「說再見」 row was clicked once and now asks to be sure.
-    sure: bool,
 }
 
 /// Everything a pet needs from the app for one step, borrowed apart from
@@ -1116,7 +1102,6 @@ impl App {
 
     fn command(&mut self, el: &ActiveEventLoop, command: TrayCommand) {
         match command {
-            TrayCommand::Size(pct) => self.size_all(el, f32::from(pct) / 100.0),
             TrayCommand::Toggle => {
                 self.hidden = !self.hidden;
                 self.set_visible();
@@ -1125,6 +1110,7 @@ impl App {
             TrayCommand::Ball => self.throw(el, Thing::Ball),
             TrayCommand::Frisbee => self.throw(el, Thing::Frisbee),
             TrayCommand::Catnip => self.catnip(el),
+            TrayCommand::Stage => self.tray_stage(el),
             TrayCommand::Scene(i) => {
                 if let Some(&scene) = TRAY_SCENES.get(usize::from(i)) {
                     self.tray_scene(el, scene);
@@ -1170,6 +1156,35 @@ impl App {
             }
             None => diag!("tray: nobody free for {scene:?}"),
         }
+    }
+
+    /// The tray's 「放聚光燈 / 收起來」: taken away if it is out, else put
+    /// down beside the pet nearest the middle of the screen, a free one
+    /// if there is one (it joins in and dances).
+    fn tray_stage(&mut self, el: &ActiveEventLoop) {
+        if self.hidden || self.fullscreen {
+            return;
+        }
+        let Some(shared) = &self.shared else {
+            return;
+        };
+        let now = self.secs(Instant::now());
+        let mid = self.area.x + self.area.w / 2.0;
+        let Some(pet) = self
+            .pets
+            .iter()
+            .min_by(|a, b| {
+                let busy = |p: &Pet| play::not_now(p, Scene::Dance, now).is_some();
+                (busy(a), (a.center_x() - mid).abs())
+                    .partial_cmp(&(busy(b), (b.center_x() - mid).abs()))
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            })
+            .map(|p| p.save.id)
+        else {
+            return;
+        };
+        self.play
+            .toggle_stage(el, shared, &mut self.pets, pet, self.area, now);
     }
 
     /// Throw a ball or a frisbee from where the cursor is (PLAN §8,
@@ -1540,8 +1555,7 @@ impl App {
 
     /// The pet's right-click menu at the cursor (or with its top-left at
     /// `at`: turning to another page and back keeps it in place), on
-    /// `page`: the first, the things to ask it (叫牠…) or the fox's spells
-    /// (施法…).
+    /// `page` (see [`menu_page`]).
     fn open_menu(
         &mut self,
         el: &ActiveEventLoop,
@@ -1550,264 +1564,44 @@ impl App {
         page: Page,
         at: Option<(i32, i32)>,
     ) {
-        let p = &self.pets[i];
-        let asleep = p.mind.asleep();
-        let snacks = p.mind.snacks_left(world.day);
-        let item = |label: &str, hint: Option<String>, icon, separated| Item {
-            label: label.into(),
-            hint,
-            icon,
-            separated,
-            caption: None,
-        };
-        if page == Page::Spells {
-            let spells = [
-                (tr("定身術"), Icon::Bubble, Magic::Spell(Spell::Freeze)),
-                (tr("狐火"), Icon::Flame, Magic::Foxfire),
-                (tr("祝福術"), Icon::Heart, Magic::Spell(Spell::Bless)),
-                (tr("招喚術"), Icon::Paw, Magic::Spell(Spell::Call)),
-            ];
-            let mut items: Vec<Item> = spells
-                .iter()
-                .map(|&(label, icon, _)| item(label, None, icon, false))
-                .collect();
-            let mut actions: Vec<Action> = spells.iter().map(|&(.., m)| Action::Magic(m)).collect();
-            items.push(item(tr("返回"), None, Icon::Back, true));
-            actions.push(Action::Back);
-            return self.show_menu(el, i, items, actions, at);
-        }
-        if page == Page::Sizes {
-            let now = p.save.size;
-            let mut items = Vec::new();
-            let mut actions = Vec::new();
-            // 大家的大小 (Roger's nineteenth pass: one go for every pet).
-            for (label, pct) in chonkgene_platform::tray::SIZES {
-                let hint = if (now * 100.0 - f32::from(pct)).abs() < 1.0 {
-                    tr("目前").to_string()
-                } else {
-                    format!("{pct}%")
-                };
-                items.push(item(tr(label), Some(hint), Icon::Size, false));
-                actions.push(Action::SizeAll(pct));
-            }
-            items.push(item(tr("返回"), None, Icon::Back, true));
-            actions.push(Action::Back);
-            return self.show_menu(el, i, items, actions, at);
-        }
-        if page == Page::HugHow {
-            // Roger's twenty-first pass: three ways to hold it, picked
-            // here (a double-click picks by how it is).
-            let holds = [
-                (tr("環抱"), HugHold::Wrap),
-                (tr("舉高高"), HugHold::Carry),
-                (tr("搖搖抱"), HugHold::Cradle),
-            ];
-            let mut items: Vec<Item> = holds
-                .iter()
-                .map(|&(label, _)| item(label, None, Icon::Hug, false))
-                .collect();
-            let mut actions: Vec<Action> = holds.iter().map(|&(_, h)| Action::HugAs(h)).collect();
-            items.push(item(tr("返回"), None, Icon::Back, true));
-            actions.push(Action::Back);
-            return self.show_menu(el, i, items, actions, at);
-        }
-        if page == Page::HugWho {
-            let mut items = Vec::new();
-            let mut actions = Vec::new();
-            for q in self.pets.iter().filter(|q| q.save.id != p.save.id) {
-                items.push(item(&q.save.name, None, Icon::Hug, false));
-                actions.push(Action::HugWith(q.save.id));
-            }
-            items.push(item(tr("返回"), None, Icon::Back, true));
-            actions.push(Action::Commands);
-            return self.show_menu(el, i, items, actions, at);
-        }
-        if page == Page::Scenes {
-            // Roger's twentieth pass, item 3: its scenes from the menu
-            // too; one already out can be put away; asleep or busy, the
-            // page says so.
-            let mut items = Vec::new();
-            let mut actions = Vec::new();
-            if let Some(run) = p.fun.scene {
-                // Its thing stays for the others when it only joined in
-                // (someone's pond, the spotlight put down from the menu).
-                let (label, icon) = match run.scene {
-                    Scene::Pond if run.keep => (tr("從水池上岸").to_string(), Icon::Pond),
-                    Scene::Dance if run.keep => (tr("不跳了").to_string(), Icon::Note),
-                    scene => (
-                        trf("把{thing}收起來", &[("thing", scene_thing(scene))]),
-                        Icon::Hide,
-                    ),
-                };
-                items.push(item(&label, None, icon, false));
-                actions.push(Action::EndScene);
-            } else {
-                match play::not_now(p, Scene::Foxfire, world.now) {
-                    Some(play::NotNow::Asleep) => {
-                        items.push(item(tr("牠睡著了，醒來再玩"), None, Icon::Moon, false));
-                        actions.push(Action::Back);
-                    }
-                    Some(_) => {
-                        items.push(item(tr("牠在忙，等等再叫牠"), None, Icon::Paw, false));
-                        actions.push(Action::Back);
-                    }
-                    None => {
-                        let own = p.species.scenes();
-                        for (n, scene) in p.species.menu_scenes().into_iter().enumerate() {
-                            let up = play::not_now(p, scene, world.now).is_some();
-                            items.push(item(
-                                scene_label(scene),
-                                up.then(|| tr("在高處").to_string()),
-                                scene_icon(scene),
-                                n > 0 && n == own.len(),
-                            ));
-                            actions.push(if up {
-                                Action::Scenes
-                            } else {
-                                Action::CallScene(scene)
-                            });
-                        }
-                    }
-                }
-            }
-            items.push(item(tr("返回"), None, Icon::Back, true));
-            actions.push(Action::Back);
-            return self.show_menu(el, i, items, actions, at);
-        }
-        if page == Page::Toys {
-            let mut items = vec![
-                item(
-                    if self.toy.is_some() {
-                        tr("把狗尾草收起來")
-                    } else {
-                        tr("拿狗尾草逗牠們")
-                    },
-                    None,
-                    Icon::Grass,
-                    false,
-                ),
-                item(tr("丟球給牠們"), None, Icon::Ball, false),
-                item(tr("丟飛盤給牠們"), None, Icon::Frisbee, false),
-                item(
-                    if self.play.has(Thing::Catnip) {
-                        tr("把貓薄荷收起來")
-                    } else {
-                        tr("放一把貓薄荷")
-                    },
-                    None,
-                    Icon::Leaf,
-                    false,
-                ),
-                item(
-                    if self.play.stage.is_some() {
-                        tr("把聚光燈收起來")
-                    } else {
-                        tr("放聚光燈")
-                    },
-                    None,
-                    Icon::Spotlight,
-                    false,
-                ),
-            ];
-            let mut actions = vec![
-                Action::Toy,
-                Action::Throw(Thing::Ball),
-                Action::Throw(Thing::Frisbee),
-                Action::Catnip,
-                Action::Stage,
-            ];
-            items.push(item(tr("返回"), None, Icon::Back, true));
-            actions.push(Action::Back);
-            return self.show_menu(el, i, items, actions, at);
-        }
-        if page == Page::Commands {
-            let mut items: Vec<Item> = [tr("坐下"), tr("趴下"), tr("過來"), tr("轉圈"), tr("握手")]
-                .iter()
-                .map(|label| item(label, None, Icon::Paw, false))
-                .collect();
-            let mut actions: Vec<Action> = Ask::ALL.iter().map(|&c| Action::Command(c)).collect();
-            items.push(item(tr("跳舞"), None, Icon::Note, false));
-            actions.push(Action::Dance);
-            // Someone else on the desktop to go and hug.
-            if self.pets.iter().any(|q| q.save.id != p.save.id) {
-                items.push(item(tr("去抱抱…"), None, Icon::Hug, false));
-                actions.push(Action::HugWho);
-            }
-            items.push(item(tr("返回"), None, Icon::Back, true));
-            actions.push(Action::Back);
-            return self.show_menu(el, i, items, actions, at);
-        }
-        let mut items = vec![
-            item(
-                if asleep {
-                    tr("抱抱")
-                } else {
-                    tr("抱抱…")
-                },
-                None,
-                Icon::Hug,
-                false,
-            ),
-            item(tr("摸摸頭"), None, Icon::Heart, false),
-            item(
-                tr("餵零食"),
-                Some(if snacks > 0 {
-                    trf("還有 {snacks} 份", &[("snacks", &snacks.to_string())])
-                } else {
-                    tr("吃飽了").into()
-                }),
-                Icon::Snack,
-                false,
-            ),
-            item(tr("改名字…"), None, Icon::Pencil, false),
-            item(tr("幫牠換造型…"), None, Icon::Palette, false),
-        ];
-        let mut actions = vec![
-            if asleep { Action::Hug } else { Action::HugHow },
-            Action::Pat,
-            Action::Feed,
-            Action::Edit,
-            Action::Edit,
-        ];
-        if asleep {
-            items.push(item(tr("輕輕叫醒牠"), None, Icon::Sun, false));
-            actions.push(Action::Wake);
-        } else {
-            items.push(item(tr("讓牠去睡覺"), None, Icon::Moon, false));
-            actions.push(Action::Sleep);
-        }
-        // Asking it to do something only while it is awake.
-        if !asleep {
-            items.push(item(tr("叫牠…"), None, Icon::Paw, false));
-            actions.push(Action::Commands);
-            // The fox casts spells when you ask (Roger, 2026-11-06).
-            if p.species == Species::Fox {
-                items.push(item(tr("施法…"), None, Icon::Wand, false));
-                actions.push(Action::Spells);
-            }
-            items.push(item(tr("玩躲貓貓"), None, Icon::Peek, false));
-            actions.push(Action::Hide);
-        }
-        items.push(item(tr("場景…"), None, Icon::Scenery, false));
-        actions.push(Action::Scenes);
-        // Things to play with (PLAN §8, Roger's fourth pass, item 2, and
-        // "Catnip"), on a page of their own.
-        items.push(item(tr("一起玩…"), None, Icon::Ball, false));
-        actions.push(Action::Toys);
-        items.push(item(tr("大家的大小…"), None, Icon::Size, false));
-        actions.push(Action::Sizes);
-        items.push(item(tr("說再見…"), None, Icon::Bye, false));
-        actions.push(Action::Bye);
-        items.push(item(
-            tr("全部收起來"),
-            Some("Ctrl+Alt+P".into()),
-            Icon::Hide,
-            true,
-        ));
-        items.push(item(tr("設定…"), None, Icon::Sliders, false));
-        items.push(item(tr("結束肉肉賴桌"), None, Icon::Exit, false));
-        actions.extend([Action::HideAll, Action::Settings, Action::Quit]);
+        let facts = self.menu_facts(i, world);
+        let (items, actions) = menu_page(page, &facts);
         self.show_menu(el, i, items, actions, at);
+    }
+
+    /// What pet `i`'s menu pages are made from, now.
+    fn menu_facts(&self, i: usize, world: &World) -> MenuFacts {
+        let p = &self.pets[i];
+        let scenes = if let Some(run) = p.fun.scene {
+            SceneRows::In(run.scene, run.keep)
+        } else {
+            match play::not_now(p, Scene::Foxfire, world.now) {
+                Some(play::NotNow::Asleep) => SceneRows::Asleep,
+                Some(_) => SceneRows::Busy,
+                None => SceneRows::Free(
+                    p.species
+                        .menu_scenes()
+                        .into_iter()
+                        .map(|s| (s, play::not_now(p, s, world.now).is_some()))
+                        .collect(),
+                ),
+            }
+        };
+        MenuFacts {
+            asleep: p.mind.asleep(),
+            snacks: p.mind.snacks_left(world.day),
+            fox: p.species == Species::Fox,
+            others: self
+                .pets
+                .iter()
+                .filter(|q| q.save.id != p.save.id)
+                .map(|q| (q.save.id, q.save.name.clone()))
+                .collect(),
+            toy: self.toy.is_some(),
+            catnip: self.play.has(Thing::Catnip),
+            stage: self.play.stage.is_some(),
+            scenes,
+        }
     }
 
     /// Draw and open the menu of pet `i` with these rows.
@@ -1887,7 +1681,6 @@ impl App {
             pos,
             scale,
             armed: false,
-            sure: false,
         });
     }
 
@@ -1908,21 +1701,11 @@ impl App {
         let now = Instant::now();
         let world = self.world(now);
         match action {
-            Action::Commands
-            | Action::Spells
-            | Action::Back
-            | Action::HugWho
-            | Action::Sizes
-            | Action::Scenes
-            | Action::Toys
-            | Action::HugHow => {
+            Action::Commands | Action::Back | Action::HugWho | Action::Toys | Action::HugHow => {
                 let page = match action {
                     Action::Commands => Page::Commands,
-                    Action::Spells => Page::Spells,
                     Action::HugWho => Page::HugWho,
-                    Action::Sizes => Page::Sizes,
                     Action::HugHow => Page::HugHow,
-                    Action::Scenes => Page::Scenes,
                     Action::Toys => Page::Toys,
                     _ => Page::Main,
                 };
@@ -2006,7 +1789,6 @@ impl App {
                 direct(pets, &mut ctx, cmds);
                 return;
             }
-            Action::SizeAll(pct) => return self.size_all(el, f32::from(pct) / 100.0),
             Action::Throw(thing) => return self.throw(el, thing),
             Action::Catnip => return self.catnip(el),
             Action::Hide => {
@@ -2064,16 +1846,8 @@ impl App {
                 self.set_visible();
                 return;
             }
-            Action::Settings => return self.open_settings(None),
             Action::Edit => return self.open_settings(Some(pet)),
             Action::Toy => return self.toggle_toy(el),
-            Action::Bye => {
-                self.store.pets.retain(|p| p.id != pet);
-                self.dirty = true;
-                self.sync_desktop(el);
-                self.save_now();
-                return;
-            }
             Action::Quit => {
                 self.save_now();
                 el.exit();
@@ -2217,9 +1991,232 @@ fn pending_save(dirty: bool, save_at: Instant) -> Option<Instant> {
     dirty.then_some(save_at)
 }
 
-/// The pets as the skit director sees them.
-/// A scene's row in the 「場景…」 page and the tray (PLAN §1.11: a plain
-/// label).
+/// What the pages of a pet's menu are made from, gathered from the pet and
+/// the desktop by `App::menu_facts` (apart, so the pages can be tested).
+struct MenuFacts {
+    asleep: bool,
+    /// Snacks left today.
+    snacks: u8,
+    fox: bool,
+    /// The other pets out, to go and hug: id and name.
+    others: Vec<(u64, String)>,
+    /// The grass stalk, catnip, the spotlight are out.
+    toy: bool,
+    catnip: bool,
+    stage: bool,
+    scenes: SceneRows,
+}
+
+/// The 場景 section of 一起玩….
+enum SceneRows {
+    /// In one: its scene, and whether it only joined someone else's.
+    In(Scene, bool),
+    Asleep,
+    Busy,
+    /// Free: each scene it can be asked for, its own first, and whether it
+    /// is up on a window (with no floor beside it for that one).
+    Free(Vec<(Scene, bool)>),
+}
+
+/// A menu page's rows and what each does, built a row at a time.
+#[derive(Default)]
+struct Rows {
+    items: Vec<Item>,
+    actions: Vec<Action>,
+}
+
+impl Rows {
+    /// A row, returned to add a hint, a separator or a caption to.
+    fn add(&mut self, label: &str, icon: Icon, action: Action) -> &mut Item {
+        self.items.push(Item {
+            label: label.into(),
+            hint: None,
+            icon,
+            separated: false,
+            caption: None,
+        });
+        self.actions.push(action);
+        let last = self.items.len() - 1;
+        &mut self.items[last]
+    }
+
+    /// 返回, set apart at the bottom.
+    fn back(&mut self, to: Action) {
+        self.add(tr("返回"), Icon::Back, to).separated = true;
+    }
+}
+
+/// The rows of a pet's menu on `page`, and what each does. Roger's
+/// twenty-sixth pass, item 1 (「右鍵選單太亂」): the first page in three
+/// short groups (the pet itself; 叫牠… and 一起玩…; settings and leaving).
+/// What is set once and kept (its name, its look, goodbye, everyone's
+/// size) lives in the settings window, which 設定… opens on this pet.
+fn menu_page(page: Page, f: &MenuFacts) -> (Vec<Item>, Vec<Action>) {
+    let mut r = Rows::default();
+    match page {
+        Page::Main => {
+            if f.asleep {
+                r.add(tr("抱抱"), Icon::Hug, Action::Hug);
+            } else {
+                r.add(tr("抱抱…"), Icon::Hug, Action::HugHow);
+            }
+            r.add(tr("摸摸頭"), Icon::Heart, Action::Pat);
+            r.add(tr("餵零食"), Icon::Snack, Action::Feed).hint = Some(if f.snacks > 0 {
+                trf("還有 {snacks} 份", &[("snacks", &f.snacks.to_string())])
+            } else {
+                tr("吃飽了").into()
+            });
+            if f.asleep {
+                r.add(tr("輕輕叫醒牠"), Icon::Sun, Action::Wake);
+            } else {
+                r.add(tr("讓牠去睡覺"), Icon::Moon, Action::Sleep);
+            }
+            // Asking it to do something only while it is awake.
+            if !f.asleep {
+                r.add(tr("叫牠…"), Icon::Paw, Action::Commands).separated = true;
+            }
+            r.add(tr("一起玩…"), Icon::Ball, Action::Toys).separated = f.asleep;
+            let settings = r.add(tr("設定…"), Icon::Sliders, Action::Edit);
+            settings.hint = Some(tr("名字・造型").into());
+            settings.separated = true;
+            r.add(tr("全部收起來"), Icon::Hide, Action::HideAll).hint = Some("Ctrl+Alt+P".into());
+            r.add(tr("結束肉肉賴桌"), Icon::Exit, Action::Quit);
+        }
+        Page::Commands => {
+            let asks = [tr("坐下"), tr("趴下"), tr("過來"), tr("轉圈"), tr("握手")];
+            for (label, &ask) in asks.iter().zip(&Ask::ALL) {
+                r.add(label, Icon::Paw, Action::Command(ask));
+            }
+            r.add(tr("跳舞"), Icon::Note, Action::Dance);
+            // Someone else on the desktop to go and hug.
+            if !f.others.is_empty() {
+                r.add(tr("去抱抱…"), Icon::Hug, Action::HugWho);
+            }
+            // The fox casts spells when you ask (Roger, 2026-11-06), in a
+            // section of its own here.
+            if f.fox {
+                let spells = [
+                    (tr("定身術"), Icon::Bubble, Magic::Spell(Spell::Freeze)),
+                    (tr("狐火"), Icon::Flame, Magic::Foxfire),
+                    (tr("祝福術"), Icon::Heart, Magic::Spell(Spell::Bless)),
+                    (tr("招喚術"), Icon::Paw, Magic::Spell(Spell::Call)),
+                ];
+                for (n, &(label, icon, magic)) in spells.iter().enumerate() {
+                    let row = r.add(label, icon, Action::Magic(magic));
+                    if n == 0 {
+                        row.caption = Some(tr("施法").into());
+                    }
+                }
+            }
+            r.back(Action::Back);
+        }
+        Page::Toys => {
+            if !f.asleep {
+                r.add(tr("玩躲貓貓"), Icon::Peek, Action::Hide);
+            }
+            // Its scenes (Roger's twentieth pass, item 3): one it is in can
+            // be put away; asleep or busy, the section says so.
+            let scenes = r.items.len();
+            match &f.scenes {
+                SceneRows::In(scene, keep) => {
+                    // Its thing stays for the others when it only joined in
+                    // (someone's pond, the spotlight put down from the menu).
+                    let (label, icon) = match scene {
+                        Scene::Pond if *keep => (tr("從水池上岸").to_string(), Icon::Pond),
+                        Scene::Dance if *keep => (tr("不跳了").to_string(), Icon::Note),
+                        &scene => (
+                            trf("把{thing}收起來", &[("thing", scene_thing(scene))]),
+                            Icon::Hide,
+                        ),
+                    };
+                    r.add(&label, icon, Action::EndScene);
+                }
+                SceneRows::Asleep => {
+                    r.add(tr("牠睡著了，醒來再玩"), Icon::Moon, Action::Toys);
+                }
+                SceneRows::Busy => {
+                    r.add(tr("牠在忙，等等再叫牠"), Icon::Paw, Action::Toys);
+                }
+                SceneRows::Free(list) => {
+                    // The fox's 狐火 is a spell, under 叫牠… › 施法.
+                    for &(scene, up) in list.iter().filter(|s| s.0 != Scene::Foxfire) {
+                        let action = if up {
+                            Action::Toys
+                        } else {
+                            Action::CallScene(scene)
+                        };
+                        let row = r.add(scene_label(scene), scene_icon(scene), action);
+                        if up {
+                            row.hint = Some(tr("在高處").into());
+                        }
+                    }
+                }
+            }
+            if let Some(row) = r.items.get_mut(scenes) {
+                row.caption = Some(tr("場景").into());
+            }
+            // Things for them all (PLAN §8, Roger's fourth pass, item 2,
+            // and "Catnip").
+            r.add(
+                if f.toy {
+                    tr("把狗尾草收起來")
+                } else {
+                    tr("拿狗尾草逗牠們")
+                },
+                Icon::Grass,
+                Action::Toy,
+            )
+            .caption = Some(tr("大家一起玩").into());
+            r.add(tr("丟球給牠們"), Icon::Ball, Action::Throw(Thing::Ball));
+            r.add(
+                tr("丟飛盤給牠們"),
+                Icon::Frisbee,
+                Action::Throw(Thing::Frisbee),
+            );
+            r.add(
+                if f.catnip {
+                    tr("把貓薄荷收起來")
+                } else {
+                    tr("放一把貓薄荷")
+                },
+                Icon::Leaf,
+                Action::Catnip,
+            );
+            r.add(
+                if f.stage {
+                    tr("把聚光燈收起來")
+                } else {
+                    tr("放聚光燈")
+                },
+                Icon::Spotlight,
+                Action::Stage,
+            );
+            r.back(Action::Back);
+        }
+        Page::HugHow => {
+            // Roger's twenty-first pass: three ways to hold it, picked
+            // here (a double-click picks by how it is).
+            for (label, hold) in [
+                (tr("環抱"), HugHold::Wrap),
+                (tr("舉高高"), HugHold::Carry),
+                (tr("搖搖抱"), HugHold::Cradle),
+            ] {
+                r.add(label, Icon::Hug, Action::HugAs(hold));
+            }
+            r.back(Action::Back);
+        }
+        Page::HugWho => {
+            for (id, name) in &f.others {
+                r.add(name, Icon::Hug, Action::HugWith(*id));
+            }
+            r.back(Action::Commands);
+        }
+    }
+    (r.items, r.actions)
+}
+
+/// A scene's row in 一起玩…'s 場景 section and the tray (PLAN §1.11: a
+/// plain label).
 fn scene_label(scene: Scene) -> &'static str {
     match scene {
         Scene::Pond => tr("玩水池"),
@@ -2289,6 +2286,7 @@ fn tray_pick(
         .map(|p| (p.0, false))
 }
 
+/// The pets as the skit director sees them.
 fn actors(pets: &[Pet], now: f64) -> Vec<Actor> {
     pets.iter()
         .map(|p| Actor {
@@ -3931,14 +3929,6 @@ impl ApplicationHandler<UserEvent> for App {
                 } => {
                     if let Some(row) = m.hover {
                         let (pet, action) = (m.pet, m.actions[row]);
-                        // Goodbye is for good: the first click only asks.
-                        if action == Action::Bye && !m.sure {
-                            m.sure = true;
-                            m.model.items[row].label = tr("真的要說再見嗎？").into();
-                            m.model.items[row].hint = Some(tr("再按一次").into());
-                            self.redraw_menu();
-                            return;
-                        }
                         diag!("menu: {action:?} (row {row}) for pet {pet}");
                         self.act(el, pet, action);
                     }
@@ -4535,6 +4525,209 @@ impl ApplicationHandler<UserEvent> for App {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn facts(asleep: bool, fox: bool, scenes: SceneRows) -> MenuFacts {
+        MenuFacts {
+            asleep,
+            snacks: 2,
+            fox,
+            others: vec![(2, "芋圓".into())],
+            toy: false,
+            catnip: false,
+            stage: false,
+            scenes,
+        }
+    }
+
+    /// The Shiba's scenes, free: its bone, then the shared pond and sun.
+    fn free() -> SceneRows {
+        SceneRows::Free(vec![
+            (Scene::Bone, false),
+            (Scene::Pond, false),
+            (Scene::Sunbeam, false),
+        ])
+    }
+
+    /// Draws the menu's pages as `menu_page` builds them, without a
+    /// display: `cargo test -p chonkgene -- --ignored menu_screenshots`
+    /// writes target/screens/menu-*.png.
+    #[test]
+    #[ignore = "writes screenshots; run by hand"]
+    fn menu_screenshots() {
+        let shiba = (
+            "阿柴",
+            "柴犬",
+            ([0xE8, 0x95, 0x5A, 255], [0xFF, 0xF3, 0xE2, 255]),
+        );
+        let fox = (
+            "小九",
+            "九尾狐",
+            ([0xEF, 0xE2, 0xD2, 255], [0xFF, 0xFF, 0xFF, 255]),
+        );
+        let pages = [
+            ("main", shiba, Page::Main, facts(false, false, free())),
+            (
+                "main-asleep",
+                shiba,
+                Page::Main,
+                facts(true, false, SceneRows::Asleep),
+            ),
+            (
+                "commands-fox",
+                fox,
+                Page::Commands,
+                facts(false, true, free()),
+            ),
+            ("toys", shiba, Page::Toys, facts(false, false, free())),
+            (
+                "toys-asleep",
+                shiba,
+                Page::Toys,
+                facts(true, false, SceneRows::Asleep),
+            ),
+        ];
+        let out = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../target/screens");
+        std::fs::create_dir_all(&out).unwrap();
+        let mut face = Face::ui();
+        for (name, (pet, species, avatar), page, f) in pages {
+            let model = menu::Model {
+                name: pet.into(),
+                species: species.into(),
+                level: 3,
+                progress: 0.6,
+                status: f.asleep.then(|| tr("睡覺中").to_string()),
+                grumpy: false,
+                avatar,
+                items: menu_page(page, &f).0,
+            };
+            let drawn = menu::draw(&mut face, &model, None, 1.25).unwrap();
+            drawn
+                .pixmap
+                .save_png(out.join(format!("menu-{name}.png")))
+                .unwrap();
+        }
+    }
+
+    /// The rows with a line (or a caption) drawn above them.
+    fn breaks(items: &[Item]) -> Vec<usize> {
+        (0..items.len())
+            .filter(|&k| items[k].separated || items[k].caption.is_some())
+            .collect()
+    }
+
+    /// Roger's twenty-sixth pass, item 1 (「右鍵選單太亂」): the first page
+    /// is three short groups, and what is set once and kept (the name, the
+    /// look, goodbye, everyone's size) is left to the settings window,
+    /// which 設定… opens on this pet.
+    #[test]
+    fn the_first_page_is_three_short_groups_and_settings_open_on_the_pet() {
+        let (items, actions) = menu_page(Page::Main, &facts(false, false, free()));
+        assert_eq!(
+            actions,
+            [
+                Action::HugHow,
+                Action::Pat,
+                Action::Feed,
+                Action::Sleep,
+                Action::Commands,
+                Action::Toys,
+                Action::Edit,
+                Action::HideAll,
+                Action::Quit,
+            ]
+        );
+        assert_eq!(breaks(&items), [4, 6]);
+        assert!(
+            items[6].hint.is_some(),
+            "設定… says the name and look are there"
+        );
+        // Asleep: nothing to ask it, woken gently, the groups kept.
+        let (items, actions) = menu_page(Page::Main, &facts(true, false, SceneRows::Asleep));
+        assert_eq!(
+            actions,
+            [
+                Action::Hug,
+                Action::Pat,
+                Action::Feed,
+                Action::Wake,
+                Action::Toys,
+                Action::Edit,
+                Action::HideAll,
+                Action::Quit,
+            ]
+        );
+        assert_eq!(breaks(&items), [4, 5]);
+    }
+
+    /// The fox's spells are a captioned section of 叫牠…, not a page.
+    #[test]
+    fn the_foxs_spells_are_a_section_of_what_you_can_ask() {
+        let magic = |a: &&Action| matches!(a, Action::Magic(_));
+        let (_, actions) = menu_page(Page::Commands, &facts(false, false, free()));
+        assert!(!actions.iter().any(|a| magic(&a)));
+        assert!(actions.contains(&Action::HugWho));
+        assert_eq!(actions.last(), Some(&Action::Back));
+        let (items, actions) = menu_page(Page::Commands, &facts(false, true, free()));
+        let first = actions.iter().position(|a| magic(&a)).unwrap();
+        assert_eq!(actions.iter().filter(magic).count(), 4);
+        assert!(items[first].caption.is_some());
+        assert_eq!(
+            first,
+            actions.len() - 5,
+            "the spells end the page, before 返回"
+        );
+        // Alone on the desktop: nobody to go and hug.
+        let alone = MenuFacts {
+            others: Vec::new(),
+            ..facts(false, false, free())
+        };
+        assert!(
+            !menu_page(Page::Commands, &alone)
+                .1
+                .contains(&Action::HugWho)
+        );
+    }
+
+    /// 一起玩… holds hide-and-seek, its scenes (captioned 場景) and the
+    /// things for them all (captioned 大家一起玩); a scene it cannot have
+    /// up on a window says so, the fox's 狐火 is only a spell, and asleep
+    /// the scenes say why not while the toys are still there.
+    #[test]
+    fn playing_holds_hide_and_seek_its_scenes_and_the_toys() {
+        let toys = [
+            Action::Toy,
+            Action::Throw(Thing::Ball),
+            Action::Throw(Thing::Frisbee),
+            Action::Catnip,
+            Action::Stage,
+            Action::Back,
+        ];
+        let fox = SceneRows::Free(vec![
+            (Scene::Foxfire, false),
+            (Scene::Pond, true),
+            (Scene::Sunbeam, false),
+        ]);
+        let (items, actions) = menu_page(Page::Toys, &facts(false, true, fox));
+        let mut want = vec![
+            Action::Hide,
+            Action::Toys,
+            Action::CallScene(Scene::Sunbeam),
+        ];
+        want.extend(toys);
+        assert_eq!(actions, want);
+        assert!(items[1].caption.is_some() && items[3].caption.is_some());
+        assert!(items[1].hint.is_some(), "the pond: up on a window");
+        assert_eq!(breaks(&items), [1, 3, 8]);
+
+        let (items, actions) = menu_page(Page::Toys, &facts(true, false, SceneRows::Asleep));
+        assert_eq!(actions[0], Action::Toys, "asleep: why not, no 躲貓貓");
+        assert!(items[0].caption.is_some());
+        assert_eq!(actions[1..], toys);
+
+        let in_one = facts(false, false, SceneRows::In(Scene::Bone, false));
+        let (_, actions) = menu_page(Page::Toys, &in_one);
+        assert_eq!(actions[..2], [Action::Hide, Action::EndScene]);
+    }
 
     #[test]
     fn the_trays_scenes_read_as_the_pet_menus_and_cover_every_species() {
