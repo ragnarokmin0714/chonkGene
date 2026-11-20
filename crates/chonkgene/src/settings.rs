@@ -1178,22 +1178,42 @@ fn ask_for_name(ui: &SettingsWindow) {
     ui.set_name_focus(true);
 }
 
-/// The pet process asks an open settings window to come to the front (its
-/// 「設定」 or 「幫牠換造型」 was used again) with a line on our stdin:
-/// `show`, or `show <pet id>` to open on that pet. A thread reads the lines;
-/// a timer acts on them in the UI thread: restore the window if it was
-/// minimised, bring it to the front, select the pet.
+/// What the pet process asks of an open settings window, a line on our
+/// stdin each.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Asked {
+    /// `show`, or `show <pet id>`: come to the front (its 「設定…」 was
+    /// used again), on that pet.
+    Show(Option<u64>),
+    /// `quit`: the pets are quitting (結束肉肉賴桌), so the window closes
+    /// too, keeping what was typed (Roger, 2026-11-20: it stayed open).
+    Quit,
+}
+
+/// The ask on one line of our stdin, if it is one.
+fn asked(line: &str) -> Option<Asked> {
+    let mut words = line.split_whitespace();
+    match words.next()? {
+        "show" => Some(Asked::Show(words.next().and_then(|w| w.parse().ok()))),
+        "quit" => Some(Asked::Quit),
+        _ => None,
+    }
+}
+
+/// The pet process asks things of an open settings window on our stdin
+/// (see [`Asked`]). A thread reads the lines; a timer acts on them in the
+/// UI thread: to come forward, restore the window if it was minimised,
+/// bring it to the front, select the pet; to quit, end the event loop.
 fn come_forward_when_asked(ui: &SettingsWindow, st: &Rc<RefCell<State>>) -> Timer {
-    let (tx, rx) = std::sync::mpsc::channel::<Option<u64>>();
+    let (tx, rx) = std::sync::mpsc::channel::<Asked>();
     std::thread::spawn(move || {
         use std::io::BufRead;
         for line in std::io::stdin().lock().lines() {
             let Ok(line) = line else { break };
-            let mut words = line.split_whitespace();
-            if words.next() != Some("show") {
+            let Some(ask) = asked(&line) else {
                 continue;
-            }
-            if tx.send(words.next().and_then(|w| w.parse().ok())).is_err() {
+            };
+            if tx.send(ask).is_err() {
                 break;
             }
         }
@@ -1203,7 +1223,14 @@ fn come_forward_when_asked(ui: &SettingsWindow, st: &Rc<RefCell<State>>) -> Time
     let st = st.clone();
     timer.start(TimerMode::Repeated, Duration::from_millis(150), move || {
         let Some(ui) = weak.upgrade() else { return };
-        while let Ok(pet) = rx.try_recv() {
+        while let Ok(ask) = rx.try_recv() {
+            let pet = match ask {
+                Asked::Show(pet) => pet,
+                Asked::Quit => {
+                    let _ = slint::quit_event_loop();
+                    return;
+                }
+            };
             ui.window().set_minimized(false);
             chonkgene_platform::bring_to_front(&ui.window().window_handle());
             if let Some(id) = pet {
@@ -1327,6 +1354,20 @@ mod tests {
         fn create_window_adapter(&self) -> Result<Rc<dyn WindowAdapter>, slint::PlatformError> {
             Ok(self.0.clone())
         }
+    }
+
+    /// The pet process quitting tells an open settings window to close
+    /// (Roger, 2026-11-20: quit from the tray, it stayed open); `show`
+    /// still brings it forward, on a pet if one is named; anything else on
+    /// stdin is let be.
+    #[test]
+    fn the_pets_quitting_closes_the_settings_and_show_still_comes_forward() {
+        assert_eq!(asked("quit"), Some(Asked::Quit));
+        assert_eq!(asked("show"), Some(Asked::Show(None)));
+        assert_eq!(asked("show 7"), Some(Asked::Show(Some(7))));
+        assert_eq!(asked("show seven"), Some(Asked::Show(None)));
+        assert_eq!(asked(""), None);
+        assert_eq!(asked("bye"), None);
     }
 
     /// Roger, 2026-11-19: names are dragged between 「出場中」 and

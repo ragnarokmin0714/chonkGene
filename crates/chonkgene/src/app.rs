@@ -566,7 +566,9 @@ struct App {
     /// hugged by you (your hands, dumped with `CHONKGENE_DUMP`);
     /// `hug-asleep`: put to sleep first, hugged 3 s later; `pat`: 摸摸頭
     /// from the first pet's menu (your hand on its head); `bone`: the
-    /// Shiba's bone scene (taken up off the floor, chewed, let fall).
+    /// Shiba's bone scene (taken up off the floor, chewed, let fall);
+    /// `settings-quit`: the settings opened on the first pet, then 結束肉肉
+    /// 賴桌 5 s later (the settings window closes too).
     stage_test: String,
     sounds: Sounds,
     tray: Option<Tray>,
@@ -834,6 +836,25 @@ impl App {
             eprintln!("{e}");
         }
         self.dirty = false;
+    }
+
+    /// Closes the settings window if it is open (Roger, 2026-11-20: quit
+    /// from the tray with it open, it stayed on the taskbar). It is asked
+    /// to, so what was being typed in it is still kept.
+    fn close_settings(&mut self) {
+        let Some(mut child) = self.child.take() else {
+            return;
+        };
+        if !matches!(child.try_wait(), Ok(None)) {
+            return;
+        }
+        let told = child
+            .stdin
+            .as_mut()
+            .is_some_and(|i| i.write_all(b"quit\n").and_then(|()| i.flush()).is_ok());
+        if !told {
+            let _ = child.kill();
+        }
     }
 
     fn open_settings(&mut self, pet: Option<u64>) {
@@ -4453,6 +4474,14 @@ impl ApplicationHandler<UserEvent> for App {
                     self.stage_test = "tray-pond-again".into();
                     self.stage_at = Some(t + 8.0);
                 }
+            } else if self.stage_test == "settings-quit" {
+                self.act(el, pet, Action::Edit);
+                self.stage_test = "quit".into();
+                self.stage_at = Some(t + 5.0);
+                diag!("CHONKGENE_STAGE=settings-quit: the settings opened");
+            } else if self.stage_test == "quit" {
+                diag!("CHONKGENE_STAGE=settings-quit: 結束肉肉賴桌");
+                self.act(el, pet, Action::Quit);
             } else if self.stage_test == "bone" {
                 let shiba = self.pets.iter().find(|p| p.species == Species::Shiba);
                 if let Some(shiba) = shiba.map(|p| p.save.id) {
@@ -4527,6 +4556,7 @@ impl ApplicationHandler<UserEvent> for App {
     }
 
     fn exiting(&mut self, _el: &ActiveEventLoop) {
+        self.close_settings();
         self.save_now();
     }
 }
