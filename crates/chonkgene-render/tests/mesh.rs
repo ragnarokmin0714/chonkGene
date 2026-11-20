@@ -2385,3 +2385,55 @@ fn the_human_forms_seal_and_eyes_land_in_the_same_place_on_the_gpu_and_the_cpu()
     lands_in_the_same_place("seal", &model, &sk, |m| m.face.seal = false);
     lands_in_the_same_place("chibi eyes", &model, &sk, |m| m.face.chibi = false);
 }
+
+/// Roger's twenty-sixth pass, item 2 (the bone was in the Shiba's mouth
+/// the next moment, the mouth never down to it): picking a thing up, the
+/// mouth comes down to the floor, low enough that what it takes there is
+/// still on the floor when it closes on it (a bone in the mouth hangs
+/// about 0.16 below it), then goes back up.
+#[test]
+fn picking_up_brings_the_mouth_down_to_the_floor() {
+    use chonkgene_core::anim::{Act, PICK_GRAB};
+    use chonkgene_render::skin::Gesture;
+    let mut short = Vec::new();
+    for id in QUAD_SPECIES.iter().chain(&BIPED_SPECIES) {
+        let (model, sk) = mesh_model(id).unwrap();
+        let nose = ["nose", "beak", "bill"]
+            .iter()
+            .find_map(|n| model.part(n))
+            .map(|i| &model.parts[i])
+            .unwrap();
+        let mouth_up = |joints: &[chonkgene_render::skin::Joint]| {
+            sk.pose(joints)[nose.bone]
+                .apply(nose.at + v3(0.0, -0.12, 0.0))
+                .y
+                - chonkgene_rig::FLOOR
+        };
+        let mut walk = Mover::new(&sk, 1.0, &model).unwrap();
+        walk.still();
+        let standing = mouth_up(&settle(&mut walk, 2.0));
+        let mut joints = Vec::new();
+        for _ in 0..60 {
+            walk.gesture(Some(Gesture {
+                act: Act::Pick,
+                e: 1.0,
+                t: PICK_GRAB,
+            }));
+            joints = walk.step(1.0 / 60.0, false, 1.0);
+        }
+        let down = mouth_up(&joints);
+        println!("{id}: mouth {standing:.2} up standing, {down:.2} picking up");
+        if down >= 0.2 {
+            short.push(format!(
+                "{id}: the mouth only came down to {down:.2} ({standing:.2} standing)"
+            ));
+        }
+        walk.gesture(None);
+        let up = mouth_up(&settle(&mut walk, 1.0));
+        assert!(
+            (up - standing).abs() < 0.05,
+            "{id}: back up to {up:.2}, not {standing:.2}"
+        );
+    }
+    assert!(short.is_empty(), "{}", short.join("\n"));
+}

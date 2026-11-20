@@ -565,7 +565,8 @@ struct App {
     /// `pond`: the duckling's pond scene started; `hug`: the first pet
     /// hugged by you (your hands, dumped with `CHONKGENE_DUMP`);
     /// `hug-asleep`: put to sleep first, hugged 3 s later; `pat`: 摸摸頭
-    /// from the first pet's menu (your hand on its head).
+    /// from the first pet's menu (your hand on its head); `bone`: the
+    /// Shiba's bone scene (taken up off the floor, chewed, let fall).
     stage_test: String,
     sounds: Sounds,
     tray: Option<Tray>,
@@ -1230,7 +1231,7 @@ impl App {
         });
     }
 
-    /// Asked for `scene` from its 「場景…」 page or the tray (Roger's
+    /// Asked for `scene` from 一起玩…'s 場景 section or the tray (Roger's
     /// twentieth pass, item 3).
     fn call_scene(
         &mut self,
@@ -3784,6 +3785,8 @@ impl Pet {
                 || self.fun.on_sand
                 || self.anim.doing() == Some(Act::Hug)
                 || self.fun.pat_by_you.is_some()
+                || self.fun.carry.is_some()
+                || self.fun.scene.is_some_and(|r| r.scene == Scene::Bone)
                 || move_test())
         {
             let wading = if self.fun.pond.now.is_some() { "w" } else { "" };
@@ -4449,6 +4452,12 @@ impl ApplicationHandler<UserEvent> for App {
                 if self.stage_test == "tray-pond" {
                     self.stage_test = "tray-pond-again".into();
                     self.stage_at = Some(t + 8.0);
+                }
+            } else if self.stage_test == "bone" {
+                let shiba = self.pets.iter().find(|p| p.species == Species::Shiba);
+                if let Some(shiba) = shiba.map(|p| p.save.id) {
+                    self.start_scene(el, shiba, Scene::Bone, world, now);
+                    diag!("CHONKGENE_STAGE=bone: the Shiba's bone");
                 }
             } else if self.stage_test == "pond" || self.stage_test == "beach" {
                 let duck = self.pets.iter().find(|p| p.species == Species::Duck);

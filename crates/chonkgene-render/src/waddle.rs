@@ -26,6 +26,11 @@ use crate::skin::{
     FLOW_HZ, JIGGLE, JIGGLE_MOST, SWISH_HZ, SWISH_REST, SWISH_WALK, Tail, Travel, Wave, drift, hold,
 };
 
+/// How far a bird tips its body and head down for
+/// [`Act::Pick`](chonkgene_core::anim::Act::Pick), degrees.
+const PICK_BODY: f32 = 40.0;
+const PICK_HEAD: f32 = 42.0;
+
 /// The pace the pet's window moves at, world units a second (60 px/s at
 /// 100%): a planted foot slides back at this speed.
 const PACE: f32 = 1.034;
@@ -562,9 +567,11 @@ impl Waddle {
         let hugging = self
             .gesture
             .is_some_and(|g| g.act == Act::Hug && !matches!(self.hug, Hug::ByYou(_)));
+        // Picking a thing up it stays side-on, the beak over it.
+        let picking = self.gesture.is_some_and(|g| g.act == Act::Pick);
         let yaw = self.yaw.step(
             facing
-                * if going || self.flying || self.travel != Travel::None {
+                * if going || self.flying || self.travel != Travel::None || picking {
                     WALK_YAW
                 } else if hugging {
                     HUG_YAW
@@ -918,6 +925,12 @@ impl Waddle {
                 // The head tipped right over, listening.
                 Act::Tilt => {
                     j[self.head].rot.z += facing * 30.0 * e;
+                }
+                // Beak down to the thing on the floor, held while it takes
+                // it, and back up.
+                Act::Pick => {
+                    j[self.body].rot.x += e * PICK_BODY;
+                    j[self.head].rot.x += e * PICK_HEAD;
                 }
                 // Beak down at the floor, poking about.
                 Act::Sniff | Act::Rub => {

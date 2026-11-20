@@ -178,14 +178,22 @@ pub struct Spray {
 /// A frisbee in a mouth is drawn this much smaller than on the floor.
 const CARRIED: f32 = 0.85;
 
-/// Draw `thing` held in a mouth at `mouth` (pixels of `pm`), the pet facing
-/// `facing` (−1 left, 1 right): a bone across the jaws; a frisbee or a
-/// ball gripped at its edge between the front teeth, sticking out in front
-/// of the muzzle on the side it faces, so the face stays in sight.
-pub fn carried(pm: &mut Pixmap, thing: Thing, mouth: (f32, f32), facing: f32, s: f32, look: Look) {
+/// Where `thing` held in a mouth at `mouth` is drawn, the pet facing
+/// `facing` (−1 left, 1 right) at scale `s` in a picture `width` pixels
+/// wide: the middle of its bottom, the scale it is drawn at, and how far
+/// it is turned past the head (radians). A bone lies across the jaws; a
+/// frisbee or a ball is gripped at its edge between the front teeth,
+/// sticking out in front of the muzzle on the side it faces, so the face
+/// stays in sight.
+pub fn held_at(
+    thing: Thing,
+    mouth: (f32, f32),
+    facing: f32,
+    s: f32,
+    width: f32,
+) -> ((f32, f32), f32, f32) {
     let (w, h) = thing.size();
     let side = if facing < 0.0 { -1.0 } else { 1.0 };
-    let look = Look { held: true, ..look };
     match thing {
         Thing::Frisbee => {
             // The rim in the teeth, the disc hanging down in front of the
@@ -196,23 +204,61 @@ pub fn carried(pm: &mut Pixmap, thing: Thing, mouth: (f32, f32), facing: f32, s:
             let mut centre = (mouth.0 + side * 0.35 * rx, mouth.1 + 0.62 * rx);
             // Walking, the head reaches far forward: never past the edge of
             // the pet's picture, where it would be cut off.
-            let room = pm.width() as f32 - rx - 1.0;
+            let room = width - rx - 1.0;
             if room > rx + 1.0 {
                 centre.0 = centre.0.clamp(rx + 1.0, room);
             }
-            let look = Look {
-                turn: look.turn + side * 0.5,
-                ..look
-            };
-            draw(pm, thing, (centre.0, centre.1 + 0.55 * h * s), s, look);
+            ((centre.0, centre.1 + 0.55 * h * s), s, side * 0.5)
         }
         Thing::Ball => {
             let r = 0.5 * h * s;
             let centre = (mouth.0 + side * 0.6 * r, mouth.1 + 0.35 * r);
-            draw(pm, thing, (centre.0, centre.1 + r), s, look);
+            ((centre.0, centre.1 + r), s, 0.0)
         }
-        _ => draw(pm, thing, (mouth.0, mouth.1 + 0.4 * h * s), 0.8 * s, look),
+        _ => ((mouth.0, mouth.1 + 0.4 * h * s), 0.8 * s, 0.0),
     }
+}
+
+/// Draw `thing` held in a mouth at `mouth` (pixels of `pm`), the pet facing
+/// `facing` (−1 left, 1 right): placed by [`held_at`].
+pub fn carried(pm: &mut Pixmap, thing: Thing, mouth: (f32, f32), facing: f32, s: f32, look: Look) {
+    let (at, scale, turn) = held_at(thing, mouth, facing, s, pm.width() as f32);
+    let look = Look {
+        held: true,
+        turn: look.turn + turn,
+        ..look
+    };
+    draw(pm, thing, at, scale, look);
+}
+
+/// Draw `thing` on its way from the floor into a mouth (Roger's
+/// twenty-sixth pass, item 2: it jumped there), `k` of the way (0 … 1,
+/// eased): from lying with the middle of its bottom at `from` at scale
+/// `from_s` (pixels of `pm`) to held as [`carried`] draws it. Its shadow
+/// stays on the floor for the first moment.
+#[allow(clippy::too_many_arguments)]
+pub fn lifted(
+    pm: &mut Pixmap,
+    thing: Thing,
+    from: (f32, f32),
+    from_s: f32,
+    mouth: (f32, f32),
+    facing: f32,
+    s: f32,
+    look: Look,
+    k: f32,
+) {
+    let (to, scale, turn) = held_at(thing, mouth, facing, s, pm.width() as f32);
+    let k = chonkgene_rig::math::smoothstep(0.0, 1.0, k);
+    let at = (from.0 + (to.0 - from.0) * k, from.1 + (to.1 - from.1) * k);
+    let look = Look {
+        held: k > 0.5,
+        grounded: k < 0.15,
+        turn: (look.turn + turn) * k,
+        spin: look.spin * k,
+        ..look
+    };
+    draw(pm, thing, at, from_s + (scale - from_s) * k, look);
 }
 
 /// Draw `thing` with the middle of its bottom at `at` (pixels of `pm`).

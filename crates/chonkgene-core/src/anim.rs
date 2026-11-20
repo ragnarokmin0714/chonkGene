@@ -102,6 +102,10 @@ pub enum Act {
     Swish,
     /// Nose down to a ball and a bump that sends it rolling.
     Nudge,
+    /// Nose down to something lying on the floor, taking it in the mouth
+    /// (a bird: the beak), and back up with it (Roger's twenty-sixth pass,
+    /// item 2: things jumped into the mouth from the floor).
+    Pick,
     /// 肉肉舞 in a spotlight (see [`dance_at`]).
     Dance,
     /// A hug (PLAN §8, Roger's sixteenth pass): how depends on its
@@ -362,6 +366,12 @@ const RUN_MOST: f32 = 6.0;
 pub const EAT_SECS: f32 = 3.6;
 pub const BITE_SECS: f32 = 1.2;
 
+/// How long [`Act::Pick`] takes: eased down to the floor over the first
+/// 0.3 s, held there, up over the last 0.3 s; it takes the thing in its
+/// mouth [`PICK_GRAB`] in, with the head right down.
+pub const PICK_SECS: f32 = 1.0;
+pub const PICK_GRAB: f32 = 0.4;
+
 /// How long a gesture that has a fixed length lasts, seconds: the idle
 /// stretch, yawn and wave. None for the rest (looks vary, steps and rest
 /// have no length).
@@ -391,6 +401,7 @@ pub fn gesture_secs(act: Act) -> Option<f32> {
         Act::Chew => Some(6.0),
         Act::Swish => Some(1.2),
         Act::Nudge => Some(0.8),
+        Act::Pick => Some(PICK_SECS),
         Act::Dance => Some(DANCE_SECS),
         Act::Hug => Some(HUG_SECS),
         _ => None,

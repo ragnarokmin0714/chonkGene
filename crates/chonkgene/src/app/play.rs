@@ -8,7 +8,7 @@
 
 use crate::diag::diag;
 use chonkgene_core::activity::{Activity, Watcher};
-use chonkgene_core::anim::{Act, Expression, Hug, Posture};
+use chonkgene_core::anim::{Act, Expression, Hug, PICK_GRAB, PICK_SECS, Posture};
 use chonkgene_core::mind::Line;
 use chonkgene_core::motion::{Heading, Motion};
 use chonkgene_core::play::{
@@ -336,11 +336,11 @@ impl PropWin {
         if let Err(e) = self.presenter.present(shared, &self.pixmap) {
             eprintln!("present failed: {e}");
         }
-        if matches!(self.prop.thing, Thing::Pond | Thing::Beach) {
-            let what = if self.prop.thing == Thing::Pond {
-                "pond"
-            } else {
-                "beach"
+        if matches!(self.prop.thing, Thing::Pond | Thing::Beach) || self.prop.thing.carried() {
+            let what = match self.prop.thing {
+                Thing::Pond => "pond",
+                Thing::Beach => "beach",
+                _ => "thing",
             };
             crate::diag::dump(format_args!("{what}{}", self.id), self.placed, &self.pixmap);
         }
@@ -676,6 +676,10 @@ pub(super) struct Fun {
     pub hide: Option<Hide>,
     /// In its mouth.
     pub carry: Option<Thing>,
+    /// Taking a thing up off the floor (see [`stoop`]).
+    pickup: Option<PickUp>,
+    /// What it holds, still rising from the floor into its mouth.
+    pub lift: Option<Lift>,
     /// Asked to do something: what, when it gets round to it, and whether
     /// it was in a mood.
     order: Option<(Command, f64, bool)>,
@@ -1426,7 +1430,28 @@ impl Pet {
                 turn: self.renderer.head_roll(),
                 ..props::Look::default()
             };
-            props::carried(canvas, thing, at, self.anim.facing, s, look);
+            match self.fun.lift {
+                // Just taken off the floor: rising from where it lay.
+                Some(l) if t < l.since + LIFT_SECS => {
+                    let from = (
+                        l.from.0 - self.placed.0 as f32,
+                        l.from.1 - self.placed.1 as f32,
+                    );
+                    let k = ((t - l.since) / LIFT_SECS) as f32;
+                    props::lifted(
+                        canvas,
+                        thing,
+                        from,
+                        l.scale,
+                        at,
+                        self.anim.facing,
+                        s,
+                        look,
+                        k,
+                    );
+                }
+                _ => props::carried(canvas, thing, at, self.anim.facing, s, look),
+            }
         }
         let head = self.renderer.anchor();
         let mouth = self.renderer.mouth(self.anim.facing);
@@ -1617,6 +1642,10 @@ pub(super) fn tick(
             start_scene = false;
         }
         scene(ground, p, ctx);
+        // A pick-up outlives neither the fetch nor the scene it was for.
+        if p.fun.chase.is_none() && p.fun.scene.is_none() && p.fun.pickup.take().is_some() {
+            p.fun.lift = None;
+        }
         // Every frame, busy or not: it also stops watching when busy.
         curious(p, ctx, activity, cursor, dt);
         if !p.fun.busy(now) || now < p.fun.lounge_until {
@@ -1771,10 +1800,34 @@ fn chase(ground: &mut Playground, pets: &mut [Pet], i: usize, ctx: &mut Ctx) {
     let me = pets[i].save.id;
     if ground.get(id).is_none() {
         pets[i].fun.carry = None;
+        pets[i].fun.pickup = None;
+        pets[i].fun.lift = None;
         pets[i].stop();
         return;
     }
     let p = &mut pets[i];
+    // Taking it up off the floor: nothing else until it has it.
+    if p.fun.pickup.is_some() {
+        match picking(ground, p, now) {
+            Picking::Busy => {
+                p.fun.chase = Some((id, c));
+                return;
+            }
+            Picking::Got => {
+                p.fun.effect(Fx::Sparkles, now);
+                p.bell(ctx);
+            }
+            Picking::Lost => {
+                p.stop();
+                if let Some(w) = ground.get_mut(id)
+                    && w.claimed == Some(me)
+                {
+                    w.claimed = None;
+                }
+                return;
+            }
+        }
+    }
     // The nose reaches the ball partway into the bump.
     if let Some((when, vel)) = p.fun.nudge
         && now >= when
@@ -1838,34 +1891,41 @@ fn chase(ground: &mut Playground, pets: &mut [Pet], i: usize, ctx: &mut Ctx) {
                 p.renderer.mouth(p.anim.facing),
                 p.anim.facing
             );
-            if prop.flying() && p.body.motion != Motion::Fall {
-                p.anim.pounce();
+            if prop.flying() {
+                // Snapped up as it comes by: into the mouth from where it
+                // was.
+                if p.body.motion != Motion::Fall {
+                    p.anim.pounce();
+                }
+                p.stop();
+                p.fun.carry = Some(prop.thing);
+                p.fun.lift = Some(Lift {
+                    from: prop.pos,
+                    scale: prop.scale,
+                    since: now,
+                });
+                p.fun.effect(Fx::Sparkles, now);
+                if let Some(w) = ground.get_mut(id) {
+                    w.carrier = Some(me);
+                }
+                p.bell(ctx);
+            } else {
+                // Lying there: the nose goes down to it first (the others
+                // leave it to this one meanwhile).
+                stoop(p, id, prop.pos);
+                if let Some(w) = ground.get_mut(id) {
+                    w.claimed = Some(me);
+                }
             }
-            p.stop();
-            p.fun.carry = Some(prop.thing);
-            p.fun.effect(Fx::Sparkles, now);
-            if let Some(w) = ground.get_mut(id) {
-                w.carrier = Some(me);
-            }
-            p.bell(ctx);
         }
         Order::Drop => {
             p.stop();
-            p.fun.carry = None;
-            let (fx, fy) = p.body.feet();
+            // Let fall from its mouth in front of it.
             if let Some(w) = ground.get_mut(id) {
-                w.carrier = None;
-                w.prop = Prop {
-                    resting: true,
-                    vel: (0.0, 0.0),
-                    ..Prop::put(
-                        prop.thing,
-                        (fx + p.body.facing * 0.2 * p.body.size.0, fy),
-                        prop.scale,
-                    )
-                };
+                drop_from_mouth(w, p, 30.0);
                 w.until = now + TOY_STAYS;
             }
+            p.fun.carry = None;
             // Back where you threw it, wagging, a lick of the nose: throw
             // it again!
             p.body.facing = -p.body.facing;
@@ -1930,13 +1990,12 @@ fn chase(ground: &mut Playground, pets: &mut [Pet], i: usize, ctx: &mut Ctx) {
         }
         Order::Done => {
             p.stop();
-            if p.fun.carry.take().is_some()
+            if p.fun.carry.is_some()
                 && let Some(w) = ground.get_mut(id)
             {
-                let (fx, fy) = p.body.feet();
-                w.carrier = None;
-                w.prop = Prop::put(prop.thing, (fx, fy), prop.scale);
+                drop_from_mouth(w, p, 0.0);
             }
+            p.fun.carry = None;
             // A cat that has had enough sits and washes; a bird gives up.
             match p.species.fetch() {
                 Fetch::Bat => {
@@ -1957,6 +2016,160 @@ fn chase(ground: &mut Playground, pets: &mut [Pet], i: usize, ctx: &mut Ctx) {
     }
 }
 
+/// Taking a thing up off the floor (Roger's twenty-sixth pass, item 2: the
+/// bone was in the Shiba's mouth the next moment, the mouth never down to
+/// it): stopped by it, the nose goes down to it ([`Act::Pick`]), and
+/// [`PICK_GRAB`] in it leaves the floor for the mouth, rising from where it
+/// lay over [`LIFT_SECS`]; the head comes back up with it.
+#[derive(Clone, Copy, Debug)]
+pub(super) struct PickUp {
+    /// The thing's prop.
+    id: u32,
+    /// When the head started down (none while it is still stopping).
+    since: Option<f64>,
+}
+
+/// What it holds rising from the floor into its mouth (see [`PickUp`]):
+/// from where it lay (screen pixels, the middle of its bottom), at the
+/// scale it lay at, since then.
+#[derive(Clone, Copy, Debug)]
+pub(super) struct Lift {
+    pub from: (f32, f32),
+    pub scale: f32,
+    pub since: f64,
+}
+
+/// How long a thing takes to rise from the floor into the mouth, seconds:
+/// the head is right down by then, so it has only a little way to go.
+pub(super) const LIFT_SECS: f64 = 0.25;
+
+/// A bone let fall from the mouth when its scene ends lies this long,
+/// seconds.
+const LEFT_LYING: f64 = 6.0;
+
+/// Where its feet go for its mouth to be over screen x `x`, keeping to the
+/// side of it it is on (as near as it is already, it stays).
+fn mouth_over(p: &Pet, x: f32) -> f32 {
+    let feet = p.body.feet().0;
+    let mouth = p.placed.0 as f32 + p.renderer.mouth(p.anim.facing).0;
+    let reach = (mouth - feet).abs().min(0.6 * p.body.size.0);
+    if (x - feet).abs() <= reach {
+        feet
+    } else {
+        x - (x - feet).signum() * reach
+    }
+}
+
+/// How a pick-up is going (see [`picking`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Picking {
+    /// Stopping by it, the nose going down, or coming back up with it.
+    Busy,
+    /// In its mouth, the head back up.
+    Got,
+    /// Gone, knocked up into the air, or taken first (by the mouse, another
+    /// pet).
+    Lost,
+}
+
+/// Starts taking prop `id`, lying at screen `at`, up off the floor: it
+/// stops and turns to it (the nose goes down once it has stopped).
+fn stoop(p: &mut Pet, id: u32, at: (f32, f32)) {
+    p.stop();
+    let dx = at.0 - p.body.feet().0;
+    if dx.abs() > 1.0 {
+        p.body.facing = dx.signum();
+    }
+    p.fun.pickup = Some(PickUp { id, since: None });
+}
+
+/// Steps a pick-up begun by [`stoop`].
+fn picking(ground: &mut Playground, p: &mut Pet, now: f64) -> Picking {
+    let Some(mut pick) = p.fun.pickup else {
+        return Picking::Lost;
+    };
+    let me = p.save.id;
+    if p.fun.carry.is_none() {
+        let gone = ground.get(pick.id).is_none_or(|w| {
+            w.carrier.is_some_and(|c| c != me) || w.grab.is_some() || w.prop.flying()
+        });
+        if gone {
+            p.fun.pickup = None;
+            return Picking::Lost;
+        }
+    }
+    let Some(since) = pick.since else {
+        // Still slowing to a stop; then the nose goes down.
+        if p.try_gesture(Act::Pick) {
+            pick.since = Some(now);
+            p.fun.pickup = Some(pick);
+        }
+        return Picking::Busy;
+    };
+    let t = (now - since) as f32;
+    if p.fun.carry.is_none()
+        && t >= PICK_GRAB
+        && let Some(w) = ground.get_mut(pick.id)
+    {
+        diag!(
+            "{}: takes the {:?} up off the floor",
+            p.save.name,
+            w.prop.thing
+        );
+        w.carrier = Some(me);
+        p.fun.carry = Some(w.prop.thing);
+        p.fun.lift = Some(Lift {
+            from: w.prop.pos,
+            scale: w.prop.scale,
+            since: now,
+        });
+    }
+    // Over, or cut short by something else once it has it.
+    if t >= PICK_SECS || (p.anim.doing() != Some(Act::Pick) && p.fun.carry.is_some()) {
+        p.fun.pickup = None;
+        p.fun.lift = None;
+        return if p.fun.carry.is_some() {
+            Picking::Got
+        } else {
+            Picking::Lost
+        };
+    }
+    Picking::Busy
+}
+
+impl Pet {
+    /// Where what it holds is (screen pixels, the middle of its bottom),
+    /// drawn as [`props::held_at`] puts it in its mouth.
+    fn held_on_screen(&self, thing: Thing) -> (f32, f32) {
+        let mouth = self.renderer.mouth(self.anim.facing);
+        let width = self.renderer.size().0 as f32;
+        let (at, ..) = props::held_at(thing, mouth, self.anim.facing, self.fun.scale, width);
+        (self.placed.0 as f32 + at.0, self.placed.1 as f32 + at.1)
+    }
+}
+
+/// Lets go of what it holds, prop `w`: it falls from the mouth to the floor,
+/// pushed the way the pet faces at `push` pixels a second (at 100%). It
+/// was put down at the feet, jumping there from the mouth (Roger's
+/// twenty-sixth pass, item 2).
+fn drop_from_mouth(w: &mut PropWin, p: &mut Pet, push: f32) {
+    let thing = w.prop.thing;
+    let at = p.held_on_screen(thing);
+    diag!(
+        "{}: lets the {thing:?} fall from its mouth at {at:?}",
+        p.save.name
+    );
+    let s = w.prop.scale;
+    w.carrier = None;
+    w.claimed = None;
+    w.prop = Prop {
+        vel: (p.body.facing * push * s.max(0.5), 0.0),
+        ..Prop::put(thing, at, s)
+    };
+    p.fun.carry = None;
+    p.fun.lift = None;
+}
+
 /// Scratched hard enough with something in its mouth, it laughs and lets
 /// go: the toy (or the bone) drops at its feet (Roger, 2026-11-06).
 fn tickled_loose(ground: &mut Playground, p: &mut Pet, ctx: &mut Ctx) {
@@ -1968,9 +2181,7 @@ fn tickled_loose(ground: &mut Playground, p: &mut Pet, ctx: &mut Ctx) {
     }
     let now = ctx.world.now;
     let me = p.save.id;
-    p.fun.carry = None;
-    let (fx, fy) = p.body.feet();
-    let at = (fx + p.body.facing * 0.25 * p.body.size.0, fy);
+    p.fun.pickup = None;
     // Whatever it held: a toy it was bringing back, or its scene's bone.
     let id = p
         .fun
@@ -1981,11 +2192,12 @@ fn tickled_loose(ground: &mut Playground, p: &mut Pet, ctx: &mut Ctx) {
     if let Some(w) = id.and_then(|id| ground.get_mut(id))
         && w.carrier == Some(me)
     {
-        w.carrier = None;
-        w.claimed = None;
-        w.prop = Prop::put(thing, at, w.prop.scale);
+        // Laughing, it lets it fall out of its mouth.
+        drop_from_mouth(w, p, 60.0);
         w.until = w.until.max(now + TOY_STAYS.min(10.0));
     }
+    p.fun.carry = None;
+    p.fun.lift = None;
     // A scene ends here (its bone goes when the scene does).
     if let Some(run) = &mut p.fun.scene {
         run.until = now;
@@ -2549,7 +2761,16 @@ fn scene(ground: &mut Playground, p: &mut Pet, ctx: &mut Ctx) {
     let interrupted = lifted || p.mind.asleep() || p.in_skit;
     let prop = run.prop.and_then(|id| ground.get(id)).map(|w| w.prop);
     let end = |ground: &mut Playground, p: &mut Pet, run: &Run| {
-        if let Some(id) = run.prop.filter(|_| !run.keep) {
+        let held = run
+            .prop
+            .and_then(|id| ground.get_mut(id))
+            .filter(|w| w.carrier == Some(p.save.id));
+        if let Some(w) = held {
+            // Picked up or dropping off to sleep with its bone: it falls
+            // from its mouth and lies there a while.
+            drop_from_mouth(w, p, 0.0);
+            w.until = now + LEFT_LYING;
+        } else if let Some(id) = run.prop.filter(|_| !run.keep) {
             ground.remove(id);
         }
         if run.scene == Scene::Dance {
@@ -2559,6 +2780,8 @@ fn scene(ground: &mut Playground, p: &mut Pet, ctx: &mut Ctx) {
             }
         }
         p.fun.carry = None;
+        p.fun.pickup = None;
+        p.fun.lift = None;
         p.fun.scene = None;
         p.fun.hold_until = 0.0;
         p.fun.swim_zoom = None;
@@ -2666,34 +2889,61 @@ fn scene(ground: &mut Playground, p: &mut Pet, ctx: &mut Ctx) {
             let Some(at) = prop else {
                 return end(ground, p, &run);
             };
-            // Joining others in a pond: its own place in it.
-            let to = if run.keep { run.spot } else { at.pos.0 };
+            // Taking its bone up off the floor, then it lies down to chew
+            // it.
+            if p.fun.pickup.is_some() {
+                match picking(ground, p, now) {
+                    Picking::Busy => {}
+                    Picking::Got => {
+                        run.phase = 1;
+                        run.since = now;
+                        p.anim.posture = Posture::Lie;
+                    }
+                    Picking::Lost => return end(ground, p, &run),
+                }
+                p.fun.scene = Some(run);
+                return;
+            }
+            // Joining others in a pond: its own place in it. Going for its
+            // bone: its mouth over it.
+            let to = if run.keep {
+                run.spot
+            } else if run.scene == Scene::Bone {
+                mouth_over(p, at.pos.0)
+            } else {
+                at.pos.0
+            };
             let heading = p.walk_to(to, 1.3, ctx.terrain);
             if heading == Heading::Blocked {
                 return end(ground, p, &run);
             }
             if heading == Heading::There {
+                if run.scene == Scene::Bone
+                    && let Some(id) = run.prop
+                {
+                    stoop(p, id, at.pos);
+                    p.fun.scene = Some(run);
+                    return;
+                }
                 run.phase = 1;
                 run.since = now;
-                match run.scene {
-                    Scene::Bone => {
-                        // Picks it up and lies down to chew it.
-                        if let Some(id) = run.prop
-                            && let Some(b) = ground.get_mut(id)
-                        {
-                            b.carrier = Some(p.save.id);
-                        }
-                        p.fun.carry = Some(Thing::Bone);
-                        p.anim.posture = Posture::Lie;
-                    }
-                    Scene::Sunbeam => p.anim.posture = Posture::Lie,
-                    _ => {}
+                if run.scene == Scene::Sunbeam {
+                    p.anim.posture = Posture::Lie;
                 }
             }
         }
         (_, 1) => {
             if now >= run.until {
                 run.phase = 2;
+                // Done with its bone: it falls from its mouth and lies
+                // there a while (it vanished from the mouth).
+                if let Some(w) = run.prop.and_then(|id| ground.get_mut(id))
+                    && w.carrier == Some(p.save.id)
+                {
+                    drop_from_mouth(w, p, 0.0);
+                    w.until = now + LEFT_LYING;
+                    run.prop = None;
+                }
                 p.fun.carry = None;
                 p.fun.scene = Some(run);
                 return;

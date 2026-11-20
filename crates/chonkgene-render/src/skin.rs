@@ -596,6 +596,13 @@ impl Spring {
     }
 }
 
+/// How far [`Act::Pick`](chonkgene_core::anim::Act::Pick) tips the body
+/// and the head down and bends the front legs, degrees: enough for the
+/// nose to reach the floor in front of the paws.
+const PICK_BODY: f32 = 18.0;
+const PICK_HEAD: f32 = 50.0;
+const PICK_LEGS: f32 = 16.0;
+
 /// Steps a second at full walking pace.
 const STEP_HZ: f32 = 2.0;
 /// Leg swing either way, degrees: with legs 0.45 long and 62% of each step
@@ -1383,9 +1390,14 @@ impl Walk {
         let hugging = self.gesture.is_some_and(|g| {
             g.act == chonkgene_core::anim::Act::Hug && !matches!(self.hug, Hug::ByYou(_))
         });
+        // Picking a thing up it stays side-on: the mouth out over the thing
+        // it walked up to (turned toward you, the mouth drew back from it).
+        let picking = self
+            .gesture
+            .is_some_and(|g| g.act == chonkgene_core::anim::Act::Pick);
         let yaw = self.yaw.step(
             facing
-                * if going || self.travel != Travel::None {
+                * if going || self.travel != Travel::None || picking {
                     WALK_YAW
                 } else if hugging {
                     HUG_YAW
@@ -1955,6 +1967,18 @@ impl Walk {
                     for &(leg, _, front) in &self.legs {
                         if front {
                             j[leg].rot.x -= 8.0 * e * down;
+                        }
+                    }
+                }
+                // Nose down to the thing on the floor, the front legs
+                // bending, held there while it takes it, and back up (the
+                // envelope eases it down and up).
+                Act::Pick => {
+                    j[b.body].rot.x += PICK_BODY * e;
+                    j[b.head].rot.x += PICK_HEAD * e;
+                    for &(leg, _, front) in &self.legs {
+                        if front {
+                            j[leg].rot.x -= PICK_LEGS * e;
                         }
                     }
                 }
