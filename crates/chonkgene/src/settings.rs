@@ -1350,9 +1350,27 @@ mod tests {
 
     struct Headless(Rc<MinimalSoftwareWindow>);
 
+    thread_local! {
+        /// The headless platform's clock, moved on by the tests (`pass`):
+        /// a click, a drag (names sliding aside to make room) and a
+        /// double-click are timed alike however busy the machine is. On
+        /// the wall clock the drag test dropped the name elsewhere in a
+        /// release build, and now and then in a busy debug run.
+        static CLOCK: std::cell::Cell<Duration> = const { std::cell::Cell::new(Duration::ZERO) };
+    }
+
+    /// Time passing for the headless platform.
+    fn pass(d: Duration) {
+        CLOCK.with(|c| c.set(c.get() + d));
+    }
+
     impl Platform for Headless {
         fn create_window_adapter(&self) -> Result<Rc<dyn WindowAdapter>, slint::PlatformError> {
             Ok(self.0.clone())
+        }
+
+        fn duration_since_start(&self) -> Duration {
+            CLOCK.with(std::cell::Cell::get)
         }
     }
 
@@ -1423,11 +1441,19 @@ mod tests {
         // layout on the second frame, and the pointer finds them there.
         draw();
         draw();
+        // The pet process is not running here: once the first send fails,
+        // the notice saying so shows on top and moves the names down (as
+        // in the screenshots, where the positions below were taken). It
+        // used to depend on how fast the test ran whether it was there yet.
+        pass(SEND_EVERY * 2);
+        draw();
+        draw();
+        assert!(!ui.get_notice().is_empty());
         let at = |x: f32, y: f32| LogicalPosition::new(x, y);
         // A little time between events, as a hand gives them (a click
         // and a drag both need the clock to move on).
         let send = |e: WindowEvent| {
-            std::thread::sleep(Duration::from_millis(20));
+            pass(Duration::from_millis(20));
             slint::platform::update_timers_and_animations();
             window.dispatch_event(e);
             draw();
@@ -1524,12 +1550,12 @@ mod tests {
                 r.render(&mut buf, 880);
             });
         };
-        std::thread::sleep(SEND_EVERY * 2);
+        pass(SEND_EVERY * 2);
         draw();
         draw();
         assert!(!ui.get_notice().is_empty());
         let send = |e: WindowEvent| {
-            std::thread::sleep(Duration::from_millis(20));
+            pass(Duration::from_millis(20));
             slint::platform::update_timers_and_animations();
             window.dispatch_event(e);
             draw();
@@ -1697,7 +1723,7 @@ mod tests {
                 ui.invoke_pick_adopt_coat("night".into());
             }
             slint::platform::update_timers_and_animations();
-            std::thread::sleep(Duration::from_millis(600));
+            pass(Duration::from_millis(600));
             slint::platform::update_timers_and_animations();
             window.request_redraw();
             let mut buf = vec![slint::Rgb8Pixel::default(); (w * h) as usize];
