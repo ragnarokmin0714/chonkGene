@@ -568,7 +568,8 @@ struct App {
     /// from the first pet's menu (your hand on its head); `bone`: the
     /// Shiba's bone scene (taken up off the floor, chewed, let fall);
     /// `settings-quit`: the settings opened on the first pet, then 結束肉肉
-    /// 賴桌 5 s later (the settings window closes too).
+    /// 賴桌 5 s later (the settings window closes too); `hug-other`: the
+    /// first pet asked to go and hug the second (叫牠… › 去抱抱…).
     stage_test: String,
     sounds: Sounds,
     tray: Option<Tray>,
@@ -4487,6 +4488,11 @@ impl ApplicationHandler<UserEvent> for App {
                 if self.stage_test == "tray-pond" {
                     self.stage_test = "tray-pond-again".into();
                     self.stage_at = Some(t + 8.0);
+                }
+            } else if self.stage_test == "hug-other" {
+                if let Some(other) = self.pets.get(1).map(|p| p.save.id) {
+                    self.act(el, pet, Action::HugWith(other));
+                    diag!("CHONKGENE_STAGE=hug-other: the first pet hugs the second");
                 }
             } else if self.stage_test == "settings-quit" {
                 self.act(el, pet, Action::Edit);

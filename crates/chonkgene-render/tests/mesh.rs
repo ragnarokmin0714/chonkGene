@@ -2542,3 +2542,57 @@ fn a_frame_waited_for_briefly_stays_on_its_way_and_is_taken_later() {
     }
     assert!(opaque(&pm) > 1000, "the picture came through");
 }
+
+/// Roger (2026-11-20, again): the fox's lower tails cut off by the bottom
+/// of her window in a hug. Hugging another pet (face to face, either side;
+/// the fox's bear hug, up on her hind legs; held in it), no pet reaches the
+/// left, top or right edge of its picture, and along the bottom it touches
+/// no more than standing on its feet.
+#[test]
+fn a_pet_hugging_another_is_never_cut_off() {
+    use chonkgene_core::anim::{Animator, Expression, Hug};
+    let mut short = Vec::new();
+    for id in QUAD_SPECIES.iter().chain(&BIPED_SPECIES) {
+        let Some(mut r) = app_renderer(id) else {
+            eprintln!("skipped: no GPU");
+            return;
+        };
+        let mut roles = vec![
+            Hug::Cuddle { front: true },
+            Hug::Cuddle { front: false },
+            Hug::Squeezed,
+        ];
+        if *id == "fox" {
+            roles.push(Hug::Bear);
+        }
+        for role in roles {
+            let mut a = Animator::new(1, 0.33, 0.0).with_pops(false);
+            let mut standing = 0;
+            for _ in 0..20 {
+                a.step(0.1);
+                r.render(&a.params(), Expression::Neutral);
+                r.finish();
+                standing = standing.max(bottom_row(r.pixmap()));
+            }
+            a.hug(role);
+            let (mut bottom, mut edges) = (0, [u32::MAX; 3]);
+            for i in 0..((role.secs() + 0.5) / 0.05) as usize {
+                a.step(0.05);
+                r.render(&a.params(), Expression::Happy);
+                r.finish();
+                if (i as f32) * 0.05 < role.secs() - 0.3 {
+                    bottom = bottom.max(bottom_row(r.pixmap()));
+                }
+                let m = margins(r.pixmap());
+                edges = [edges[0].min(m[0]), edges[1].min(m[1]), edges[2].min(m[2])];
+            }
+            if bottom > standing + 4 || edges.iter().any(|&m| m < 3) {
+                short.push(format!(
+                    "{id} {role:?}: {bottom} px along the bottom (standing, {standing}), \
+                     {edges:?} px from the left, top and right"
+                ));
+            }
+        }
+    }
+    assert!(short.is_empty(), "{}", short.join("\n"));
+}

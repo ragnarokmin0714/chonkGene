@@ -1153,12 +1153,14 @@ impl MeshRenderer {
         let lean = Affine::about(M3::rot_z(params.sway.to_radians()), feet);
         let mut world = lean.then(&squash);
         let g = self.walk.ground();
-        // Held in your hands (Roger, 2026-11-20: the fox's tails, and a
-        // sleeping chick, cut off along the bottom of the window): nothing
-        // hangs below its picture's floor; it is lifted as far as needed.
-        let held =
-            params.act == Act::Hug && matches!(params.hug, chonkgene_core::anim::Hug::ByYou(_));
-        if (g > 0.0 || held)
+        // In a hug (Roger, 2026-11-20: the fox's tails, and a sleeping
+        // chick, cut off along the bottom of the window; then her tails
+        // again, in her bear hug): nothing goes below its picture's floor,
+        // it is lifted as far as needed; held in your hands, a little
+        // further.
+        let hugging = params.act == Act::Hug;
+        let held = hugging && matches!(params.hug, chonkgene_core::anim::Hug::ByYou(_));
+        if (g > 0.0 || hugging)
             && let Some(live) = &self.live
         {
             // The lowest of the skin (a sample of it) comes to the floor,
@@ -1181,8 +1183,9 @@ impl MeshRenderer {
                 world.t.y += (FLOOR - low) * g;
                 world.t.x -= 0.5 * (left + right) * g;
                 let low = low + (FLOOR - low) * g;
-                if held && low < FLOOR + HELD_CLEAR {
-                    world.t.y += FLOOR + HELD_CLEAR - low;
+                let floor = FLOOR + if held { HELD_CLEAR } else { 0.0 };
+                if hugging && low < floor {
+                    world.t.y += floor - low;
                 }
             }
         }

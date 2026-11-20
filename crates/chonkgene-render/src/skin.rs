@@ -613,6 +613,9 @@ const PICK_LEGS: f32 = 16.0;
 /// ears it fits its picture.
 const HELD_TAILS: (f32, f32, f32) = (5.0, 15.0, 0.0);
 const CARRY_TAILS: f32 = -35.0;
+/// Her bear hug, up on her hind legs: how far her tails tip back up,
+/// degrees (as [`CARRY_TAILS`]).
+const BEAR_TAILS: f32 = -38.0;
 const CARRY_PITCH: f32 = 22.0;
 const CARRY_DANGLE: f32 = 22.0;
 
@@ -2072,6 +2075,14 @@ impl Walk {
                                 if front {
                                     j[leg].rot.x -= e * (70.0 + 10.0 * squeeze);
                                     j[leg].shift.y += e * 0.12;
+                                }
+                            }
+                            // Up on her hind legs, her tails stay fanned up
+                            // behind her, not swept down past her picture's
+                            // bottom (Roger, 2026-11-20: cut off).
+                            for tail in &self.tails {
+                                if let Some(&root) = tail.bones.first() {
+                                    j[root].rot.x -= e * BEAR_TAILS;
                                 }
                             }
                         }
