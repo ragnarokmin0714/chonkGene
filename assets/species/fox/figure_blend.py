@@ -61,11 +61,16 @@ def lerp(a, b, t):
 
 
 # ---- the skeleton -----------------------------------------------------------
-HEAD_C = Vector((0.0, Y(212), -0.01))
-HEAD_R = Vector((0.34, 0.33, 0.31))
+HEAD_C = Vector((0.0, Y(212), -0.02))
+HEAD_R = Vector((0.34, 0.33, 0.28))
+# Her lower face, a part of its own on the painted head: the sheet's side
+# view has the cheeks, mouth and chin well forward of the brow (a baby's
+# face, fullest low down), the chin's underside at y 0.35.
+JAW_C = Vector((0.0, 0.46, 0.10))
+JAW_R = Vector((0.24, 0.13, 0.178))
 NECK_Y = Y(318)
-SHOULDER = Vector((X(305), Y(345), -0.01))  # her left shoulder joint
-CUFF = Vector((-X(95), Y(468), 0.03))  # the middle of her left cuff
+SHOULDER = Vector((X(305), Y(345), -0.04))  # her left shoulder joint
+CUFF = Vector((-X(95), Y(468), -0.095))  # the middle of her left cuff
 HIP = Vector((X(290), Y(560), 0.0))
 ANKLE_Y = Y(705)
 SASH_TOP, SASH_BOT = Y(437), Y(489)
@@ -225,7 +230,12 @@ def legs():
         for i in range(steps + 1):
             t = i / steps
             r = 0.088 + 0.006 * math.sin(math.pi * min(1.0, t / 0.75))
-            b.ball(Vector((x, lerp(top, ankle, t), -0.004 * t)), r)
+            # Front to back (the sheet's side view): as deep as wide at the
+            # top, the calf bulging behind, the ankle slimmer; the leg's
+            # middle 0.04 to 0.06 behind hers.
+            deep = 1.0 - 0.22 * smoothstep(0.35, 1.0, t)
+            z = -0.035 - 0.025 * smoothstep(0.0, 0.5, t)
+            b.ball(Vector((x, lerp(top, ankle, t), z)), r, "ELLIPSOID", (1.0, 1.0, deep))
         # The foot is hardly more than the leg's end (the sheet's side view:
         # the toes a little past the shin, no heel behind the calf): a flat
         # sole as wide as the leg, and along its front, low, a row of five
@@ -234,7 +244,7 @@ def legs():
         fx = x * 1.02
         # A rounded box, so the front is flat across like the sheet's and
         # all five toes show along it.
-        b.ball(Vector((fx, FLOOR + 0.04, 0.003)), 0.03, "CUBE", (0.058, 0.008, 0.065))
+        b.ball(Vector((fx, FLOOR + 0.04, -0.022)), 0.03, "CUBE", (0.058, 0.008, 0.095))
         for dx, r, sx in ((-0.066, 0.027, 0.72), (-0.032, 0.025, 0.7), (0.0, 0.0245, 0.7),
                           (0.031, 0.0235, 0.7), (0.061, 0.022, 0.72)):
             b.ball(Vector((fx + s * dx, FLOOR + 0.025, 0.104 - 0.15 * abs(dx + 0.01) ** 1.5)),
@@ -280,7 +290,7 @@ def hands():
 
 def neck():
     b = Balls("neck", 0.0085)
-    b.capsule(Vector((0, NECK_Y - 0.005, -0.01)), Vector((0, NECK_Y + 0.065, -0.01)), 0.095)
+    b.capsule(Vector((0, NECK_Y - 0.005, -0.03)), Vector((0, NECK_Y + 0.065, -0.03)), 0.075)
 
     def bones(p):
         w = smoothstep(NECK_Y - 0.06, NECK_Y + 0.06, p.y)
@@ -292,23 +302,23 @@ def neck():
 # Her outline, (y px, half width px in front, forward px and back px from
 # the side), neck to hem.
 ROBE = [
-    (316, 30, 26, 26),
-    (326, 48, 36, 34),
-    (338, 62, 42, 40),
-    (360, 66, 48, 44),
-    (400, 67, 51, 45),
-    (440, 69, 52, 46),
-    (485, 72, 50, 48),
-    (520, 84, 58, 58),
-    (560, 100, 72, 76),
-    (595, 113, 84, 96),
-    (614, 119, 88, 104),
+    (316, 30, 16, 26),
+    (326, 48, 22, 34),
+    (338, 62, 28, 40),
+    (360, 66, 41, 44),
+    (400, 67, 60, 45),
+    (440, 69, 62, 46),
+    (485, 72, 61, 52),
+    (520, 84, 70, 79),
+    (560, 100, 80, 88),
+    (595, 113, 86, 98),
+    (614, 119, 89, 103),
     # (the back hangs lower than the front: past the hem's front)
     (660, 133, 99, 120),
 ]
 AROUND = 168
 FOLDS = 9
-HEM_FRONT, HEM_BACK = 614, 632
+HEM_FRONT, HEM_BACK = 614, 625
 
 
 def hem(th):
@@ -971,9 +981,14 @@ def write_ron(path):
     # On the head's surface: a little nose, a mouth only just raised.
     def front(dy):
         return hc.z + hr.z * math.sqrt(max(0.0, 1 - (dy / hr.y) ** 2))
-    # (measured: the nose just under the eyes, the mouth 0.12 wide)
-    nose = Vector((0, hc.y - 0.126, front(-0.126) - 0.004))
-    mouth = Vector((0, hc.y - 0.205, front(-0.205) - 0.06 + 0.009))
+    def jaw_front(y):
+        d = (y - JAW_C.y) / JAW_R.y
+        return JAW_C.z + JAW_R.z * math.sqrt(max(0.0, 1 - d * d))
+    # (measured off the side view: the nose's tip at y 0.53, 0.296
+    # forward, hardly past the cheeks; the mouth 0.12 wide, on the lower
+    # face, only just raised)
+    nose = Vector((0, 0.532, 0.282))
+    mouth = Vector((0, hc.y - 0.205, jaw_front(hc.y - 0.205) - 0.06 + 0.009))
     cheek = Vector((0.16, hc.y - 0.15, hc.z + 0.1))
     # The face, measured off the sheet's front view: the eyes' middles
     # 51 px either side of the face's (238.5), at y 228, 47 px round; set
@@ -995,7 +1010,9 @@ def write_ron(path):
     out.append("    ],\n    parts: [\n")
     out.append(f'        (name: "head", bone: "head", shape: Ellipsoid({v3(hr)}), at: {v3(hc)},\n'
                f'            blend: 0.03, color: "skin", fuzz: 0, zone: "head"),\n')
-    out.append(f'        (name: "nose", bone: "head", shape: Ellipsoid((0.018, 0.013, 0.011)), at: {v3(nose)},\n'
+    out.append(f'        (name: "jaw", bone: "head", shape: Ellipsoid({v3(JAW_R)}), at: {v3(JAW_C)},\n'
+               f'            blend: 0.06, color: "skin", fuzz: 0, zone: "chin"),\n')
+    out.append(f'        (name: "nose", bone: "head", shape: Ellipsoid((0.024, 0.017, 0.014)), at: {v3(nose)},\n'
                f'            blend: 0.015, color: "skin", fuzz: 0, zone: "head"),\n')
     out.append(f'        (name: "mouth", bone: "head", shape: Ellipsoid((0.13, 0.07, 0.06)), at: {v3(mouth)},\n'
                f'            blend: 0.03, color: "skin", fuzz: 0, zone: "chin"),\n')
