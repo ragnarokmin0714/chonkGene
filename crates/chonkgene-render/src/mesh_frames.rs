@@ -109,6 +109,13 @@ const KEEP_UP_WAIT: Duration = Duration::from_millis(12);
 /// Held by you, the lowest of the pet stays this far above its picture's
 /// floor (world units), so none of it is cut off along the bottom.
 const HELD_CLEAR: f32 = 0.05;
+/// After a hug its pose comes back over half a second or so (the tails'
+/// springs, a cradled pet rolling back up), so the lift comes down with it
+/// rather than all at once: for [`HUG_HOLD`] seconds no faster than the
+/// pose needs, then whether or not; at most as fast as an exponential fall
+/// with time constant [`HUG_LAND`] seconds.
+const HUG_HOLD: f32 = 1.0;
+const HUG_LAND: f32 = 0.15;
 
 /// How far into its pose a gesture `secs` long is, `t` seconds in (0 … 1):
 /// eased in and out over [`GESTURE_EASE`] at each end, held between. It
@@ -222,6 +229,10 @@ pub struct MeshRenderer {
     glow: f32,
     /// The animator's clock, seconds (the flame tails flicker by it).
     flame_clock: f32,
+    /// In a hug or just after: the floor nothing may go below (world
+    /// units), the most it may be lifted for that, and the seconds since
+    /// the hug ended (see `settle`).
+    hug_floor: Option<(f32, f32, f32)>,
 }
 
 impl MeshRenderer {
@@ -291,6 +302,7 @@ impl MeshRenderer {
             floor_shadow: true,
             glow: 0.0,
             flame_clock: 0.0,
+            hug_floor: None,
         })
     }
 
@@ -638,7 +650,13 @@ impl MeshRenderer {
             _ => 0.0,
         });
         self.walk.gesture(self.gesture.and_then(|(act, since)| {
-            let secs = gesture_secs(act)?;
+            // A hug lasts as long as its kind (搖搖抱 is long: its pose,
+            // the fox's tails draped over your hands and the rocking, went
+            // after the 3.2 s of the others).
+            let secs = match act {
+                Act::Hug => params.hug.secs(),
+                _ => gesture_secs(act)?,
+            };
             let t = (params.clock - since).max(0.0);
             Some(Gesture {
                 act,
@@ -708,7 +726,7 @@ impl MeshRenderer {
         let wanted = self.step_px / dt.max(MAX_STEP) / SMOOTH_PX;
         self.smooth_fps = wanted.max(self.smooth_fps - SMOOTH_FALL * dt).min(60.0);
         self.bones = bones;
-        self.settle(params);
+        self.settle(params, dt);
         self.dent(params, dt);
         self.hand_dent(dt);
         self.look = look;
@@ -1141,7 +1159,7 @@ impl MeshRenderer {
     /// melting) and breathing, its lean (held swinging, dizzy), and, rolled
     /// over or melted, settling it onto the floor: one move after the
     /// skeleton's, for every bone.
-    fn settle(&mut self, params: &PoseParams) {
+    fn settle(&mut self, params: &PoseParams, dt: f32) {
         // Squeezed between your hands in a hug: narrower and taller.
         let hug = HAND_SQUEEZE * (self.hand_dent.x / HAND_DENT).clamp(-0.5, 1.5);
         let sq = (0.35 * params.squash + 0.15 * params.belly + self.walk.flatten() - hug)
@@ -1157,10 +1175,21 @@ impl MeshRenderer {
         // chick, cut off along the bottom of the window; then her tails
         // again, in her bear hug): nothing goes below its picture's floor,
         // it is lifted as far as needed; held in your hands, a little
-        // further.
+        // further. And just after (Roger, 2026-11-23, her tails cut off
+        // once more): the lift went at once while the pose (the tails'
+        // springs) took half a second to come back, a chubby fox dropping
+        // into the bottom of her picture; the floor holds a while longer,
+        // the lift coming down with her pose (see [`HUG_HOLD`]).
         let hugging = params.act == Act::Hug;
-        let held = hugging && matches!(params.hug, chonkgene_core::anim::Hug::ByYou(_));
-        if (g > 0.0 || hugging)
+        if hugging {
+            let held = matches!(params.hug, chonkgene_core::anim::Hug::ByYou(_));
+            let floor = FLOOR + if held { HELD_CLEAR } else { 0.0 };
+            // (Lifted below by as much as the skin needs.)
+            self.hug_floor = Some((floor, 0.0, 0.0));
+        } else if let Some((floor, most, after)) = self.hug_floor {
+            self.hug_floor = (most > 1e-3).then_some((floor, most, after + dt));
+        }
+        if (g > 0.0 || self.hug_floor.is_some())
             && let Some(live) = &self.live
         {
             // The lowest of the skin (a sample of it) comes to the floor,
@@ -1183,9 +1212,18 @@ impl MeshRenderer {
                 world.t.y += (FLOOR - low) * g;
                 world.t.x -= 0.5 * (left + right) * g;
                 let low = low + (FLOOR - low) * g;
-                let floor = FLOOR + if held { HELD_CLEAR } else { 0.0 };
-                if hugging && low < floor {
-                    world.t.y += floor - low;
+                if let Some((floor, most, after)) = self.hug_floor {
+                    let need = (floor - low).max(0.0);
+                    let fall = most * (-dt / HUG_LAND).exp();
+                    let most = if hugging {
+                        need
+                    } else if after < HUG_HOLD {
+                        most.min(need.max(fall))
+                    } else {
+                        fall
+                    };
+                    world.t.y += need.min(most);
+                    self.hug_floor = Some((floor, most, after));
                 }
             }
         }
