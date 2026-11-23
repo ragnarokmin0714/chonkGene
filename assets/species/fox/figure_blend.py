@@ -1020,29 +1020,33 @@ def hairline(phi):
     return -8.0 + 13.0 * smoothstep(100, 140, a)
 
 
-def scalp(knot=None, grooves=9):
-    """The hair's main mass: one sheet over the shell down to the hairline,
-    its lower edge coming in onto the head; with `knot` (a point on the
-    shell), grooved along the way the hair is combed to it, gathered tight
-    there."""
+def scalp(knot=None, grooves=9, low=hairline, tuck_all=False):
+    """The hair's main mass: one sheet over the shell down to the hairline
+    (`low`), its lower edge coming in onto the head (all round with
+    `tuck_all`, where no long hair hangs from under it); with `knot` (a
+    point on the shell, or several), grooved along the way the hair is
+    combed to the nearest, gathered tight there."""
     rows, cols = 48, 220
-    if knot is not None:
-        toward = ediv(knot - SHELL_C, SHELL_R).normalized()
+    knots = [] if knot is None else (knot if isinstance(knot, list) else [knot])
+    frames = []
+    for k_ in knots:
+        toward = ediv(k_ - SHELL_C, SHELL_R).normalized()
         e1 = (Vector((1, 0, 0)) - toward * toward.x).normalized()
-        e2 = toward.cross(e1)
+        frames.append((toward, e1, toward.cross(e1)))
     first_face = len(faces)
     rows_v = []
     for i in range(rows + 1):
         row = []
         for j in range(cols):
             phi = -180 + 360 * j / cols
-            low = hairline(phi)
+            bottom = low(phi)
             u = i / rows
-            theta = low + (89.5 - low) * u
+            theta = bottom + (89.5 - bottom) * u
             pr, tr = math.radians(phi), math.radians(theta)
             q = Vector((math.sin(pr) * math.cos(tr), math.sin(tr), math.cos(pr) * math.cos(tr)))
             off, groove = 0.0, 0.0
-            if knot is not None:
+            if frames:
+                toward, e1, e2 = max(frames, key=lambda f: q.dot(f[0]))
                 ang = math.acos(max(-1.0, min(1.0, q.dot(toward))))
                 psi = math.atan2(q.dot(e2), q.dot(e1))
                 g = (0.5 + 0.5 * math.cos(grooves * psi)) ** 0.6
@@ -1058,7 +1062,7 @@ def scalp(knot=None, grooves=9):
             pos = on_shell(phi, theta, off)
             # The lower edge comes in onto the head, so no edge hangs in
             # the air.
-            tuck = 1.0 - smoothstep(95, 125, abs(phi))
+            tuck = 1.0 if tuck_all else 1.0 - smoothstep(95, 125, abs(phi))
             if u < 0.25 and tuck > 0:
                 on_head = HEAD_C + emul(HEAD_R, ediv(pos - HEAD_C, HEAD_R).normalized())
                 pos = pos.lerp(off_head(on_head, 0.01), tuck * (1.0 - smoothstep(0.0, 0.25, u)))
@@ -1140,10 +1144,10 @@ CURTAIN = [(0.5, 0.46, -0.46, -0.04), (0.28, 0.5, -0.47, -0.12), (0.02, 0.5, -0.
            (-0.16, 0.48, -0.41, -0.18)]
 
 
-def curtain_at(u, y):
+def curtain_at(u, y, rows=CURTAIN):
     """On the curtain's outside at `u` round her back (−1 her right side,
-    0 the middle of her back, 1 her left side) and height `y`."""
-    rows = CURTAIN
+    0 the middle of her back, 1 her left side) and height `y`; `rows` its
+    outline."""
     if y >= rows[0][0]:
         r = rows[0]
     elif y <= rows[-1][0]:
@@ -1159,12 +1163,13 @@ def curtain_at(u, y):
     return Vector((half * math.sin(a), y, side + (back - side) * math.cos(a)))
 
 
-def curtain(grooves=14):
-    """The long hair let down behind her arms and shoulders to the sash: one
-    slab of hair round her back from one side to the other, hanging from
-    under the shell, with `grooves` grooves down it; low down each strip
-    between them ends in a point (the sheet: one smooth mass, splitting
-    into pointed locks at the ends)."""
+def curtain(grooves=14, tips=HAIR_TIPS, outline=CURTAIN):
+    """The long hair let down behind her arms and shoulders to the sash
+    (`tips`): one slab of hair round her back from one side to the other
+    (`outline` its outline), hanging from under the shell, with `grooves`
+    grooves down it; low down each strip between them ends in a point
+    (the sheet: one smooth mass, splitting into pointed locks at the
+    ends)."""
     def bones(v):
         w = smoothstep(0.1, 0.5, v)
         return (("head", 1.0 - w), ("hair_b", 0.6 * w), ("body", 0.4 * w))
@@ -1181,10 +1186,10 @@ def curtain(grooves=14):
             k = (u + 1.0) / 2.0 * grooves
             f = k - math.floor(k)
             strip = int(min(k, grooves - 1))
-            tip = HAIR_TIPS + 0.025 * math.cos(2.3 * strip) - 0.07 * (1 - abs(2 * f - 1))
+            tip = tips + 0.025 * math.cos(2.3 * strip) - 0.07 * (1 - abs(2 * f - 1))
             # From under the shell round the back and sides, then down.
             phi = math.copysign(180 - abs(u) * 98, u) if u else 180.0
-            first = curtain_at(u, 0.5)
+            first = curtain_at(u, 0.5, outline)
             if v < 0.12:
                 # From under the shell's lower edge, down its outside (so it
                 # carries on from the hair over her head, no ledge), into
@@ -1197,7 +1202,7 @@ def curtain(grooves=14):
                 y = min(y, 0.5)
                 # The last stretch runs down to the strip's point.
                 y = lerp(y, tip, smoothstep(0.86, 1.0, v))
-                p = curtain_at(u, y)
+                p = curtain_at(u, y, outline)
                 # Ends turned in a little.
                 p += Vector((-p.x, 0, -(p.z + 0.2))).normalized() * 0.03 * smoothstep(0.8, 1.0, v)
             out = Vector((p.x, 0.0, p.z + 0.2)).normalized()
@@ -1285,7 +1290,223 @@ def hair_ponytail():
     ribbon(knot + out * 0.035, out, "hair_b")
 
 
-HAIRDOS = {"ponytail": hair_ponytail}
+def twin_hairline(phi):
+    """綁雙馬尾's hairline: as the others' in front and at the sides; behind,
+    with no long hair let down, the hair comes down to the nape."""
+    a = abs(phi)
+    if a < 100:
+        return hairline(phi)
+    return -8.0 - 34.0 * smoothstep(100, 170, a)
+
+
+# 綁雙馬尾, measured off the sheet's hairdo panel (its own scale: the hair's
+# top to the chin, 150 px, is ours 0.81, so 0.0054 a pixel): tied high at
+# the sides, red bands; each bunch springs up and out to 1.3 (the ears'
+# tips), out to 0.86 at its widest by the eyes, its inner edge falling
+# straight from the tie by the head (0.42 to 0.5), down to the sash
+# (−0.27), the outer ends flicking out to 0.93. The sheet's panel has no
+# ears: ours tie just behind them, and the bunches hang behind her arms.
+TWIN_KNOT = (132, 38)
+# A bunch fans out from the tie as three masses lying over each other
+# (points down each, its width across in front, her left; mirrored):
+# the inner falling straight by her head, the middle, and the outer
+# springing up and over and down the outside, its end flicking out.
+TWIN_MASSES = [
+    # inner
+    ([((0.4, 0.98, -0.27), 0.14), ((0.47, 0.75, -0.31), 0.2), ((0.5, 0.45, -0.34), 0.24),
+      ((0.52, 0.15, -0.36), 0.26), ((0.56, -0.12, -0.36), 0.24), ((0.6, -0.26, -0.36), 0.12)], 5),
+    # middle, a little further back
+    ([((0.42, 1.1, -0.31), 0.16), ((0.56, 1.0, -0.37), 0.24), ((0.64, 0.74, -0.41), 0.26),
+      ((0.66, 0.4, -0.43), 0.26), ((0.64, 0.06, -0.43), 0.28), ((0.65, -0.3, -0.41), 0.16)], 5),
+    # outer, over the top
+    ([((0.44, 1.2, -0.27), 0.16), ((0.64, 1.22, -0.3), 0.22), ((0.78, 1.02, -0.32), 0.24),
+      ((0.8, 0.7, -0.34), 0.24), ((0.76, 0.3, -0.36), 0.22), ((0.88, -0.12, -0.36), 0.12)], 4),
+]
+
+
+def bunch(path, grooves, bones, up, *, depth=0.55, most_depth=0.09, reach=0.14, tip=0.6,
+          root=0.1, end=0.72):
+    """A mass of hair along `path` ((point, width across) pairs): an oval
+    section `depth` times as deep as it is wide (at most `most_depth`
+    deep), `up` the way its front faces; `grooves` grooves down it, and at
+    the end each strip between them comes to a point of its own, the
+    strips' middles reaching furthest (by `reach` of its length). It
+    swells from `root`, thins from `end` on; its colour turns to the tips'
+    from `tip` on."""
+    n_al, cols = 56, 12 * grooves
+    pts = curve([Vector(p) for p, _ in path], n_al)
+    widths = [w for _, w in path]
+    def width(tt):
+        u = tt * (len(widths) - 1)
+        k = min(int(u), len(widths) - 2)
+        return lerp(widths[k], widths[k + 1], smoothstep(0.0, 1.0, u - k))
+    def at(tt):
+        u = tt * (n_al - 1)
+        k = min(int(u), n_al - 2)
+        p = pts[k].lerp(pts[k + 1], u - k)
+        tan = (pts[min(k + 2, n_al - 1)] - pts[max(k - 1, 0)]).normalized()
+        return p, tan
+    first_face = len(faces)
+    rings = []
+    for i in range(n_al):
+        v = i / (n_al - 1)
+        ring = []
+        for j in range(cols):
+            a = 2 * math.pi * j / cols
+            k = j * grooves / cols
+            f = k - math.floor(k)
+            tt = v * (1.0 - reach * abs(2 * f - 1))
+            p, tan = at(tt)
+            n = up(p, tt)
+            b = tan.cross(n).normalized()
+            n = b.cross(tan).normalized()
+            taper = (smoothstep(0.0, root, v) * 0.5 + 0.5) * max(1.0 - smoothstep(end, 1.0, v), 0.0) ** 0.8
+            w = max(width(tt) / 2 * taper, 0.003)
+            d = max(min(width(tt) / 2 * depth, most_depth) * taper, 0.003)
+            g = (0.5 + 0.5 * math.cos(2 * math.pi * k)) ** 0.5
+            bulge = 1.0 + 0.08 * (g - 0.7) * smoothstep(0.05, 0.2, v)
+            q = p + (b * (w * math.cos(a)) + n * (d * math.sin(a))) * bulge
+            mix = HAIR_SHADE + (1.0 - HAIR_SHADE) * smoothstep(tip, 1.0, v)
+            i_v = vert(q, "hair", "hairtip", mix, HAIR_GLOSS, HAIR_FUZZ, bones(v), "head")
+            GROOVES[i_v] = 0.8 * (1.0 - g) ** 2 * smoothstep(0.05, 0.2, v)
+            ring.append(i_v)
+        rings.append(ring)
+    grid(rings, True, None)
+    for ring, top in ((rings[0], True), (rings[-1], False)):
+        c = sum((verts[i][0] for i in ring), Vector()) / cols
+        v0 = verts[ring[0]]
+        centre = vert(c, v0[1], v0[2], v0[3], HAIR_GLOSS, HAIR_FUZZ, v0[6], "head")
+        for j in range(cols):
+            a_, b_ = ring[j], ring[(j + 1) % cols]
+            faces.append((centre, b_, a_) if top else (centre, a_, b_))
+    face_out(first_face)
+
+
+def hair_twintails():
+    """綁雙馬尾 (the sheet's hairdos): all the hair combed up into two bunches
+    tied high on either side behind the ears with red bands, each springing
+    up and out and falling long to the sash; the fringe and the locks by
+    her face as the others'."""
+    global SHELL_C, SHELL_R
+    # Nothing let down behind: the shell comes in at the back (a hair's
+    # depth off the head, not the long hair's), its front as the others'.
+    shells = SHELL_C, SHELL_R
+    SHELL_C, SHELL_R = Vector((0.0, 0.76, -0.015)), Vector((0.41, 0.42, 0.365))
+    try:
+        knots = [on_shell(s * TWIN_KNOT[0], TWIN_KNOT[1]) for s in (1, -1)]
+        fringe_and_locks()
+        scalp(knot=knots, low=twin_hairline, tuck_all=True)
+        for s, knot in zip((1, -1), knots):
+            twin_bunch(s, knot)
+    finally:
+        SHELL_C, SHELL_R = shells
+
+
+def twin_bunch(s, knot):
+    """One of 綁雙馬尾's bunches, on her left (`s` 1) or right (−1), tied at
+    `knot`."""
+    side = "l" if s > 0 else "r"
+    def bones(v):
+        w = smoothstep(0.0, 0.3, v)
+        return (("head", 1.0 - w), (f"hair_{side}", w))
+    out = (knot - SHELL_C).normalized()
+    axis = (Vector((s * 0.75, 0.45, -0.45)).normalized() + out).normalized()
+    tie = knot + axis * 0.035
+    front = lambda p, t: Vector((s * 0.25, 0.0, 1.0)).normalized()
+    def mirrored(path):
+        """`path` on her side, starting in the band."""
+        return [(Vector((s * x, y, z)) if i else tie, w) for i, ((x, y, z), w) in enumerate(path)]
+    for path, grooves in TWIN_MASSES:
+        bunch(mirrored([((0, 0, 0), 0.05)] + path), grooves, bones, front, reach=0.15,
+              depth=0.85, most_depth=0.12, end=0.84)
+    # The red band round the gathered hair.
+    u = (Vector((0, 1, 0)) - axis * axis.y).normalized()
+    v = axis.cross(u)
+    band = [tie + (u * math.cos(a) + v * math.sin(a)) * 0.05 for a in
+            [2 * math.pi * i / 20 for i in range(21)]]
+    clump(band, 0.03, 0.016, clear=0.0, root=0.0, colors=("ribbon", "ribbon"), edge=0.0,
+          bones=lambda t: (("head", 1.0),), closed=True, gloss=0.35,
+          up=lambda p, t: (p - tie - axis * (p - tie).dot(axis)).normalized())
+
+
+# 公主頭, off the sheet's hairdo panel (its face 102 px across, ours 0.6:
+# 0.0059 a pixel): the long hair let down a little longer than the other
+# hairdos', to the hips (−0.37), flaring to 0.55 either side at its ends,
+# and its top half gathered: a twisted roll from each temple round the
+# back of the head (y 0.8 to 0.95) to a round knot in the middle (y 0.81),
+# the gathered hair falling from it down the middle of her back over the
+# rest, its end the lowest point (a V).
+PRINCESS_TIPS = -0.37
+PRINCESS_CURTAIN = CURTAIN[:3] + [(-0.16, 0.5, -0.42, -0.18), (-0.4, 0.56, -0.4, -0.2)]
+PRINCESS_KNOT = (180, 8)
+
+
+def swept(path, width, thick, bones, clear=0.02):
+    """A section of hair swept back along `path` into a knot: two broad flat
+    locks lying on the head, one above the other, crossing over once
+    before the knot (a half twist), each `width` across, narrowing into
+    it."""
+    pts = curve(path, 40)
+    for k in (1, -1):
+        strand = []
+        for i, p in enumerate(pts):
+            t = i / (len(pts) - 1)
+            tan = (pts[min(i + 1, len(pts) - 1)] - pts[max(i - 1, 0)]).normalized()
+            out = ediv(p - SHELL_C, emul(SHELL_R, SHELL_R)).normalized()
+            side = tan.cross(out).normalized()
+            # Above and below the path, crossing over toward the knot.
+            a = math.pi * smoothstep(0.45, 0.95, t)
+            r = width * 0.5 * (1.0 - 0.5 * t)
+            strand.append(p + side * (k * r * math.cos(a)) + out * (0.02 * k * math.sin(a)))
+        clump(strand, lambda t: width * (1.0 - 0.45 * t), thick, clear=clear, root=0.4, point=6.0,
+              tip=1.0, bones=bones, edge=0.6, flat=0.6)
+
+
+def hair_princess():
+    """公主頭 (the sheet's hairdos, front and back): long and let down, its
+    top half twisted back from either temple into a round knot at the
+    back of her head, the gathered hair hanging from it down the middle of
+    her back."""
+    knot = on_shell(*PRINCESS_KNOT, -0.01)
+    fringe_and_locks()
+    curtain(tips=PRINCESS_TIPS, outline=PRINCESS_CURTAIN)
+    scalp(knot=knot)
+    head = lambda t: (("head", 1.0),)
+    out = (knot - SHELL_C).normalized()
+    # The twisted rolls, from behind the locks by her face round under the
+    # ears to the knot.
+    for s in (1, -1):
+        path = [on_shell(s * 86, 22, -0.015), on_shell(s * 108, 18, 0.03), on_shell(s * 134, 14, 0.045),
+                on_shell(s * 160, 10, 0.04), on_shell(s * 176, 8, 0.03)]
+        swept(path, 0.13, 0.05, head)
+    # The knot: a round ball of hair (0.17 across, as the sheet's), the
+    # hair wound round it.
+    c = knot + out * 0.06
+    sphere(c, Vector((0.08, 0.075, 0.06)), "hair", (("head", 1.0),), gloss=HAIR_GLOSS, zone="head")
+    # (each ring round the ball and over its back, the two crossing)
+    for tilt in (45.0, -45.0):
+        t_ = math.radians(tilt)
+        u = Vector((math.cos(t_), math.sin(t_), 0.0))
+        v = (out - u * out.dot(u)).normalized()
+        ring = [c + (u * math.cos(a) + v * math.sin(a)) * 0.08 for a in [2 * math.pi * i / 20 for i in range(21)]]
+        clump(ring, 0.03, 0.025, clear=0.0, root=0.0, closed=True, bones=head, edge=0.6,
+              up=lambda p, t: (p - c).normalized())
+    # The gathered hair, out of the knot and down the middle of her back,
+    # lying on the rest, widening as it falls, its middle lowest (a V).
+    def lock_bones(t):
+        w = smoothstep(0.0, 0.3, t)
+        return (("head", 1.0 - w), ("hair_b", w))
+    on = lambda u, y, off: curtain_at(u, y, PRINCESS_CURTAIN) + Vector((0, 0, -off))
+    for du, w, low in ((-0.18, 0.1, 0.0), (0.18, 0.1, 0.0), (-0.07, 0.1, 0.03), (0.07, 0.1, 0.03),
+                       (0.0, 0.09, 0.07)):
+        clump([c + Vector((du * 0.15, -0.04, -0.03)), c + Vector((du * 0.3, -0.12, -0.04)),
+               on(du * 0.45, 0.45, 0.06), on(du * 0.75, 0.15, 0.06), on(du, -0.15, 0.05),
+               on(du * 0.9, PRINCESS_TIPS - low, 0.04)],
+              w, 0.055, clear=0.02, root=0.05, point=2.2, tip=0.6, bones=lock_bones, edge=0.45, flat=0.8,
+              up=lambda p, t: Vector((0, 0.1, -1)).normalized())
+
+
+HAIRDOS = {"ponytail": hair_ponytail, "twintails": hair_twintails, "princess": hair_princess}
 
 
 def head_proxy():
