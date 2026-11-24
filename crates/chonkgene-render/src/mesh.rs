@@ -203,7 +203,7 @@ pub fn bake(
             }
         })
         .collect();
-    let shadow = shadow_of(&vertices);
+    let shadow = shadow_of(&vertices, &zones, skeleton);
     let head = chonkgene_rig::ZONES.iter().position(|z| *z == "head");
     let crown = (0..vertices.len())
         .filter(|&i| head.is_some_and(|h| usize::from(zones[i]) == h))
@@ -232,13 +232,30 @@ pub fn bake(
 }
 
 /// The shadow's radii across and along the body: what stands on the floor
-/// (legs, belly, feet), a little wider.
-fn shadow_of(vertices: &[Vertex]) -> (f32, f32) {
+/// (legs, belly, feet), a little wider. Tails, hair and a child's arms
+/// never stand on it, however low they hang (the fox's human form, made
+/// chubbier with shorter legs, 2026-11-24: her outer tails came down past
+/// her knees, her long hair past her hips, her hands, held out as she was
+/// made, below the line her legs reach to).
+fn shadow_of(vertices: &[Vertex], zones: &[u8], sk: &Skeleton) -> (f32, f32) {
+    let hangs = ["tail", "head"].map(|name| ZONES.iter().position(|z| *z == name));
+    let arm: Vec<bool> = sk
+        .names
+        .iter()
+        .map(|n| n.starts_with("arm_") || n.starts_with("fore_"))
+        .collect();
+    let on_arm = |v: &Vertex| {
+        let main = (0..4).max_by(|&a, &b| v.weights[a].total_cmp(&v.weights[b]));
+        main.is_some_and(|k| arm.get(v.bones[k] as usize).copied().unwrap_or(false))
+    };
     let reach = |axis: usize, centre: f32| {
         vertices
             .iter()
-            .filter(|v| v.pos[1] < FLOOR + 0.5)
-            .map(|v| (v.pos[axis] - centre).abs())
+            .zip(zones)
+            .filter(|(v, z)| {
+                v.pos[1] < FLOOR + 0.5 && !hangs.contains(&Some(usize::from(**z))) && !on_arm(v)
+            })
+            .map(|(v, _)| (v.pos[axis] - centre).abs())
             .fold(0.3f32, f32::max)
             * 1.15
     };
@@ -538,7 +555,7 @@ pub fn import(
     if let Some(&i) = mesh.indices[..].iter().find(|&&i| i >= base + count) {
         return Err(format!("a triangle names vertex {} of {count}", i - base));
     }
-    mesh.shadow = shadow_of(&mesh.vertices);
+    mesh.shadow = shadow_of(&mesh.vertices, &mesh.zones, sk);
     // The crown (where bubbles hang from) may now be the top of the hair.
     let head = ZONES.iter().position(|z| *z == "head").map(|h| h as u8);
     if let Some(top) = (0..mesh.vertices.len())

@@ -79,8 +79,8 @@ def line(i, base, length, spread, steps=CONES, lean=1.0):
     th = math.radians(-spread + i * 2 * spread / 8)
     # Upright ones the longest, the outer a little shorter; no two alike.
     size = (1.0 - 0.06 * abs(math.sin(th))) * (1.0 + 0.05 * math.sin(i * 2.3))
-    # The outer ones droop no lower than her knees: lower, they would count
-    # as standing on the floor and spread her shadow (mesh.rs, `reach`).
+    # The outer ones droop only a little (the shadow leaves tails out
+    # however low they hang: mesh.rs, `shadow_of`).
     d = norm([1.15 * math.sin(th), 0.45 + 0.9 * math.cos(th), -lean])
     # The way it curls: across itself in the fan, toward upright (up for
     # the outer ones, in for the top ones; turning toward its own way out

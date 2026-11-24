@@ -77,6 +77,10 @@ JAW_R = Vector((0.24, 0.13, 0.178))
 NECK_Y = Y(318)
 SHOULDER = Vector((X(305), Y(345), -0.04))  # her left shoulder joint
 CUFF = Vector((-X(95), Y(468), -0.095))  # the middle of her left cuff
+# Her elbow, half way down the sleeve: the forearm bends there, the hand and
+# the sleeve's open end with it (Roger, 2026-11-24, her moves 「生疏」:
+# straight arms stuck out could do no more than swing).
+ELBOW = SHOULDER.lerp(CUFF, 0.5)
 HIP = Vector((X(290), Y(560), 0.0))
 ANKLE_Y = Y(705)
 SASH_TOP, SASH_BOT = Y(437), Y(489)
@@ -88,6 +92,8 @@ PIVOTS = {
     "head": Vector((0, NECK_Y, 0)),
     "arm_l": SHOULDER,
     "arm_r": Vector((-SHOULDER.x, SHOULDER.y, SHOULDER.z)),
+    "fore_l": ELBOW,
+    "fore_r": Vector((-ELBOW.x, ELBOW.y, ELBOW.z)),
     "leg_l": HIP,
     "leg_r": Vector((-HIP.x, HIP.y, HIP.z)),
     "bell": Vector((0, Y(470), 0.2)),
@@ -99,8 +105,91 @@ PIVOTS = {
 }
 PARENTS = {
     "hips": "body", "head": "body", "arm_l": "body", "arm_r": "body", "bell": "body",
+    "fore_l": "arm_l", "fore_r": "arm_r",
     "ear_l": "head", "ear_r": "head", "hair_b": "head", "hair_l": "head", "hair_r": "head",
 }
+
+# ---- her proportions -----------------------------------------------------------
+# The sheet's figure is slim, the head a third of her; beside the other pets
+# (round, the head as big as the rest of them) she looked another kind of
+# thing (Roger, 2026-11-24: 「九尾的人型與其他寵物比例差太多」). Everything
+# is made as measured off the sheet, then reshaped as it is written: the
+# head, with the ears and the hair on it, grown about the neck; the body
+# below wider and deeper; the legs and the body shorter, the feet kept; the
+# arms a little bigger about the shoulder, at the same slant; the tails
+# moved with their root, their size kept: about two heads tall, as the
+# other pets are. FIGURE_SHAPE="<head> <wide> <legs> <body> <arms>" in the
+# environment tries other proportions ("1 1 1 1 1": the sheet's).
+SHAPE = dict(head=1.45, wide=1.28, legs=0.65, body=0.88, arms=1.12)
+if os.environ.get("FIGURE_SHAPE"):
+    SHAPE = dict(zip(SHAPE, map(float, os.environ["FIGURE_SHAPE"].split())))
+HEAD_BONES = {"head", "ear_l", "ear_r", "hair_b", "hair_l", "hair_r"}
+ARM_BONES = {"arm_l": 1.0, "fore_l": 1.0, "arm_r": -1.0, "fore_r": -1.0}  # and their side
+NECK = Vector((0.0, NECK_Y, 0.0))
+
+
+def squeeze(y):
+    """How much the body is shortened at height `y`: the feet kept, the
+    legs by SHAPE legs, from the hips up by SHAPE body."""
+    s = lerp(1.0, SHAPE["legs"], smoothstep(ANKLE_Y, ANKLE_Y + 0.1, y))
+    return lerp(s, SHAPE["body"], smoothstep(HIP.y - 0.05, HIP.y + 0.15, y))
+
+
+SQUEEZE_STEP = 0.001
+SQUEEZED = [0.0]  # how high above the floor each step's height ends up
+for _k in range(4000):
+    _y = FLOOR + (_k + 0.5) * SQUEEZE_STEP
+    SQUEEZED.append(SQUEEZED[-1] + squeeze(_y) * SQUEEZE_STEP)
+
+
+def body_y(y):
+    f = (y - FLOOR) / SQUEEZE_STEP
+    if f <= 0:
+        return y
+    k = min(int(f), len(SQUEEZED) - 2)
+    return FLOOR + SQUEEZED[k] + (f - k) * (SQUEEZED[k + 1] - SQUEEZED[k])
+
+
+def body_at(p):
+    return Vector((p.x * SHAPE["wide"], body_y(p.y), p.z * SHAPE["wide"]))
+
+
+def head_at(p):
+    return body_at(NECK) + (p - NECK) * SHAPE["head"]
+
+
+def arm_at(p, side):
+    shoulder = Vector((side * SHOULDER.x, SHOULDER.y, SHOULDER.z))
+    return body_at(shoulder) + (p - shoulder) * SHAPE["arms"]
+
+
+def tail_at(p):
+    root = tail_root()
+    return body_at(root) + (p - root)
+
+
+def reshape(p, bones, zone):
+    """Where a vertex made as measured ends up. Hair hanging below the neck
+    goes over to the body's reshaping as it falls, so its ends stay where
+    they hang (at the sash, over the shoulders) as the head grows."""
+    if zone == "tail":
+        return tail_at(p)
+    total = sum(w for _, w in bones) or 1.0
+    on_arm = sum(w for name, w in bones if name in ARM_BONES) / total
+    if on_arm > 0.0:
+        side = next(ARM_BONES[name] for name, _ in bones if name in ARM_BONES)
+        return body_at(p).lerp(arm_at(p, side), on_arm)
+    on_head = sum(w for name, w in bones if name in HEAD_BONES) / total
+    on_head *= 1.0 - smoothstep(NECK_Y - 0.02, NECK_Y - 0.3, p.y)
+    return body_at(p).lerp(head_at(p), on_head)
+
+
+def reshape_pivot(name, p):
+    if name.startswith("tail"):
+        return tail_at(p)
+    if name in ARM_BONES:
+        return arm_at(p, ARM_BONES[name])
+    return head_at(p) if name in HEAD_BONES else body_at(p)
 
 # ---- what is written ----------------------------------------------------------
 # A vertex: position, colour slots a and b mixed t, shine, fuzz, bones,
@@ -291,7 +380,7 @@ def hands():
             b.capsule(base, tip, 0.023, stiff=8.0)
         tb = wrist + hd * 0.07 + z * 0.088 + n * 0.03
         b.capsule(tb, tb + (hd * 0.6 + z * 0.5 + n * 0.4).normalized() * 0.055, 0.024, stiff=6.0)
-    b.mesh(lambda p: ((f"arm_{'l' if p.x > 0 else 'r'}", 1.0),), "paw", keep=0.4)
+    b.mesh(lambda p: ((f"fore_{'l' if p.x > 0 else 'r'}", 1.0),), "paw", keep=0.4)
 
 
 def neck():
@@ -577,25 +666,32 @@ def sleeve_normal(s, t, a):
     return n if n.dot(c) > 0 else -n
 
 
+def sleeve_bones(s, t):
+    """The sleeve's bones at t (0 shoulder … 1 cuff): the body's at the
+    shoulder, the upper arm's, the forearm's past the elbow (half way)."""
+    side = "l" if s > 0 else "r"
+    w = smoothstep(0.0, 0.3, t)
+    f = smoothstep(0.38, 0.62, t)
+    return tuple((name, k) for name, k in (("body", 1 - w), (f"arm_{side}", w * (1 - f)),
+                                           (f"fore_{side}", w * f)) if k > 0)
+
+
 def sleeve(s):
-    bone = f"arm_{'l' if s > 0 else 'r'}"
     n_al, n_ar = 40, 72
     rows = []
     for i in range(n_al + 1):
         t = i / n_al
-        w = smoothstep(0.0, 0.3, t)
-        bones = ((bone, w), ("body", 1 - w)) if w < 1 else ((bone, 1.0),)
         rows.append([vert(sleeve_at(s, t, 2 * math.pi * j / n_ar), "robe", gloss=0.18, fuzz=0.05,
-                          bones=bones) for j in range(n_ar)])
+                          bones=sleeve_bones(s, t)) for j in range(n_ar)])
     # The cuff's edge turned in, so it has a thickness.
     for color, out, ext in (("gold", -0.012, 0.008), ("robe", -0.022, -0.03)):
         rows.append([vert(sleeve_at(s, 1.0, 2 * math.pi * j / n_ar, out, ext), color,
-                          bones=((bone, 1.0),)) for j in range(n_ar)])
+                          bones=sleeve_bones(s, 1.0)) for j in range(n_ar)])
     grid(rows, True, "robe")
 
 
 def cuff(s):
-    bone = f"arm_{'l' if s > 0 else 'r'}"
+    bone = f"fore_{'l' if s > 0 else 'r'}"
     t = 0.905
     path = [sleeve_at(s, t, 2 * math.pi * j / 400) for j in range(401)]
     nrm = [sleeve_normal(s, t, 2 * math.pi * j / 400) for j in range(401)]
@@ -884,8 +980,6 @@ TAIL_WIDE = 0.8  # against the beast form's plumes
 TAIL_LEAN = 1.0  # how far back they set off (the beast form's 1)
 TAIL_STEPS = 60  # rings along a plume
 TAIL_COLS = 32
-# The shadow counts anything lower as standing on the floor (mesh.rs).
-TAIL_LOW = FLOOR + 0.5
 
 
 def tail_root():
@@ -974,15 +1068,14 @@ def tail(i):
     point = vert(pts[-1] + t1 * r1, "tailtip", gloss=0.0, fuzz=1.0, bones=tail_bones(i, 1.0), zone="tail")
     grid(rings, True, "fur", close_top=root, close_bottom=point)
     face_out(first)
-    return min(verts[v][0].y for r in rings for v in r)
 
 
 def tails():
-    low = min(tail(i) for i in range(9))
+    for i in range(9):
+        tail(i)
     # The round puff at the root the nine grow out of, as the beast form's.
     sphere(tail_root() + Vector((0, 0.01, -0.04)), Vector((0.11, 0.1, 0.085)), "fur",
            (("hips", 1.0),), gloss=0.0, fuzz=1.0, zone="tail")
-    print(f"tails: lowest point y {low:.3f} (keep above {TAIL_LOW:.3f})")
 
 
 # ---- normals, occlusion, out ---------------------------------------------------
@@ -1654,7 +1747,7 @@ def head_proxy():
         for j in range(n):
             ph = 2 * math.pi * j / n
             u = Vector((math.sin(th) * math.cos(ph), math.cos(th), math.sin(th) * math.sin(ph)))
-            pts.append(HEAD_C + Vector((HEAD_R.x * u.x, HEAD_R.y * u.y, HEAD_R.z * u.z)))
+            pts.append(head_at(HEAD_C + Vector((HEAD_R.x * u.x, HEAD_R.y * u.y, HEAD_R.z * u.z))))
     for i in range(n):
         for j in range(n):
             a = i * n + j
@@ -1699,6 +1792,10 @@ def occlusion(nrm, others=None):
 
 
 def write_mesh(path, others=None):
+    """Write what is built, reshaped (SHAPE) as it goes; `others` are
+    already."""
+    for i, v in enumerate(verts):
+        verts[i] = (reshape(v[0], v[6], v[7]),) + v[1:]
     nrm = normals()
     ao = occlusion(nrm, others)
     zone = None
@@ -1748,6 +1845,12 @@ def write_ron(path):
     nose = Vector((0, 0.532, 0.282))
     mouth = Vector((0, hc.y - 0.205, jaw_front(hc.y - 0.205) - 0.06 + 0.009))
     cheek = Vector((0.16, hc.y - 0.15, hc.z + 0.1))
+    chin = Vector((0, hc.y - 0.2, 0.2))
+    # All of it as reshaped (SHAPE): the head grown about the neck.
+    k = SHAPE["head"]
+    hc, hr = head_at(hc), hr * k
+    jaw_c, jaw_r = head_at(JAW_C), JAW_R * k
+    nose, mouth, cheek, chin = (head_at(p) for p in (nose, mouth, cheek, chin))
     # The face, measured off the sheet's front view: the eyes' middles
     # 51 px either side of the face's (238.5), at y 228, 47 px round; set
     # 0.02 higher, as the app's camera looks down 9° and the face, in
@@ -1759,23 +1862,26 @@ def write_ron(path):
                         "blush: (at: (0.5, -0.46), r: (0.15, 0.085)")
     head_part = head_part.replace("bake_cell: 0.025", "bake_cell: 0.008")
     out = [head_part, "    pivots: {\n"]
-    out += [f'        "{k}": {v3(v)},\n' for k, v in PIVOTS.items()]
+    out += [f'        "{name}": {v3(reshape_pivot(name, p))},\n' for name, p in PIVOTS.items()]
     out.append("    },\n    parents: {\n")
     out += [f'        "{k}": "{v}",\n' for k, v in PARENTS.items()]
     out.append("    },\n    jiggles: [\n")
-    out.append(f'        (name: "chin", parent: "head", at: {v3(Vector((0, hc.y - 0.2, 0.2)))}, '
-               f'radius: 0.17, share: 0.6),\n')
+    out.append(f'        (name: "chin", parent: "head", at: {v3(chin)}, '
+               f'radius: {fmt(0.17 * k)}, share: 0.6),\n')
     out.append("    ],\n    parts: [\n")
     out.append(f'        (name: "head", bone: "head", shape: Ellipsoid({v3(hr)}), at: {v3(hc)},\n'
-               f'            blend: 0.03, color: "skin", fuzz: 0, zone: "head"),\n')
-    out.append(f'        (name: "jaw", bone: "head", shape: Ellipsoid({v3(JAW_R)}), at: {v3(JAW_C)},\n'
-               f'            blend: 0.06, color: "skin", fuzz: 0, zone: "chin"),\n')
-    out.append(f'        (name: "nose", bone: "head", shape: Ellipsoid((0.024, 0.017, 0.014)), at: {v3(nose)},\n'
-               f'            blend: 0.015, color: "skin", fuzz: 0, zone: "head"),\n')
-    out.append(f'        (name: "mouth", bone: "head", shape: Ellipsoid((0.13, 0.07, 0.06)), at: {v3(mouth)},\n'
-               f'            blend: 0.03, color: "skin", fuzz: 0, zone: "chin"),\n')
-    out.append(f'        (name: "cheek", bone: "head", shape: Ellipsoid((0.12, 0.1, 0.11)), at: {v3(cheek)},\n'
-               f'            blend: 0.07, color: "skin", fuzz: 0, mirror: true, zone: "cheek"),\n')
+               f'            blend: {fmt(0.03 * k)}, color: "skin", fuzz: 0, zone: "head"),\n')
+    out.append(f'        (name: "jaw", bone: "head", shape: Ellipsoid({v3(jaw_r)}), at: {v3(jaw_c)},\n'
+               f'            blend: {fmt(0.06 * k)}, color: "skin", fuzz: 0, zone: "chin"),\n')
+    out.append(f'        (name: "nose", bone: "head", shape: Ellipsoid({v3(Vector((0.024, 0.017, 0.014)) * k)}), '
+               f'at: {v3(nose)},\n'
+               f'            blend: {fmt(0.015 * k)}, color: "skin", fuzz: 0, zone: "head"),\n')
+    out.append(f'        (name: "mouth", bone: "head", shape: Ellipsoid({v3(Vector((0.13, 0.07, 0.06)) * k)}), '
+               f'at: {v3(mouth)},\n'
+               f'            blend: {fmt(0.03 * k)}, color: "skin", fuzz: 0, zone: "chin"),\n')
+    out.append(f'        (name: "cheek", bone: "head", shape: Ellipsoid({v3(Vector((0.12, 0.1, 0.11)) * k)}), '
+               f'at: {v3(cheek)},\n'
+               f'            blend: {fmt(0.07 * k)}, color: "skin", fuzz: 0, mirror: true, zone: "cheek"),\n')
     out.append("    ],\n")
     # Everything else is made here, as meshes (simplified and packed by
     # build_figure.sh into figure/<name>.mesh.gz, embedded by the app's

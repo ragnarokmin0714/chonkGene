@@ -13,7 +13,7 @@ here=$(cd "$(dirname "$0")" && pwd)
 root=$(cd "$here/../../.." && pwd)
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
-blender -b --factory-startup -P "$here/figure_blend.py" -- "$work" | grep -E "vertices|tails:|Error|Traceback" || true
+blender -b --factory-startup -P "$here/figure_blend.py" -- "$work" | grep -E "vertices|Error|Traceback" || true
 test -f "$work/human_figure.ron" || { echo "Blender wrote no model" >&2; exit 1; }
 cargo build -q --release --manifest-path "$root/tools/meshbake/Cargo.toml"
 mkdir -p "$here/figure"
