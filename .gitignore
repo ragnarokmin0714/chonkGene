@@ -11,3 +11,6 @@ docs/icon-drafts/
 
 # The Blender hair pilot's output (assets/species/fox/hair_blend.py): not shipped yet.
 /assets/species/*/hair_*.mesh
+
+# Python bytecode from the asset generators (Blender imports gen_tails.py).
+__pycache__/
