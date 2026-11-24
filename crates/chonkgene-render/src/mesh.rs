@@ -3,6 +3,8 @@
 //! occlusion, where it sits on the face, and up to four bone weights. Posing
 //! then only moves vertices, so a frame costs a raster pass, not a ray march.
 
+use std::io::Read;
+
 use chonkgene_rig::math::{V3, smoothstep, v3};
 use chonkgene_rig::sdf::Shape;
 use chonkgene_rig::{FLOOR, Layer, Look, Model, Pose, Scene, ZONES};
@@ -201,23 +203,13 @@ pub fn bake(
             }
         })
         .collect();
-    let low: Vec<&Vertex> = vertices
-        .iter()
-        .filter(|v: &&Vertex| v.pos[1] < FLOOR + 0.5)
-        .collect();
-    let reach = |axis: usize, centre: f32| {
-        low.iter()
-            .map(|v| (v.pos[axis] - centre).abs())
-            .fold(0.3f32, f32::max)
-            * 1.15
-    };
-    let shadow = (reach(0, ROOT_PIVOT.x), reach(2, ROOT_PIVOT.z));
+    let shadow = shadow_of(&vertices);
     let head = chonkgene_rig::ZONES.iter().position(|z| *z == "head");
     let crown = (0..vertices.len())
         .filter(|&i| head.is_some_and(|h| usize::from(zones[i]) == h))
         .max_by(|&a, &b| vertices[a].pos[1].total_cmp(&vertices[b].pos[1]))
         .unwrap_or(0);
-    Ok(Mesh {
+    let mut mesh = Mesh {
         shadow,
         zones,
         crown,
@@ -225,7 +217,32 @@ pub fn bake(
         indices,
         eye_r: radii(eyes),
         mouth_r: radii(mouth),
-    })
+    };
+    // What was made elsewhere for this look (the fox's human form: all
+    // but her painted head).
+    for m in model.meshes_on(coat).filter(|m| !m.src.is_empty()) {
+        let mut text = String::new();
+        flate2::read::GzDecoder::new(&m.src[..])
+            .read_to_string(&mut text)
+            .map_err(|e| format!("mesh {:?}: {e}", m.name))?;
+        import(&mut mesh, model, skeleton, coat, "back", &text)
+            .map_err(|e| format!("mesh {:?}: {e}", m.name))?;
+    }
+    Ok(mesh)
+}
+
+/// The shadow's radii across and along the body: what stands on the floor
+/// (legs, belly, feet), a little wider.
+fn shadow_of(vertices: &[Vertex]) -> (f32, f32) {
+    let reach = |axis: usize, centre: f32| {
+        vertices
+            .iter()
+            .filter(|v| v.pos[1] < FLOOR + 0.5)
+            .map(|v| (v.pos[axis] - centre).abs())
+            .fold(0.3f32, f32::max)
+            * 1.15
+    };
+    (reach(0, ROOT_PIVOT.x), reach(2, ROOT_PIVOT.z))
 }
 
 /// The field on an `n`³ grid, a slab of it per thread.
@@ -407,7 +424,8 @@ fn weigh(parts: &[chonkgene_rig::PartView], sk: &Skeleton, p: V3) -> ([u32; 4], 
 ///   (mesh.wgsl `woven` draws the pattern, sharp at any size).
 ///
 /// The colours come from `model`'s coat `coat`, so a dyed model dyes it.
-/// Nothing here is painted (no face) and nothing is a tail.
+/// Nothing here is painted (no face); vertices on a tail are marked to
+/// burn as baked ones are. The crown and the shadow take it in.
 pub fn import(
     mesh: &mut Mesh,
     model: &Model,
@@ -520,6 +538,7 @@ pub fn import(
     if let Some(&i) = mesh.indices[..].iter().find(|&&i| i >= base + count) {
         return Err(format!("a triangle names vertex {} of {count}", i - base));
     }
+    mesh.shadow = shadow_of(&mesh.vertices);
     // The crown (where bubbles hang from) may now be the top of the hair.
     let head = ZONES.iter().position(|z| *z == "head").map(|h| h as u8);
     if let Some(top) = (0..mesh.vertices.len())

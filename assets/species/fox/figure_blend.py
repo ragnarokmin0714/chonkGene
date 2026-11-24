@@ -15,7 +15,10 @@
 #   coats that wear them (the 銀白版 has none);
 # - human_figure.ron: human.ron's coats, hair colours and face, with this
 #   figure's skeleton and only the painted head (the face is painted on an
-#   ellipsoid by our own shaders, so the head stays a baked part).
+#   ellipsoid by our own shaders, so the head stays a baked part), and the
+#   meshes it is drawn with, by look.
+#
+# build_figure.sh runs this and packs what the app embeds into figure/.
 #
 # Proportions are measured off the sheet's front and side views (her
 # outline traced in pixels below, in the sheet's 正面 / 側面 at 2752 px
@@ -1773,6 +1776,14 @@ def write_ron(path):
                f'            blend: 0.03, color: "skin", fuzz: 0, zone: "chin"),\n')
     out.append(f'        (name: "cheek", bone: "head", shape: Ellipsoid((0.12, 0.1, 0.11)), at: {v3(cheek)},\n'
                f'            blend: 0.07, color: "skin", fuzz: 0, mirror: true, zone: "cheek"),\n')
+    out.append("    ],\n")
+    # Everything else is made here, as meshes (simplified and packed by
+    # build_figure.sh into figure/<name>.mesh.gz, embedded by the app's
+    # `skin::human`): the figure in every look, a hairdo's hair only in that
+    # hairdo, 紅髮版's armbands only on her coat (白色).
+    out.append("    meshes: [\n        (name: \"figure\"),\n"
+               "        (name: \"armbands\", coats: [\"white\"]),\n")
+    out += [f'        (name: "hair_{style}", style: Some("{style}")),\n' for style in HAIRDOS]
     out.append("    ],\n")
     with open(path, "w", encoding="utf-8") as f:
         f.write("".join(out) + tail)

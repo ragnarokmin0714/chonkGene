@@ -93,17 +93,54 @@ pub fn biped(id: &str) -> Result<(Model, Skeleton), String> {
 
 /// A pet's human form with every hairdo and hair colour in it (see
 /// [`human`]), for listing them.
+///
+/// Only the fox has one (PLAN §8: her 人型形態), her whole figure made in
+/// Blender (`assets/species/fox/figure_blend.py`, packed by
+/// `build_figure.sh` into `figure/`): the model holds her painted head,
+/// her skeleton and her looks, and names the meshes that make the rest,
+/// embedded here.
 pub fn human_model(id: &str) -> Result<Model, String> {
-    let src = match id {
-        "fox" => include_str!("../../../assets/species/fox/human.ron"),
+    let (src, packed): (&str, Packed) = match id {
+        "fox" => (
+            include_str!("../../../assets/species/fox/figure/figure.ron"),
+            fox_figure,
+        ),
         _ => return Err(format!("no human form {id:?}")),
     };
-    Model::parse(src, builtin::POSES).map_err(|e| e.to_string())
+    Model::parse(src, builtin::POSES)
+        .map_err(|e| e.to_string())?
+        .with_meshes(|name| {
+            packed(name)
+                .map(std::sync::Arc::from)
+                .ok_or_else(|| format!("{id}: no mesh {name:?} embedded"))
+        })
 }
 
-/// A pet's human form (only the fox has one, PLAN §8: her 人型形態): a
-/// two-legged child's model in hairdo `style` and hair colour `hair`
-/// (unknown ones fall back to the first), and its skeleton.
+/// A human form's meshes by name, gzipped, as embedded.
+type Packed = fn(&str) -> Option<&'static [u8]>;
+
+/// The fox's figure meshes, gzipped (`assets/species/fox/figure`).
+fn fox_figure(name: &str) -> Option<&'static [u8]> {
+    Some(match name {
+        "figure" => include_bytes!("../../../assets/species/fox/figure/figure.mesh.gz"),
+        "armbands" => include_bytes!("../../../assets/species/fox/figure/armbands.mesh.gz"),
+        "hair_ponytail" => {
+            include_bytes!("../../../assets/species/fox/figure/hair_ponytail.mesh.gz")
+        }
+        "hair_twintails" => {
+            include_bytes!("../../../assets/species/fox/figure/hair_twintails.mesh.gz")
+        }
+        "hair_princess" => {
+            include_bytes!("../../../assets/species/fox/figure/hair_princess.mesh.gz")
+        }
+        _ => return None,
+    })
+}
+
+/// A pet's human form: a two-legged child's model in hairdo `style` and
+/// hair colour `hair` (unknown ones fall back to the first), and its
+/// skeleton. Baked ([`crate::mesh::bake`]), her meshes for that look and
+/// coat come with it.
 pub fn human(id: &str, style: &str, hair: &str) -> Result<(Model, Skeleton), String> {
     let model = human_model(id)?.styled(style).dyed(hair);
     let sk = Skeleton::new(&model);

@@ -2,6 +2,7 @@
 //! resolved form.
 
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use serde::Deserialize;
 
@@ -140,6 +141,19 @@ struct ModelFile {
     /// each names only the slots it changes.
     #[serde(default)]
     hairs: Vec<CoatFile>,
+    /// Meshes made elsewhere and drawn with what is baked (see
+    /// [`Model::meshes`]).
+    #[serde(default)]
+    meshes: Vec<MeshFile>,
+}
+
+#[derive(Deserialize)]
+struct MeshFile {
+    name: String,
+    #[serde(default)]
+    style: Option<String>,
+    #[serde(default)]
+    coats: Vec<String>,
 }
 
 #[derive(Deserialize)]
@@ -632,6 +646,24 @@ pub struct Model {
     /// Hair colours chosen apart from the coat (the fox's human form): the
     /// slots each one sets, over whatever the coat says.
     pub hairs: Vec<Dye>,
+    /// Meshes made elsewhere (in Blender) and drawn with what is baked: the
+    /// fox's human form is all meshes but her painted head. Named here,
+    /// their contents put in by whoever embeds them
+    /// ([`Model::with_meshes`]); `chonkgene_render::mesh::bake` adds them.
+    pub meshes: Vec<MeshRef>,
+}
+
+/// A mesh made elsewhere, by name, the look it belongs to, and what is in
+/// it (`chonkgene_render::mesh::import`'s text, gzipped; empty until put
+/// in, and then left out of the bake).
+#[derive(Clone, Debug)]
+pub struct MeshRef {
+    pub name: String,
+    /// Only in this style (a hairdo); in every style if none.
+    pub style: Option<String>,
+    /// Only on these coats; on every coat if empty.
+    pub coats: Vec<usize>,
+    pub src: Arc<[u8]>,
 }
 
 /// Colours for a few slots, laid over a coat's (a hair colour).
@@ -666,10 +698,12 @@ impl Model {
         self.parts.iter().position(|p| p.name == name)
     }
 
-    /// The styles (hairdos) its parts name, in the order they first come.
+    /// The styles (hairdos) its parts and meshes name, in the order they
+    /// first come.
     pub fn styles(&self) -> Vec<&str> {
         let mut out: Vec<&str> = Vec::new();
-        for s in self.parts.iter().filter_map(|p| p.style.as_deref()) {
+        let parts = self.parts.iter().filter_map(|p| p.style.as_deref());
+        for s in parts.chain(self.meshes.iter().filter_map(|m| m.style.as_deref())) {
             if !out.contains(&s) {
                 out.push(s);
             }
@@ -684,7 +718,28 @@ impl Model {
         let Some(&keep) = styles.iter().find(|s| **s == style).or(styles.first()) else {
             return self.clone();
         };
-        self.only(|p| p.style.as_deref().is_none_or(|s| s == keep))
+        let mut out = self.only(|p| p.style.as_deref().is_none_or(|s| s == keep));
+        out.meshes
+            .retain(|m| m.style.as_deref().is_none_or(|s| s == keep));
+        out
+    }
+
+    /// The meshes drawn on coat `coat`.
+    pub fn meshes_on(&self, coat: usize) -> impl Iterator<Item = &MeshRef> {
+        self.meshes
+            .iter()
+            .filter(move |m| m.coats.is_empty() || m.coats.contains(&coat))
+    }
+
+    /// The model with what is in its meshes put in, by name.
+    pub fn with_meshes(
+        mut self,
+        packed: impl Fn(&str) -> Result<Arc<[u8]>, String>,
+    ) -> Result<Model, String> {
+        for m in &mut self.meshes {
+            m.src = packed(&m.name)?;
+        }
+        Ok(self)
     }
 
     /// The model with only the parts `keep` keeps (the face stays on its
@@ -985,6 +1040,24 @@ fn resolve(file: ModelFile, shared: HashMap<String, PoseFile>) -> Result<Model, 
         });
     }
 
+    let mut meshes = Vec::new();
+    for m in &file.meshes {
+        let mut on = Vec::new();
+        for c in &m.coats {
+            let i = coats
+                .iter()
+                .position(|k: &Coat| k.name == *c)
+                .ok_or_else(|| ctx(format!("mesh {:?} on no coat {c:?}", m.name)))?;
+            on.push(i);
+        }
+        meshes.push(MeshRef {
+            name: m.name.clone(),
+            style: m.style.clone(),
+            coats: on,
+            src: Arc::from(&[][..]),
+        });
+    }
+
     let mut jiggles = Vec::new();
     for j in &file.jiggles {
         let parent = bones.iter().position(|b| *b == j.parent).ok_or_else(|| {
@@ -1032,6 +1105,7 @@ fn resolve(file: ModelFile, shared: HashMap<String, PoseFile>) -> Result<Model, 
             .canvas
             .map(|(w, h)| (w.clamp(2.0, 12.0), h.clamp(2.0, 12.0))),
         hairs,
+        meshes,
     })
 }
 

@@ -26,6 +26,9 @@ serde = { version = "1.0.229", features = ["derive"] }
 tiny-skia = "0.12.0"
 bytemuck = "1.25.2"
 pollster = "1.0.1"
+# Unpacks the fox's human-form meshes (gzipped, embedded); already in the
+# tree through png, with the same pure-Rust backend.
+flate2 = { version = "1.1.10", default-features = false, features = ["rust_backend"] }
 # Real-time 3D pets (chonkgene-render's gpu module).
 wgpu = "30.0.1"
 # X11 only: v1 runs under XWayland on Wayland (PLAN §0), and pet windows have

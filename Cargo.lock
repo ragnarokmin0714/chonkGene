@@ -687,6 +687,7 @@ dependencies = [
  "bytemuck",
  "chonkgene-core",
  "chonkgene-rig",
+ "flate2",
  "pollster",
  "skrifa 0.49.0",
  "tiny-skia",

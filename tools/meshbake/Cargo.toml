@@ -1,0 +1,14 @@
+[package]
+name = "meshbake"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+# A developer tool, not part of the workspace: simplifies the meshes the
+# Blender scripts write (assets/species/fox/figure_blend.py) to what a pet
+# a couple of hundred pixels tall needs, and packs them for the app to
+# embed, so the app itself needs no mesh simplifier.
+[workspace]
+
+[dependencies]
+meshopt = "0.7.0"

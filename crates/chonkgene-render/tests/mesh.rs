@@ -2227,7 +2227,15 @@ fn the_fox_human_form_fits_the_shader_and_stands_on_her_feet() {
             .iter()
             .all(|c| c.colors[hair] == [0xD8, 0x32, 0x2A, 0xFF])
     );
-    assert!(red.part("pony0").is_some() && red.part("twin_l0").is_none());
+    // Her figure is made in Blender: a hairdo's hair only in it, 紅髮版's
+    // armbands only on her coat (白色), all of it embedded.
+    let on = |coat: &str| -> Vec<&str> {
+        let c = red.coat(coat).unwrap();
+        red.meshes_on(c).map(|m| m.name.as_str()).collect()
+    };
+    assert_eq!(on("white"), ["figure", "armbands", "hair_ponytail"]);
+    assert_eq!(on("snow"), ["figure", "hair_ponytail"]);
+    assert!(red.meshes.iter().all(|m| !m.src.is_empty()));
 }
 
 /// Her human form walks as a child does (PLAN §8, her human form:
@@ -2296,19 +2304,19 @@ fn the_fox_child_swings_her_arms_and_her_tails_and_hair_flow() {
     }
 }
 
-/// A mesh made in Blender (`assets/species/fox/hair_blend.py`) joins the
+/// A mesh made in Blender (`assets/species/fox/figure_blend.py`) joins the
 /// baked one: its colours come from the coat (dyed, so the hair's colour
 /// follows), its bones by name, its weights summing to one; the model
-/// without the parts it replaces keeps its face on the head; a bad file
-/// says what is wrong with it.
+/// without some of its parts keeps its face on the head; a bad file says
+/// what is wrong with it.
 #[test]
 fn a_mesh_made_elsewhere_joins_the_baked_one() {
     use chonkgene_render::mesh::{Mesh, import};
     use chonkgene_rig::ZONES;
     let (model, sk) = human("fox", "ponytail", "red").unwrap();
-    let bald = model.only(|p| !p.name.starts_with("pony") && !p.name.starts_with("hair"));
-    assert!(bald.parts.len() < model.parts.len());
-    assert_eq!(bald.parts[bald.face.on].name, "head");
+    let plain = model.only(|p| p.name != "cheek" && p.name != "nose");
+    assert!(plain.parts.len() < model.parts.len());
+    assert_eq!(plain.parts[plain.face.on].name, "head");
     let empty = || Mesh {
         vertices: Vec::new(),
         indices: Vec::new(),
@@ -2396,8 +2404,10 @@ fn chain_name<'a>(sk: &'a Skeleton, tails: &[Vec<usize>]) -> &'a str {
 
 #[test]
 fn the_human_forms_seal_and_eyes_land_in_the_same_place_on_the_gpu_and_the_cpu() {
-    let (model, sk) = human("fox", "ponytail", "white").unwrap();
+    let (mut model, sk) = human("fox", "ponytail", "white").unwrap();
     assert!(model.face.seal && model.face.chibi);
+    // The ray-marcher draws only what is baked: compare her bare head.
+    model.meshes.clear();
     lands_in_the_same_place("seal", &model, &sk, |m| m.face.seal = false);
     lands_in_the_same_place("chibi eyes", &model, &sk, |m| m.face.chibi = false);
 }
