@@ -2951,7 +2951,7 @@ fn cross(a: V3, b: V3) -> V3 {
 
 /// The turn (degrees, as [`M3::euler`]) that points `from` along `to`:
 /// the shortest turn between them (Rodrigues), read back as Euler angles.
-fn aim(from: V3, to: V3) -> V3 {
+pub(crate) fn aim(from: V3, to: V3) -> V3 {
     let (from, to) = (from.normalize(), to.normalize());
     let axis = cross(from, to);
     let (sin, cos) = (axis.length(), from.dot(to));

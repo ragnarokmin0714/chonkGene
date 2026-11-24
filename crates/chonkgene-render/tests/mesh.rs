@@ -2304,6 +2304,106 @@ fn the_fox_child_swings_her_arms_and_her_tails_and_hair_flow() {
     }
 }
 
+/// Her human form sits on her heels, her legs folded back either side of
+/// her (女の子座り) and her skirt spread to the floor, all of it above the
+/// floor line (legs out in front lay along it, under the picture's bottom
+/// from the app's camera); asleep curled on her side, she lies along the
+/// floor under her tails, which neither prop her up nor cover her face
+/// (PLAN §8, her human form: sitting and sleeping).
+#[test]
+fn the_fox_child_sits_on_her_heels_and_curls_up_under_her_tails() {
+    use chonkgene_render::skin::SleepPose;
+    use chonkgene_rig::{FLOOR, ZONES};
+    let (model, sk) = human("fox", "ponytail", "white").unwrap();
+    let mesh = bake(&model, &sk, 0, 0.33, model.bake_cell).unwrap();
+    let tail = ZONES.iter().position(|z| *z == "tail").unwrap() as u8;
+    let head = ZONES.iter().position(|z| *z == "head").unwrap() as u8;
+    // The skin as posed: (lowest of all, lowest not on a tail, top of the
+    // head).
+    let skin = |joints: &[chonkgene_render::skin::Joint]| {
+        let bones = sk.pose(joints);
+        let (mut low, mut body_low, mut crown) = (f32::MAX, f32::MAX, f32::MIN);
+        for (v, &zone) in mesh.vertices.iter().zip(&mesh.zones).step_by(3) {
+            let rest = v3(v.pos[0], v.pos[1], v.pos[2]);
+            let mut p = V3::ZERO;
+            for (b, w) in v.bones.iter().zip(v.weights) {
+                p = p + bones[*b as usize].apply(rest) * w;
+            }
+            low = low.min(p.y);
+            if zone != tail {
+                body_low = body_low.min(p.y);
+            }
+            if zone == head {
+                crown = crown.max(p.y);
+            }
+        }
+        (low, body_low, crown)
+    };
+    let settle = |w: &mut Mover, secs: f32| {
+        let mut j = Vec::new();
+        for _ in 0..(secs * 60.0) as usize {
+            j = w.step(1.0 / 60.0, false, 1.0);
+        }
+        j
+    };
+    let mut w = Mover::new(&sk, 1.0, &model).unwrap();
+    w.still();
+    let (_, standing_low, standing_crown) = skin(&settle(&mut w, 1.0));
+    assert!(
+        (standing_low - FLOOR).abs() < 0.05,
+        "stands at {standing_low}"
+    );
+    // Sitting: lower, on the floor, her feet out beside her skirt.
+    w.sit(true);
+    let j = settle(&mut w, 3.0);
+    let (_, low, crown) = skin(&j);
+    assert!((low - FLOOR).abs() < 0.08, "sits with her lowest at {low}");
+    assert!(
+        standing_crown - crown > 0.25,
+        "sitting, her head only {:.2} lower",
+        standing_crown - crown
+    );
+    let posed = sk.pose(&j);
+    for leg in ["leg_l", "leg_r"] {
+        let b = sk.bone(leg).unwrap();
+        let hip = sk.pivots[b];
+        let foot = posed[b].apply(v3(hip.x, FLOOR + 0.05, hip.z));
+        assert!(foot.x.abs() > 0.45, "{leg}: foot at x {:.2}", foot.x);
+        assert!(foot.z < 0.0, "{leg}: foot in front ({:.2})", foot.z);
+        assert!(foot.y > FLOOR - 0.06, "{leg}: foot under the floor");
+    }
+    // Curled up on her side asleep.
+    w.sit(false);
+    w.sleep_pose(SleepPose::Curl);
+    w.lie(true);
+    let j = settle(&mut w, 4.0);
+    assert!(w.ground() > 0.9, "laid on the floor: {}", w.ground());
+    let posed = sk.pose(&j);
+    let at = |name: &str| {
+        let b = sk.bone(name).unwrap();
+        posed[b].apply(sk.pivots[b])
+    };
+    let (h, hips) = (at("head"), at("hips"));
+    assert!(
+        (h.x - hips.x).abs() > 0.5 && (h.y - hips.y).abs() < 0.3,
+        "lying along the floor: head {h:?}, hips {hips:?}"
+    );
+    let (low, body_low, _) = skin(&j);
+    assert!(
+        low > body_low - 0.02,
+        "her tails reach {low:.2}, under her body ({body_low:.2})"
+    );
+    for chain in sk.tails() {
+        let tip = *chain.last().unwrap();
+        let p = posed[tip].apply(sk.pivots[tip]);
+        assert!(
+            (p - h).length() > 0.45,
+            "{} lies over her face",
+            sk.names[tip]
+        );
+    }
+}
+
 /// A mesh made in Blender (`assets/species/fox/figure_blend.py`) joins the
 /// baked one: its colours come from the coat (dyed, so the hair's colour
 /// follows), its bones by name, its weights summing to one; the model

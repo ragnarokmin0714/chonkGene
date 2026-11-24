@@ -11,8 +11,11 @@
 //! 曼赤肯's belly rubbed into its trap), `scratch` (held on the head
 //! and rubbed about), `laugh`, `fedup`, `sulk`, `jog` and `run` (running
 //! at pace 1.6, half way into a gallop, and 2.2, a full one),
-//! `sleep-chin`, `sleep-curl`, `sleep-side`, `sleep-up`, and `bury` (the
-//! Shiba lying, grinning, the beach's sand piled over it and burst out of).
+//! `sleep-chin`, `sleep-curl`, `sleep-side`, `sleep-up`, `sit` (sitting
+//! and staying, 坐下), and `bury` (the Shiba lying, grinning, the beach's
+//! sand piled over it and burst out of). `fox-human` is the fox's human
+//! form, in hairdo `STYLE` and hair colour `HAIR` from the environment;
+//! `COAT=` picks a coat by name.
 
 use std::sync::Arc;
 
@@ -21,7 +24,7 @@ use chonkgene_core::anim::{Act, Animator, Expression, HOLD_SECS, Hug, HugHold, P
 use chonkgene_core::species::Species;
 use chonkgene_render::MeshRenderer;
 use chonkgene_render::gpu::Gpu;
-use chonkgene_render::skin::{SleepPose, mesh_model};
+use chonkgene_render::skin::{SleepPose, human, mesh_model};
 
 const FPS: f32 = 15.0;
 
@@ -172,6 +175,11 @@ fn scenes() -> Vec<Scene> {
         sleep("sleep-curl", SleepPose::Curl),
         sleep("sleep-side", SleepPose::Side),
         sleep("sleep-up", SleepPose::BellyUp),
+        Scene {
+            secs: 4.0,
+            walk_first: false,
+            ..travel("sit", Posture::Sit)
+        },
     ]
 }
 
@@ -210,17 +218,25 @@ fn main() {
         .and_then(|s| s.parse().ok())
         .unwrap_or(1.0f32)
         .max(1.0);
+    let human_form = id.strip_suffix("-human");
+    let id = human_form.unwrap_or(id);
     let species = Species::from_id(id).unwrap_or_else(|| panic!("no species {id:?}"));
     let gpu: &'static Gpu = Box::leak(Box::new(Gpu::new().expect("a GPU")));
     gpu.set_budget(1.0);
-    let (model, _) = mesh_model(id).unwrap_or_else(|e| panic!("{e}"));
+    let env = |k: &str| std::env::var(k).unwrap_or_default();
+    let (model, _) = match human_form {
+        Some(id) => human(id, &env("STYLE"), &env("HAIR")),
+        None => mesh_model(id),
+    }
+    .unwrap_or_else(|e| panic!("{e}"));
+    let coat = model.coat(&env("COAT")).unwrap_or(0);
     let model = Arc::new(model);
     std::fs::create_dir_all(out).expect("out dir");
     for scene in scenes() {
         if only.is_some_and(|o| o != scene.name) {
             continue;
         }
-        let mut r = MeshRenderer::new(gpu, Arc::clone(&model), 1.0, 0.33, 0).expect("renderer");
+        let mut r = MeshRenderer::new(gpu, Arc::clone(&model), 1.0, 0.33, coat).expect("renderer");
         r.sleep_in(scene.sleep);
         let mut a = Animator::new(3, 0.33, species.waddle())
             .with_pops(false)

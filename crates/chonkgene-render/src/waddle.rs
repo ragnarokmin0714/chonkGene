@@ -11,7 +11,7 @@ use std::f32::consts::{PI, TAU};
 
 use chonkgene_core::anim::{Act, Hug};
 
-use chonkgene_rig::math::v3;
+use chonkgene_rig::math::{V3, v3};
 use chonkgene_rig::{FLOOR, Model};
 
 use chonkgene_core::Zone;
@@ -23,7 +23,8 @@ use crate::skin::{
     Walk, bite, peck, tempo_split,
 };
 use crate::skin::{
-    FLOW_HZ, JIGGLE, JIGGLE_MOST, SWISH_HZ, SWISH_REST, SWISH_WALK, Tail, Travel, Wave, drift, hold,
+    FLOW_HZ, JIGGLE, JIGGLE_MOST, SWISH_HZ, SWISH_REST, SWISH_WALK, Tail, Travel, Wave, aim, drift,
+    hold,
 };
 
 /// How far a bird tips its body and head down for
@@ -80,6 +81,30 @@ const HAIR_HANG: f32 = 0.7;
 const HAIR_BOB: f32 = 70.0;
 const HAIR_PACE: f32 = 500.0;
 const HAIR_TURN: f32 = 0.35;
+/// A child sitting (the fox's human form, PLAN §8): on her heels with her
+/// legs folded back either side of her (女の子座り: degrees back from
+/// hanging, and out, the feet on the floor beside her), her skirt spread
+/// round her down to the floor (grown that much), leaning back a little,
+/// hands in her lap; dropped this share of her legs' length. What lies at
+/// the floor line is under the picture's bottom from the app's camera
+/// (legs out in front were), so all of it shows above it.
+const SEAT_LEGS: f32 = 78.0;
+const SEAT_SPLAY: f32 = 62.0;
+const SEAT_FLARE: f32 = 0.2;
+const SEAT_LEAN: f32 = 4.0;
+const SEAT_ARMS: f32 = 24.0;
+const SEAT_LOW: f32 = 0.57;
+/// Dozing off sitting up (her `Chin` sleep): slumped forward, head down.
+const DOZE_SLUMP: f32 = 9.0;
+/// Curled up on her side asleep (her `Curl` sleep): rolled over (degrees),
+/// her legs drawn up (the upper one further), the lower arm up under her
+/// head and the upper over her front, her head laid over toward the
+/// floor; her tails over her like a quilt (see [`quilt`]).
+const CURL_ROLL: f32 = 90.0;
+const CURL_LEGS: [f32; 2] = [70.0, 56.0];
+const CURL_PILLOW: f32 = 150.0;
+const CURL_HUG: f32 = 55.0;
+const CURL_HEAD: f32 = 14.0;
 
 /// One frame's motion, for what a child's body adds (see
 /// [`Waddle::child`]): pace and step phase, the body's vertical
@@ -92,6 +117,9 @@ struct Shake {
     pace_acc: f32,
     lie: f32,
     strides: [f32; 2],
+    /// How far sat down, and which way it faces (+1 right, −1 left).
+    sit: f32,
+    facing: f32,
 }
 
 /// Walks either way.
@@ -180,10 +208,12 @@ impl Mover {
         }
     }
 
-    /// The pose to sleep in (birds always tuck in, or stand: the owl).
+    /// The pose to sleep in (birds always tuck in, or stand: the owl; the
+    /// fox's human form dozes sitting or curls up on her side).
     pub fn sleep_pose(&mut self, pose: SleepPose) {
-        if let Self::Quad(w) = self {
-            w.sleep_pose(pose);
+        match self {
+            Self::Quad(w) => w.sleep_pose(pose),
+            Self::Biped(w) => w.sleep_pose = pose,
         }
     }
 
@@ -398,6 +428,17 @@ pub struct Waddle {
     ear: Spring,
     bell: Option<usize>,
     bell_swing: (Spring, Spring),
+    /// The bone her skirt hangs from (laid over her lap sitting), and how
+    /// far to drop her to sit on the floor.
+    hips: Option<usize>,
+    seat_drop: f32,
+    /// How she sleeps (only `Curl` is told apart: on her side; the rest
+    /// doze sitting up), and how far into curling up.
+    pub(crate) sleep_pose: SleepPose,
+    curl: Spring,
+    /// Each tail's turn over her as a quilt, curled up asleep: lying on her
+    /// left side (facing right), and on her right.
+    quilts: Vec<[V3; 2]>,
 }
 
 impl Waddle {
@@ -482,6 +523,11 @@ impl Waddle {
             ear: Spring::default(),
             bell: sk.bone("bell"),
             bell_swing: Default::default(),
+            hips: sk.bone("hips"),
+            seat_drop: leg_len * SEAT_LOW,
+            sleep_pose: SleepPose::default(),
+            curl: Spring::default(),
+            quilts: quilt(sk),
         })
     }
 
@@ -1116,6 +1162,8 @@ impl Waddle {
             pace_acc,
             lie,
             strides,
+            sit,
+            facing,
         };
         self.child(&mut j, &shake, &lv, &f, dt);
         self.busy = s > 0.0
@@ -1134,9 +1182,57 @@ impl Waddle {
     /// arms swinging with the steps, nine tails flowing, hair, ears and
     /// the bell swinging on springs. Nothing on a bird.
     fn child(&mut self, j: &mut [Joint], k: &Shake, lv: &Levels, f: &Out, dt: f32) {
+        if self.arms[0].is_none() {
+            return;
+        }
         let s = k.s;
         let yaw_acc = (self.yaw.v - self.yaw_v) / dt;
         self.yaw_v = self.yaw.v;
+        // Sitting, she sits on the floor (a bird's legs fold under it: hers
+        // go out in front); asleep, she dozes off sitting up or curls up on
+        // her side.
+        let curl_goal = if self.sleep_pose == SleepPose::Curl {
+            k.lie
+        } else {
+            0.0
+        };
+        let curl = self.curl.step(curl_goal, 0.0, 1.0, 1.0, dt).clamp(0.0, 1.0);
+        let seat = k.sit * (1.0 - curl);
+        let doze = k.lie * (1.0 - curl);
+        // (Taking back the bird's sitting first.)
+        j[0].shift.y += SIT_DROP * k.sit - self.seat_drop * seat;
+        j[self.body].rot.x += -SEAT_LEAN * seat + DOZE_SLUMP * doze;
+        if let Some(h) = self.hips {
+            j[h].swell += SEAT_FLARE * (seat + doze);
+        }
+        for (side, &leg) in self.legs.iter().enumerate() {
+            let sign = if side == 0 { 1.0 } else { -1.0 };
+            // The upper leg, curled on her side, is the one away from the
+            // floor: her right lying on her left.
+            let upper = (side == 1) == (k.facing > 0.0);
+            let curled = CURL_LEGS[usize::from(!upper)];
+            j[leg].rot.x += SIT_LEGS * k.sit + SEAT_LEGS * seat - curled * curl;
+            j[leg].rot.z += sign * SEAT_SPLAY * seat;
+        }
+        for (side, arm) in self.arms.iter().enumerate() {
+            let Some(a) = *arm else { continue };
+            let sign = if side == 0 { 1.0 } else { -1.0 };
+            let lower = (side == 0) == (k.facing > 0.0);
+            j[a].rot.x -= SEAT_ARMS * seat;
+            j[a].rot.z -= sign * 6.0 * seat;
+            if lower {
+                // Up under her head, a pillow.
+                j[a].rot.z += sign * CURL_PILLOW * curl;
+            } else {
+                j[a].rot.x -= CURL_HUG * curl;
+                j[a].rot.z -= sign * 12.0 * curl;
+            }
+        }
+        // Rolled onto her side (her left facing right), laid on the floor
+        // by the renderer (see `ground`), her head laid over on her arm.
+        j[0].rot.z -= k.facing * CURL_ROLL * curl;
+        j[self.head].rot.z -= k.facing * CURL_HEAD * curl;
+        self.ground = self.ground.max(curl);
         // Arms: each with the other side's leg, smoothed (a planted foot
         // sweeps back evenly, an arm swings); out a little at each step;
         // at rest they hang, stirring with her breath.
@@ -1168,8 +1264,10 @@ impl Waddle {
                 flick: lv.flick,
                 flow: true,
             };
-            for tail in &mut self.tails {
+            let side = usize::from(k.facing < 0.0);
+            for (tail, quilt) in self.tails.iter_mut().zip(&self.quilts) {
                 tail.wave(j, &wave, dt);
+                j[tail.bones[0]].rot = j[tail.bones[0]].rot + quilt[side] * curl;
             }
         }
         // Hair hangs: leaning the head, it swings back against the lean;
@@ -1480,4 +1578,38 @@ impl Waddle {
             }
         }
     }
+}
+
+/// Each of several tails' turn over the fox curled up asleep on her side
+/// (her human form), as [`aim`] gives it, for lying on her left side
+/// (facing right) and on her right: up over the side away from the floor
+/// and down over her front like a quilt, spread from her hips down her
+/// legs in the order they lie in the fan, none over her face.
+fn quilt(sk: &Skeleton) -> Vec<[V3; 2]> {
+    let chains = sk.tails();
+    if chains.len() < 2 {
+        return vec![[V3::ZERO; 2]; chains.len()];
+    }
+    let dirs: Vec<V3> = chains
+        .iter()
+        .map(|c| match c[..] {
+            [a, b, ..] => (sk.pivots[b] - sk.pivots[a]).normalize(),
+            _ => v3(0.0, 1.0, 0.0),
+        })
+        .collect();
+    let mut order: Vec<usize> = (0..chains.len()).collect();
+    order.sort_by(|&a, &b| dirs[a].x.total_cmp(&dirs[b].x));
+    let mut out = vec![[V3::ZERO; 2]; chains.len()];
+    let n = (chains.len() - 1) as f32;
+    for (slot, &t) in order.iter().enumerate() {
+        let along = slot as f32 / n;
+        for (k, up) in [-1.0f32, 1.0].into_iter().enumerate() {
+            // Her side away from the floor is her right (−x) lying on her
+            // left; the tails nearest it in the fan go furthest up her.
+            let a = if up < 0.0 { along } else { 1.0 - along };
+            let want = v3(up * 0.45, 0.1 - 0.9 * a, 0.8).normalize();
+            out[t][k] = aim(dirs[t], want);
+        }
+    }
+    out
 }
