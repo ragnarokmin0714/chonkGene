@@ -70,6 +70,16 @@ pub enum Kind {
     Waggle,
     /// A quick shake of the head (the duckling).
     HeadShake,
+    /// Her hair tucked back behind her ear (the fox's human form).
+    HairTuck,
+    /// Hands clasped behind her back, rocking on her heels (the fox's
+    /// human form).
+    HandsBehind,
+    /// Both arms swung forward and back, waiting (the fox's human form).
+    ArmSwing,
+    /// Fiddling with her fingers in front of her, looking down a little
+    /// (the fox's human form).
+    Fiddle,
 }
 
 impl Kind {
@@ -100,6 +110,10 @@ impl Kind {
             Self::Dabble => (0.6, 1.0),
             Self::Waggle => (0.5, 0.8),
             Self::HeadShake => (0.4, 0.6),
+            Self::HairTuck => (1.1, 1.5),
+            Self::HandsBehind => (2.0, 3.2),
+            Self::ArmSwing => (1.4, 2.2),
+            Self::Fiddle => (1.4, 2.2),
         }
     }
 
@@ -122,6 +136,8 @@ impl Kind {
                 | Self::Waggle
                 | Self::HeadShake
                 | Self::Wag
+                | Self::HairTuck
+                | Self::ArmSwing
         )
     }
 
@@ -234,6 +250,20 @@ fn kit(species: &str) -> (Kit, Kit) {
                 (HeadTilt, 2),
             ],
             &[(Waggle, 1), (WingShift, 2)],
+        ),
+        // The fox's human form, a child (the waddle's `child`).
+        "child" => (
+            &[
+                (HairTuck, 3),
+                (HandsBehind, 3),
+                (HeadTilt, 3),
+                (Ripple, 3),
+                (WeightShift, 2),
+                (ArmSwing, 2),
+                (Fiddle, 2),
+                (Jingle, 1),
+            ],
+            &[(Dream, 2), (Ripple, 1)],
         ),
         _ => (&[(HeadTilt, 1), (WeightShift, 1)], &[(Dream, 1)]),
     }

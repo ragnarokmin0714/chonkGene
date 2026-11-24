@@ -147,6 +147,9 @@ pub struct MeshRenderer {
     gpu: &'static Gpu,
     model: Arc<Model>,
     sk: Skeleton,
+    /// Her hands (the fox's human form): each forearm's bone and the
+    /// middle of its palm at rest.
+    sk_hands: Option<[(usize, V3); 2]>,
     scale: f32,
     chonk: f32,
     coat: usize,
@@ -257,6 +260,7 @@ impl MeshRenderer {
         Some(Self {
             gpu,
             model,
+            sk_hands: crate::waddle::hands(&sk),
             sk,
             scale,
             chonk,
@@ -547,8 +551,12 @@ impl MeshRenderer {
     }
 
     /// Where a snack lies: on the floor just under the nose (or beak
-    /// or bill) of the pose shown, pixels.
+    /// or bill) of the pose shown, pixels; held in her hands (the fox's
+    /// human form).
     fn snack_spot(&self) -> Option<(f32, f32)> {
+        if self.sk_hands.is_some() {
+            return self.hands_at();
+        }
         let live = self.live.as_ref()?;
         let part = ["nose", "beak", "bill"]
             .iter()
@@ -1338,6 +1346,31 @@ impl MeshRenderer {
     fn canvas_forward(&self) -> V3 {
         let (s, c) = crate::raymarch::TILT_DEG.to_radians().sin_cos();
         v3(0.0, -s, -c)
+    }
+
+    /// Between her hands in the picture shown, pixels (the fox's human
+    /// form; no one else has any).
+    fn hands_at(&self) -> Option<(f32, f32)> {
+        let live = self.live.as_ref()?;
+        let [(l, pl), (r, pr)] = self.sk_hands?;
+        let mid = (self.shown_bones[l].apply(pl) + self.shown_bones[r].apply(pr)) * 0.5;
+        Some(live.canvas.project(mid))
+    }
+
+    /// Holding something to her chest, in her hands (the fox's human form
+    /// carrying a thing; anyone else carries it in its mouth).
+    pub fn set_holding(&mut self, on: bool) {
+        self.walk.hold(on);
+    }
+
+    /// Where something it carries goes, pixels: between her hands (the
+    /// fox's human form), in the mouth (everyone else, see [`Self::mouth`]),
+    /// and whether it is in hands.
+    pub fn carry_at(&self) -> Option<((f32, f32), bool)> {
+        match self.sk_hands {
+            Some(_) => self.hands_at().map(|at| (at, true)),
+            None => self.mouth().map(|at| (at, false)),
+        }
     }
 
     /// Where something carried in the mouth goes: just under the nose (or

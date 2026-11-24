@@ -305,6 +305,27 @@ impl Renderer {
         (x + facing.signum() * 0.16 * w as f32, y + 0.32 * h as f32)
     }
 
+    /// Where something it carries goes, in pixmap pixels, and how far it
+    /// turns with the head (radians, as [`Self::head_roll`]): between her
+    /// hands, upright, for the fox's human form; in the mouth (see
+    /// [`Self::mouth`]) for everyone else.
+    pub fn carry_at(&self, facing: f32) -> ((f32, f32), f32) {
+        if let Self::Mesh(r) = self
+            && let Some((at, in_hands)) = r.carry_at()
+        {
+            return (at, if in_hands { 0.0 } else { r.head_roll() });
+        }
+        (self.mouth(facing), self.head_roll())
+    }
+
+    /// Holding what it carries in its hands (only the fox's human form
+    /// has hands to: anyone else carries it in its mouth), set every frame.
+    pub fn set_holding(&mut self, on: bool) {
+        if let Self::Mesh(r) = self {
+            r.set_holding(on);
+        }
+    }
+
     /// How far the head is tipped over, radians (+ clockwise on the
     /// screen); 0 where frames are pictures cut beforehand.
     pub fn head_roll(&self) -> f32 {

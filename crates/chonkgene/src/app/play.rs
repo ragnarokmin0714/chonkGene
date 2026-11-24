@@ -1422,12 +1422,13 @@ impl Pet {
             props::draw_pat_hand(canvas, hand, (t - since) as f32);
         }
         if let Some(thing) = self.fun.carry {
-            let at = self.renderer.mouth(self.anim.facing);
-            // Turned with the head as it gnaws or trots along.
+            // In the mouth, turned with the head as it gnaws or trots
+            // along (in her hands, the fox's human form).
+            let (at, turn) = self.renderer.carry_at(self.anim.facing);
             let look = props::Look {
                 spin: if thing == Thing::Bone { 0.0 } else { 0.4 },
                 t: t as f32,
-                turn: self.renderer.head_roll(),
+                turn,
                 ..props::Look::default()
             };
             match self.fun.lift {
@@ -1885,10 +1886,10 @@ fn chase(ground: &mut Playground, pets: &mut [Pet], i: usize, ctx: &mut Ctx) {
         Order::Grab => {
             let (pw, ph) = p.renderer.size();
             crate::diag::diag!(
-                "{}: got the {:?}, its mouth at {:?} in a {pw}x{ph} picture, facing {}",
+                "{}: got the {:?}, held at {:?} in a {pw}x{ph} picture, facing {}",
                 p.save.name,
                 prop.thing,
-                p.renderer.mouth(p.anim.facing),
+                p.renderer.carry_at(p.anim.facing).0,
                 p.anim.facing
             );
             if prop.flying() {
@@ -2047,11 +2048,12 @@ pub(super) const LIFT_SECS: f64 = 0.25;
 /// seconds.
 const LEFT_LYING: f64 = 6.0;
 
-/// Where its feet go for its mouth to be over screen x `x`, keeping to the
-/// side of it it is on (as near as it is already, it stays).
+/// Where its feet go for its mouth (her hands: the fox's human form) to be
+/// over screen x `x`, keeping to the side of it it is on (as near as it is
+/// already, it stays).
 fn mouth_over(p: &Pet, x: f32) -> f32 {
     let feet = p.body.feet().0;
-    let mouth = p.placed.0 as f32 + p.renderer.mouth(p.anim.facing).0;
+    let mouth = p.placed.0 as f32 + p.renderer.carry_at(p.anim.facing).0.0;
     let reach = (mouth - feet).abs().min(0.6 * p.body.size.0);
     if (x - feet).abs() <= reach {
         feet
@@ -2139,9 +2141,10 @@ fn picking(ground: &mut Playground, p: &mut Pet, now: f64) -> Picking {
 
 impl Pet {
     /// Where what it holds is (screen pixels, the middle of its bottom),
-    /// drawn as [`props::held_at`] puts it in its mouth.
+    /// drawn as [`props::held_at`] puts it in its mouth (her hands: the
+    /// fox's human form).
     fn held_on_screen(&self, thing: Thing) -> (f32, f32) {
-        let mouth = self.renderer.mouth(self.anim.facing);
+        let mouth = self.renderer.carry_at(self.anim.facing).0;
         let width = self.renderer.size().0 as f32;
         let (at, ..) = props::held_at(thing, mouth, self.anim.facing, self.fun.scale, width);
         (self.placed.0 as f32 + at.0, self.placed.1 as f32 + at.1)

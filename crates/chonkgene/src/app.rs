@@ -3973,6 +3973,7 @@ impl Pet {
                 &pose,
             ))
         });
+        self.renderer.set_holding(self.fun.carry.is_some());
         if self.mind.asleep() {
             self.renderer
                 .render_asleep(&params, (t - self.asleep_since) as f32);

@@ -373,6 +373,7 @@ fn main() {
         .map(|c| model.coat(c).unwrap_or_else(|| panic!("no coat {c:?}")))
         .unwrap_or(0);
     std::fs::create_dir_all(out).expect("out dir");
+    let species = id.strip_suffix("-human").unwrap_or(id);
     let script = match mode.as_str() {
         "peek" => return peek(&model, out),
         "still" => return still(&model, &sk, coat, out, scale),
@@ -384,9 +385,10 @@ fn main() {
         "swim" => fly_swim(true),
         "look" => look(),
         "fidget" => fidget(),
-        "life" => life(id, false),
-        "smile" => life(id, true),
-        "scene" => scene(id),
+        // (Her human form lives as the fox does.)
+        "life" => life(species, false),
+        "smile" => life(species, true),
+        "scene" => scene(species),
         g => match GESTURES.iter().find(|(name, _)| *name == g) {
             Some(&(_, act)) => gesture(act),
             None => panic!("no mode {mode:?}"),
