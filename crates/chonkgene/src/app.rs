@@ -149,8 +149,9 @@ pub fn run(opts: Options) -> Result<(), String> {
     };
     crate::diag::open(&data.path);
     diag!(
-        "chonkGene {} on {}",
+        "chonkGene {} ({}) on {}",
         env!("CARGO_PKG_VERSION"),
+        env!("CHONKGENE_COMMIT"),
         std::env::consts::OS
     );
     match chonkgene_render::shared_gpu() {
