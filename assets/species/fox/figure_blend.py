@@ -32,6 +32,9 @@ import bpy
 from mathutils import Vector
 from mathutils.bvhtree import BVHTree
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import gen_tails  # noqa: E402  (the beast form's plumes, shared)
+
 K = 0.0034
 FLOOR = -1.1
 SOLE_PX = 735
@@ -737,7 +740,7 @@ def bell(c, r, bones=(("bell", 1.0),)):
           for j in range(32)], 0.08 * r, "gold", bones, closed=True, sides=8, gloss=0.75)
 
 
-def sphere(c, r, color, bones, gloss=0.3, slot=False, zone="back", n=20):
+def sphere(c, r, color, bones, gloss=0.3, slot=False, zone="back", n=20, fuzz=0.0):
     rows = []
     for i in range(1, n):
         th = math.pi * i / n
@@ -756,10 +759,10 @@ def sphere(c, r, color, bones, gloss=0.3, slot=False, zone="back", n=20):
             if slot and u.y < -0.3:
                 dark = max(dark, 1 - smoothstep(0.05, 0.08, abs(u.x)))
             p = c + Vector((r.x * u.x, r.y * u.y, r.z * u.z)) * (1 - 0.15 * dark)
-            row.append(vert(p, color, "ink", 0.85 * dark, gloss=gloss, bones=bones, zone=zone))
+            row.append(vert(p, color, "ink", 0.85 * dark, gloss=gloss, fuzz=fuzz, bones=bones, zone=zone))
         rows.append(row)
-    top = vert(c + Vector((0, r.y, 0)), color, bones=bones, zone=zone)
-    bot = vert(c - Vector((0, r.y, 0)), color, bones=bones, zone=zone)
+    top = vert(c + Vector((0, r.y, 0)), color, gloss=gloss, fuzz=fuzz, bones=bones, zone=zone)
+    bot = vert(c - Vector((0, r.y, 0)), color, gloss=gloss, fuzz=fuzz, bones=bones, zone=zone)
     first = len(faces)
     grid([list(reversed(r_)) for r_ in rows], True, color, close_top=top, close_bottom=bot)
     face_out(first)
@@ -861,24 +864,23 @@ def lock(pts, nrm, width, thick, color, bones, zone="head", around=12):
 
 
 # ---- the tails: nine plumes fanned from one root -------------------------------
-# The sheet's 九尾巴 (獨立 9 分件): nine plumes, each its own piece, white at
-# the root through gold to orange-red at the point; narrow where it leaves
-# the root, fullest a little under half way, drawn to a point; fanned from
-# one root (腰椎尾部基部銜接點). Where the root sits: the 三視圖 (人型形態)
-# and the 3D viewport sheet have the tails leave her back just under the
-# long hair's ends, behind the top of the skirt, going back before they
-# rise and spread (the turnaround's back view marks the socket higher, in
-# a parting of the hair). Under the hair, every hairdo stays as it is.
-# From behind, the middle ones rise over the hair to about her chin; from
-# the front the outer ones show either side of her, the lowest at her
-# hips, their points turning up.
+# The beast form's nine plumes (Roger, 2026-11-24: 「尾巴好像還是獸型的時候
+# 比較好一點」): the same centre lines and widths as gen_tails.py draws
+# them, plump teardrops of fluff packed like petals, white with only the
+# ends coloured, the point a brush tip; plush, not shiny. Fanned from one
+# root (the sheet's 腰椎尾部基部銜接點). Where the root sits: the 三視圖
+# (人型形態) and the 3D viewport sheet have the tails leave her back just
+# under the long hair's ends, behind the top of the skirt (the turnaround's
+# back view marks the socket higher, in a parting of the hair). Under the
+# hair, every hairdo stays as it is.
 TAIL_ROOT_PY = 505
-TAIL_SEG = ["", "_b", "_c", "_d", "_tip"]
-TAIL_SPREAD = 100.0  # degrees either side of upright
-TAIL_LENGTH = 1.45
-TAIL_WIDE = 0.17  # half width at its fullest
-TAIL_FLAT = 0.62  # depth against width
-TAIL_GROOVES = 7
+TAIL_SEG = gen_tails.SEG
+TAIL_SPREAD = 96.0  # degrees either side of upright
+TAIL_LENGTH = 1.55
+TAIL_WIDE = 0.8  # against the beast form's plumes
+TAIL_LEAN = 1.0  # how far back they set off (the beast form's 1)
+TAIL_STEPS = 60  # rings along a plume
+TAIL_COLS = 32
 # The shadow counts anything lower as standing on the floor (mesh.rs).
 TAIL_LOW = FLOOR + 0.5
 
@@ -896,37 +898,6 @@ def tail_hide():
     return tail_root().y + 0.01
 
 
-def tail_line(i, n=64):
-    """Tail `i`'s centre line (0 her right … 8 her left), `n` points root
-    to point, and its angle in the fan (radians, 0 upright, + her left)."""
-    th = math.radians(-TAIL_SPREAD + i * 2 * TAIL_SPREAD / 8)
-    # The upright ones the longest; no two alike.
-    size = (1.0 - 0.06 * abs(math.sin(th))) * (1.0 + 0.04 * math.sin(i * 2.3))
-    step = TAIL_LENGTH * size / (n - 1)
-    u = Vector((math.sin(th), math.cos(th), 0.0))
-    # Across the fan, toward upright (the middle one leans to her left).
-    toward = Vector((-math.cos(th), math.sin(th), 0.0)) if th > 0 else \
-        Vector((math.cos(th), -math.sin(th), 0.0))
-    if abs(th) < 1e-6:
-        toward = Vector((1.0, 0.0, 0.0))
-    p = tail_root()
-    pts = [p.copy()]
-    for k in range(1, n):
-        s = (k - 0.5) / (n - 1)
-        # Out a little away from upright at the root, back toward it
-        # through the middle, the point flicking up (the sheet's petals).
-        droop = 0.32 - 0.24 * smoothstep(math.radians(50), math.radians(100), abs(th))
-        a = -droop + 0.9 * smoothstep(0.18, 1.0, s)
-        fan = u * math.cos(a) + toward * math.sin(a)
-        # Straight back from her first, clear of the hair, then the fan
-        # leaning back (the middle ones most, so they lie behind).
-        back = 1.6 * (1.0 - smoothstep(0.0, 0.3, s)) + 0.4 + 0.4 * max(math.cos(th), 0.0)
-        d = (fan + Vector((0.0, 0.0, -back))).normalized()
-        p = p + d * step
-        pts.append(p.copy())
-    return pts, th
-
-
 def tail_bones(i, s):
     """Tail `i`'s bones at `s` along it: each segment's middle on its own
     bone, blending to the next between."""
@@ -937,63 +908,77 @@ def tail_bones(i, s):
     return ((names[k], 1.0 - t), (names[k + 1], t))
 
 
-def tail_wide(s):
-    """A plume's half width `s` of the way out: narrow at the root,
-    swelling to its fullest at 0.45, easing in to a point."""
-    if s < 0.45:
-        return TAIL_WIDE * (0.22 + 0.78 * math.sin(0.5 * math.pi * s / 0.45) ** 0.9)
-    return TAIL_WIDE * max(0.0, math.cos(0.5 * math.pi * (s - 0.45) / 0.55)) ** 1.15 + 0.003
+TAIL_TIP = 1.0 - 1.0 / gen_tails.CONES  # the beast form's last cone
 
 
 def tail_color(s):
-    """White at the root, gold through the middle, the tip colour at the
-    point: two slots a vertex, so in two stretches."""
-    if s < 0.62:
-        return "fur", "tailmid", smoothstep(0.28, 0.62, s)
-    return "tailmid", "tailtip", smoothstep(0.66, 0.97, s)
+    """As the beast form's plumes are painted: white, a blush of the middle
+    colour past half way that deepens toward the end, then the last cone
+    the tip colour, sharp-edged like a brush's tip (two slots a vertex)."""
+    if s < TAIL_TIP:
+        return "fur", "tailmid", 0.25 * smoothstep(0.45, 0.65, s) + 0.6 * smoothstep(0.7, TAIL_TIP, s)
+    return "tailmid", "tailtip", 0.55 + 0.45 * smoothstep(TAIL_TIP, 1.0, s)
+
+
+def tail_frame(d):
+    """A cone's width and depth for direction `d`, as the round cones of the
+    beast form lie (rot (a, 0, g) squeezes local z): across, world x as
+    square to `d` as it goes; the flat side square to both."""
+    dy, dz = d.y, d.z
+    yz = math.hypot(dy, dz)
+    depth = Vector((0.0, -dz / yz, dy / yz))
+    across = Vector((yz, -d.x * dy / yz, -d.x * dz / yz))
+    return across, depth
 
 
 def tail(i):
-    pts, th = tail_line(i)
+    steps = list(gen_tails.line(i, tuple(tail_root()), TAIL_LENGTH, TAIL_SPREAD, TAIL_STEPS, TAIL_LEAN))
+    pts = [Vector(p) for p, _, _, _, _ in steps]
+    dirs = [Vector(d) for _, d, _, _, _ in steps]
+    pts.append(pts[-1] + dirs[-1] * steps[-1][2])
     n = len(pts)
     names = [f"tail{i + 1}{seg}" for seg in TAIL_SEG]
+    per = TAIL_STEPS // len(names)
     for k, name in enumerate(names):
-        PIVOTS[name] = pts[round(k / len(names) * (n - 1))]
+        PIVOTS[name] = pts[k * per].copy()
         PARENTS[name] = "hips" if k == 0 else names[k - 1]
-    # Its width lies across the fan, its flat faces front and back.
-    across = Vector((math.cos(th), -math.sin(th), 0.0))
-    cols = 6 * TAIL_GROOVES
-    rings = []
-    for k, p in enumerate(pts):
-        s = k / (n - 1)
-        tan = (pts[min(k + 1, n - 1)] - pts[max(k - 1, 0)]).normalized()
-        depth = tan.cross(across).normalized()
-        side = depth.cross(tan).normalized()
-        w = tail_wide(s)
-        d = max(w * TAIL_FLAT, 0.003)
+
+    def ring(c, tan, r, s):
+        across, depth = tail_frame(tan)
         a_, b_, t_ = tail_color(s)
-        ring = []
-        for j in range(cols):
-            a = 2 * math.pi * j / cols
-            g = (0.5 + 0.5 * math.cos(TAIL_GROOVES * a)) ** 0.5
-            bulge = 1.0 + 0.07 * (g - 0.7) * smoothstep(0.08, 0.2, s)
-            q = p + (side * (w * math.cos(a)) + depth * (d * math.sin(a))) * bulge
-            v = vert(q, a_, b_, t_, gloss=0.2, fuzz=0.2, bones=tail_bones(i, s), zone="tail")
-            GROOVES[v] = 0.55 * (1.0 - g) ** 2 * smoothstep(0.08, 0.25, s) * (1 - smoothstep(0.85, 1.0, s))
-            ring.append(v)
-        rings.append(ring)
+        return [vert(c + across * (r * math.cos(2 * math.pi * j / TAIL_COLS))
+                     + depth * (r / gen_tails.FLAT * math.sin(2 * math.pi * j / TAIL_COLS)),
+                     a_, b_, t_, gloss=0.0, fuzz=1.0, bones=tail_bones(i, s), zone="tail")
+                for j in range(TAIL_COLS)]
+
+    rings = []
+    # The root a round end, as a round cone's is, then along the plume, then
+    # the point's little ball.
+    r0, t0 = gen_tails.radius(0.0, TAIL_WIDE), dirs[0]
+    for beta in (60, 30):
+        b = math.radians(beta)
+        rings.append(ring(pts[0] - t0 * (r0 * math.sin(b)), t0, r0 * math.cos(b), 0.0))
+    for k, p in enumerate(pts):
+        tan = (dirs[max(k - 1, 0)] + dirs[min(k, n - 2)]).normalized()
+        s = k / (n - 1)
+        rings.append(ring(p, tan, gen_tails.radius(s, TAIL_WIDE), s))
+    r1, t1 = gen_tails.radius(1.0, TAIL_WIDE), dirs[-1]
+    for beta in (30, 60):
+        b = math.radians(beta)
+        rings.append(ring(pts[-1] + t1 * (r1 * math.sin(b)), t1, r1 * math.cos(b), 1.0))
     first = len(faces)
-    cap = vert(pts[0], "fur", bones=tail_bones(i, 0.0), zone="tail")
-    grid(rings, True, "fur", close_top=cap)
+    root = vert(pts[0] - t0 * r0, "fur", gloss=0.0, fuzz=1.0, bones=tail_bones(i, 0.0), zone="tail")
+    point = vert(pts[-1] + t1 * r1, "tailtip", gloss=0.0, fuzz=1.0, bones=tail_bones(i, 1.0), zone="tail")
+    grid(rings, True, "fur", close_top=root, close_bottom=point)
     face_out(first)
     return min(verts[v][0].y for r in rings for v in r)
 
 
 def tails():
     low = min(tail(i) for i in range(9))
-    # The root: a soft puff where the nine meet.
-    sphere(tail_root() + Vector((0, 0.005, -0.025)), Vector((0.075, 0.07, 0.06)), "fur",
-           (("hips", 1.0),), gloss=0.2, zone="tail")
+    # The round puff at the root the nine grow out of, as the beast form's.
+    sphere(tail_root() + Vector((0, 0.01, -0.04)), Vector((0.11, 0.1, 0.085)), "fur",
+           (("hips", 1.0),), gloss=0.0, fuzz=1.0, zone="tail")
     print(f"tails: lowest point y {low:.3f} (keep above {TAIL_LOW:.3f})")
 
 

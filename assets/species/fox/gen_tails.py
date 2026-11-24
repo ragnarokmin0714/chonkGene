@@ -37,26 +37,27 @@ def f(v):
 
 import sys
 
-HUMAN = sys.argv[1:] == ["human"]
-base = [0.0, -0.3, -0.3] if HUMAN else [0.0, 0.1, -0.88]
-LENGTH = 1.55 if HUMAN else 1.9
-# How fat the plumes are, against the beast form's.
-WIDE = 0.8 if HUMAN else 1.0
+# The fan for each form: where the nine meet, how long and fat the plumes
+# are against the beast form's, how wide the fan opens either side of
+# upright (degrees). figure_blend.py builds her whole-figure tails along
+# the same lines, from her own root (`line`, `radius`).
+PRESETS = {
+    "quad": dict(base=(0.0, 0.1, -0.88), length=1.9, wide=1.0, spread=112.0),
+    "human": dict(base=(0.0, -0.3, -0.3), length=1.55, wide=0.8, spread=96.0),
+}
 BONES = 5
 PER = 3  # cones to a bone
 CONES = BONES * PER
 SEG = ["", "_b", "_c", "_d", "_tip"]
-# How wide the fan opens either side of upright, degrees.
-SPREAD = 96.0 if HUMAN else 112.0
 FLAT = 1.2
 
 
-def radius(s):
+def radius(s, wide=1.0):
     """A plume's half-width a fraction `s` of the way out: a narrow root
     swelling quickly to its fullest at 0.42, then easing in to a point."""
     if s < 0.42:
-        return WIDE * (0.1 + 0.33 * math.sin(0.5 * math.pi * s / 0.42) ** 0.9)
-    return WIDE * (0.03 + 0.4 * max(0.0, math.cos(0.5 * math.pi * (s - 0.42) / 0.58)) ** 1.25)
+        return wide * (0.1 + 0.33 * math.sin(0.5 * math.pi * s / 0.42) ** 0.9)
+    return wide * (0.03 + 0.4 * max(0.0, math.cos(0.5 * math.pi * (s - 0.42) / 0.58)) ** 1.25)
 
 
 def bend(s):
@@ -70,60 +71,78 @@ def bend(s):
     return 2.2, 0.3
 
 
-pivots, parents, parts = [], [], []
-lowest = 0.0
-for i in range(9):
-    th = math.radians(-SPREAD + i * 2 * SPREAD / 8)  # i = 0 out to her right
+def line(i, base, length, spread, steps=CONES, lean=1.0):
+    """Tail `i`'s centre line (0 out to her right … 8 her left) in `steps`
+    equal steps, root to point: (start, direction, step length, s at the
+    start, s at the end) for each step. `lean` > 1 sets the plumes off
+    further back from her."""
+    th = math.radians(-spread + i * 2 * spread / 8)
     # Upright ones the longest, the outer a little shorter; no two alike.
     size = (1.0 - 0.06 * abs(math.sin(th))) * (1.0 + 0.05 * math.sin(i * 2.3))
     # The outer ones droop no lower than her knees: lower, they would count
     # as standing on the floor and spread her shadow (mesh.rs, `reach`).
-    d = norm([1.15 * math.sin(th), 0.45 + 0.9 * math.cos(th), -1.0])
+    d = norm([1.15 * math.sin(th), 0.45 + 0.9 * math.cos(th), -lean])
     # The way it curls: across itself in the fan, toward upright (up for
     # the outer ones, in for the top ones; turning toward its own way out
     # would not turn it at all), and a little back.
     sgn = 1.0 if th >= 0.0 else -1.0
     out = norm([-sgn * math.cos(th), abs(math.sin(th)), -0.3])
-    p = base[:]
-    names = [f"tail{i + 1}{s}" for s in SEG]
-    step = LENGTH * size / CONES
-    for k in range(CONES):
-        s0, s1 = k / CONES, (k + 1) / CONES
+    p = list(base)
+    step = length * size / steps
+    for k in range(steps):
+        s0, s1 = k / steps, (k + 1) / steps
         # Turn half before and half after the step (midpoint rule), so the
         # cones meet at the same angle on both sides of each joint.
         o, up = bend((s0 + s1) / 2)
         d = norm(add(add(d, out, o * step * 0.5), [0, 1, 0], up * step * 0.5))
-        to = [x * step for x in d]
-        bone = names[k // PER]
-        if k % PER == 0:
-            pivots.append(f'        "{bone}": {f(p)},')
-            parents.append(f'        "{bone}": "{"hips" if k == 0 else names[k // PER - 1]}",')
-        g = -math.degrees(math.asin(max(-1, min(1, d[0]))))
-        a = math.degrees(math.atan2(d[2], d[1]))
-        # One soft gradient up the plume: the middle colour from past half
-        # way, the tip colour over the last part (big soft spots, no bands).
-        marks = ""
-        if k == CONES // 2 + 1:
-            marks = f',\n            marks: [(at: (0, {step:.3f}, 0), radii: (0.5, 0.45, 0.5), color: "tailmid", soft: 0.9)]'
-        if k == CONES - 3:
-            marks = f',\n            marks: [(at: (0, 0, 0), radii: (0.45, 0.4, 0.45), color: "tailmid", soft: 0.9)]'
-        if k == CONES - 1:
-            marks = (
-                f',\n            marks: [(at: (0, 0, 0), radii: (0.35, 0.3, 0.35), color: "tailmid", soft: 0.9),'
-                f'\n                (at: (0, {step:.3f}, 0), radii: (0.3, {step * 1.6:.3f}, 0.3), color: "tailtip", soft: 0.7)]'
-            )
-        name = bone if k % PER == 0 else f"{bone}_{k % PER + 1}"
-        parts.append(
-            f'        (name: "{name}", bone: "{bone}", shape: Cone(r1: {radius(s0):.3f}, r2: {radius(s1):.3f}, h: {step:.3f}, flat: {FLAT}), at: {f(p)},\n'
-            f'            rot: {f([a, 0, g])}, blend: {0.1 if k == 0 else 0.02}, color: "fur", zone: "bottom"{marks}),'
-        )
+        yield p, d, step, s0, s1
+        p = add(p, [x * step for x in d])
         d = norm(add(add(d, out, o * step * 0.5), [0, 1, 0], up * step * 0.5))
-        p = add(p, to)
-        lowest = min(lowest, p[1] - radius(s1))
-print(f"lowest point of the tails: y {lowest:.3f}", file=sys.stderr)
-print("PIVOTS")
-print("\n".join(pivots))
-print("PARENTS")
-print("\n".join(parents))
-print("PARTS")
-print("\n".join(parts))
+
+
+def ron(base, length, wide, spread):
+    """The nine plumes as round cones for a model file, and their lowest
+    point."""
+    pivots, parents, parts = [], [], []
+    lowest = 0.0
+    for i in range(9):
+        names = [f"tail{i + 1}{s}" for s in SEG]
+        for k, (p, d, step, s0, s1) in enumerate(line(i, base, length, spread)):
+            bone = names[k // PER]
+            if k % PER == 0:
+                pivots.append(f'        "{bone}": {f(p)},')
+                parents.append(f'        "{bone}": "{"hips" if k == 0 else names[k // PER - 1]}",')
+            g = -math.degrees(math.asin(max(-1, min(1, d[0]))))
+            a = math.degrees(math.atan2(d[2], d[1]))
+            # One soft gradient up the plume: the middle colour from past half
+            # way, the tip colour over the last part (big soft spots, no bands).
+            marks = ""
+            if k == CONES // 2 + 1:
+                marks = f',\n            marks: [(at: (0, {step:.3f}, 0), radii: (0.5, 0.45, 0.5), color: "tailmid", soft: 0.9)]'
+            if k == CONES - 3:
+                marks = f',\n            marks: [(at: (0, 0, 0), radii: (0.45, 0.4, 0.45), color: "tailmid", soft: 0.9)]'
+            if k == CONES - 1:
+                marks = (
+                    f',\n            marks: [(at: (0, 0, 0), radii: (0.35, 0.3, 0.35), color: "tailmid", soft: 0.9),'
+                    f'\n                (at: (0, {step:.3f}, 0), radii: (0.3, {step * 1.6:.3f}, 0.3), color: "tailtip", soft: 0.7)]'
+                )
+            name = bone if k % PER == 0 else f"{bone}_{k % PER + 1}"
+            parts.append(
+                f'        (name: "{name}", bone: "{bone}", shape: Cone(r1: {radius(s0, wide):.3f}, r2: {radius(s1, wide):.3f}, h: {step:.3f}, flat: {FLAT}), at: {f(p)},\n'
+                f'            rot: {f([a, 0, g])}, blend: {0.1 if k == 0 else 0.02}, color: "fur", zone: "bottom"{marks}),'
+            )
+            end = add(p, [x * step for x in d])
+            lowest = min(lowest, end[1] - radius(s1, wide))
+    return pivots, parents, parts, lowest
+
+
+if __name__ == "__main__":
+    preset = PRESETS["human" if sys.argv[1:] == ["human"] else "quad"]
+    pivots, parents, parts, lowest = ron(**preset)
+    print(f"lowest point of the tails: y {lowest:.3f}", file=sys.stderr)
+    print("PIVOTS")
+    print("\n".join(pivots))
+    print("PARENTS")
+    print("\n".join(parents))
+    print("PARTS")
+    print("\n".join(parts))
