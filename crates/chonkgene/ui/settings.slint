@@ -596,6 +596,17 @@ export component SettingsWindow inherits Window {
     in property <int> name-max: 12;
     in property <int> you-max: 8;
     callback coat-picked(string);
+    // The fox's human form (PLAN §8), where she can take it here: kept in
+    // a form or free to change (0 隨牠變, 1 維持原型, 2 維持人型), her
+    // hairdo (0 綁單馬尾, 1 綁雙馬尾, 2 公主頭) and her hair's colour.
+    in property <bool> has-human;
+    in-out property <int> form-lock;
+    in-out property <int> hairdo;
+    in property <[CoatRow]> hairs;
+    in-out property <string> hair;
+    callback form-lock-picked(int);
+    callback hairdo-picked(int);
+    callback hair-picked(string);
     callback chonk-changed(float);
     callback size-changed(float);
     callback trait-changed(int, float);
@@ -948,6 +959,55 @@ export component SettingsWindow inherits Window {
                                         }
                                     }
                                     Text { text: c.label; color: c.id == root.coat ? Theme.ink : Theme.muted; font-size: 12px; horizontal-alignment: center; }
+                                }
+                            }
+
+                            // Her human form: whether she changes by
+                            // herself, and how she looks in it.
+                            if root.has-human: VerticalLayout {
+                                spacing: 12px;
+                                Label { text: @tr("人型"); }
+                                HorizontalLayout {
+                                    alignment: start;
+                                    Segmented {
+                                        options: [@tr("隨牠變"), @tr("維持原型"), @tr("維持人型")];
+                                        selected <=> root.form-lock;
+                                        picked(i) => { root.form-lock-picked(i); }
+                                    }
+                                }
+                                Hint { text: @tr("牠偶爾會自己變身，也可以讓牠一直維持一種樣子。"); }
+                                Label { text: @tr("髮型"); }
+                                HorizontalLayout {
+                                    alignment: start;
+                                    Segmented {
+                                        options: [@tr("綁單馬尾"), @tr("綁雙馬尾"), @tr("公主頭")];
+                                        selected <=> root.hairdo;
+                                        picked(i) => { root.hairdo-picked(i); }
+                                    }
+                                }
+                                Label { text: @tr("髮色"); }
+                                HorizontalLayout {
+                                    spacing: 10px;
+                                    alignment: start;
+                                    for c in root.hairs: VerticalLayout {
+                                        spacing: 4px;
+                                        Rectangle {
+                                            width: 44px;
+                                            height: 44px;
+                                            border-radius: 22px;
+                                            border-width: c.id == root.hair ? 3px : 0px;
+                                            border-color: Theme.accent;
+                                            Rectangle {
+                                                x: 5px; y: 5px; width: 34px; height: 34px; border-radius: 17px; background: c.main; border-width: 1px; border-color: #00000018;
+                                                Rectangle { y: 25px; height: 9px; border-radius: 4.5px; background: c.light; }
+                                            }
+                                            TouchArea {
+                                                mouse-cursor: pointer;
+                                                clicked => { root.hair-picked(c.id); }
+                                            }
+                                        }
+                                        Text { text: c.label; color: c.id == root.hair ? Theme.ink : Theme.muted; font-size: 12px; horizontal-alignment: center; }
+                                    }
                                 }
                             }
 

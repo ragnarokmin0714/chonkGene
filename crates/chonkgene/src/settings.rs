@@ -24,7 +24,7 @@ use slint::{
 use crate::brand;
 use crate::ipc::{self, Msg};
 use crate::lines::{MAX_NAME, MAX_YOU};
-use crate::store::{self, DataDir, PetSave, Pets, ROTATE_CHOICES, Room, Settings};
+use crate::store::{self, DataDir, FormLock, PetSave, Pets, ROTATE_CHOICES, Room, Settings};
 
 slint::include_modules!();
 
@@ -62,6 +62,50 @@ fn coat_label(coat: &str) -> &'static str {
         "snow" => tr("雪狐"),
         _ => tr("其他"),
     }
+}
+
+/// The fox's hairdos in her human form, in the order 髮型 shows them.
+const HAIRDOS: [&str; 3] = ["ponytail", "twintails", "princess"];
+
+/// A hair colour's name in 髮色.
+fn hair_label(hair: &str) -> &'static str {
+    match hair {
+        "red" => tr("紅色"),
+        "gold" => tr("金色"),
+        "night" => tr("夜色"),
+        _ => tr("白色"),
+    }
+}
+
+/// Her hair colours as dots: the hair, and its tips under it.
+fn hair_rows(model: &Model) -> ModelRc<CoatRow> {
+    let slot = |name: &str| model.slots.iter().position(|s| s == name);
+    let (hair, tip) = (slot("hair"), slot("hairtip"));
+    let rows: Vec<CoatRow> = model
+        .hairs
+        .iter()
+        .map(|d| {
+            let pick = |s: Option<usize>| {
+                d.colors
+                    .iter()
+                    .find(|(i, _)| Some(*i) == s)
+                    .map_or([0xE6, 0xEB, 0xF3, 0xFF], |c| c.1)
+            };
+            CoatRow {
+                label: hair_label(&d.name).into(),
+                id: d.name.clone().into(),
+                main: color(pick(hair)),
+                light: color(pick(tip)),
+            }
+        })
+        .collect();
+    ModelRc::new(VecModel::from(rows))
+}
+
+/// Whether the fox can take her human form in this window's preview (and
+/// so on the desktop): only where there is a real GPU.
+fn has_human(species: Species) -> bool {
+    species == Species::Fox && chonkgene_render::shared_gpu().is_some()
 }
 
 fn blurb(s: Species) -> &'static str {
@@ -551,6 +595,24 @@ fn show_pet(ui: &SettingsWindow, st: &mut State) {
     ui.set_pet_you(p.you.clone().into());
     ui.set_coats(coat_rows(st.coats(species)));
     ui.set_coat(p.coat.clone().into());
+    let human = has_human(species);
+    ui.set_has_human(human);
+    if human && let Ok(model) = chonkgene_render::skin::human_model(species.id()) {
+        ui.set_form_lock(match p.form_lock {
+            FormLock::Free => 0,
+            FormLock::Beast => 1,
+            FormLock::Human => 2,
+        });
+        ui.set_hairdo(HAIRDOS.iter().position(|h| *h == p.hairdo).unwrap_or(0) as i32);
+        ui.set_hairs(hair_rows(&model));
+        let first = model.hairs.first().map(|d| d.name.as_str()).unwrap_or("");
+        let hair = if model.hairs.iter().any(|d| d.name == p.hair) {
+            p.hair.as_str()
+        } else {
+            first
+        };
+        ui.set_hair(hair.into());
+    }
     ui.set_chonk(p.chonk);
     ui.set_size(p.size);
     ui.set_ticklish(p.ticklish);
@@ -570,15 +632,27 @@ fn show_pet(ui: &SettingsWindow, st: &mut State) {
         .into(),
     );
     ui.set_confirm_release(false);
+    make_preview(st, &p);
+}
+
+/// The pet's preview, made afresh: as it is now (the fox in her human
+/// form, in her hairdo and hair colour, if she is in it).
+fn make_preview(st: &mut State, p: &PetSave) {
+    let Some(species) = p.species() else {
+        return;
+    };
     let kind = &st.kinds[&species];
-    let coat = kind.model.coat(&p.coat).unwrap_or(0);
-    if let Some(mut renderer) = Renderer::new(
-        Arc::clone(&kind.model),
-        kind.quad.clone(),
-        1.0,
-        p.chonk,
-        coat,
-    ) {
+    let human = (p.human && has_human(species))
+        .then(|| chonkgene_render::skin::human(species.id(), &p.hairdo, &p.hair).ok())
+        .flatten()
+        .map(|(m, _)| Arc::new(m));
+    let mesh = human.or_else(|| kind.quad.clone());
+    let coat = mesh
+        .as_deref()
+        .unwrap_or(&kind.model)
+        .coat(&p.coat)
+        .unwrap_or(0);
+    if let Some(mut renderer) = Renderer::new(Arc::clone(&kind.model), mesh, 1.0, p.chonk, coat) {
         // Pops hide cuts between sprites; GPU frames blend instead.
         let pops = !renderer.is_gpu();
         // The only pet in this window: each frame shows in the tick that
@@ -880,6 +954,42 @@ fn setup(
     on!(on_coat_picked, |ui, st, id: SharedString| {
         ui.set_coat(id.clone());
         edit(&ui, st, |p| p.coat = id.to_string());
+    });
+    // Her human form: kept in one form (she takes it at once), or free;
+    // her hairdo and hair colour (seen in the preview if she is in it).
+    on!(on_form_lock_picked, |ui, st, i: i32| {
+        let lock = match i {
+            1 => FormLock::Beast,
+            2 => FormLock::Human,
+            _ => FormLock::Free,
+        };
+        ui.set_form_lock(i);
+        let mut morphed = false;
+        edit(&ui, st, |p| {
+            p.form_lock = lock;
+            if let Some(human) = lock.keeps() {
+                morphed = p.human != human;
+                p.human = human;
+            }
+        });
+        if morphed && let Some(p) = st.pet().cloned() {
+            make_preview(st, &p);
+        }
+    });
+    on!(on_hairdo_picked, |ui, st, i: i32| {
+        let hairdo = HAIRDOS.get(i as usize).copied().unwrap_or(HAIRDOS[0]);
+        ui.set_hairdo(i);
+        edit(&ui, st, |p| p.hairdo = hairdo.to_string());
+        if let Some(p) = st.pet().cloned().filter(|p| p.human) {
+            make_preview(st, &p);
+        }
+    });
+    on!(on_hair_picked, |ui, st, id: SharedString| {
+        ui.set_hair(id.clone());
+        edit(&ui, st, |p| p.hair = id.to_string());
+        if let Some(p) = st.pet().cloned().filter(|p| p.human) {
+            make_preview(st, &p);
+        }
     });
     on!(on_chonk_changed, |ui, st, v: f32| {
         edit(&ui, st, |p| p.chonk = v);
@@ -1723,6 +1833,10 @@ mod tests {
             ("play", 1, false),
             ("quiet", 2, false),
             ("general", 3, false),
+            // The fox's card, tall enough to show her human form's choices
+            // (only where she can take it: run with CHONKGENE_RENDERER=gpu
+            // on a software GPU).
+            ("pets-fox", 0, false),
         ];
         for (lang, pick, (name, tab, adopting)) in [("", 1, ()), ("-ja", 2, ()), ("-en", 3, ())]
             .into_iter()
@@ -1731,6 +1845,10 @@ mod tests {
             if name == "pets" {
                 ui.invoke_language_picked(pick);
             }
+            let tall = name == "pets-fox";
+            let (w, h) = if tall { (w, 1180) } else { (w, h) };
+            window.set_size(slint::PhysicalSize::new(w, h));
+            ui.invoke_select_pet(if tall { "7" } else { "1" }.into());
             ui.set_tab(tab);
             ui.set_adopting(adopting);
             if name == "adopt" {

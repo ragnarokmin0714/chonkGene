@@ -177,6 +177,19 @@ pub struct PetSave {
     /// file was set aside as broken).
     #[serde(default)]
     pub pinned: bool,
+    /// The fox in her human form (人型形態, PLAN §8); her hairdo and hair
+    /// colour in it (unknown ones are the first: 綁單馬尾, white); whether
+    /// she changes by herself. Missing from saves before 2026-11-24. Only
+    /// the pet process changes `human` (she changes by herself, or from her
+    /// menu); the settings window sets the rest.
+    #[serde(default)]
+    pub human: bool,
+    #[serde(default)]
+    pub hairdo: String,
+    #[serde(default)]
+    pub hair: String,
+    #[serde(default)]
+    pub form_lock: FormLock,
     pub level: u32,
     pub xp: u32,
     pub xp_day: i64,
@@ -202,6 +215,10 @@ impl PetSave {
             energy: jitter(p.energy, rng),
             on_desktop: true,
             pinned: false,
+            human: false,
+            hairdo: String::new(),
+            hair: String::new(),
+            form_lock: FormLock::Free,
             level: 1,
             xp: 0,
             xp_day: 0,
@@ -288,6 +305,30 @@ impl PetSave {
         self.name = self.name.chars().take(crate::lines::MAX_NAME).collect();
         self.you = self.you.chars().take(crate::lines::MAX_YOU).collect();
         self.level = self.level.max(1);
+    }
+}
+
+/// Whether the fox changes form by herself (Roger, 2026-11-16: 「她偶爾會
+/// 自己變，我也可以叫他維持原型和人型」).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum FormLock {
+    /// 隨牠變: now and then by herself.
+    #[default]
+    Free,
+    /// 維持原型.
+    Beast,
+    /// 維持人型.
+    Human,
+}
+
+impl FormLock {
+    /// The form it keeps her in, if it keeps her in one.
+    pub fn keeps(self) -> Option<bool> {
+        match self {
+            Self::Free => None,
+            Self::Beast => Some(false),
+            Self::Human => Some(true),
+        }
     }
 }
 
@@ -823,6 +864,37 @@ mod tests {
         assert_eq!(pets.pets.len(), 1);
         assert!(!pets.pets[0].pinned);
         assert_eq!(pets.pets[0].level, 2);
+        // Nor the fox's form (2026-11-24): on all fours, free to change.
+        let p = &pets.pets[0];
+        assert!(!p.human && p.hairdo.is_empty() && p.hair.is_empty());
+        assert_eq!(p.form_lock, FormLock::Free);
+    }
+
+    /// The fox's form and looks are kept (her human form, PLAN §8), and
+    /// a lock keeps her in the form it names.
+    #[test]
+    fn the_foxs_form_and_looks_are_saved() {
+        let dir = temp_dir("fox-form");
+        let path = dir.join("pets.ron");
+        let mut rng = fastrand::Rng::with_seed(1);
+        let mut fox = PetSave::adopt(1, Species::Fox, "snow", &mut rng);
+        fox.human = true;
+        fox.hairdo = "princess".into();
+        fox.hair = "red".into();
+        fox.form_lock = FormLock::Human;
+        let pets = Pets {
+            pets: vec![fox.clone()],
+            ..Pets::default()
+        };
+        save(&path, &pets).unwrap();
+        let back = load::<Pets>(&path).unwrap().unwrap();
+        assert_eq!(back.pets[0].human, fox.human);
+        assert_eq!(back.pets[0].hairdo, "princess");
+        assert_eq!(back.pets[0].hair, "red");
+        assert_eq!(back.pets[0].form_lock, FormLock::Human);
+        assert_eq!(FormLock::Free.keeps(), None);
+        assert_eq!(FormLock::Beast.keeps(), Some(false));
+        assert_eq!(FormLock::Human.keeps(), Some(true));
     }
 
     #[test]

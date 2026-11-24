@@ -38,7 +38,7 @@ use crate::brand;
 use crate::diag::diag;
 use crate::ipc::{self, Claim, Msg};
 use crate::lines::Lines;
-use crate::store::{self, DataDir, PetSave, Pets, Room, Settings};
+use crate::store::{self, DataDir, FormLock, PetSave, Pets, Room, Settings};
 use chonkgene_render::props::{self, Fx};
 
 mod play;
@@ -88,6 +88,13 @@ fn fly_chance(species: Species) -> f32 {
 fn move_test() -> bool {
     static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
     *ON.get_or_init(|| std::env::var("CHONKGENE_STAGE").is_ok_and(|v| v == "move"))
+}
+
+/// `CHONKGENE_STAGE=morph`: the fox changing form from her menu and back,
+/// her frames dumped with `CHONKGENE_DUMP`.
+fn morph_test() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| std::env::var("CHONKGENE_STAGE").is_ok_and(|v| v == "morph"))
 }
 
 /// How likely a pet falling from high up is to glide down instead: a bird
@@ -266,6 +273,9 @@ struct Pet {
     repaint: bool,
     last: Instant,
     switch_at: f64,
+    /// When she next changes form by herself (隨牠變; the fox where she
+    /// can).
+    morph_at: f64,
     happy_until: f64,
     asleep_since: f64,
     hello_at: Option<f64>,
@@ -383,6 +393,8 @@ enum Action {
     EndScene,
     /// The page of things to play with (一起玩…).
     Toys,
+    /// 變身: the fox into her human form, or back.
+    Morph,
 }
 
 struct Menu {
@@ -569,7 +581,8 @@ struct App {
     /// Shiba's bone scene (taken up off the floor, chewed, let fall);
     /// `settings-quit`: the settings opened on the first pet, then 結束肉肉
     /// 賴桌 5 s later (the settings window closes too); `hug-other`: the
-    /// first pet asked to go and hug the second (叫牠… › 去抱抱…).
+    /// first pet asked to go and hug the second (叫牠… › 去抱抱…);
+    /// `morph`: the fox 變身 from her menu, and back 10 s later.
     stage_test: String,
     sounds: Sounds,
     tray: Option<Tray>,
@@ -593,6 +606,9 @@ struct App {
     /// Where pets just gone to rest stood (their feet's middle, x): the
     /// ones coming out in their place appear there (換班).
     handover: Vec<f32>,
+    /// The fox changing form: her id and where she stood (her feet's
+    /// middle, x); she comes back there in her other form.
+    morphs: Vec<(u64, f32)>,
 }
 
 impl App {
@@ -693,6 +709,7 @@ impl App {
             perf_at: now + PERF_EVERY,
             shift_at: None,
             handover: Vec::new(),
+            morphs: Vec::new(),
         };
         // Trying the skits out: the next one soon, of the kind named.
         if let Ok(kind) = std::env::var("CHONKGENE_SKIT") {
@@ -973,7 +990,22 @@ impl App {
                         pet.window.set_visible(false);
                         pet.presenter.restyle();
                     }
-                    if !self.handover.is_empty() {
+                    if let Some(k) = self.morphs.iter().position(|m| m.0 == *id) {
+                        // Changed form: where she stood, in a burst of
+                        // fox-fire and sparkles, and hello at once.
+                        let (_, x) = self.morphs.remove(k);
+                        let (w, _) = pet.body.size;
+                        pet.body = Body::on_ground(
+                            &self.terrain,
+                            x - w / 2.0,
+                            pet.body.size,
+                            pet.body.foot,
+                        );
+                        pet.fun.effect(Fx::Spell, t);
+                        pet.fun.effect(Fx::Sparkles, t);
+                        pet.hello_at = Some(t + 0.5);
+                        pet.switch_at = t + 3.0;
+                    } else if !self.handover.is_empty() {
                         // In the place of one just gone, in a puff, and
                         // hello at once.
                         let x = self.handover.remove(0);
@@ -1048,6 +1080,72 @@ impl App {
             return;
         }
         self.shift_at = Some(t + round * (0.8 + 0.4 * self.rng.f64()));
+    }
+
+    /// The fox changes form (PLAN §8, her human form): from her menu, or
+    /// by herself now and then (隨牠變). Her window is made again for the
+    /// other form, where she stood, in a burst of fox-fire. Asked from the
+    /// menu with her kept in one form (維持原型 / 維持人型), she is kept in
+    /// the one asked for.
+    fn morph(&mut self, el: &ActiveEventLoop, id: u64, by_herself: bool) {
+        let Some(i) = self.pets.iter().position(|p| p.save.id == id) else {
+            return;
+        };
+        if !morphs(self.pets[i].species) || self.hidden || self.fullscreen {
+            return;
+        }
+        let Some(save) = self.store.pets.iter_mut().find(|p| p.id == id) else {
+            return;
+        };
+        save.human = !save.human;
+        if !by_herself && save.form_lock.keeps().is_some() {
+            save.form_lock = if save.human {
+                FormLock::Human
+            } else {
+                FormLock::Beast
+            };
+        }
+        diag!(
+            "morph: {} into her {} form{}",
+            save.name,
+            if save.human { "human" } else { "beast" },
+            if by_herself { " by herself" } else { "" }
+        );
+        self.collect_affinity();
+        self.dirty = true;
+        let x = self.pets[i].body.feet().0;
+        self.pets.remove(i);
+        self.morphs.retain(|m| m.0 != id);
+        self.morphs.push((id, x));
+        self.sync_desktop(el);
+    }
+
+    /// Now and then the fox changes form by herself (隨牠變), when she is
+    /// awake and up to nothing; not while a menu is open or anyone is
+    /// leaving.
+    fn morph_step(&mut self, el: &ActiveEventLoop, t: f64) {
+        if self.hidden || self.fullscreen || self.menu.is_some() {
+            return;
+        }
+        let due = self.pets.iter().find(|p| {
+            t >= p.morph_at
+                && morphs(p.species)
+                && p.save.form_lock == FormLock::Free
+                && !p.mind.asleep()
+                && p.free_to_go()
+                && p.act.is_none()
+        });
+        let Some(id) = due.map(|p| p.save.id) else {
+            // Not free when due: try again in a while.
+            for p in self.pets.iter_mut().filter(|p| t >= p.morph_at) {
+                p.morph_at = t + 60.0;
+            }
+            return;
+        };
+        if self.pets.iter().any(|p| p.leave_at.is_some()) {
+            return;
+        }
+        self.morph(el, id, true);
     }
 
     /// One pet out that is free to go changes places with one resting in
@@ -1519,13 +1617,28 @@ impl App {
                 // edit sent just after 隨機輪班 moved this pet would undo it).
                 update.on_desktop = save.on_desktop;
                 update.pinned = save.pinned;
+                // Her form is hers to change (she may have changed by
+                // herself since the settings window read it), unless she
+                // is now kept in the other one.
+                let was_human = save.human;
+                update.human = update.form_lock.keeps().unwrap_or(save.human);
+                let morphed = update.human != was_human;
+                let restyled =
+                    update.human && (update.hairdo != save.hairdo || update.hair != save.hair);
                 *save = update;
                 save.set_affinity(&affinity);
                 let save = save.clone();
                 self.dirty = true;
                 if let Some(i) = self.pets.iter().position(|p| p.save.id == save.id) {
                     let resized = (self.pets[i].save.size - save.size).abs() > 1e-3;
-                    if resized {
+                    if morphed || restyled {
+                        // Made again in her new form or look, where she
+                        // stands, in a burst of fox-fire.
+                        let x = self.pets[i].body.feet().0;
+                        self.pets.remove(i);
+                        self.morphs.retain(|m| m.0 != save.id);
+                        self.morphs.push((save.id, x));
+                    } else if resized {
                         self.pets.remove(i);
                     } else {
                         let p = &mut self.pets[i];
@@ -1644,6 +1757,7 @@ impl App {
             asleep: p.mind.asleep(),
             snacks: p.mind.snacks_left(world.day),
             fox: p.species == Species::Fox,
+            morph: morphs(p.species).then_some(p.save.human),
             others: self
                 .pets
                 .iter()
@@ -1784,6 +1898,10 @@ impl App {
             }
             Action::Magic(Magic::Foxfire) => {
                 self.start_scene(el, pet, Scene::Foxfire, world, now);
+                return;
+            }
+            Action::Morph => {
+                self.morph(el, pet, false);
                 return;
             }
             Action::CallScene(scene) => {
@@ -2052,6 +2170,9 @@ struct MenuFacts {
     /// Snacks left today.
     snacks: u8,
     fox: bool,
+    /// She can change form here (the fox, on a real GPU): whether she is in
+    /// her human form now.
+    morph: Option<bool>,
     /// The other pets out, to go and hug: id and name.
     others: Vec<(u64, String)>,
     /// The grass stalk, catnip, the spotlight are out.
@@ -2160,6 +2281,17 @@ fn menu_page(page: Page, f: &MenuFacts) -> (Vec<Item>, Vec<Action>) {
                     if n == 0 {
                         row.caption = Some(tr("施法").into());
                     }
+                }
+                // Her human form (PLAN §8), where she can take it.
+                if let Some(human) = f.morph {
+                    r.add(tr("變身"), Icon::Wand, Action::Morph).hint = Some(
+                        if human {
+                            tr("變回原型")
+                        } else {
+                            tr("變成人型")
+                        }
+                        .into(),
+                    );
                 }
             }
             r.back(Action::Back);
@@ -2681,6 +2813,24 @@ struct Float {
 const FLOAT_RISE: f32 = 72.0;
 const FLOAT_BOB: f32 = 4.0;
 
+/// Whether a pet of `species` can change form here: the fox, on a real GPU
+/// (her human form is meshes made in Blender; the CPU's sprites are
+/// ray-marched from a model's parts and would show only her head).
+fn morphs(species: Species) -> bool {
+    species == Species::Fox && chonkgene_render::shared_gpu().is_some()
+}
+
+/// How long until the fox next changes form by herself: half an hour to
+/// an hour and a half. `CHONKGENE_MORPH=<seconds>` makes it about that,
+/// for trying it out.
+fn morph_wait(rng: &mut fastrand::Rng) -> f64 {
+    let mean = std::env::var("CHONKGENE_MORPH")
+        .ok()
+        .and_then(|s| s.parse::<f64>().ok())
+        .unwrap_or(3600.0);
+    mean * (0.5 + rng.f64())
+}
+
 #[allow(clippy::too_many_arguments)]
 fn spawn(
     el: &ActiveEventLoop,
@@ -2697,16 +2847,25 @@ fn spawn(
     let species = save.species().ok_or("unknown species")?;
     let kind = &kinds[&species];
     let scale = save.size * ui_scale;
-    let coat = kind.model.coat(&save.coat).unwrap_or(0);
+    // The fox in her human form, where she can take it (her figure is
+    // meshes: on sprites she stays as she is on all fours).
+    let human = (save.human && morphs(species))
+        .then(|| chonkgene_render::skin::human(species.id(), &save.hairdo, &save.hair))
+        .transpose()
+        .unwrap_or_else(|e| {
+            eprintln!("{}: no human form: {e}", save.name);
+            None
+        })
+        .map(|(m, _)| Arc::new(m));
+    let mesh = human.or_else(|| kind.quad.clone());
+    let coat = mesh
+        .as_deref()
+        .unwrap_or(&kind.model)
+        .coat(&save.coat)
+        .unwrap_or(0);
     // The renderer first: a pet on all fours needs a wider window.
-    let mut renderer = Renderer::new(
-        Arc::clone(&kind.model),
-        kind.quad.clone(),
-        scale,
-        save.chonk,
-        coat,
-    )
-    .ok_or("cannot allocate a pixmap")?;
+    let mut renderer = Renderer::new(Arc::clone(&kind.model), mesh, scale, save.chonk, coat)
+        .ok_or("cannot allocate a pixmap")?;
     // Its fidgets: as lively as it is, on a clock of its own.
     renderer.set_fidgets(
         save.personality().energy,
@@ -2748,6 +2907,7 @@ fn spawn(
         repaint: true,
         last: now,
         switch_at: t + 2.0 + slot as f64,
+        morph_at: t + morph_wait(&mut fastrand::Rng::with_seed(seed)),
         happy_until: 0.0,
         asleep_since: 0.0,
         hello_at: Some(t + 1.2 + slot as f64 * 1.4),
@@ -3840,7 +4000,8 @@ impl Pet {
                 || self.fun.pat_by_you.is_some()
                 || self.fun.carry.is_some()
                 || self.fun.scene.is_some_and(|r| r.scene == Scene::Bone)
-                || move_test())
+                || move_test()
+                || morph_test())
         {
             let wading = if self.fun.pond.now.is_some() { "w" } else { "" };
             let what = format_args!("pet{}{wading}", self.save.id);
@@ -4340,6 +4501,7 @@ impl ApplicationHandler<UserEvent> for App {
             self.sync_desktop(el);
         }
         self.rotate_step(el, t);
+        self.morph_step(el, t);
 
         if now >= self.terrain_at {
             self.refresh_terrain();
@@ -4506,6 +4668,16 @@ impl ApplicationHandler<UserEvent> for App {
                     self.stage_test = "tray-pond-again".into();
                     self.stage_at = Some(t + 8.0);
                 }
+            } else if self.stage_test.starts_with("morph") {
+                let fox = self.pets.iter().find(|p| p.species == Species::Fox);
+                if let Some(fox) = fox.map(|p| p.save.id) {
+                    self.act(el, fox, Action::Morph);
+                    diag!("CHONKGENE_STAGE={}: the fox's 變身", self.stage_test);
+                }
+                if self.stage_test == "morph" {
+                    self.stage_test = "morph-back".into();
+                    self.stage_at = Some(t + 10.0);
+                }
             } else if self.stage_test == "hug-other" {
                 if let Some(other) = self.pets.get(1).map(|p| p.save.id) {
                     self.act(el, pet, Action::HugWith(other));
@@ -4607,6 +4779,7 @@ mod tests {
             asleep,
             snacks: 2,
             fox,
+            morph: None,
             others: vec![(2, "芋圓".into())],
             toy: false,
             catnip: false,
@@ -4652,7 +4825,10 @@ mod tests {
                 "commands-fox",
                 fox,
                 Page::Commands,
-                facts(false, true, free()),
+                MenuFacts {
+                    morph: Some(false),
+                    ..facts(false, true, free())
+                },
             ),
             ("toys", shiba, Page::Toys, facts(false, false, free())),
             (
@@ -4733,6 +4909,32 @@ mod tests {
             ]
         );
         assert_eq!(breaks(&items), [4, 5]);
+    }
+
+    /// Where she can change form (the fox, on a real GPU), 變身 ends her
+    /// spells, saying which way it goes; elsewhere it is not there.
+    #[test]
+    fn the_fox_changes_form_from_her_spells() {
+        let morph = |f: &MenuFacts| {
+            let (items, actions) = menu_page(Page::Commands, f);
+            actions
+                .iter()
+                .position(|a| *a == Action::Morph)
+                .map(|i| (i, items[i].hint.clone(), actions.len()))
+        };
+        assert_eq!(morph(&facts(false, true, free())), None);
+        let beast = MenuFacts {
+            morph: Some(false),
+            ..facts(false, true, free())
+        };
+        let (at, hint, len) = morph(&beast).unwrap();
+        assert_eq!(at, len - 2, "last of the spells, before 返回");
+        assert_eq!(hint.as_deref(), Some(tr("變成人型")));
+        let human = MenuFacts {
+            morph: Some(true),
+            ..facts(false, true, free())
+        };
+        assert_eq!(morph(&human).unwrap().1.as_deref(), Some(tr("變回原型")));
     }
 
     /// The fox's spells are a captioned section of 叫牠…, not a page.
