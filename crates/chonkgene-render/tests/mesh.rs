@@ -2340,6 +2340,17 @@ fn a_mesh_made_elsewhere_joins_the_baked_one() {
     assert!((v.color[0] - half(0xD8, 0xF9)).abs() < 1e-4);
     assert!((v.color[2] - half(0x2A, 0x4E)).abs() < 1e-4);
     assert_eq!(mesh.crown, 0, "the top of the hair is the crown");
+    assert_eq!(v.mouth[3], 0.0, "hair is no tail");
+    // Her tails, made elsewhere, burn when she casts as baked ones do: a
+    // vertex all on a tail is marked past −1 by how far along it is (the
+    // middle of the third of five segments), one partly on it only by how
+    // much.
+    let mut tails = empty();
+    let src = "v 0 0 0 0 1 0 fur fur 0 0 0 1 tail3_c 1\n\
+               v 0 0 0 0 1 0 fur fur 0 0 0 1 hips 1 tail3 1\n";
+    import(&mut tails, &model, &sk, 0, "tail", src).expect("import");
+    assert!((tails.vertices[0].mouth[3] + 1.5).abs() < 1e-6);
+    assert!((tails.vertices[1].mouth[3] + 0.5).abs() < 1e-6);
     for (bad, says) in [
         ("v 0 0 0 0 1 0 hair hair 0 0 0 1 nobone 1\n", "no such bone"),
         (

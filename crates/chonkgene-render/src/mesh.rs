@@ -169,17 +169,7 @@ pub fn bake(
         .iter()
         .find(|pv| ["nose", "beak", "bill"].contains(&pv.part.name.as_str()))
         .map(|pv| pv.center.y);
-    // Several tails (the fox's): each tail bone's place along its tail,
-    // the middle of its segment, 0 root … 1 tip.
-    let mut along_tail = vec![None; skeleton.names.len()];
-    let chains = skeleton.tails();
-    if chains.len() > 1 {
-        for c in &chains {
-            for (k, &b) in c.iter().enumerate() {
-                along_tail[b] = Some((k as f32 + 0.5) / c.len() as f32);
-            }
-        }
-    }
+    let along_tail = tail_places(skeleton);
     let vertices: Vec<Vertex> = points
         .iter()
         .map(|&p0| {
@@ -200,15 +190,9 @@ pub fn bake(
                 eye: on_face(eyes, p, 0.05),
                 mouth: {
                     let mut m = on_face(mouth, p, 0.04);
-                    let (mut tail, mut along) = (0.0, 0.0);
-                    for (&b, &w) in bones.iter().zip(&weights) {
-                        if let Some(a) = along_tail.get(b as usize).copied().flatten() {
-                            tail += w;
-                            along += w * a;
-                        }
-                    }
-                    if tail > 0.0 && m[3] < 0.5 {
-                        m[3] = -(tail + if tail > 0.99 { along / tail } else { 0.0 });
+                    let tail = tail_mark(&along_tail, &bones, &weights);
+                    if tail < 0.0 && m[3] < 0.5 {
+                        m[3] = tail;
                     }
                     m
                 },
@@ -329,6 +313,39 @@ fn refine_zone(
     index(if back { "back" } else { "belly" }).unwrap_or(zone)
 }
 
+/// Several tails (the fox's): each tail bone's place along its tail, the
+/// middle of its segment, 0 root … 1 tip; `None` off the tails, and for
+/// every bone of a pet with one tail.
+fn tail_places(sk: &Skeleton) -> Vec<Option<f32>> {
+    let mut places = vec![None; sk.names.len()];
+    let chains = sk.tails();
+    if chains.len() > 1 {
+        for c in &chains {
+            for (k, &b) in c.iter().enumerate() {
+                places[b] = Some((k as f32 + 0.5) / c.len() as f32);
+            }
+        }
+    }
+    places
+}
+
+/// A vertex's mark for the shader's burning tails (mouth.w): minus how
+/// much it is a tail's, and past −1 how far along it; 0 off the tails.
+fn tail_mark(places: &[Option<f32>], bones: &[u32; 4], weights: &[f32; 4]) -> f32 {
+    let (mut tail, mut along) = (0.0, 0.0);
+    for (&b, &w) in bones.iter().zip(weights) {
+        if let Some(a) = places.get(b as usize).copied().flatten() {
+            tail += w;
+            along += w * a;
+        }
+    }
+    if tail > 0.0 {
+        -(tail + if tail > 0.99 { along / tail } else { 0.0 })
+    } else {
+        0.0
+    }
+}
+
 fn weigh(parts: &[chonkgene_rig::PartView], sk: &Skeleton, p: V3) -> ([u32; 4], [f32; 4]) {
     let mut w = vec![0.0f32; sk.names.len()];
     let d: Vec<f32> = parts
@@ -421,6 +438,7 @@ pub fn import(
         let c = colors[i];
         Ok(v3(c[0] as f32, c[1] as f32, c[2] as f32) / 255.0)
     };
+    let places = tail_places(sk);
     let base = mesh.vertices.len() as u32;
     let mut count = 0u32;
     for (n, line) in src.lines().enumerate() {
@@ -465,7 +483,8 @@ pub fn import(
                     normal: [f[3], f[4], f[5], gloss],
                     color: [c.x, c.y, c.z, fuzz],
                     eye: [0.0; 4],
-                    mouth: [0.0; 4],
+                    // Tails burn when she casts, as baked ones do.
+                    mouth: [0.0, 0.0, 0.0, tail_mark(&places, &bones, &weights)],
                     bones,
                     weights,
                 });

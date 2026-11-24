@@ -766,13 +766,19 @@ def sphere(c, r, color, bones, gloss=0.3, slot=False, zone="back", n=20):
 
 
 # ---- ears: big fox ears tilted out, a thick rim, a hollow lined with fluff ----
+EAR_W = 0.225
+
+
 def ear(s):
     bone = f"ear_{'l' if s > 0 else 'r'}"
     bones = ((bone, 1.0),)
     # The root sinks well into the head (the hair hides the rest), so
     # nothing shows between them.
-    base = Vector((s * 0.19, HEAD_C.y + 0.19, -0.06))
-    tip = Vector((s * 0.4, HEAD_C.y + 0.62, -0.075))
+    # (measured over the sheet's front and side views with the hair on:
+    # the tip 0.04 higher than it was, a little further out and forward,
+    # the ear broader)
+    base = Vector((s * 0.19, HEAD_C.y + 0.21, -0.06))
+    tip = Vector((s * 0.425, HEAD_C.y + 0.66, -0.06))
     axis = (tip - base).normalized()
     across = Vector((1, 0, 0)) - axis * axis.x
     across.normalize()
@@ -788,7 +794,7 @@ def ear(s):
     rows = []
     for i in range(n_al + 1):
         t = i / n_al
-        w = 0.2 * (1 - t) ** 0.72 * (1 + 0.32 * math.sin(math.pi * t)) + 0.004
+        w = EAR_W * (1 - t) ** 0.72 * (1 + 0.32 * math.sin(math.pi * t)) + 0.004
         d = 0.085 * (1 - t) ** 0.7 + 0.006
         cup = 0.75 * d * smoothstep(0.1, 0.25, t) * (1 - smoothstep(0.72, 0.95, t))
         # The outer edge bows out, the inner edge is straighter.
@@ -816,7 +822,7 @@ def ear(s):
     for ca, t0, ln, wd in ((-0.45, 0.14, 0.13, 0.05), (-0.18, 0.1, 0.17, 0.06),
                            (0.12, 0.12, 0.16, 0.055), (0.42, 0.16, 0.12, 0.05),
                            (-0.3, 0.26, 0.1, 0.04), (0.25, 0.27, 0.1, 0.04)):
-        w = 0.2 * (1 - t0) ** 0.72
+        w = EAR_W * (1 - t0) ** 0.72
         root = base + axis * (length * t0) + across * (w * ca)
         spread = across * (0.9 * ca)
         pts, nrm = [], []
@@ -852,6 +858,143 @@ def lock(pts, nrm, width, thick, color, bones, zone="head", around=12):
     grid(rows, True, color, close_bottom=cap)
     # Each lock faces out on its own (the ear's own test can't judge them).
     face_out(first)
+
+
+# ---- the tails: nine plumes fanned from one root -------------------------------
+# The sheet's 九尾巴 (獨立 9 分件): nine plumes, each its own piece, white at
+# the root through gold to orange-red at the point; narrow where it leaves
+# the root, fullest a little under half way, drawn to a point; fanned from
+# one root (腰椎尾部基部銜接點). Where the root sits: the 三視圖 (人型形態)
+# and the 3D viewport sheet have the tails leave her back just under the
+# long hair's ends, behind the top of the skirt, going back before they
+# rise and spread (the turnaround's back view marks the socket higher, in
+# a parting of the hair). Under the hair, every hairdo stays as it is.
+# From behind, the middle ones rise over the hair to about her chin; from
+# the front the outer ones show either side of her, the lowest at her
+# hips, their points turning up.
+TAIL_ROOT_PY = 505
+TAIL_SEG = ["", "_b", "_c", "_d", "_tip"]
+TAIL_SPREAD = 100.0  # degrees either side of upright
+TAIL_LENGTH = 1.45
+TAIL_WIDE = 0.17  # half width at its fullest
+TAIL_FLAT = 0.62  # depth against width
+TAIL_GROOVES = 7
+# The shadow counts anything lower as standing on the floor (mesh.rs).
+TAIL_LOW = FLOOR + 0.5
+
+
+def tail_root():
+    """Where the nine meet: on the robe's back, a little sunk into it."""
+    _, _, back = robe_at(TAIL_ROOT_PY)
+    return Vector((0.0, Y(TAIL_ROOT_PY), -back + 0.03))
+
+
+def tail_hide():
+    """How low hair may hang in the middle of her back: further down it
+    comes out in front of the tails' root, seen from behind (the hair hangs
+    further back than where the tails leave her)."""
+    return tail_root().y + 0.01
+
+
+def tail_line(i, n=64):
+    """Tail `i`'s centre line (0 her right … 8 her left), `n` points root
+    to point, and its angle in the fan (radians, 0 upright, + her left)."""
+    th = math.radians(-TAIL_SPREAD + i * 2 * TAIL_SPREAD / 8)
+    # The upright ones the longest; no two alike.
+    size = (1.0 - 0.06 * abs(math.sin(th))) * (1.0 + 0.04 * math.sin(i * 2.3))
+    step = TAIL_LENGTH * size / (n - 1)
+    u = Vector((math.sin(th), math.cos(th), 0.0))
+    # Across the fan, toward upright (the middle one leans to her left).
+    toward = Vector((-math.cos(th), math.sin(th), 0.0)) if th > 0 else \
+        Vector((math.cos(th), -math.sin(th), 0.0))
+    if abs(th) < 1e-6:
+        toward = Vector((1.0, 0.0, 0.0))
+    p = tail_root()
+    pts = [p.copy()]
+    for k in range(1, n):
+        s = (k - 0.5) / (n - 1)
+        # Out a little away from upright at the root, back toward it
+        # through the middle, the point flicking up (the sheet's petals).
+        droop = 0.32 - 0.24 * smoothstep(math.radians(50), math.radians(100), abs(th))
+        a = -droop + 0.9 * smoothstep(0.18, 1.0, s)
+        fan = u * math.cos(a) + toward * math.sin(a)
+        # Straight back from her first, clear of the hair, then the fan
+        # leaning back (the middle ones most, so they lie behind).
+        back = 1.6 * (1.0 - smoothstep(0.0, 0.3, s)) + 0.4 + 0.4 * max(math.cos(th), 0.0)
+        d = (fan + Vector((0.0, 0.0, -back))).normalized()
+        p = p + d * step
+        pts.append(p.copy())
+    return pts, th
+
+
+def tail_bones(i, s):
+    """Tail `i`'s bones at `s` along it: each segment's middle on its own
+    bone, blending to the next between."""
+    names = [f"tail{i + 1}{seg}" for seg in TAIL_SEG]
+    f = min(max(s * len(names) - 0.5, 0.0), len(names) - 1.0)
+    k = min(int(f), len(names) - 2)
+    t = f - k
+    return ((names[k], 1.0 - t), (names[k + 1], t))
+
+
+def tail_wide(s):
+    """A plume's half width `s` of the way out: narrow at the root,
+    swelling to its fullest at 0.45, easing in to a point."""
+    if s < 0.45:
+        return TAIL_WIDE * (0.22 + 0.78 * math.sin(0.5 * math.pi * s / 0.45) ** 0.9)
+    return TAIL_WIDE * max(0.0, math.cos(0.5 * math.pi * (s - 0.45) / 0.55)) ** 1.15 + 0.003
+
+
+def tail_color(s):
+    """White at the root, gold through the middle, the tip colour at the
+    point: two slots a vertex, so in two stretches."""
+    if s < 0.62:
+        return "fur", "tailmid", smoothstep(0.28, 0.62, s)
+    return "tailmid", "tailtip", smoothstep(0.66, 0.97, s)
+
+
+def tail(i):
+    pts, th = tail_line(i)
+    n = len(pts)
+    names = [f"tail{i + 1}{seg}" for seg in TAIL_SEG]
+    for k, name in enumerate(names):
+        PIVOTS[name] = pts[round(k / len(names) * (n - 1))]
+        PARENTS[name] = "hips" if k == 0 else names[k - 1]
+    # Its width lies across the fan, its flat faces front and back.
+    across = Vector((math.cos(th), -math.sin(th), 0.0))
+    cols = 6 * TAIL_GROOVES
+    rings = []
+    for k, p in enumerate(pts):
+        s = k / (n - 1)
+        tan = (pts[min(k + 1, n - 1)] - pts[max(k - 1, 0)]).normalized()
+        depth = tan.cross(across).normalized()
+        side = depth.cross(tan).normalized()
+        w = tail_wide(s)
+        d = max(w * TAIL_FLAT, 0.003)
+        a_, b_, t_ = tail_color(s)
+        ring = []
+        for j in range(cols):
+            a = 2 * math.pi * j / cols
+            g = (0.5 + 0.5 * math.cos(TAIL_GROOVES * a)) ** 0.5
+            bulge = 1.0 + 0.07 * (g - 0.7) * smoothstep(0.08, 0.2, s)
+            q = p + (side * (w * math.cos(a)) + depth * (d * math.sin(a))) * bulge
+            v = vert(q, a_, b_, t_, gloss=0.2, fuzz=0.2, bones=tail_bones(i, s), zone="tail")
+            GROOVES[v] = 0.55 * (1.0 - g) ** 2 * smoothstep(0.08, 0.25, s) * (1 - smoothstep(0.85, 1.0, s))
+            ring.append(v)
+        rings.append(ring)
+    first = len(faces)
+    cap = vert(pts[0], "fur", bones=tail_bones(i, 0.0), zone="tail")
+    grid(rings, True, "fur", close_top=cap)
+    face_out(first)
+    return min(verts[v][0].y for r in rings for v in r)
+
+
+def tails():
+    low = min(tail(i) for i in range(9))
+    # The root: a soft puff where the nine meet.
+    sphere(tail_root() + Vector((0, 0.005, -0.025)), Vector((0.075, 0.07, 0.06)), "fur",
+           (("hips", 1.0),), gloss=0.2, zone="tail")
+    print(f"tails: lowest point y {low:.3f} (keep above {TAIL_LOW:.3f})")
 
 
 # ---- normals, occlusion, out ---------------------------------------------------
@@ -1187,6 +1330,9 @@ def curtain(grooves=14, tips=HAIR_TIPS, outline=CURTAIN):
             f = k - math.floor(k)
             strip = int(min(k, grooves - 1))
             tip = tips + 0.025 * math.cos(2.3 * strip) - 0.07 * (1 - abs(2 * f - 1))
+            # In the middle of her back, the ends no lower than the tails'
+            # root (the tails hide them; lower, they showed over the root).
+            tip += (1 - smoothstep(0.2, 0.45, abs(u))) * max(0.0, tail_hide() - (tips - 0.095))
             # From under the shell round the back and sides, then down.
             phi = math.copysign(180 - abs(u) * 98, u) if u else 180.0
             first = curtain_at(u, 0.5, outline)
@@ -1497,11 +1643,14 @@ def hair_princess():
         w = smoothstep(0.0, 0.3, t)
         return (("head", 1.0 - w), ("hair_b", w))
     on = lambda u, y, off: curtain_at(u, y, PRINCESS_CURTAIN) + Vector((0, 0, -off))
+    # (the V's point no lower than the tails' root, which hides it; a
+    # little higher, as these locks lie further back than the curtain)
+    v_lift = max(0.0, tail_hide() + 0.03 - (PRINCESS_TIPS - 0.07))
     for du, w, low in ((-0.18, 0.1, 0.0), (0.18, 0.1, 0.0), (-0.07, 0.1, 0.03), (0.07, 0.1, 0.03),
                        (0.0, 0.09, 0.07)):
         clump([c + Vector((du * 0.15, -0.04, -0.03)), c + Vector((du * 0.3, -0.12, -0.04)),
                on(du * 0.45, 0.45, 0.06), on(du * 0.75, 0.15, 0.06), on(du, -0.15, 0.05),
-               on(du * 0.9, PRINCESS_TIPS - low, 0.04)],
+               on(du * 0.9, PRINCESS_TIPS - low + v_lift, 0.04)],
               w, 0.055, clear=0.02, root=0.05, point=2.2, tip=0.6, bones=lock_bones, edge=0.45, flat=0.8,
               up=lambda p, t: Vector((0, 0.1, -1)).normalized())
 
@@ -1661,6 +1810,7 @@ if __name__ == "__main__":
     piece(sash)
     piece(ear, 1)
     piece(ear, -1)
+    piece(tails)
     write_mesh(os.path.join(out, "figure.mesh"))
     # 紅髮版's armbands, in a file of their own, shaded by the figure.
     figure = ([v[0] for v in verts], list(faces))
