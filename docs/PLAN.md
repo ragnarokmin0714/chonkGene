@@ -1669,6 +1669,60 @@ On the build with `faba221` (CI built `efd544d` and `1edbbf2` green), so not the
 
 **Fixed**: the floor of a hug (`hug_floor`: `FLOOR`, held by you `+ HELD_CLEAR`) holds after the hug too. For `HUG_HOLD` 1 s the most it may lift her comes down no faster than her pose needs (and at most as an exponential fall, `HUG_LAND` 0.15 s), then whether or not, so she comes down with her pose, gently, and always lands; a chubby fox hovers a few pixels for that second, then sits down. A time-only fall was tried first: the stricter tests then caught a cradled Shiba rolling back up off its back slower than that (one frame, 15 px). **Found on the way and fixed**: the renderer timed every hug's pose by `gesture_secs(Act::Hug)`, 3.2 s, so in the 9 s 搖搖抱 her tails draped over your hands and the rocking went after 3.2 s while your hands stayed; it now times a hug by `Hug::secs`. Tests `a_pet_held_in_your_arms_is_never_cut_off` and `a_pet_hugging_another_is_never_cut_off` now share `hug_edges`: every species at chonk 0.33 and 1, through the whole hug and 0.6 s after, may touch the bottom no more than on its feet before or settled after (+4 px), and never come within 3 px of the left, top or right edge. Checked in the app under Xvfb with a chonk 1 fox first (`CHONKGENE_STAGE` hug-other and cradle, her frames dumped): nothing of her along the bottom row in the bear hug, the cradle, or the 1.5 s after either (lying asleep after the cradle, as lying always does).
 
+### Roger's twenty-seventh pass (feedback only, 2026-11-25; to do next)
+
+Roger's 「20261125 回饋報告」, talked through with him the same day (his answers folded in).
+
+1. **「`她怎麼叫你` 可以多一個統一窗口設定」: one 「牠怎麼叫你」 for every pet.** Plan, two layers:
+   - In 一般, a box **「大家怎麼叫你」**, empty by default. Empty, every pet keeps its species' default (主人, 奴才, 同學… have character; one value for all should not wipe that out unasked).
+   - Filled, every pet whose own 「牠怎麼叫你」 nobody changed (still at its species' default in any language, as `store.rs` already tells) uses it, **and so does every pet adopted after**. A pet's own box, filled, still wins; empty, it shows the shared value greyed and follows it.
+   - Changed, each pet that follows says `called_you`, a few seconds apart (not seven bubbles at once).
+   - Better than an 「套用到全部」 button, which works once and misses the pets adopted later.
+2. **Actions by zone, by tapping** (「互動改善建議 和 擁抱的觸發機制更改」). A setting **「動作要點幾下」: 一下 / 兩下, default 兩下**. It replaces today's double-click anywhere = hug (`DOUBLE_CLICK`).
+
+   | Zone | Action | Built already? |
+   |---|---|---|
+   | 頭 head | 摸摸頭 (the menu's routine) | yes |
+   | 下巴 chin | a chin scratch of the species' own (table below) | new |
+   | 手 front paw (birds: wing) | 握手 (a bird's wing: a high five) | yes, `叫牠… › 握手` |
+   | 腳 hind paw (birds: foot) | 舉高高 | yes, `HugHold::Carry` |
+   | 肩 shoulder | 環抱 | yes, `HugHold::Wrap` |
+   | 背 back | 搖搖抱 | yes, `HugHold::Cradle` |
+   | 肚子 belly, 臉頰 cheek | no action: the flesh dents in and springs back out, 「ㄉㄨㄞ ㄉㄨㄞ」 | the dent is there |
+   | 肚子 while lying on its back | 摸肚肚, a belly rub | new |
+
+   - **Two taps** (the default): the first tap is a poke as now, but small, and the turn to face you waits until the double-click time has passed (so a poke does not feel 0.4 s late). The zone is **locked at the first tap**: the pet moves between the taps, and the second may land elsewhere. The second tap counts if it lands on the same pet within the system's double-click time (Windows `GetDoubleClickTime`, else 0.4 s).
+   - **One tap**: a tap on a zone with an action starts it. Pokes and the tickle stages stay on belly and cheeks only (Roger, 2026-11-25: 可以; the belly was always the main event, §1.2).
+   - **Both modes**: bottom and tail are not in Roger's list and stay poke only. A long press is unchanged: a pat by fondness, a dislike, the 曼赤肯's trap.
+   - **握手 against the fondness table** (every species dislikes a held paw): two taps offer your hand and it gives its paw gladly, while holding the paw down is still disliked. With a grudge, or asleep, it pulls the paw back.
+   - **「ㄉㄨㄞ ㄉㄨㄞ」**: the press dent (`mesh.wgsl` `press`, negative depth springing back) springs past the surface into a bulge and wobbles two or three times before it settles, more on a chubbier pet. The Shiba's double chin needs a soft spot of its own.
+   - **摸肚肚** when it lies on its back (the tickle's belly-up laugh, a belly-up sleep, after a 搖搖抱): the Shiba's hind leg kicks (the scratch reflex), the 曼赤肯's trap comes after 3 s as now, the 折耳貓 melts flat, the fox's tails sway. New idle to go with it, **翻肚討摸**: now and then, with the cursor near, a dog, cat or beast-form fox rolls over to show its belly, asking. Without it a rub is hard to find.
+   - **New zones from the bones**, as `back` and `wing` were (`mesh::refine_zone`): `Shoulder` (the top of the body between the neck and the front legs; a bird's wing root), and `Paw` split into front and hind (a bird's wing is its hand, its foot its foot). A picture of every pet coloured by zone (`examples/zones.rs`) goes to Roger first, checked at the smallest size, where shoulder, back and chin are a few pixels.
+   - **Showing what can be done**: over each zone the hand cursor changes pose (an open palm on the head, knuckles up under the chin, …). See also item 4.
+   - **Chin scratches** (Roger gave the cats and the dog; the rest are mine to plan):
+
+     | Species | Chin scratch |
+     |---|---|
+     | 柴犬 | the double chin held from below, patted and squeezed, the flesh bouncing 「ㄉㄨㄞ ㄉㄨㄞ」; eyes squeezed into a Shiba smile, the curled tail going |
+     | 曼赤肯貓 | 反手撓下巴 (the back of the hand, knuckles stroking up): the chin goes up and up, purring, then it rubs its cheek on your knuckles (scent-marking you as its own) |
+     | 蘇格蘭折耳貓 | 反手撓下巴: the head tilts further and further until the whole cat slowly topples sideways, melted |
+     | 貓頭鷹 | under the face disc: face feathers fluffed out, eyes half shut, the head following your finger round and round until it is nearly upside down |
+     | 小雞 | under the beak: head up, eyes shut, puffed into a round ball of fluff, 「啾～」 |
+     | 小鴨 | under the bill: nibbles your finger with its bill, its bottom waggling |
+     | 九尾 (beast) | 「哼」 while pressing her head into your hand, the nine tails swaying slowly; stop and a tail hooks your hand to keep it there |
+
+   - **The Shiba's move is after 安西教練** (灌籃高手). That stays a reference only: no name from that work in the UI, the lines or a store page; in code `jowl_jiggle` or similar.
+   - **The fox's human form** (Roger, 2026-11-25: yes): head (a pat; 傲嬌 「……只准一下」), hands (握手), shoulders (環抱, which she turns into her bear hug of you), chin (she catches your finger: 「挑姊姊下巴？膽子不小。」). Belly, legs and back get no dent and no action: she steps aside or swats the hand away. Zones on the body of a grown woman read differently from an animal's, and Steam's content survey asks. **Asked**: her cheeks and tails were her zones too (entry of 2026-11-25 above), and neither has that problem (her tails are her favourite spot); proposed to keep both.
+   - **The menu**: Roger said yes (2026-11-25) to a 「互動…」 submenu with 握手 and 舉高高, with 抱抱 kept. Missed when it was proposed: 抱抱… already has 環抱 / 舉高高 / 搖搖抱, and 叫牠… has 握手. **Proposed instead**: no new submenu (the menu was cut to nine rows in the twenty-sixth pass). **Asked**.
+3. **「好朋友／主人」 shown untranslated** (asked where on 2026-11-25): Roger: 似乎解決, he will say if he sees it again. Closed.
+4. **Roger asked: should each pet's interactions show in 「我的寵物」?** Proposed: yes, as a card **「摸摸筆記」** beside the pet's picture:
+   - **Shown from the start**: the shared zone → action rows (頭 摸摸頭, 手 握手, 腳 舉高高, 肩 環抱, 背 搖搖抱). Otherwise nobody finds 舉高高 on the feet.
+   - **Filled in by trying, on that pet**: what is its own: its chin scratch, its fondness hearts per zone (❤️❤️ / ❤️ / · / ✗), its specials (the 曼赤肯's trap, the Shiba's kick, the owl's head turn). Until then 「還沒試過」. A small store of what each pet has shown (zone and reaction) in its save; it belongs with the growth diary (Phase 5).
+   - **Hovering a row** lights that zone on the preview (the zone colours of `examples/zones.rs`).
+   - The tap setting of item 2 lives in 一般, not here: it is the same for every pet.
+
+**Suggested order**: 1 (small, on its own) → the zones (shoulder, front and hind paws) and their picture → the tap setting, mapped onto the actions already built → 「ㄉㄨㄞ ㄉㄨㄞ」 → the chin scratches → 摸肚肚 and 翻肚討摸 → the human form's zones → the cursor poses → 4 (摸摸筆記).
+
 ### New species: eleven more pets (Roger, 2026-11-13; planned, none built)
 
 Roger, 2026-11-13: 「這是 chonkGene 接下來要新增的寵物」, with a concept picture he made with Gemini (`inbox/Gemini_Generated_Image_1w2xeh1w2xeh1w2x.jpeg`, 「超萌動物大集合」; a reference for look only, nothing from it ships). It shows nine animals; the Munchkin is already in the cast, so eight are new. Roger then added three not in the picture (same day: 「再加個 無尾熊 和 熊貓 台灣黑熊」): the koala, the giant panda and the Formosan black bear, eleven in all. When they come relative to the open items above is Roger's call (his order of 2026-11-13 is to clear what is planned first).
