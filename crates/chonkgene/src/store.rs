@@ -107,6 +107,10 @@ pub struct Settings {
     /// places; 0 never (the default, Roger 2026-11-19). One of
     /// [`ROTATE_CHOICES`].
     pub rotate_minutes: u32,
+    /// 「大家怎麼叫你」 (Roger, 2026-11-25): what every pet whose own
+    /// 「牠怎麼叫你」 nobody changed calls you, pets adopted later too;
+    /// empty, each keeps its species' default. See [`PetSave::calls_you`].
+    pub you: String,
 }
 
 /// The intervals 「讓牠們隨機輪班」 offers, minutes (0: off). 15 minutes
@@ -128,6 +132,7 @@ impl Default for Settings {
             welcomed: false,
             language: String::new(),
             rotate_minutes: 0,
+            you: String::new(),
         }
     }
 }
@@ -154,6 +159,18 @@ impl Settings {
         self.format = FORMAT;
         true
     }
+
+    /// Clamp what a hand-edited file could get wrong.
+    pub fn sanitise(&mut self) {
+        self.you = clean_you(&self.you);
+    }
+}
+
+/// What was typed for 「牠怎麼叫你」 or 「大家怎麼叫你」 as it is kept:
+/// trimmed, at most [`crate::lines::MAX_YOU`] characters.
+pub fn clean_you(typed: &str) -> String {
+    let cut: String = typed.trim().chars().take(crate::lines::MAX_YOU).collect();
+    cut.trim().to_string()
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -190,6 +207,12 @@ pub struct PetSave {
     pub hair: String,
     #[serde(default)]
     pub form_lock: FormLock,
+    /// Its 「牠怎麼叫你」 was typed in by hand even if it reads as its
+    /// species' default (asked to keep 「主人」 while 「大家怎麼叫你」 is
+    /// set): it does not follow the shared one. Missing from saves before
+    /// 2026-11-25, where anything not a default was typed in anyway.
+    #[serde(default)]
+    pub own_you: bool,
     pub level: u32,
     pub xp: u32,
     pub xp_day: i64,
@@ -219,6 +242,7 @@ impl PetSave {
             hairdo: String::new(),
             hair: String::new(),
             form_lock: FormLock::Free,
+            own_you: false,
             level: 1,
             xp: 0,
             xp_day: 0,
@@ -244,20 +268,58 @@ impl PetSave {
             return false;
         };
         let mut changed = false;
-        for (field, key) in [
-            (&mut self.name, species.default_name_zh()),
-            (&mut self.you, species.default_you_zh()),
-        ] {
+        let mut fields = vec![(&mut self.name, species.default_name_zh())];
+        if !self.own_you {
+            fields.push((&mut self.you, species.default_you_zh()));
+        }
+        for (field, key) in fields {
             let now = i18n::tr_in(lang, key);
-            let a_default = Lang::ALL
-                .iter()
-                .any(|&l| field.as_str() == i18n::tr_in(l, key));
-            if a_default && field.as_str() != now {
+            if is_default(field, key) && field.as_str() != now {
                 *field = now.into();
                 changed = true;
             }
         }
         changed
+    }
+
+    /// Its 「牠怎麼叫你」 is still its species' default, in any language:
+    /// nobody changed it, so it follows 「大家怎麼叫你」 when that is set.
+    pub fn you_untouched(&self) -> bool {
+        !self.own_you
+            && self
+                .species()
+                .is_some_and(|s| is_default(&self.you, s.default_you_zh()))
+    }
+
+    /// What it calls you: `everyone` (「大家怎麼叫你」) if that is set and
+    /// its own was never changed, else its own.
+    pub fn calls_you<'a>(&'a self, everyone: &'a str) -> &'a str {
+        if !everyone.is_empty() && self.you_untouched() {
+            everyone
+        } else {
+            &self.you
+        }
+    }
+
+    /// Back to its species' default 「牠怎麼叫你」, in the language shown,
+    /// so it follows 「大家怎麼叫你」 again.
+    pub fn follow_everyone(&mut self) {
+        if let Some(s) = self.species() {
+            self.you = s.default_you().into();
+            self.own_you = false;
+        }
+    }
+
+    /// Store `typed` (cleaned, not empty) as its own 「牠怎麼叫你」. Its
+    /// species' default counts as typed in only while `everyone` is set
+    /// (kept apart from the shared one on purpose); otherwise it is just
+    /// the default again.
+    pub fn set_own_you(&mut self, typed: String, everyone: &str) {
+        self.own_you = !everyone.is_empty()
+            || !self
+                .species()
+                .is_some_and(|s| is_default(&typed, s.default_you_zh()));
+        self.you = typed;
     }
 
     pub fn personality(&self) -> Personality {
@@ -306,6 +368,11 @@ impl PetSave {
         self.you = self.you.chars().take(crate::lines::MAX_YOU).collect();
         self.level = self.level.max(1);
     }
+}
+
+/// `text` is the default `key` (as the code writes it) in some language.
+fn is_default(text: &str, key: &'static str) -> bool {
+    Lang::ALL.iter().any(|&l| text == i18n::tr_in(l, key))
 }
 
 /// Whether the fox changes form by herself (Roger, 2026-11-16: 「她偶爾會
@@ -650,6 +717,52 @@ mod tests {
         munchkin.name = "小麻糬".into();
         munchkin.localize_defaults_in(Lang::En);
         assert_eq!(munchkin.name, "小麻糬");
+    }
+
+    #[test]
+    fn everyone_calls_you_the_same_unless_one_was_told_otherwise() {
+        let mut rng = fastrand::Rng::with_seed(2);
+        let mut shiba = PetSave::adopt(1, Species::Shiba, "red", &mut rng);
+        // Nothing shared: its species' default.
+        assert_eq!(shiba.calls_you(""), shiba.you);
+        // Shared, and its own untouched (in any language): the shared one.
+        assert_eq!(shiba.calls_you("Roger"), "Roger");
+        shiba.you = i18n::tr_in(Lang::Ja, Species::Shiba.default_you_zh()).into();
+        assert!(shiba.you_untouched());
+        assert_eq!(shiba.calls_you("Roger"), "Roger");
+        // Its own typed in: that one, shared or not.
+        shiba.you = "老爸".into();
+        assert!(!shiba.you_untouched());
+        assert_eq!(shiba.calls_you("Roger"), "老爸");
+        assert_eq!(shiba.calls_you(""), "老爸");
+        // Put back: it follows again.
+        shiba.follow_everyone();
+        assert_eq!(shiba.calls_you("Roger"), "Roger");
+        // Its default typed in while a shared one is set: kept apart, in
+        // every language.
+        let master = shiba.you.clone();
+        shiba.set_own_you(master.clone(), "Roger");
+        assert_eq!(shiba.calls_you("Roger"), master);
+        shiba.localize_defaults_in(Lang::En);
+        assert_eq!(shiba.you, master);
+        // Typed with nothing shared, its default is just the default.
+        shiba.set_own_you(master.clone(), "");
+        assert!(shiba.you_untouched());
+        // Saves from before the flag still read.
+        let old: PetSave = ron::from_str(
+            r#"(id: 1, species: "shiba", name: "阿柴", you: "主人", coat: "red", chonk: 0.33,
+            size: 1.0, ticklish: 0.5, patience: 0.5, energy: 0.5, on_desktop: true,
+            level: 1, xp: 0, xp_day: 0, xp_today: 0)"#,
+        )
+        .unwrap();
+        assert!(old.you_untouched());
+        // A settings file edited by hand is cut to fit a bubble.
+        let mut settings = Settings {
+            you: "  一二三四五六七八九十  ".into(),
+            ..Settings::default()
+        };
+        settings.sanitise();
+        assert_eq!(settings.you, "一二三四五六七八");
     }
 
     use super::*;

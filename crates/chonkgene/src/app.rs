@@ -427,6 +427,8 @@ struct Ctx<'a> {
     sounds: &'a mut Sounds,
     sound_on: bool,
     volume: f32,
+    /// 「大家怎麼叫你」 (empty: unset), see [`PetSave::calls_you`].
+    everyone_you: &'a str,
 }
 
 /// The pets' sounds (PLAN §1.5), several at once, each class rate-limited
@@ -604,6 +606,9 @@ struct App {
     /// When 隨機輪班 next changes a pet out for one resting (seconds, as
     /// `secs`); none while it is off.
     shift_at: Option<f64>,
+    /// Pets to say `called_you` and when (seconds, as `shift_at`): told by
+    /// 「大家怎麼叫你」, one after another.
+    called: Vec<(f64, u64)>,
     /// Where pets just gone to rest stood (their feet's middle, x): the
     /// ones coming out in their place appear there (換班).
     handover: Vec<f32>,
@@ -637,6 +642,7 @@ impl App {
             })
             .unwrap_or_default();
         let upgraded = settings.upgrade();
+        settings.sanitise();
         chonkgene_core::i18n::set(settings.lang());
         if upgraded && let Err(e) = store::save(&data.settings(), &settings) {
             notes.push(e);
@@ -709,6 +715,7 @@ impl App {
             wake: None,
             perf_at: now + PERF_EVERY,
             shift_at: None,
+            called: Vec::new(),
             handover: Vec::new(),
             morphs: Vec::new(),
         };
@@ -1040,6 +1047,33 @@ impl App {
             if let Err(e) = store::save(&self.data.settings(), &self.settings) {
                 eprintln!("{e}");
             }
+        }
+    }
+
+    /// The pets queued to try out what 「大家怎麼叫你」 now makes them call
+    /// you say it when their turn comes (not asleep, not while put away).
+    fn called_step(&mut self, el: &ActiveEventLoop, now: Instant, t: f64) {
+        if self.called.is_empty() {
+            return;
+        }
+        if self.hidden {
+            self.called.clear();
+            return;
+        }
+        let due: Vec<u64> = self
+            .called
+            .iter()
+            .filter(|c| c.0 <= t)
+            .map(|c| c.1)
+            .collect();
+        self.called.retain(|c| c.0 > t);
+        for id in due {
+            let world = self.world(now);
+            self.with_pet(el, id, world, now, |_, p, ctx| {
+                if !p.mind.asleep() {
+                    p.say(ctx, Line::CalledYou);
+                }
+            });
         }
     }
 
@@ -1412,6 +1446,7 @@ impl App {
             face: bubble_face,
             sounds,
             sound_on: settings.sound,
+            everyone_you: &settings.you,
             volume: f32::from(settings.volume) / 100.0,
             area: *area,
             terrain,
@@ -1567,7 +1602,8 @@ impl App {
                 self.set_visible();
                 self.open_settings(None);
             }
-            Msg::Settings(s) => {
+            Msg::Settings(mut s) => {
+                s.sanitise();
                 // 「同時在桌面上的寵物」 sends pets to rest or calls them out
                 // (the settings window does the same to its list).
                 if s.on_desktop != self.settings.on_desktop {
@@ -1577,6 +1613,21 @@ impl App {
                 let new_language = s.lang() != self.settings.lang();
                 if s.rotate_minutes != self.settings.rotate_minutes {
                     self.shift_at = None;
+                }
+                // 「大家怎麼叫你」 changed: each pet out that now calls you
+                // something else tries it out, a moment apart.
+                let told = told_anew(
+                    self.pets.iter().map(|p| &p.save),
+                    &self.settings.you,
+                    &s.you,
+                );
+                if !told.is_empty() {
+                    let mut at = self.secs(Instant::now()) + 0.3;
+                    for id in told {
+                        self.called.retain(|c| c.1 != id);
+                        self.called.push((at, id));
+                        at += 1.2 + 0.8 * self.rng.f64();
+                    }
                 }
                 self.settings = s;
                 if let Err(e) = store::save(&self.data.settings(), &self.settings) {
@@ -1613,7 +1664,8 @@ impl App {
                 };
                 // Affinity lives in the pet process; never take it from settings.
                 let affinity = save.affinity();
-                let renamed_you = save.you != update.you;
+                let everyone = &self.settings.you;
+                let renamed_you = save.calls_you(everyone) != update.calls_you(everyone);
                 // Nor who is out or 常駐: only `Msg::Roster` moves those (an
                 // edit sent just after 隨機輪班 moved this pet would undo it).
                 update.on_desktop = save.on_desktop;
@@ -1952,6 +2004,7 @@ impl App {
                     face: bubble_face,
                     sounds,
                     sound_on: settings.sound,
+                    everyone_you: &settings.you,
                     volume: f32::from(settings.volume) / 100.0,
                     area: *area,
                     terrain,
@@ -1992,6 +2045,7 @@ impl App {
                     face: bubble_face,
                     sounds,
                     sound_on: settings.sound,
+                    everyone_you: &settings.you,
                     volume: f32::from(settings.volume) / 100.0,
                     area: *area,
                     terrain,
@@ -2051,6 +2105,7 @@ impl App {
             face: bubble_face,
             sounds,
             sound_on: settings.sound,
+            everyone_you: &settings.you,
             volume: f32::from(settings.volume) / 100.0,
             area: *area,
             terrain,
@@ -2156,6 +2211,16 @@ fn wake_at(due: impl IntoIterator<Item = Option<Instant>>) -> Instant {
         .flatten()
         .min()
         .unwrap_or_else(|| Instant::now() + Duration::from_secs(1))
+}
+
+/// The pets (of `saves`) that call you something else once 「大家怎麼叫你」
+/// goes from `was` to `now`: those whose own was never changed, unless
+/// the shared one and their default give the same.
+fn told_anew<'a>(saves: impl Iterator<Item = &'a PetSave>, was: &str, now: &str) -> Vec<u64> {
+    saves
+        .filter(|p| p.calls_you(was) != p.calls_you(now))
+        .map(|p| p.id)
+        .collect()
 }
 
 /// The next save, if anything is unsaved. `save_at` stays behind once a
@@ -3503,7 +3568,7 @@ impl Pet {
             self.species,
             line,
             &self.save.name,
-            &self.save.you,
+            self.save.calls_you(ctx.everyone_you),
             &mut self.rng,
         ) else {
             return;
@@ -4248,6 +4313,7 @@ impl ApplicationHandler<UserEvent> for App {
                                 face: bubble_face,
                                 sounds,
                                 sound_on: settings.sound,
+                                everyone_you: &settings.you,
                                 volume: f32::from(settings.volume) / 100.0,
                                 area: *area,
                                 terrain,
@@ -4334,6 +4400,7 @@ impl ApplicationHandler<UserEvent> for App {
                                 face: bubble_face,
                                 sounds,
                                 sound_on: settings.sound,
+                                everyone_you: &settings.you,
                                 volume: f32::from(settings.volume) / 100.0,
                                 area: *area,
                                 terrain,
@@ -4404,6 +4471,7 @@ impl ApplicationHandler<UserEvent> for App {
                                 face: bubble_face,
                                 sounds,
                                 sound_on: settings.sound,
+                                everyone_you: &settings.you,
                                 volume: f32::from(settings.volume) / 100.0,
                                 area: *area,
                                 terrain,
@@ -4504,6 +4572,7 @@ impl ApplicationHandler<UserEvent> for App {
         }
         self.rotate_step(el, t);
         self.morph_step(el, t);
+        self.called_step(el, now, t);
 
         if now >= self.terrain_at {
             self.refresh_terrain();
@@ -4555,6 +4624,7 @@ impl ApplicationHandler<UserEvent> for App {
             face: bubble_face,
             sounds,
             sound_on: settings.sound,
+            everyone_you: &settings.you,
             volume: f32::from(settings.volume) / 100.0,
             area: *area,
             terrain,
@@ -4754,6 +4824,11 @@ impl ApplicationHandler<UserEvent> for App {
             // The input timing is sampled a few times a second.
             (visible && self.settings.react_to_input).then(|| now + Duration::from_millis(200)),
             self.stats.then_some(self.stats_at),
+            // The next pet to try out what 「大家怎麼叫你」 has it call you.
+            self.called
+                .iter()
+                .map(|c| self.start + Duration::from_secs_f64(c.0.max(0.0)))
+                .min(),
             // Always ahead of now: it is moved on whenever it is reached.
             visible.then_some(self.terrain_at),
         ];
@@ -4775,6 +4850,25 @@ impl ApplicationHandler<UserEvent> for App {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_shared_name_is_tried_out_by_the_pets_that_take_it() {
+        let mut rng = fastrand::Rng::with_seed(3);
+        let shiba = PetSave::adopt(1, Species::Shiba, "red", &mut rng);
+        let mut owl = PetSave::adopt(2, Species::Owl, "brown", &mut rng);
+        owl.you = "學長".into();
+        let fold = PetSave::adopt(3, Species::Fold, "grey", &mut rng);
+        let saves = [shiba.clone(), owl, fold];
+        // Set: the two untouched take it, the owl keeps 「學長」.
+        assert_eq!(told_anew(saves.iter(), "", "Roger"), vec![1, 3]);
+        // Changed: the same two.
+        assert_eq!(told_anew(saves.iter(), "Roger", "阿傑"), vec![1, 3]);
+        // Unset: back to their defaults, so they say so.
+        assert_eq!(told_anew(saves.iter(), "阿傑", ""), vec![1, 3]);
+        // Set to a pet's own default: it calls you the same as before.
+        assert_eq!(told_anew(saves.iter(), "", &shiba.you), vec![3]);
+        assert!(told_anew(saves.iter(), "Roger", "Roger").is_empty());
+    }
 
     fn facts(asleep: bool, fox: bool, scenes: SceneRows) -> MenuFacts {
         MenuFacts {

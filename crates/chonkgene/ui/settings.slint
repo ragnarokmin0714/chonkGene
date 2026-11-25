@@ -76,8 +76,12 @@ component CuteField inherits Rectangle {
     // Set to have the box take the focus with its text selected, as soon
     // as it is shown (or at once if it is); it clears itself.
     in-out property <bool> focus-ask;
+    // Shown greyed while the box is empty (what it follows when left so).
+    in property <string> placeholder;
     property <bool> typing: input.has-focus;
     property <bool> saved;
+    // What the box held when typing began: Esc puts it back.
+    property <string> before;
     height: 44px;
     min-width: 120px;
     preferred-width: 160px;
@@ -92,6 +96,7 @@ component CuteField inherits Rectangle {
             self.text = self.committed(self.text);
             self.saved = true;
         } else {
+            self.before = self.text;
             self.saved = false;
         }
     }
@@ -116,6 +121,18 @@ component CuteField inherits Rectangle {
         width: root.width - 32px - count.preferred-width - 8px;
         height: root.height;
         clip: true;
+        Text {
+            visible: root.text == "";
+            x: 0px;
+            width: parent.width;
+            height: 100%;
+            horizontal-alignment: left;
+            overflow: elide;
+            vertical-alignment: center;
+            font-size: 15px;
+            color: Theme.muted;
+            text: root.placeholder;
+        }
         input := TextInput {
             property <length> slide;
             x: Math.min(0px, Math.max(parent.width - self.width - self.text-cursor-width, self.slide));
@@ -141,11 +158,11 @@ component CuteField inherits Rectangle {
                 }
             }
             accepted => { self.clear-focus(); }
-            // Esc: what was typed is dropped, the stored one comes back (an
-            // empty entry is put back when stored).
+            // Esc: what was typed is dropped, what was there comes back
+            // (stored again as it was: an empty box may mean "follow").
             key-pressed(event) => {
                 if event.text == Key.Escape {
-                    self.text = "";
+                    self.text = root.before;
                     self.clear-focus();
                     return accept;
                 }
@@ -573,6 +590,10 @@ export component SettingsWindow inherits Window {
     // Focus the name box, its text selected (opened from a pet's 設定…).
     in-out property <bool> name-focus;
     in-out property <string> pet-you;
+    // 「大家怎麼叫你」 (一般; empty: each its own), and the picked pet's
+    // box showing it greyed while that pet follows it.
+    in-out property <string> everyone-you;
+    callback everyone-you-committed(string) -> string;
     in property <[CoatRow]> coats;
     in-out property <string> coat;
     in-out property <float> chonk;
@@ -929,13 +950,14 @@ export component SettingsWindow inherits Window {
                                     Label { text: @tr("牠怎麼叫你"); }
                                     CuteField {
                                         text <=> root.pet-you;
+                                        placeholder: root.everyone-you;
                                         max: root.you-max;
                                         keep-first(t, n) => { return root.keep-first(t, n); }
                                         committed(t) => { return root.you-committed(t); }
                                     }
                                 }
                             }
-                            Hint { text: @tr("牠在對話泡泡裡會這樣叫你。"); }
+                            Hint { text: root.everyone-you == "" ? @tr("牠在對話泡泡裡會這樣叫你。") : @tr("留空的話，就照「大家怎麼叫你」。"); }
 
                             Label { text: @tr("毛色"); }
                             HorizontalLayout {
@@ -1249,6 +1271,25 @@ export component SettingsWindow inherits Window {
                                         primary: root.size-all == choice.pct;
                                         clicked => { root.size-all-picked(choice.pct); }
                                     }
+                                }
+                            }
+                            // Roger, 2026-11-25: one name for all of
+                            // them, a pet's own still winning.
+                            Row {
+                                VerticalLayout {
+                                    alignment: center;
+                                    spacing: 4px;
+                                    horizontal-stretch: 1;
+                                    Label { text: @tr("大家怎麼叫你"); }
+                                    Hint { text: root.everyone-you == "" ? @tr("留空的話，牠們各叫各的。") : @tr("沒有另外改過的寵物，都會這樣叫你。"); }
+                                }
+                                CuteField {
+                                    horizontal-stretch: 0;
+                                    width: 200px;
+                                    text <=> root.everyone-you;
+                                    max: root.you-max;
+                                    keep-first(t, n) => { return root.keep-first(t, n); }
+                                    committed(t) => { return root.everyone-you-committed(t); }
                                 }
                             }
                             Row {

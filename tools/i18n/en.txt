@@ -262,3 +262,7 @@
 收起來 / 叫回來 → Hide / call back
 拿狗尾草逗牠們 / 收起來 → Grass to tease them / put away
 場景 → Scenes
+大家怎麼叫你 → What they all call you
+留空的話，牠們各叫各的。 → Left empty, each keeps its own.
+沒有另外改過的寵物，都會這樣叫你。 → Every pet you haven't changed calls you this.
+留空的話，就照「大家怎麼叫你」。 → Left empty, it uses "What they all call you".

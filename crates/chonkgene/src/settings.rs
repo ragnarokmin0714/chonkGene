@@ -592,7 +592,7 @@ fn show_pet(ui: &SettingsWindow, st: &mut State) {
     ui.set_selected_pet(p.id.to_string().into());
     ui.set_species_label(species.label().into());
     ui.set_pet_name(p.name.clone().into());
-    ui.set_pet_you(p.you.clone().into());
+    ui.set_pet_you(shown_you(&p, &st.settings.you).into());
     ui.set_coats(coat_rows(st.coats(species)));
     ui.set_coat(p.coat.clone().into());
     let human = has_human(species);
@@ -695,26 +695,47 @@ fn common_size(pets: &Pets) -> i32 {
     if sizes.all(|s| s == first) { first } else { 0 }
 }
 
-/// Apply an edit to the selected pet: update the preview and mark it for sending.
+/// What a pet's 「牠怎麼叫你」 box shows: its own, or nothing (the shared
+/// one greyed behind it) while it follows 「大家怎麼叫你」.
+fn shown_you(p: &PetSave, everyone: &str) -> String {
+    if !everyone.is_empty() && p.you_untouched() {
+        String::new()
+    } else {
+        p.you.clone()
+    }
+}
+
 /// Store what was typed as the picked pet's name (`you`: 「牠怎麼叫你」):
 /// trimmed, at most so many characters; empty, or the same, it stays as it
-/// was. Gives back what it is now, for the field to show.
+/// was. With 「大家怎麼叫你」 set, a 「牠怎麼叫你」 left empty or typed as
+/// the shared one follows that. Gives back what it is now, for the field
+/// to show.
 fn commit_text(ui: &SettingsWindow, st: &mut State, you: bool, typed: &str) -> SharedString {
     let most = if you { MAX_YOU } else { MAX_NAME };
     let clean: String = typed.trim().chars().take(most).collect::<String>();
     let clean = clean.trim().to_string();
-    let Some(now) = st
-        .pet()
-        .map(|p| if you { p.you.clone() } else { p.name.clone() })
-    else {
+    let everyone = st.settings.you.clone();
+    let Some((now, follows)) = st.pet().map(|p| {
+        if you {
+            (shown_you(p, &everyone), p.you_untouched())
+        } else {
+            (p.name.clone(), false)
+        }
+    }) else {
         return typed.into();
     };
+    if you && !everyone.is_empty() && (clean.is_empty() || clean == everyone) {
+        if !follows {
+            edit(ui, st, PetSave::follow_everyone);
+        }
+        return SharedString::new();
+    }
     if clean.is_empty() || clean == now {
         return now.into();
     }
     edit(ui, st, |p| {
         if you {
-            p.you = clean.clone();
+            p.set_own_you(clean.clone(), &everyone);
         } else {
             p.name = clean.clone();
         }
@@ -722,9 +743,26 @@ fn commit_text(ui: &SettingsWindow, st: &mut State, you: bool, typed: &str) -> S
     clean.into()
 }
 
-/// Store both boxes as they stand (another pet picked, the page or the
+/// Store what was typed as 「大家怎麼叫你」 (empty: each its own) and send
+/// it; the picked pet's box shows what it follows now. Gives back what it
+/// is, for the box to show.
+fn commit_everyone(ui: &SettingsWindow, st: &mut State, typed: &str) -> SharedString {
+    let clean = store::clean_you(typed);
+    if clean != st.settings.you {
+        st.settings.you = clean.clone();
+        st.send_settings();
+        if let Some(p) = st.pet() {
+            ui.set_pet_you(shown_you(p, &clean).into());
+        }
+    }
+    clean.into()
+}
+
+/// Store the boxes as they stand (another pet picked, the page or the
 /// window left while typing), and show what was stored.
 fn commit_fields(ui: &SettingsWindow, st: &mut State) {
+    let everyone = commit_everyone(ui, st, &ui.get_everyone_you());
+    ui.set_everyone_you(everyone);
     if st.pet().is_none() {
         return;
     }
@@ -771,6 +809,7 @@ fn setup(
     // The pet process upgrades and saves it first; this only covers a
     // settings window opened on its own.
     settings.upgrade();
+    settings.sanitise();
     let mut pets = store::load::<Pets>(&data.pets())
         .ok()
         .flatten()
@@ -828,6 +867,7 @@ fn setup(
         ui.set_desktop_limit(s.on_desktop.min(i32::MAX as u32) as i32);
         ui.set_name_max(MAX_NAME as i32);
         ui.set_you_max(MAX_YOU as i32);
+        ui.set_everyone_you(s.you.clone().into());
         ui.set_rotate(rotate_index(s.rotate_minutes));
         ui.set_size_all(common_size(&st.pets));
         let path = st.data.path.display().to_string();
@@ -947,6 +987,14 @@ fn setup(
         } else {
             ui.on_name_committed(store);
         }
+    }
+    {
+        let weak = ui.as_weak();
+        let st = st.clone();
+        ui.on_everyone_you_committed(move |t| {
+            let Some(ui) = weak.upgrade() else { return t };
+            commit_everyone(&ui, &mut st.borrow_mut(), &t)
+        });
     }
     on!(on_commit_fields, |ui, st| {
         commit_fields(&ui, st);
@@ -1747,6 +1795,58 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    /// 「大家怎麼叫你」 (Roger, 2026-11-25): set, a pet nobody told
+    /// otherwise follows it (its box empty, the shared name greyed behind
+    /// it); its own typed in still wins, even its species' default; emptied
+    /// or typed as the shared one, it follows again; unset, each its own.
+    #[test]
+    fn one_name_for_everyone_and_a_pets_own_still_wins() {
+        let window = MinimalSoftwareWindow::new(RepaintBufferType::NewBuffer);
+        slint::platform::set_platform(Box::new(Headless(window.clone()))).unwrap();
+        let dir = std::env::temp_dir().join(format!("chonkgene-everyone-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let data = DataDir::locate(Some(dir.clone())).unwrap();
+        let mut rng = fastrand::Rng::with_seed(5);
+        let mut pets = Pets::default();
+        pets.pets
+            .push(PetSave::adopt(1, Species::Shiba, "", &mut rng));
+        pets.pets
+            .push(PetSave::adopt(2, Species::Owl, "", &mut rng));
+        pets.next_id = 3;
+        store::save(&data.pets(), &pets).unwrap();
+        let ui = SettingsWindow::new().unwrap();
+        let (st, _timers) = setup(&ui, data, Some(1)).unwrap();
+        ui.invoke_language_picked(1);
+        st.borrow_mut().reachable = false;
+        let shiba = |st: &Rc<RefCell<State>>| st.borrow().pets.pets[0].clone();
+        assert_eq!(ui.get_pet_you(), "主人");
+        assert_eq!(ui.get_everyone_you(), "");
+
+        assert_eq!(ui.invoke_everyone_you_committed("  Roger ".into()), "Roger");
+        assert_eq!(st.borrow().settings.you, "Roger");
+        assert_eq!(ui.get_pet_you(), "", "following: the box is empty");
+
+        assert_eq!(ui.invoke_you_committed("主人".into()), "主人");
+        assert!(shiba(&st).own_you);
+        assert_eq!(shiba(&st).calls_you("Roger"), "主人");
+
+        assert_eq!(ui.invoke_you_committed("".into()), "");
+        assert_eq!(shiba(&st).calls_you("Roger"), "Roger");
+        ui.invoke_you_committed("老爸".into());
+        assert_eq!(ui.invoke_you_committed("Roger".into()), "");
+        assert!(shiba(&st).you_untouched(), "typed as the shared one");
+
+        ui.invoke_everyone_you_committed("".into());
+        assert_eq!(ui.get_pet_you(), "主人");
+        assert_eq!(shiba(&st).calls_you(""), "主人");
+
+        // Left while typing (another page): stored as it stands.
+        ui.set_everyone_you("一二三四五六七八九".into());
+        ui.invoke_commit_fields();
+        assert_eq!(st.borrow().settings.you, "一二三四五六七八");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     /// Bumping `repaint` redraws the whole window, even when the renderer
     /// otherwise redraws only what changed (see `repaint_when_shown`).
     #[test]
@@ -1837,6 +1937,10 @@ mod tests {
             // (only where she can take it: run with CHONKGENE_RENDERER=gpu
             // on a software GPU).
             ("pets-fox", 0, false),
+            // 「大家怎麼叫你」 set: the box in 一般, and the Shiba's own
+            // box empty with the shared name greyed behind it.
+            ("general-you", 3, false),
+            ("pets-you", 0, false),
         ];
         for (lang, pick, (name, tab, adopting)) in [("", 1, ()), ("-ja", 2, ()), ("-en", 3, ())]
             .into_iter()
@@ -1851,6 +1955,9 @@ mod tests {
             ui.invoke_select_pet(if tall { "7" } else { "1" }.into());
             ui.set_tab(tab);
             ui.set_adopting(adopting);
+            let everyone = if name.ends_with("-you") { "阿傑" } else { "" };
+            ui.invoke_everyone_you_committed(everyone.into());
+            ui.set_everyone_you(everyone.into());
             if name == "adopt" {
                 ui.invoke_pick_adopt_species("chick".into());
             } else if name == "adopt-fox" {

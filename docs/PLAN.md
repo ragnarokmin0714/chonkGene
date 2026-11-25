@@ -1678,6 +1678,14 @@ Roger's 「20261125 回饋報告」, talked through with him the same day (his a
    - Filled, every pet whose own 「牠怎麼叫你」 nobody changed (still at its species' default in any language, as `store.rs` already tells) uses it, **and so does every pet adopted after**. A pet's own box, filled, still wins; empty, it shows the shared value greyed and follows it.
    - Changed, each pet that follows says `called_you`, a few seconds apart (not seven bubbles at once).
    - Better than an 「套用到全部」 button, which works once and misses the pets adopted later.
+
+   **Built 2026-11-25** (`go on`):
+   - **Stored**: `Settings::you` (empty by default, cut to `MAX_YOU`, `Settings::sanitise` on load and on `Msg::Settings`).
+   - **Who follows**: `PetSave::calls_you(everyone)` gives the shared one when it is set and the pet's own is untouched (`you_untouched`: its species' default in any language, and not `own_you`). `own_you` (new, `serde(default)`) marks a 「牠怎麼叫你」 typed in by hand that reads as the default: asked to keep 「主人」 while the shared one is 「阿傑」, the Shiba keeps 「主人」. Typed with nothing shared, the default is just the default.
+   - **The settings window**: 一般 has 「大家怎麼叫你」 (a `CuteField`; hint 「留空的話，牠們各叫各的。」 / 「沒有另外改過的寵物，都會這樣叫你。」). A pet's box is empty while it follows, the shared name greyed in it (`CuteField.placeholder`); its hint reads 「留空的話，就照「大家怎麼叫你」。」. Emptied, or typed as the shared one, it follows again (`follow_everyone`). Esc in any `CuteField` now puts back what the box held when typing began (it emptied the box and relied on an empty entry being put back, which an empty 「牠怎麼叫你」 no longer is). Leaving the page while typing stores the shared box too (`commit_fields`).
+   - **The pets**: `say` fills `{you}` from `calls_you` (`Ctx::everyone_you`). The shared one changed, each pet out whose name for you changed (`told_anew`) says `called_you`, the first after 0.3 s and the rest 1.2–2 s apart (`App::called`, `called_step`; not asleep; dropped while put away). A pet's own changed in the settings says it only if what it calls you really changed.
+   - **Words**: ja and en in `tools/i18n/*.txt`.
+   - **Tests**: `everyone_calls_you_the_same_unless_one_was_told_otherwise` (store), `a_shared_name_is_tried_out_by_the_pets_that_take_it` (app), `one_name_for_everyone_and_a_pets_own_still_wins` (settings). Screenshots `settings-general-you*.png`, `settings-pets-you*.png` (`settings_screenshots`).
 2. **Actions by zone, by tapping** (「互動改善建議 和 擁抱的觸發機制更改」). A setting **「動作要點幾下」: 一下 / 兩下, default 兩下**. It replaces today's double-click anywhere = hug (`DOUBLE_CLICK`).
 
    | Zone | Action | Built already? |
