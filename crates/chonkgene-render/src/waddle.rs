@@ -18,14 +18,14 @@ use chonkgene_core::Zone;
 
 use crate::fidget::{Fidgets, Kind, Out};
 
-mod child;
+mod human;
 use crate::skin::{
     ATTEND_YAW, Feel, Gesture, HUG_YAW, Joint, Levels, MAX_SWING, Mood, Moods, REST_YAW, SIT_YAW,
     SPEED_UP, STILL_GOING, SULK_BACK, SULK_YAW, Skeleton, SleepPose, Spring, TURN_HZ, WALK_YAW,
     Walk, bite, peck, tempo_split,
 };
 use crate::skin::{JIGGLE, JIGGLE_MOST, Tail, Travel, aim, drift, hold};
-pub(crate) use child::hands;
+pub(crate) use human::hands;
 
 /// How far a bird tips its body and head down for
 /// [`Act::Pick`](chonkgene_core::anim::Act::Pick), degrees.
@@ -76,11 +76,11 @@ const HAIR_HANG: f32 = 0.7;
 const HAIR_BOB: f32 = 70.0;
 const HAIR_PACE: f32 = 500.0;
 const HAIR_TURN: f32 = 0.35;
-/// A child sitting (the fox's human form, PLAN §8): on her heels with her
+/// Her human form sitting (the fox's, PLAN §8): on her heels with her
 /// legs folded back either side of her (女の子座り: degrees back from
 /// hanging, and out, the feet on the floor beside her), her skirt spread
 /// round her down to the floor (grown that much), leaning back a little
-/// (her hands in her lap: see `child`); dropped this share of her legs'
+/// (her hands in her lap: see `human`); dropped this share of her legs'
 /// length. What lies at
 /// the floor line is under the picture's bottom from the app's camera
 /// (legs out in front were), so all of it shows above it.
@@ -94,13 +94,13 @@ const DOZE_SLUMP: f32 = 9.0;
 /// Curled up on her side asleep (her `Curl` sleep): rolled over (degrees),
 /// her legs drawn up (the upper one further), her head laid over toward
 /// the floor (her hands: under her cheek and over her front, see
-/// `child`); her tails over her like a quilt (see [`quilt`]).
+/// `human`); her tails over her like a quilt (see [`quilt`]).
 const CURL_ROLL: f32 = 90.0;
 const CURL_LEGS: [f32; 2] = [70.0, 56.0];
 const CURL_HEAD: f32 = 14.0;
 
-/// One frame's motion, for what a child's body adds (see
-/// [`Waddle::child`]): pace and step phase, the body's vertical
+/// One frame's motion, for what her human form adds (see
+/// [`Waddle::human_form`]): pace and step phase, the body's vertical
 /// acceleration, speeding up, how far lying down, and each leg's stride
 /// (1 forward … −1 back).
 struct Shake {
@@ -147,7 +147,7 @@ impl Mover {
         match self {
             Self::Quad(w) => w.set_fidgets(species, energy, seed),
             Self::Biped(w) => {
-                let kit = if w.kid.is_some() { CHILD_KIT } else { species };
+                let kit = if w.arms.is_some() { HUMAN_KIT } else { species };
                 w.fidgets = Fidgets::new(kit, seed);
                 w.fidgets.set_energy(energy);
             }
@@ -420,12 +420,12 @@ pub struct Waddle {
     /// last frame, which flings them.
     tails: Vec<Tail>,
     yaw_v: f32,
-    /// A child's arms (the fox's human form, see `child`), each swinging
+    /// Her arms (the fox's human form, see `human`), each swinging
     /// with her steps; how far she kneels down (to dig, to pick something
     /// up), and how far she holds something to her chest (a thing she
     /// carries: see [`Mover::hold`]); her head's turn the last two frames
     /// (shaking it flings her hair).
-    kid: Option<child::Arms>,
+    arms: Option<human::Arms>,
     arm: [Spring; 2],
     kneel: Spring,
     holding: bool,
@@ -523,7 +523,7 @@ impl Waddle {
                 .filter(|t| t.len() > 1)
                 .unwrap_or_default(),
             yaw_v: 0.0,
-            kid: child::Arms::new(sk, model),
+            arms: human::Arms::new(sk, model),
             arm: Default::default(),
             kneel: Spring::default(),
             holding: false,
@@ -803,7 +803,7 @@ impl Waddle {
         // asleep, it was left out, and nothing held it up off its
         // picture's bottom (Roger, 2026-11-20).
         if let Some(g) = self.gesture.filter(|g| {
-            self.kid.is_none() && s < 0.5 && (sit < 0.5 || g.act.seated() || g.act == Act::Hug)
+            self.arms.is_none() && s < 0.5 && (sit < 0.5 || g.act.seated() || g.act == Act::Hug)
         }) {
             let e = g.e;
             match g.act {
@@ -1179,7 +1179,7 @@ impl Waddle {
             sit,
             facing,
         };
-        self.child(&mut j, &shake, &lv, &f, dt);
+        self.human_form(&mut j, &shake, &lv, &f, dt);
         self.busy = s > 0.0
             || self.gesture.is_some()
             || self.yaw.v.abs() > 1.0
@@ -1211,8 +1211,8 @@ impl Waddle {
             }
         }
         self.lively(j, f, dt);
-        // A child's fidgets are her own (see `child`).
-        let Some(run) = f.run.filter(|_| self.kid.is_none()) else {
+        // Her human form's fidgets are her own (see `human`).
+        let Some(run) = f.run.filter(|_| self.arms.is_none()) else {
             return;
         };
         let (e, t, side) = (run.e(), run.t, run.side);
@@ -1362,8 +1362,8 @@ impl Waddle {
         j[self.head].rot.x += TOUCH_NECK * TOUCH_GAZE * lv.gaze.1;
         j[self.body].rot.x += 0.5 * (1.0 - TOUCH_NECK) * TOUCH_GAZE * lv.gaze.1;
         // Laughing: back on its bottom, feet kicking, wings flapping (a
-        // child laughs her own way, see `child`).
-        let l = lv.laugh.min(1.0) * f32::from(u8::from(self.kid.is_none()));
+        // human form laughs her own way, see `human`).
+        let l = lv.laugh.min(1.0) * f32::from(u8::from(self.arms.is_none()));
         if l > 0.0 {
             j[self.body].rot.x -= l * (22.0 + 8.0 * (TAU * 2.2 * t).sin());
             for (k, &leg) in self.legs.iter().enumerate() {
@@ -1456,13 +1456,13 @@ impl Waddle {
     }
 }
 
-/// The fidgets a child (the fox's human form) draws from (see
+/// The fidgets her human form draws from (see
 /// [`crate::fidget`]): her own, not the four-legged fox's.
-const CHILD_KIT: &str = "child";
+const HUMAN_KIT: &str = "human";
 
 fn fidget_kit<'a>(sk: &Skeleton, model: &'a Model) -> &'a str {
-    if child::hands(sk).is_some() {
-        CHILD_KIT
+    if human::hands(sk).is_some() {
+        HUMAN_KIT
     } else {
         &model.species
     }

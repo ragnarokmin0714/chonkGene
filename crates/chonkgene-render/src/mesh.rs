@@ -232,7 +232,7 @@ pub fn bake(
 }
 
 /// The shadow's radii across and along the body: what stands on the floor
-/// (legs, belly, feet), a little wider. Tails, hair and a child's arms
+/// (legs, belly, feet), a little wider. Tails, hair and a human form's arms
 /// never stand on it, however low they hang (the fox's human form, made
 /// chubbier with shorter legs, 2026-11-24: her outer tails came down past
 /// her knees, her long hair past her hips, her hands, held out as she was

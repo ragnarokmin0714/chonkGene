@@ -321,7 +321,7 @@ fn tongue(c0: vec3<f32>, uv: vec2<f32>, a: vec2<f32>, b: vec2<f32>, r: f32, aa: 
     return mix(c, vec3<f32>(0.86, 0.36, 0.42), ink(groove, aa));
 }
 
-// A child's mouth at rest, as face.rs `chibi_smile`: a wide, shallow closed
+// Her human form's mouth at rest, as face.rs `chibi_smile`: a wide, shallow closed
 // smile, a blush of pink lip under it, no line up to the nose.
 fn chibi_smile(c0: vec3<f32>, uv: vec2<f32>, ink_c: vec3<f32>, aa: f32) -> vec3<f32> {
     let lip = ell(uv, vec2<f32>(0.0, -0.32), vec2<f32>(0.34, 0.16));

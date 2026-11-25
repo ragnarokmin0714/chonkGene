@@ -1,4 +1,4 @@
-//! The fox's human form, a child (PLAN §8): what her body does on top of
+//! The fox's human form (PLAN §8): what her body does on top of
 //! the two-legged walk. Her arms have elbows, and are moved by where her
 //! hands go (two-bone reaching, [`Arm::reach`]): hanging at her sides,
 //! swinging as she walks, in her lap sitting, over her mouth for a yawn,
@@ -378,20 +378,20 @@ fn bump(x: f32) -> f32 {
 }
 
 impl Waddle {
-    /// What a child's body (the fox's human form) adds on top of the pose:
+    /// What her human form adds on top of the pose:
     /// sitting and sleeping her own ways, her gestures, fidgets and
     /// answers to a touch, her arms put where her hands go, nine tails
     /// flowing, hair, ears and the bell swinging on springs. Nothing on a
     /// bird.
-    pub(super) fn child(&mut self, j: &mut [Joint], k: &Shake, lv: &Levels, f: &Out, dt: f32) {
-        let Some(arms) = self.kid.take() else {
+    pub(super) fn human_form(&mut self, j: &mut [Joint], k: &Shake, lv: &Levels, f: &Out, dt: f32) {
+        let Some(arms) = self.arms.take() else {
             return;
         };
-        self.child_with(&arms, j, k, lv, f, dt);
-        self.kid = Some(arms);
+        self.human_with(&arms, j, k, lv, f, dt);
+        self.arms = Some(arms);
     }
 
-    fn child_with(
+    fn human_with(
         &mut self,
         arms: &Arms,
         j: &mut [Joint],
@@ -447,9 +447,9 @@ impl Waddle {
         self.ground = self.ground.max(curl);
 
         // Her own moves, each with its hands' places.
-        let moods = self.child_moods(arms, j, lv, k.facing);
-        let fidget = self.child_fidget(j, f, k, seat);
-        let doing = gesture.map(|g| self.child_gesture(j, g, k.facing, dt));
+        let moods = self.her_moods(arms, j, lv, k.facing);
+        let fidget = self.her_fidget(j, f, k, seat);
+        let doing = gesture.map(|g| self.her_gesture(j, g, k.facing, dt));
         let hold = self
             .hold
             .step(f32::from(u8::from(self.holding)), 0.0, 2.5, 1.0, dt)
@@ -596,7 +596,7 @@ impl Waddle {
     /// folded; shy, hands to her cheeks; startled, hands to her chest;
     /// blissful or patted, hands together under her chin; a hand of hers
     /// touched, up it comes to yours.
-    fn child_moods(&mut self, arms: &Arms, j: &mut [Joint], lv: &Levels, facing: f32) -> Layer {
+    fn her_moods(&mut self, arms: &Arms, j: &mut [Joint], lv: &Levels, facing: f32) -> Layer {
         let mut layer: Layer = [None; 2];
         let mut both = |place: Place, w: f32| {
             if w > 0.01 {
@@ -634,7 +634,7 @@ impl Waddle {
     /// with her fingers, weight from foot to foot, a tilt of the head, a
     /// little shake that rings her bell (her tails' ripple is with the
     /// tails).
-    fn child_fidget(&mut self, j: &mut [Joint], f: &Out, k: &Shake, seat: f32) -> Layer {
+    fn her_fidget(&mut self, j: &mut [Joint], f: &Out, k: &Shake, seat: f32) -> Layer {
         let mut layer: Layer = [None; 2];
         let Some(run) = f.run else {
             return layer;
@@ -698,7 +698,7 @@ impl Waddle {
         layer
     }
 
-    /// Her gestures, as a child would: a stretch with both arms up on her
+    /// Her gestures, her own: a stretch with both arms up on her
     /// toes; a yawn behind her hand; a wave; her hand for a 握手; a snack
     /// held in both hands and nibbled; kneeling to dig in the floor or to
     /// pick something up; a shy scratch behind her head (the fox's
@@ -707,7 +707,7 @@ impl Waddle {
     /// her hands under her chin; a cheer for each hop; a twirl, arms out;
     /// typing along; a finger to her cheek with a tilt of the head;
     /// hugging; the 肉肉舞.
-    fn child_gesture(&mut self, j: &mut [Joint], g: Gesture, facing: f32, dt: f32) -> Layer {
+    fn her_gesture(&mut self, j: &mut [Joint], g: Gesture, facing: f32, dt: f32) -> Layer {
         let (e, t) = (g.e, g.t);
         let mut layer: Layer = [None; 2];
         let n = near(facing);

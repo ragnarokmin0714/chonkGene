@@ -251,8 +251,8 @@ fn kit(species: &str) -> (Kit, Kit) {
             ],
             &[(Waggle, 1), (WingShift, 2)],
         ),
-        // The fox's human form, a child (the waddle's `child`).
-        "child" => (
+        // The fox's human form (the waddle's `human`).
+        "human" => (
             &[
                 (HairTuck, 3),
                 (HandsBehind, 3),

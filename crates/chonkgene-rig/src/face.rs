@@ -339,7 +339,7 @@ pub fn mouth(scene: &Scene, shape: Shape, q: V3, base: V3, px: f32) -> V3 {
     c.lerp(ink_c, ink(ridge, aa))
 }
 
-/// A child's mouth at rest (the fox's human form, Roger's sheet): a wide,
+/// Her human form's mouth at rest (the fox's, Roger's sheet): a wide,
 /// shallow closed smile (the ends just turned up), a blush of pink lip
 /// under it; no line up to the nose. The same in paint.wgsl `chibi_smile`.
 fn chibi_smile(c: V3, uv: P, ink_c: V3, aa: f32) -> V3 {

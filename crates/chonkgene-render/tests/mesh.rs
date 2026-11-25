@@ -2238,11 +2238,11 @@ fn the_fox_human_form_fits_the_shader_and_stands_on_her_feet() {
     assert!(red.meshes.iter().all(|m| !m.src.is_empty()));
 }
 
-/// Her human form walks as a child does (PLAN §8, her human form:
+/// Her human form walks on two legs (PLAN §8, her human form:
 /// standing and walking): each arm swings with the other side's leg, her
 /// nine tails stream out behind and flow, and her hair and bell swing.
 #[test]
-fn the_fox_child_swings_her_arms_and_her_tails_and_hair_flow() {
+fn the_fox_human_form_swings_her_arms_and_her_tails_and_hair_flow() {
     let (model, sk) = human("fox", "ponytail", "white").unwrap();
     let bone = |n: &str| sk.bone(n).unwrap();
     let (leg_l, leg_r, arm_l, arm_r) = (bone("leg_l"), bone("leg_r"), bone("arm_l"), bone("arm_r"));
@@ -2311,7 +2311,7 @@ fn the_fox_child_swings_her_arms_and_her_tails_and_hair_flow() {
 /// floor under her tails, which neither prop her up nor cover her face
 /// (PLAN §8, her human form: sitting and sleeping).
 #[test]
-fn the_fox_child_sits_on_her_heels_and_curls_up_under_her_tails() {
+fn the_fox_human_form_sits_on_her_heels_and_curls_up_under_her_tails() {
     use chonkgene_render::skin::SleepPose;
     use chonkgene_rig::{FLOOR, ZONES};
     let (model, sk) = human("fox", "ponytail", "white").unwrap();

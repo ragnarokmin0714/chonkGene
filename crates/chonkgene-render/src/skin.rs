@@ -137,7 +137,7 @@ fn fox_figure(name: &str) -> Option<&'static [u8]> {
     })
 }
 
-/// A pet's human form: a two-legged child's model in hairdo `style` and
+/// A pet's human form: a two-legged model in hairdo `style` and
 /// hair colour `hair` (unknown ones fall back to the first), and its
 /// skeleton. Baked ([`crate::mesh::bake`]), her meshes for that look and
 /// coat come with it.
