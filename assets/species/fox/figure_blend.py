@@ -441,6 +441,24 @@ def fold(py, th):
     return f + chest * 0.002 * math.sin(14 * th + 0.4)
 
 
+# A young woman's figure under the robe, softly (Roger, 2026-11-25: 「畢竟
+# 是女九尾，給點上圍」; the 3D全型 sheet's side view): the cloth over her
+# chest rounded out a little, two soft swells that run together in the
+# middle, between the collar and the sash. Sheet pixels: forward, and the
+# heights it rises from, is fullest over, and is gone by.
+BUST = 15.0
+BUST_ROWS = (350, 382, 404, 434)
+
+
+def bust(py, th):
+    """How far the cloth at height py, turned th, comes out over her
+    chest (model units)."""
+    lo, top0, top1, hi = BUST_ROWS
+    rise = smoothstep(lo, top0, py) * (1 - smoothstep(top1, hi, py))
+    side = math.exp(-((abs(th) - 0.3) / 0.24) ** 2)
+    return BUST * K * rise * side * max(math.cos(th), 0.0)
+
+
 def section(py, th, out=0.0):
     """On the robe at height py, turned th (0 facing you, + to her left),
     `out` off the cloth."""
@@ -451,7 +469,7 @@ def section(py, th, out=0.0):
     e = 2.15
     sx = math.copysign(abs(s) ** (2 / e), s)
     cz = math.copysign(abs(c) ** (2 / e), c)
-    depth = f if c > 0 else b
+    depth = f + bust(py, th) if c > 0 else b
     o = out + fold(py, th)
     return Vector(((a + o) * sx, Y(py), (depth + o) * cz))
 
@@ -974,9 +992,11 @@ def lock(pts, nrm, width, thick, color, bones, zone="head", around=12):
 # hair, every hairdo stays as it is.
 TAIL_ROOT_PY = 505
 TAIL_SEG = gen_tails.SEG
-TAIL_SPREAD = 96.0  # degrees either side of upright
-TAIL_LENGTH = 1.55
-TAIL_WIDE = 0.8  # against the beast form's plumes
+# The beast form's plumes, as they are (Roger, 2026-11-25: 「尾巴可以沿用獸
+# 型態」): as long, as fat, fanned as wide; her coats colour them as its do.
+TAIL_SPREAD = gen_tails.PRESETS["quad"]["spread"]  # degrees either side of upright
+TAIL_LENGTH = gen_tails.PRESETS["quad"]["length"]
+TAIL_WIDE = gen_tails.PRESETS["quad"]["wide"]
 TAIL_LEAN = 1.0  # how far back they set off (the beast form's 1)
 TAIL_STEPS = 60  # rings along a plume
 TAIL_COLS = 32

@@ -327,11 +327,21 @@ struct FaceFile {
     /// pupil, two highlights (the fox's human form).
     #[serde(default)]
     chibi: bool,
-    /// The marks at rest are her seal (咒印): a crest on the forehead, a
-    /// leaf over each brow, three short stripes on each cheek, in the
-    /// `forehead` colour, laid out for a round child's face.
+    /// The marks are her seal (咒印): three leaves between the eyes and
+    /// three fine strokes on each cheek, in the `forehead` colour, laid out
+    /// for her human form's round face (growing into a lotus crest as she
+    /// casts).
     #[serde(default)]
     seal: bool,
+    /// How far off the `on` part's surface its paint still lands (world
+    /// units; 0.05 if not given): her human form's cheeks and chin are
+    /// parts of their own, standing out further than that.
+    #[serde(default = "paint_reach")]
+    paint: f32,
+}
+
+fn paint_reach() -> f32 {
+    0.05
 }
 
 #[derive(Deserialize)]
@@ -467,6 +477,8 @@ pub struct Face {
     pub chibi: bool,
     /// The marks at rest are the seal (face.rs `seal_marks`).
     pub seal: bool,
+    /// How far off the face part's surface its paint still lands.
+    pub paint: f32,
 }
 
 /// How a species walks: the walk is worked out from these every frame (legs
@@ -978,6 +990,7 @@ fn resolve(file: ModelFile, shared: HashMap<String, PoseFile>) -> Result<Model, 
         forehead: f.forehead.as_deref().map(slot).transpose()?,
         chibi: f.chibi,
         seal: f.seal,
+        paint: f.paint,
     };
 
     let mut poses = Vec::new();

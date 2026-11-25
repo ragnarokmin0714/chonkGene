@@ -59,31 +59,53 @@ fn fox_marks(uv: vec2<f32>, aa: f32) -> vec2<f32> {
     return vec2<f32>(ink(d, aa), ss(0.55, 0.86, abs(uv.x)));
 }
 
-// The seal in the fox's human form, as face.rs `seal_marks`, placed from
-// the eyes (`eye`: their middle x, y and radii): a small crest low between
-// the brows, a leaf over the inner half of each eye for a brow, two short
-// stripes on each cheek under the eye. Coverage.
-fn seal_marks(uv: vec2<f32>, aa: f32, eye: vec4<f32>) -> f32 {
+// The seal in the fox's human form, as face.rs `seal_marks` at rest,
+// placed from the eyes (`eye`: their middle x, y and radii): three leaves
+// between the upper halves of her eyes, three fine strokes fanned on each
+// cheek. Casting (`g`, 0 … 1; Roger's 拆解圖2 faces), it grows from that
+// into the lotus crest: the middle leaf a tall flame drop with a hollow in
+// it, a wing curling up out of its foot either side; the cheek strokes
+// longer and bolder; a flick of eyeliner at each eye's outer corner, all
+// in the mark's colour (no rings round the eyes: the beast's seal has
+// them, hers does not). x: coverage; y: a soft halo round them.
+fn seal_marks(uv: vec2<f32>, aa: f32, eye: vec4<f32>, g: f32) -> vec2<f32> {
     let ex = eye.x;
     let ey = eye.y;
     let rx = eye.z;
     let ry = eye.w;
-    let foot = ey + 0.55 * ry;
-    var d = tapered(uv, vec2<f32>(0.0, foot + 0.04), vec2<f32>(0.0, foot + 0.2), 0.026, 0.003);
+    let foot = ey + 0.4 * ry;
+    let rise = ss(0.0, 0.6, g);
+    let top = foot + (0.85 + 0.45 * rise) * ry;
+    var d = leaf(uv, vec2<f32>(0.0, foot), vec2<f32>(0.0, top), 0.045 + 0.02 * rise);
+    d = max(d, -(length(uv - vec2<f32>(0.0, foot + 0.6 * (top - foot))) - 0.02 * ss(0.3, 0.7, g)));
+    let wing = ss(0.25, 0.8, g);
     for (var k = 0; k < 2; k++) {
         let side = select(-1.0, 1.0, k == 1);
-        d = min(d, leaf(uv, vec2<f32>(0.012 * side, foot), vec2<f32>(0.085 * side, foot + 0.17), 0.024));
-        let b0 = vec2<f32>((ex - 1.45 * rx) * side, ey + 1.32 * ry);
-        let b1 = vec2<f32>((ex + 0.2 * rx) * side, ey + 1.93 * ry);
-        d = min(d, leaf(uv, b0, b1, 0.042));
-        for (var i = 0; i < 2; i++) {
-            let fi = f32(i);
-            let outer = vec2<f32>((ex + (0.42 - 0.08 * fi) * rx) * side, ey - (1.31 + 0.3 * fi) * ry);
-            let inner = vec2<f32>((ex - (0.58 - 0.12 * fi) * rx) * side, ey - (1.66 + 0.3 * fi) * ry);
-            d = min(d, tapered(uv, outer, inner, 0.034 - 0.006 * fi, 0.005));
+        d = min(d, leaf(uv, vec2<f32>(0.02 * side, foot), vec2<f32>(0.12 * side, foot + 0.5 * ry), 0.032));
+        let w0 = vec2<f32>(0.03 * side, foot + 0.03);
+        let w1 = vec2<f32>(0.2 * side, foot + 0.45 * ry);
+        let w2 = vec2<f32>(0.15 * side, foot + 0.85 * ry);
+        d = min(d, leaf(uv, w0, mix(w0, w1, wing), 0.035 * wing + 0.001));
+        d = min(d, tapered(uv, w1, mix(w1, w2, ss(0.5, 0.9, g)), 0.02 * wing, 0.003));
+        for (var i = 0; i < 3; i++) {
+            let ab = whisker(ex, ey, rx, ry, f32(i), side);
+            let a = ab.xy;
+            let b = a + (ab.zw - a) * (1.0 + 0.35 * g);
+            d = min(d, tapered(uv, a, b, 0.02 + 0.012 * g, 0.004));
         }
+        let f0 = vec2<f32>((ex + 0.9 * rx) * side, ey + 0.35 * ry);
+        let f1 = vec2<f32>((ex + (0.9 + 0.5 * ss(0.3, 1.0, g)) * rx) * side, ey + 0.75 * ry);
+        d = min(d, tapered(uv, f0, f1, 0.016 * ss(0.2, 0.5, g), 0.002));
     }
-    return ink(d, aa);
+    return vec2<f32>(ink(d, aa), ink(d - 0.04, aa * 6.0));
+}
+
+// Her cheek stroke `i` (0 the top) on side `side`, as face.rs `whisker`:
+// inner end in xy, outer end in zw.
+fn whisker(ex: f32, ey: f32, rx: f32, ry: f32, i: f32, side: f32) -> vec4<f32> {
+    let a = vec2<f32>(ex * side, ey - (1.2 + 0.3 * i) * ry);
+    let b = vec2<f32>((ex + rx) * side, ey - (1.08 + 0.4 * i) * ry);
+    return vec4<f32>(a, b);
 }
 
 // A big chibi eye, as face.rs `chibi_eye`.
@@ -218,16 +240,18 @@ fn paint_eyes(q: vec3<f32>, r: vec3<f32>, base: vec3<f32>, px: f32) -> vec3<f32>
     if u.spots.w >= 0.0 {
         let mark = u.palette[u32(u.spots.w)].rgb;
         let g = u.fwd.w;
-        // Casting, the rest marks give way to the seal (咒印) as it grows.
         if u.style.y > 0.5 {
-            c = mix(c, mark, seal_marks(uv, aa, u.eye) * (1.0 - ss(0.2, 0.7, g)));
+            // Her human form: her seal grows from its rest into the lotus.
+            c = mix(c, mix(mark, mark * 0.85, g), seal_marks(uv, aa, u.eye, g).x);
         } else {
+            // Casting, the rest marks give way to the seal (咒印) as it
+            // grows.
             let m0 = fox_marks(uv, aa);
             c = mix(c, mix(mark, white, 0.35 * m0.y), m0.x * (1.0 - ss(0.2, 0.7, g)));
-        }
-        if g > 0.0 {
-            let m = spell_marks(uv, aa, g);
-            c = mix(c, mark * 0.85, m.x * min(2.0 * g, 1.0));
+            if g > 0.0 {
+                let m = spell_marks(uv, aa, g);
+                c = mix(c, mark * 0.85, m.x * min(2.0 * g, 1.0));
+            }
         }
     }
     return c;
@@ -291,24 +315,36 @@ fn spell_glow(q: vec3<f32>, r: vec3<f32>, lit: vec3<f32>, px: f32) -> vec3<f32> 
     var c = lit;
     var eye_c = mix(hot, white, 0.35);
     var pupil = 0.55;
+    // Her human form's eyes stay their own deep colour, only a little lit
+    // (Roger's 施法狀態 pictures); the beast's light right up.
+    let human = u.style.y > 0.5;
     if u.iris.x >= 0.0 {
-        eye_c = mix(u.palette[u32(u.iris.x)].rgb, white, 0.45);
+        eye_c = mix(u.palette[u32(u.iris.x)].rgb, white, select(0.45, 0.12, human));
         pupil = u.iris.y;
     }
+    let eye_w = select(0.75, 0.3, human);
     for (var k = 0; k < 2; k++) {
         let side = select(-1.0, 1.0, k == 1);
         let ec = vec2<f32>(u.eye.x * side, u.eye.y);
         let er = vec2<f32>(u.eye.z, u.eye.w);
         let ring = ink(ell(uv, ec, er), aa) * (1.0 - ink(ell(uv, ec, er * pupil), aa));
         let halo = ink(ell(uv, ec, er * vec2<f32>(1.6, 1.5)), aa * 10.0);
-        c = mix(c, eye_c, g * (0.2 * halo + 0.75 * ring));
+        c = mix(c, eye_c, g * (0.2 * halo + eye_w * ring));
     }
-    let m = spell_marks(uv, aa, g);
+    var m = spell_marks(uv, aa, g);
+    var crest = CREST_AT + vec2<f32>(0.0, 0.16);
+    var crest_r = vec2<f32>(0.24, 0.3);
+    if u.style.y > 0.5 {
+        // Her human form's seal, and its crest between her eyes.
+        m = seal_marks(uv, aa, u.eye, g);
+        crest = vec2<f32>(0.0, u.eye.y + 1.0 * u.eye.w);
+        crest_r = vec2<f32>(0.18, 0.22);
+    }
     // A soft glow round the seal, not over it: the seal itself stays the
     // mark's deep colour (Roger's picture).
     c = mix(c, mix(hot, white, 0.4), g * 0.22 * m.y * (1.0 - m.x));
     // The crest blazing, a halo round it.
-    let halo = ink(ell(uv, CREST_AT + vec2<f32>(0.0, 0.16), vec2<f32>(0.24, 0.3)), aa * 12.0);
+    let halo = ink(ell(uv, crest, crest_r), aa * 12.0);
     c = mix(c, mix(hot, white, 0.5), g * 0.2 * halo);
     return clamp(c, vec3<f32>(0.0), vec3<f32>(1.0));
 }

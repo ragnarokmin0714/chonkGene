@@ -16,11 +16,11 @@
     coats: [
         // 紅髮版's colours: a red border with gold, a red sash and a red and
         // gold rope (`gold` is the braid and the bell), red marks, red eyes;
-        // tails white through gold to orange.
+        // tails as the beast form's: white, a pink blush, red tips.
         (name: "white", colors: {
             "skin": "#FFE6DC", "robe": "#FFFDF8", "trim": "#D2232F", "gold": "#F0BC42", "sash": "#D2232F",
             "hair": "#E9EDF5", "hairtip": "#CCD6E6", "ribbon": "#D2232F", "fluff": "#FFFFFF",
-            "fur": "#FFFAF4", "tailmid": "#F9CF6A", "tailtip": "#F06A2E",
+            "fur": "#FFF9F3", "tailmid": "#F7A8B8", "tailtip": "#D93050",
             "ink": "#3A2224", "blush": "#FF9AAA", "mark": "#D8202E", "iris": "#E02E30",
         }),
         // 銀白版's: a silver-grey border, a white rope with a silver bell,
@@ -1082,6 +1082,9 @@
         chibi: true,
         forehead: Some("mark"),
         seal: true,
+        // Her cheeks and chin stand out of the head: the seal's cheek
+        // strokes reach them.
+        paint: 0.16,
         blush: (at: (0.5, -0.4), r: (0.2, 0.12), color: "blush"),
     ),
 )

@@ -64,42 +64,40 @@ pub(crate) fn fox_marks(uv: P, aa: f32) -> (f32, f32) {
     (ink(d, aa), smoothstep(0.55, 0.86, uv.0.abs()))
 }
 
-/// The fox's seal in her human form, the same in paint.wgsl `seal_marks`,
-/// placed from the eyes (`eye`: their middle x, y and radii) as Roger's
-/// sheet has it (the turnaround's front view, measured): low on the
-/// forehead between the brows a small crest (two wings opening up from a
-/// point a little below the tops of the eyes, a drop between them); a leaf
-/// over the inner half of each eye for a brow, slanting up and out; two
-/// short stripes on each cheek under the eye, rising outward, thick at the
-/// outer end.
+/// The fox's seal in her human form at rest, the same in paint.wgsl
+/// `seal_marks` (which also grows it as she casts), placed from the eyes
+/// (`eye`: their middle x, y and radii), after Roger's 平常 picture
+/// (2026-11-25: 「平時、施法時的咒印，還是和預計有點差距」): between the
+/// upper halves of her eyes three leaves, the middle one tallest, the
+/// others fanned up and out from its foot; on each cheek, under the eye
+/// and out past it, three fine strokes fanned like whiskers (the top one
+/// rising outward, the bottom one falling), each tapering outward.
 pub(crate) fn seal_marks(uv: P, aa: f32, eye: (f32, f32, f32, f32)) -> f32 {
     let (ex, ey, rx, ry) = eye;
-    let foot = ey + 0.55 * ry;
-    let mut d = tapered(uv, (0.0, foot + 0.04), (0.0, foot + 0.2), 0.026, 0.003);
+    let foot = ey + 0.4 * ry;
+    let mut d = leaf(uv, (0.0, foot), (0.0, foot + 0.85 * ry), 0.045);
     for side in [-1.0, 1.0] {
         d = d.min(leaf(
             uv,
-            (0.012 * side, foot),
-            (0.085 * side, foot + 0.17),
-            0.024,
+            (0.02 * side, foot),
+            (0.12 * side, foot + 0.5 * ry),
+            0.032,
         ));
-        let b0 = ((ex - 1.45 * rx) * side, ey + 1.32 * ry);
-        let b1 = ((ex + 0.2 * rx) * side, ey + 1.93 * ry);
-        d = d.min(leaf(uv, b0, b1, 0.042));
-        for i in 0..2 {
-            let fi = i as f32;
-            let outer = (
-                (ex + (0.42 - 0.08 * fi) * rx) * side,
-                ey - (1.31 + 0.3 * fi) * ry,
-            );
-            let inner = (
-                (ex - (0.58 - 0.12 * fi) * rx) * side,
-                ey - (1.66 + 0.3 * fi) * ry,
-            );
-            d = d.min(tapered(uv, outer, inner, 0.034 - 0.006 * fi, 0.005));
+        for i in 0..3 {
+            let (a, b) = whisker(ex, ey, rx, ry, i, side);
+            d = d.min(tapered(uv, a, b, 0.02, 0.004));
         }
     }
     ink(d, aa)
+}
+
+/// Her cheek stroke `i` (0 the top) on side `side`, from under the eye out
+/// past it: (inner end, outer end), as paint.wgsl `whisker`.
+fn whisker(ex: f32, ey: f32, rx: f32, ry: f32, i: usize, side: f32) -> (P, P) {
+    let fi = i as f32;
+    let a = (ex * side, ey - (1.2 + 0.3 * fi) * ry);
+    let b = ((ex + rx) * side, ey - (1.08 + 0.4 * fi) * ry);
+    (a, b)
 }
 
 /// A big chibi eye (the fox's human form), the same in paint.wgsl

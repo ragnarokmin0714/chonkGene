@@ -377,7 +377,7 @@ impl<'m> Scene<'m> {
         let mut s = self.coat_at(p);
         if let Some(fp) = self.face.map(|i| &self.placed[i]) {
             let fq = fp.local(p);
-            if fp.shape.distance(fq).abs() < 0.05 {
+            if fp.shape.distance(fq).abs() < self.model.face.paint {
                 s.color = face::eyes(self, fp.shape, fq, s.color, px);
             }
         }

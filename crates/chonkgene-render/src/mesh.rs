@@ -189,7 +189,7 @@ pub fn bake(
                 pos: [p.x, p.y, p.z, occlusion(&scene, p, nrm)],
                 normal: [nrm.x, nrm.y, nrm.z, s.gloss],
                 color: [s.color.x, s.color.y, s.color.z, s.fuzz],
-                eye: on_face(eyes, p, 0.05),
+                eye: on_face(eyes, p, model.face.paint),
                 mouth: {
                     let mut m = on_face(mouth, p, 0.04);
                     let tail = tail_mark(&along_tail, &bones, &weights);

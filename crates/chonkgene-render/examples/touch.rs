@@ -15,7 +15,7 @@
 //! and staying, 坐下), and `bury` (the Shiba lying, grinning, the beach's
 //! sand piled over it and burst out of). `fox-human` is the fox's human
 //! form, in hairdo `STYLE` and hair colour `HAIR` from the environment;
-//! `COAT=` picks a coat by name.
+//! `COAT=` picks a coat by name; `SCALE=` draws it bigger.
 
 use std::sync::Arc;
 
@@ -236,7 +236,13 @@ fn main() {
         if only.is_some_and(|o| o != scene.name) {
             continue;
         }
-        let mut r = MeshRenderer::new(gpu, Arc::clone(&model), 1.0, 0.33, coat).expect("renderer");
+        // `SCALE=2`: drawn twice the size (close-ups of the face).
+        let scale: f32 = std::env::var("SCALE")
+            .ok()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(1.0);
+        let mut r =
+            MeshRenderer::new(gpu, Arc::clone(&model), scale, 0.33, coat).expect("renderer");
         r.sleep_in(scene.sleep);
         let mut a = Animator::new(3, 0.33, species.waddle())
             .with_pops(false)
@@ -327,8 +333,9 @@ fn main() {
                 .flatten();
             if scene.name == "pat" {
                 let crown = r.anchor();
-                let at =
-                    |p: &chonkgene_render::props::PatPose| pat_hand(crown, a.facing, 1.0, p).press;
+                let at = |p: &chonkgene_render::props::PatPose| {
+                    pat_hand(crown, a.facing, scale, p).press
+                };
                 match pat {
                     Some(p) if p.down && !pat_down => {
                         a.press(Zone::Head, at(&p));
@@ -373,7 +380,7 @@ fn main() {
                     bottom: &|x| r.body_bottom(x),
                 };
                 let build = Build::of(r.species());
-                hug_hands(&body, build, hold, a.facing, 1.0, t - 0.3, secs)
+                hug_hands(&body, build, hold, a.facing, scale, t - 0.3, secs)
             });
             r.hug_press(hands.map(|h| {
                 let [p, q] = h.hands;
@@ -395,7 +402,7 @@ fn main() {
             let path = format!("{out}/{}-{f:03}.png", scene.name);
             if let Some(p) = pat {
                 let mut pm = r.pixmap().clone();
-                let hand = pat_hand(r.anchor(), a.facing, 1.0, &p);
+                let hand = pat_hand(r.anchor(), a.facing, scale, &p);
                 draw_pat_hand(&mut pm, &hand, pat_t);
                 pm.save_png(&path).expect("write frame");
                 continue;
@@ -406,7 +413,7 @@ fn main() {
                 let mut src =
                     tiny_skia::Pixmap::new(r.pixmap().width(), r.pixmap().height()).expect("frame");
                 if let Some(h) = &hands {
-                    draw_hug_hands(&mut src, h, HandLayer::Behind, 1.0, t - 0.3);
+                    draw_hug_hands(&mut src, h, HandLayer::Behind, scale, t - 0.3);
                 }
                 src.draw_pixmap(
                     0,
@@ -417,12 +424,12 @@ fn main() {
                     None,
                 );
                 if let Some(h) = &hands {
-                    draw_hug_hands(&mut src, h, HandLayer::Front, 1.0, t - 0.3);
+                    draw_hug_hands(&mut src, h, HandLayer::Front, scale, t - 0.3);
                 }
                 // Room above it for the lift (the app moves its window up
                 // instead), so its head is not cut off.
                 const ROOM: i32 = 30;
-                let lift = hug_lift(hold, 1.0, t - 0.3, secs).round() as i32;
+                let lift = hug_lift(hold, scale, t - 0.3, secs).round() as i32;
                 let mut pm =
                     tiny_skia::Pixmap::new(src.width(), src.height() + ROOM as u32).unwrap();
                 pm.draw_pixmap(
