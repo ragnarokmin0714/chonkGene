@@ -40,7 +40,7 @@ fn tapered(uv: P, a: P, b: P, r1: f32, r2: f32) -> f32 {
 fn leaf(uv: P, a: P, b: P, w: f32) -> f32 {
     let (pa, ba) = (sub(uv, a), sub(b, a));
     let h = ((pa.0 * ba.0 + pa.1 * ba.1) / (ba.0 * ba.0 + ba.1 * ba.1)).clamp(0.0, 1.0);
-    let r = w * (std::f32::consts::PI * h).sin().powf(0.7) + 0.003;
+    let r = w * (std::f32::consts::PI * h).sin().max(0.0).powf(0.7) + 0.003;
     len((pa.0 - ba.0 * h, pa.1 - ba.1 * h)) - r
 }
 

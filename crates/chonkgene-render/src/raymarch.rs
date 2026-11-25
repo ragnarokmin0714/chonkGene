@@ -215,7 +215,7 @@ fn shade(scene: &Scene, cam: &Camera, x: f32, y: f32) -> Sample {
     let mut col = alb.mul_elem(tone) * (0.70 + 0.30 * ao);
     // Bounce light from below and a soft fuzzy rim: the plush look.
     col = col + alb.mul_elem(v3(1.0, 0.85, 0.75)) * (0.10 * clamp01(-n.y));
-    let fres = (1.0 - n.dot(v).max(0.0)).powf(2.5);
+    let fres = (1.0 - n.dot(v).max(0.0)).max(0.0).powf(2.5);
     col = col + v3(1.0, 0.96, 0.92).lerp(alb, 0.3) * (fres * 0.28 * (0.5 + 0.5 * ao));
     let h = (l + v).normalize();
     col = col + V3::ONE * (surf.gloss * 0.55 * n.dot(h).max(0.0).powf(40.0));

@@ -386,7 +386,7 @@ fn shade(x: f32, y: f32) -> Sample {
     let tone = mix(vec3<f32>(0.76, 0.64, 0.66), vec3<f32>(1.04, 1.0, 0.97), band);
     var col = alb * tone * (0.70 + 0.30 * ao);
     col += alb * vec3<f32>(1.0, 0.85, 0.75) * (0.10 * clamp01(-n.y));
-    let fres = pow(1.0 - max(dot(n, v), 0.0), 2.5);
+    let fres = pow(clamp(1.0 - max(dot(n, v), 0.0), 0.0, 1.0), 2.5);
     col += mix(vec3<f32>(1.0, 0.96, 0.92), alb, 0.3) * (fres * 0.28 * (0.5 + 0.5 * ao));
     let hv = normalize(l + v);
     col += vec3<f32>(surf.gloss * 0.55 * pow(max(dot(n, hv), 0.0), 40.0));

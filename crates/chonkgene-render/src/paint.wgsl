@@ -38,7 +38,10 @@ fn leaf(uv: vec2<f32>, a: vec2<f32>, b: vec2<f32>, w: f32) -> f32 {
     let pa = uv - a;
     let ba = b - a;
     let h = clamp(dot(pa, ba) / dot(ba, ba), 0.0, 1.0);
-    let r = w * pow(sin(3.14159265 * h), 0.7) + 0.003;
+    // (Past its ends sin(π h) comes out a hair under 0, and pow of that is
+    // NaN: on some GPUs the whole half plane past a leaf's tip took its
+    // colour.)
+    let r = w * pow(max(sin(3.14159265 * h), 0.0), 0.7) + 0.003;
     return length(pa - ba * h) - r;
 }
 
