@@ -1720,8 +1720,22 @@ Roger's 「20261125 回饋報告」, talked through with him the same day (his a
    - **Filled in by trying, on that pet**: what is its own: its chin scratch, its fondness hearts per zone (❤️❤️ / ❤️ / · / ✗), its specials (the 曼赤肯's trap, the Shiba's kick, the owl's head turn). Until then 「還沒試過」. A small store of what each pet has shown (zone and reaction) in its save; it belongs with the growth diary (Phase 5).
    - **Hovering a row** lights that zone on the preview (the zone colours of `examples/zones.rs`).
    - The tap setting of item 2 lives in 一般, not here: it is the same for every pet.
+5. **Roger, the same day: 「❤️❤️ 愛心太多是不是會讓畫面太亂，用顏色淺淡來表示會不會比較好？觸發到一定程度是不是可以出粉紅泡泡，寵物臉上的開心表情更明顯 或 high到不行」.** Proposed:
+   - **No hearts in 摸摸筆記** (replaces the hearts in item 4). The preview's zones are tinted by fondness: 最愛 deep pink, 喜歡 pale pink, 還好 no tint, 不喜歡 pale grey-blue. Dislike gets a hue of its own because a paler pink would read as "likes a little". Each row has a word in the same colour (最愛 / 喜歡 / 還好 / 不喜歡). A zone not tried yet has no tint, only a dotted outline. Deep and pale pink differ in lightness, the grey-blue in hue, so it reads without colour vision too.
+   - **Happiness that builds while you pet** (`Mind`, built like the tickle: it climbs while a hand is on it and fades with a half-life when it stops; fastest on a loved spot, slower on a liked one; a spot it does not mind stops at stage 1; a disliked one never starts):
 
-**Suggested order**: 1 (small, on its own) → the zones (shoulder, front and hind paws) and their picture → the tap setting, mapped onto the actions already built → 「ㄉㄨㄞ ㄉㄨㄞ」 → the chin scratches → 摸肚肚 and 翻肚討摸 → the human form's zones → the cursor poses → 4 (摸摸筆記).
+     | Stage | Reached | Face | Body | Effect |
+     |---|---|---|---|---|
+     | 1 舒服 | about 1 s | eyes narrowed, the mouth's ends up, a faint blush | leans into the hand | now and then one heart |
+     | 2 超開心 | about 3 s on a loved spot, 6 s on a liked one | eyes curved into ^ ^, mouth open, the blush deeper and wider | louder purr or pant, a cat treading, the tail going faster | pink bubbles rising slowly, now and then one pops |
+     | 3 high到不行 | a loved spot only, about 3 s more | the species' own (below) | the species' own | a gush of bubbles, a pink glow round it |
+
+   - **Stage 3, by species**: 柴犬, tongue out, eyes shut happy, tail spinning like a propeller, and let go it does zoomies (laps at full tilt); 曼赤肯, rolls over kneading the air, purring at its loudest (its belly still ends in the trap); 折耳貓, melts flat into a puddle, eyes thin lines, ears flat with bliss; 貓頭鷹, the head turns a full circle, face feathers puffed to twice their size, eyes crescents; 小雞, puffed round and bouncing like a ball, 「啾啾啾」; 小鴨, spins on the spot, tail waggling madly, a happy quack; 九尾, 傲嬌 gives way: face red, paws (hands, in human form) over her face, 「才、才沒有很舒服！」 while all nine tails wag wildly. A 厭世 one keeps a straight face while its bubbles give it away.
+   - **After stage 3**: a few seconds of afterglow (the bubbles thinning), then a cooldown of 1–2 min in which it climbs no higher than stage 2, so the peak stays special. 親密度 for the peak once, within the daily cap.
+   - **Fewer hearts on the desktop too**: hearts belong to stage 1 only (now one every 1.6 s while held on a loved spot); stage 2 has bubbles instead.
+   - Pets are small on the desktop, so the face is pushed further than a still would need: the blush (`face.rs`, the `face.blush` spot) grows in size and strength with the stage. The bubbles are a new `Fx` (not `Fx::Bubble`, which is the spell's).
+
+**Suggested order**: 1 (small, on its own) → the zones (shoulder, front and hind paws) and their picture → the tap setting, mapped onto the actions already built → 「ㄉㄨㄞ ㄉㄨㄞ」 → the chin scratches → 5's stages and bubbles → 摸肚肚 and 翻肚討摸 → the human form's zones → the cursor poses → 4 (摸摸筆記, coloured as 5 says).
 
 ### New species: eleven more pets (Roger, 2026-11-13; planned, none built)
 
