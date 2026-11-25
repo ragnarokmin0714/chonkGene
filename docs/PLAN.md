@@ -1712,8 +1712,8 @@ Roger's 「20261125 回饋報告」, talked through with him the same day (his a
      | 九尾 (beast) | 「哼」 while pressing her head into your hand, the nine tails swaying slowly; stop and a tail hooks your hand to keep it there |
 
    - **The Shiba's move is after 安西教練** (灌籃高手). That stays a reference only: no name from that work in the UI, the lines or a store page; in code `jowl_jiggle` or similar.
-   - **The fox's human form** (Roger, 2026-11-25: yes): head (a pat; 傲嬌 「……只准一下」), hands (握手), shoulders (環抱, which she turns into her bear hug of you), chin (she catches your finger: 「挑姊姊下巴？膽子不小。」). Belly, legs and back get no dent and no action: she steps aside or swats the hand away. Zones on the body of a grown woman read differently from an animal's, and Steam's content survey asks. **Asked**: her cheeks and tails were her zones too (entry of 2026-11-25 above), and neither has that problem (her tails are her favourite spot); proposed to keep both.
-   - **The menu**: Roger said yes (2026-11-25) to a 「互動…」 submenu with 握手 and 舉高高, with 抱抱 kept. Missed when it was proposed: 抱抱… already has 環抱 / 舉高高 / 搖搖抱, and 叫牠… has 握手. **Proposed instead**: no new submenu (the menu was cut to nine rows in the twenty-sixth pass). **Asked**.
+   - **The fox's human form** (Roger, 2026-11-25: yes): head (a pat; 傲嬌 「……只准一下」), hands (握手), shoulders (環抱, which she turns into her bear hug of you), chin (she catches your finger: 「挑姊姊下巴？膽子不小。」). Belly, legs and back get no dent and no action: she steps aside or swats the hand away. Zones on the body of a grown woman read differently from an animal's, and Steam's content survey asks. **Asked**: her cheeks and tails were her zones too (entry of 2026-11-25 above), and neither has that problem (her tails are her favourite spot); proposed to keep both. **Roger: yes** (item 6 gives both an action).
+   - **The menu**: Roger said yes (2026-11-25) to a 「互動…」 submenu with 握手 and 舉高高, with 抱抱 kept. Missed when it was proposed: 抱抱… already has 環抱 / 舉高高 / 搖搖抱, and 叫牠… has 握手. **Proposed instead**: no new submenu (the menu was cut to nine rows in the twenty-sixth pass). **Roger: 可以**, no new submenu.
 3. **「好朋友／主人」 shown untranslated** (asked where on 2026-11-25): Roger: 似乎解決, he will say if he sees it again. Closed.
 4. **Roger asked: should each pet's interactions show in 「我的寵物」?** Proposed: yes, as a card **「摸摸筆記」** beside the pet's picture:
    - **Shown from the start**: the shared zone → action rows (頭 摸摸頭, 手 握手, 腳 舉高高, 肩 環抱, 背 搖搖抱). Otherwise nobody finds 舉高高 on the feet.
@@ -1734,8 +1734,25 @@ Roger's 「20261125 回饋報告」, talked through with him the same day (his a
    - **After stage 3**: a few seconds of afterglow (the bubbles thinning), then a cooldown of 1–2 min in which it climbs no higher than stage 2, so the peak stays special. 親密度 for the peak once, within the daily cap.
    - **Fewer hearts on the desktop too**: hearts belong to stage 1 only (now one every 1.6 s while held on a loved spot); stage 2 has bubbles instead.
    - Pets are small on the desktop, so the face is pushed further than a still would need: the blush (`face.rs`, the `face.blush` spot) grows in size and strength with the stage. The bubbles are a new `Fx` (not `Fx::Bubble`, which is the spell's).
+6. **Roger, the same day**: (a) 「你雙手夾臉頰肉 放開後再回彈後 兩邊臉頰就會有紅腫」, (b) 「對屁股方面的互動需要嗎？」, (c) 「摸九尾的尾巴她會害羞？」. Proposed:
+   - **(a) Cheek squeeze**, every pet and the fox's human form:
+     - **Trigger**: a long press on a cheek (the "cheek squish" §1.2 always had). It takes the place of a pat there.
+     - **Held**: your two hands come in from both sides, drawn as the hug's (`props::hug_arms`), and press both cheeks in with the shader's two presses. The face squashes and the mouth is pushed into a pout: a duck's bill pushed forward, the owl's face disc squeezed into an oval. It stays squashed while held.
+     - **Let go**: the cheeks spring out past round and wobble (「ㄉㄨㄞ ㄉㄨㄞ」), then stay **rosy** for about 5 s: the blush deeper, wider and a little puffed, fading. Pink, never a sore red-purple: cute, not hurt.
+     - **By fondness**: on a loved cheek it is pleased and rubs its face on your hand after. On one it does not mind or dislikes, it pouts and rubs its cheeks with its paws. Held over about 3 s on a disliked cheek, it wriggles out (a dislike, as now). The fox holds her cheeks, red: 「捏、捏夠了沒！」.
+   - **(b) The bottom: a light pat** (two taps, or one in that mode), species-true:
+     - **Cats**: elevator butt at the tail base (rump up, tail straight up, treading).
+     - **Shiba**: a hind leg kicking at the tail base, and a pleased look back.
+     - **Chick and duckling**: a startled hop one step forward; the duckling waddles off faster, quacking.
+     - **Beast-form fox**: she turns, glares and swats your hand with her tails, 「放肆！」. A glare, no blush, not shyness.
+     - **Unchanged**: her human form has no bottom zone (item 2). Pokes and long presses on the bottom stay as they are.
+   - **(c) The fox's tails make her shy**, in both forms. Still her favourite spot (❤️❤️), so item 5's stages run as on any loved spot, but her face says the opposite of her tails:
+     - **Stage 1**: a blush, a look away, 「尾、尾巴不准隨便摸……」, while the stroked tail curls round your hand.
+     - **Stage 2**: red to the ears, paws over her face, tails fluffing up.
+     - **Stage 3**: all nine fluff up to twice their size, 「笨、笨蛋！」, and she hides behind them, peeking out. Item 5's peak (「才、才沒有很舒服！」) stays for her other loved spots.
+     - **Tone**: the lines stay 傲嬌 embarrassed, never suggestive (Steam's content survey, item 2).
 
-**Suggested order**: 1 (small, on its own) → the zones (shoulder, front and hind paws) and their picture → the tap setting, mapped onto the actions already built → 「ㄉㄨㄞ ㄉㄨㄞ」 → the chin scratches → 5's stages and bubbles → 摸肚肚 and 翻肚討摸 → the human form's zones → the cursor poses → 4 (摸摸筆記, coloured as 5 says).
+**Suggested order**: 1 (small, on its own) → the zones (shoulder, front and hind paws) and their picture → the tap setting, mapped onto the actions already built, with 6 (b) → 「ㄉㄨㄞ ㄉㄨㄞ」 and 6 (a) → the chin scratches → 5's stages and bubbles, with 6 (c) → 摸肚肚 and 翻肚討摸 → the human form's zones → the cursor poses → 4 (摸摸筆記, coloured as 5 says).
 
 ### New species: eleven more pets (Roger, 2026-11-13; planned, none built)
 
