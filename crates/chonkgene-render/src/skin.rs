@@ -355,6 +355,9 @@ pub struct Feel {
     /// The 曼赤肯's belly trap, 0 … 1 (see
     /// [`chonkgene_core::anim::Touch::trap`]).
     pub trap: f32,
+    /// Patted on the bottom, the Shiba's way: a hind leg kicking and a
+    /// look back, 0 … 1 (see [`chonkgene_core::anim::Touch::rump`]).
+    pub rump: f32,
 }
 
 impl Feel {
@@ -521,7 +524,7 @@ impl Moods {
         // then it enjoys it facing you, eyes shut.
         let loved = feel.fond == Some(Fondness::Loves);
         let back_goal = if loved {
-            0.0
+            feel.rump
         } else {
             held(Zone::Tail)
                 .max(held(Zone::Bottom))
@@ -529,6 +532,7 @@ impl Moods {
                 .max(long(Zone::Tail))
                 .max(long(Zone::Bottom))
                 .max(long(Zone::Back))
+                .max(feel.rump)
         };
         let back = self.back.step(back_goal, 0.0, 2.2, 0.9, dt);
         let head = self.head.step(held(Zone::Head), 0.0, 2.0, 0.8, dt);
@@ -588,6 +592,7 @@ impl Moods {
             .max(held(Zone::Belly))
             .max(loved_bottom)
             .max(scratch)
+            .max(feel.rump)
             * (0.5 + 0.5 * (TAU * 0.5 * self.t).sin().abs());
         // A quick poke anywhere: a start, over in about half a second.
         let startle = feel
@@ -897,6 +902,8 @@ const FLOW_SPRING: (f32, f32, f32) = (3.2, 1.5, 0.32);
 /// pace swings it.
 const FLOW_TRAIL: f32 = 14.0;
 pub(crate) const FLOW_SWING: f32 = 900.0;
+/// How far a cat tips forward pushing its rump up (電梯屁股), degrees.
+const BUTT_UP_PITCH: f32 = 14.0;
 /// How quickly her tails fold over her asleep, or open up (a critically
 /// damped spring's rate behind her lying down).
 const FLOW_FOLD_HZ: f32 = 0.5;
@@ -921,6 +928,9 @@ pub(crate) struct Tail {
     /// held up, as the Shiba's) and about the vertical (one held out
     /// behind, as the Fold's), from which way its root points.
     swish_axes: (f32, f32),
+    /// The turn about x (degrees) that stands it straight up from where it
+    /// rests, base to tip (a cat's 電梯屁股).
+    raise: f32,
 }
 
 /// One frame of the tails' travelling wave, as [`Tail::wave`] takes it.
@@ -958,6 +968,15 @@ impl Tail {
                     [a, b, ..] => (sk.pivots[b] - sk.pivots[a]).normalize().y.abs(),
                     _ => 1.0,
                 };
+                // From up toward behind (-z): what a turn about x takes
+                // away.
+                let raise = match (bones.first(), bones.last()) {
+                    (Some(&a), Some(&b)) if a != b => {
+                        let d = sk.pivots[b] - sk.pivots[a];
+                        (-d.z).atan2(d.y).to_degrees()
+                    }
+                    _ => 0.0,
+                };
                 Tail {
                     swish: vec![Spring::default(); bones.len()],
                     bounce: vec![Spring::default(); bones.len()],
@@ -968,6 +987,7 @@ impl Tail {
                     lie_turn,
                     lie_curl,
                     swish_axes: (up, (1.0 - up * up).max(0.0).sqrt()),
+                    raise,
                 }
             })
             .collect()
@@ -1496,11 +1516,16 @@ impl Walk {
         // Sulking it sits with its back to you; laughing, melted or rolled
         // over it does not sit.
         let lying_about = self.feel.mood == Mood::FedUp || rolled_over;
+        // Patted on the bottom sitting, a cat gets up to push it up.
+        let butt_up = self
+            .gesture
+            .is_some_and(|g| g.act == chonkgene_core::anim::Act::ButtUp);
         let goal = if (self.sitting || self.feel.mood == Mood::Sulk || sits_up)
             && !self.lying
             && !lying_about
             && !walking
             && !lifted
+            && !butt_up
         {
             1.0
         } else {
@@ -2234,6 +2259,31 @@ impl Walk {
                             }
                         }
                     }
+                }
+                // 電梯屁股: patted at the base of its tail, a cat pushes
+                // its rump up into the hand (the body tipped forward, the
+                // front legs kept straight under it), the tail goes
+                // straight up, and the hind paws tread in turn.
+                Act::ButtUp => {
+                    j[b.body].rot.x += BUTT_UP_PITCH * e;
+                    j[b.head].rot.x -= 16.0 * e;
+                    let mut k = 0.0;
+                    for &(leg, _, front) in &self.legs {
+                        if front {
+                            j[leg].rot.x -= 14.0 * e;
+                        } else {
+                            let up = (TAU * 2.2 * g.t + PI * k).sin().max(0.0);
+                            j[leg].rot.x -= e * (6.0 + 10.0 * up);
+                            j[leg].shift.y += e * 0.07 * up;
+                            k += 1.0;
+                        }
+                    }
+                    for tail in &self.tails {
+                        if let Some(&root) = tail.bones.first() {
+                            j[root].rot.x += e * (tail.raise - BUTT_UP_PITCH);
+                        }
+                    }
+                    self.butt.v += e * 0.6 * (TAU * 2.2 * g.t).cos() * dt * 30.0;
                 }
                 // The tails swung round hard at someone, the body
                 // twisting into it, the bell knocked swinging.

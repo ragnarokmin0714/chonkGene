@@ -5,7 +5,7 @@
 //! it (lines in bubbles, expressions, actions, sounds).
 
 use crate::anim::Expression;
-use crate::species::{Fondness, Grumpiness, Species, in_hours};
+use crate::species::{BottomPat, Fondness, Grumpiness, Species, in_hours};
 use crate::tickle::{Reaction, Tickle};
 use crate::{Personality, Zone};
 
@@ -59,6 +59,8 @@ pub enum Line {
     Obey,
     /// Doing as it was asked, in a bad mood, after a while.
     ObeyLater,
+    /// Patted on the bottom (two taps there), each its own way.
+    BottomPat,
     /// Bringing a thrown toy back.
     Fetch,
     /// At the catnip: a cat in bliss, anyone else in character.
@@ -130,7 +132,7 @@ pub enum Line {
 }
 
 impl Line {
-    pub const ALL: [Line; 61] = [
+    pub const ALL: [Line; 62] = [
         Line::Hello,
         Line::WelcomeBack,
         Line::PokeSmall,
@@ -160,6 +162,7 @@ impl Line {
         Line::SkitShrug,
         Line::Obey,
         Line::ObeyLater,
+        Line::BottomPat,
         Line::Fetch,
         Line::Catnip,
         Line::CatnipMeh,
@@ -226,6 +229,7 @@ impl Line {
             Line::SkitShrug => "skit_shrug",
             Line::Obey => "obey",
             Line::ObeyLater => "obey_later",
+            Line::BottomPat => "bottom_pat",
             Line::Fetch => "fetch",
             Line::Catnip => "catnip",
             Line::CatnipMeh => "catnip_meh",
@@ -545,6 +549,37 @@ impl Mind {
         out
     }
 
+    /// A light pat on the bottom (two taps there, PLAN §8, Roger's
+    /// twenty-seventh pass, item 6 (b)): each its own way (see
+    /// [`Species::bottom_pat`]), the fox put out but not cross for long.
+    /// Asleep it only stirs; with a grudge it will not have it.
+    pub fn pat_bottom(&mut self, w: &World) -> Out {
+        self.last_touch = w.now;
+        if self.sleep.is_some() {
+            return Out::say(Line::TurnOver);
+        }
+        if self.grumpy() {
+            let mut out = Out::say(Line::GrudgePat);
+            self.gain(&mut out, 2, w.day);
+            return out;
+        }
+        let mut out = Out::say(Line::BottomPat);
+        // The fox's glare is in her swat and her words: 厭世 (FedUp) would
+        // melt her flat.
+        out.expression = match self.species.bottom_pat() {
+            BottomPat::ButtUp | BottomPat::Kick => Some(Expression::Happy),
+            BottomPat::Swat | BottomPat::Hop | BottomPat::HopAway | BottomPat::LookRound => None,
+        };
+        let xp = match self.species.fondness(Zone::Bottom) {
+            Fondness::Loves => 10,
+            Fondness::Likes => 6,
+            Fondness::Fine => 4,
+            Fondness::Dislikes => 2,
+        };
+        self.gain(&mut out, xp, w.day);
+        out
+    }
+
     /// The 曼赤肯's belly trap sprung: it grabs the hand and kicks, all in
     /// play (no grudge, 親密度 as for a loved spot).
     pub fn trap(&mut self, w: &World) -> Out {
@@ -787,6 +822,39 @@ mod tests {
         m.shake(&world(5.0));
         assert!(m.grumpy());
         assert_eq!(m.shake_hands(&world(12.0)).line, Some(Line::GrudgePat));
+    }
+
+    /// Roger's twenty-seventh pass, item 6 (b): a light pat on the bottom,
+    /// each its own way, pleased for the cats and the Shiba (it loves it
+    /// there most, and gets the most 親密度 for it); asleep it only stirs,
+    /// with a grudge it will not have it.
+    #[test]
+    fn a_pat_on_the_bottom_is_taken_each_its_own_way() {
+        let mut r = rng();
+        let mut most = (0, Species::Owl);
+        for s in Species::ALL {
+            let mut m = of(s);
+            let before = m.affinity.total();
+            let out = m.pat_bottom(&world(10.0));
+            assert_eq!(out.line, Some(Line::BottomPat), "{s:?}");
+            let pleased = matches!(s.bottom_pat(), BottomPat::ButtUp | BottomPat::Kick);
+            assert_eq!(out.expression == Some(Expression::Happy), pleased, "{s:?}");
+            assert_ne!(out.expression, Some(Expression::FedUp), "{s:?} melts");
+            let gained = m.affinity.total() - before;
+            if gained > most.0 {
+                most = (gained, s);
+            }
+        }
+        assert_eq!(most.1, Species::Shiba);
+        assert_eq!(Species::Munchkin.bottom_pat(), BottomPat::ButtUp);
+        assert_eq!(Species::Fox.bottom_pat(), BottomPat::Swat);
+        let mut m = mind();
+        m.put_to_sleep(&world(20.0), &mut r);
+        assert_eq!(m.pat_bottom(&world(30.0)).line, Some(Line::TurnOver));
+        let mut m = mind();
+        m.put_to_sleep(&world(0.0), &mut r);
+        m.shake(&world(5.0));
+        assert_eq!(m.pat_bottom(&world(12.0)).line, Some(Line::GrudgePat));
     }
 
     #[test]

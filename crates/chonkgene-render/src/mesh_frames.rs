@@ -989,6 +989,7 @@ impl MeshRenderer {
             scratch: touch.scratch,
             fond: touch.fond,
             trap: touch.trap,
+            rump: touch.rump,
         }
     }
 

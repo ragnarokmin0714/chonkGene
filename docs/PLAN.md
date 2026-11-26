@@ -1742,7 +1742,14 @@ Roger's 「20261125 回饋報告」, talked through with him the same day (his a
    - **Two taps**: the first on a spot with an action is a small poke at once (`Animator::tap`, a third of a poke's kick, no hop, no look round); it looks round and reacts as to a poke once the double-click time has passed with no second tap (`Animator::noticed`, then `poke_now`). The spot is kept from the first tap (`Pet::tapped`). A tap where there is no action is a poke at once, no longer held back.
    - **One tap**: a quick tap on a spot with an action starts it; elsewhere a poke as now. Long presses are as they were in both modes.
    - **Tests**: `a_tap_does_what_the_spot_does` (app), `a_first_tap_waits_to_look_round` (anim, mutation-checked), `a_paw_is_given_gladly_unless_asleep_or_in_a_grudge` (mind), `taps_are_two_by_default_and_one_can_be_picked` (settings). Windows clippy of the platform crate clean.
-   - **Next**: 6 (b), the bottom pats, as the bottom's action.
+   - **6 (b), the bottom pats, built the same day** as the bottom's action (`TapAction::PatBottom`; not on her human form): `Mind::pat_bottom` (line `bottom_pat`, all seven in three languages; 親密度 by how it likes its bottom, the Shiba most), `Species::bottom_pat` for how:
+     - **Cats** `Act::ButtUp`: the body tipped forward 14°, the front legs kept straight, the tail turned straight up from wherever it rests (`Tail::raise`, worked out from its base-to-tip line, so the Fold's tail held out behind and the Munchkin's curled one both stand), the hind paws treading; sitting, it gets up for it.
+     - **Shiba**: `Animator::pat_rump`, 1.8 s of `Touch::rump`, a hind leg kicking (the scratch's kick) and a look back over its shoulder even though it loves it there, pleased.
+     - **Chick**: a startled hop forward, away from the hand. **Duckling**: a hop on the spot, then off at a quicker waddle (pace 1.9, 1.6 s), its 「呱！呱呱呱！」.
+     - **Owl** (ours; Roger's list left it out): it looks round at the hand behind it, unimpressed, 「咕？（整顆頭轉過來盯著你）」.
+     - **Fox** (beast form): she turns to the hand and swings her tails at it (`Act::Swish`), 「放肆！」. **No face for the glare yet**: 厭世 (FedUp) would melt her flat, so her face stays as it is until the faces of item 5 give her one.
+     - **Tests**: `a_pat_on_the_bottom_is_taken_each_its_own_way` (mind), `patted_on_the_bottom_a_cat_puts_its_rump_up_and_the_shiba_kicks` (mesh). `examples/touch.rs` scenes `buttup`, `rump`, `swish`. Picture: `inbox/bottom-pats.png`.
+   - **Next in the order**: 「ㄉㄨㄞ ㄉㄨㄞ」 and 6 (a), the cheek squeeze.
 3. **「好朋友／主人」 shown untranslated** (asked where on 2026-11-25): Roger: 似乎解決, he will say if he sees it again. Closed.
 4. **Roger asked: should each pet's interactions show in 「我的寵物」?** Proposed: yes, as a card **「摸摸筆記」** beside the pet's picture:
    - **Shown from the start**: the shared zone → action rows (頭 摸摸頭, 手 握手, 腳 舉高高, 肩 環抱, 背 搖搖抱). Otherwise nobody finds 舉高高 on the feet.

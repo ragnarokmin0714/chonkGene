@@ -173,6 +173,11 @@ fn scenes() -> Vec<Scene> {
         // 摸摸頭 from its menu: your hand pats its head, from 0.3 s.
         feel("pat", Expression::Neutral, 4.4),
         feel("fedup", Expression::FedUp, 3.0),
+        // Patted on the bottom (item 6 (b)), from 0.3 s: a cat's 電梯屁股,
+        // the Shiba's kick and look back, the fox's tails swung at you.
+        feel("buttup", Expression::Happy, 3.0),
+        feel("rump", Expression::Happy, 2.6),
+        feel("swish", Expression::Neutral, 2.0),
         feel("sulk", Expression::Sulk, 4.5),
         sleep("sleep-chin", SleepPose::Chin),
         sleep("sleep-curl", SleepPose::Curl),
@@ -260,6 +265,7 @@ fn main() {
         }
         let mut pressed = None;
         let mut hugged = false;
+        let mut gestured = false;
         let (mut pat_down, mut pat_was) = (false, false);
         let mut mound = None;
         let frames = (scene.secs * FPS * slow).round() as u32;
@@ -317,6 +323,15 @@ fn main() {
                 a.hug = role;
                 a.gesture(Act::Hug);
                 hugged = true;
+            }
+            if !gestured && t >= 0.3 {
+                gestured = true;
+                match scene.name {
+                    "buttup" => a.gesture(Act::ButtUp),
+                    "swish" => a.gesture(Act::Swish),
+                    "rump" => a.pat_rump(),
+                    _ => {}
+                }
             }
             if let Some(p) = scene.posture {
                 a.posture = p;

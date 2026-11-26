@@ -1511,6 +1511,83 @@ fn a_touched_pet_turns_to_you_and_looks_at_the_finger() {
     }
 }
 
+/// Roger's twenty-seventh pass, item 6 (b), patted on the bottom: a cat,
+/// sitting, gets up and pushes its rump up and its tail straight up
+/// (電梯屁股); the Shiba kicks a hind leg and looks back over its shoulder.
+#[test]
+fn patted_on_the_bottom_a_cat_puts_its_rump_up_and_the_shiba_kicks() {
+    use chonkgene_core::anim::Act;
+    use chonkgene_render::skin::Gesture;
+    const DT: f32 = 1.0 / 60.0;
+    for id in ["munchkin", "fold"] {
+        let (model, sk) = mesh_model(id).unwrap();
+        let tip = *sk.tails()[0].last().unwrap();
+        let butt = sk.bone("butt").unwrap();
+        // Rump and tail tip heights after `secs`, sitting first.
+        let heights = |act: Option<Act>, sit: bool| {
+            let mut walk = Mover::new(&sk, 1.0, &model).unwrap();
+            walk.sit(sit);
+            settle(&mut walk, 2.0);
+            let mut j = Vec::new();
+            for k in 0..(1.4 / DT) as usize {
+                walk.gesture(act.map(|act| Gesture {
+                    act,
+                    e: 1.0,
+                    t: k as f32 * DT,
+                }));
+                j = walk.step(DT, false, 1.0);
+            }
+            let bones = sk.pose(&j);
+            let y = |b: usize| bones[b].apply(sk.pivots[b]).y;
+            (y(butt), y(tip))
+        };
+        let (rump, tail) = heights(Some(Act::ButtUp), true);
+        let (stand_rump, stand_tail) = heights(None, false);
+        assert!(
+            rump > stand_rump + 0.05,
+            "{id}: rump at {rump:.2}, standing {stand_rump:.2}"
+        );
+        assert!(
+            tail > stand_tail + 0.1,
+            "{id}: tail tip at {tail:.2}, standing {stand_tail:.2}"
+        );
+    }
+    let (model, sk) = mesh_model("shiba").unwrap();
+    let (head, body) = (sk.bone("head").unwrap(), sk.bone("body").unwrap());
+    let hind: Vec<usize> = ["leg_bl", "leg_br"]
+        .iter()
+        .map(|n| sk.bone(n).unwrap())
+        .collect();
+    // (how far round it looks, how much a hind leg moves) over a second.
+    let take = |rump: f32| {
+        let mut walk = Mover::new(&sk, 1.0, &model).unwrap();
+        settle(&mut walk, 2.0);
+        let (mut look, mut lo, mut hi) = (0.0f32, f32::MAX, f32::MIN);
+        for _ in 0..60 {
+            walk.feel(chonkgene_render::skin::Feel {
+                rump,
+                ..Default::default()
+            });
+            let j = walk.step(DT, false, 1.0);
+            look = look.max((j[head].rot.y + j[body].rot.y).abs());
+            for &l in &hind {
+                lo = lo.min(j[l].rot.x);
+                hi = hi.max(j[l].rot.x);
+            }
+        }
+        (look, hi - lo)
+    };
+    let ((look, kick), (still_look, still_kick)) = (take(1.0), take(0.0));
+    assert!(
+        look > still_look + 15.0,
+        "looked back {look:.0}° ({still_look:.0}°)"
+    );
+    assert!(
+        kick > still_kick + 10.0,
+        "a hind leg moved {kick:.0}° ({still_kick:.0}°)"
+    );
+}
+
 /// Roger: cats, dogs and the fox slept with their heads up. Lying chin
 /// down or curled up, the nose comes down below 60% of its height standing
 /// (lying down before, it stayed at two thirds); on its side or back, the

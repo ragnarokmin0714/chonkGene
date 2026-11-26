@@ -24,6 +24,8 @@ const HOP_GRAVITY: f32 = 1800.0;
 const PRESS_SQUASH: f32 = 0.28;
 /// The kick of the first of two taps: about a third of a poke on the head.
 const TAP_KICK: f32 = 0.8;
+/// How long the Shiba kicks and looks back when patted on the bottom.
+const RUMP_SECS: f32 = 1.8;
 /// A steady walk shows this many distinct frames a step, so a renderer can
 /// draw each once and copy it after (PLAN §5).
 pub const BEATS: u8 = 12;
@@ -102,6 +104,10 @@ pub enum Act {
     Chew,
     /// The fox's tails swung round hard at someone (a play-fight).
     Swish,
+    /// A cat patted at the base of its tail (電梯屁股, PLAN §8, Roger's
+    /// twenty-seventh pass, item 6 (b)): the rump pushed up, the tail
+    /// straight up, the hind paws treading.
+    ButtUp,
     /// Nose down to a ball and a bump that sends it rolling.
     Nudge,
     /// Nose down to something lying on the floor, taking it in the mouth
@@ -402,6 +408,7 @@ pub fn gesture_secs(act: Act) -> Option<f32> {
         Act::Bliss => Some(4.0),
         Act::Chew => Some(6.0),
         Act::Swish => Some(1.2),
+        Act::ButtUp => Some(2.2),
         Act::Nudge => Some(0.8),
         Act::Pick => Some(PICK_SECS),
         Act::Dance => Some(DANCE_SECS),
@@ -434,6 +441,10 @@ pub struct Touch {
     /// to look up at it (that brought its face under the hand), it squints
     /// and takes it.
     pub from_above: bool,
+    /// Patted on the bottom, the Shiba's way of taking it (PLAN §8, Roger's
+    /// twenty-seventh pass, item 6 (b)): a hind leg kicking at the base of
+    /// its tail and a pleased look back over its shoulder, 0 … 1.
+    pub rump: f32,
 }
 
 impl Touch {
@@ -602,6 +613,9 @@ pub struct Animator {
     last_touch: Option<(Zone, (f32, f32), f32)>,
     /// The first of two taps, not yet looked at (see [`Animator::tap`]).
     tapped: Option<(Zone, (f32, f32))>,
+    /// Until when the bottom pat's kick and look back last (see
+    /// [`Touch::rump`]).
+    rump_until: f32,
     watch: Option<(f32, f32)>,
     /// See [`Touch::scratch`].
     scratch: f32,
@@ -679,6 +693,7 @@ impl Animator {
             held: None,
             last_touch: None,
             tapped: None,
+            rump_until: f32::MIN,
             scratch: 0.0,
             licks: 0,
             watch: None,
@@ -783,6 +798,17 @@ impl Animator {
         }
     }
 
+    /// Touched on `zone` at `at` without a finger coming down (the owl
+    /// patted on the bottom looks round at the hand, as at a poke there).
+    pub fn noticed_at(&mut self, zone: Zone, at: (f32, f32)) {
+        self.last_touch = Some((zone, at, self.t));
+    }
+
+    /// Patted on the bottom, the Shiba's way (see [`Touch::rump`]).
+    pub fn pat_rump(&mut self) {
+        self.rump_until = self.t + RUMP_SECS;
+    }
+
     /// The tap of [`Animator::tap`] did something else (a second tap came):
     /// nothing more of it.
     pub fn untap(&mut self) {
@@ -849,6 +875,12 @@ impl Animator {
     /// A pounce at a toy: one big hop.
     pub fn pounce(&mut self) {
         self.jump(300.0, 0);
+    }
+
+    /// A start: one small hop on the spot (the duckling patted on the
+    /// bottom, before it waddles off).
+    pub fn startle_hop(&mut self) {
+        self.jump(240.0, 0);
     }
 
     /// Keep an eye on this spot of the picture (a toy), or nothing.
@@ -1300,6 +1332,12 @@ impl Animator {
                     (left / 0.25).clamp(0.0, 1.0)
                 },
                 from_above: self.patted,
+                rump: {
+                    // In fast, held, out over its last half second.
+                    let left = self.rump_until - self.t;
+                    let since = RUMP_SECS - left;
+                    ((since / 0.15).min(left / 0.5)).clamp(0.0, 1.0)
+                },
             },
             posture: self.posture,
             lively: match self.expression {

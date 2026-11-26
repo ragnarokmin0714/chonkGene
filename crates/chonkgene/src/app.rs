@@ -97,6 +97,9 @@ fn morph_test() -> bool {
     *ON.get_or_init(|| std::env::var("CHONKGENE_STAGE").is_ok_and(|v| v == "morph"))
 }
 
+/// The duckling patted on the bottom waddles off this much quicker.
+const DUCK_HURRY: f32 = 1.9;
+
 /// How likely a pet falling from high up is to glide down instead: a bird
 /// nearly always, the fox with her tails fanned mostly, the rest (legs out
 /// like a flying squirrel) half the time.
@@ -112,14 +115,15 @@ fn glide_chance(species: Species) -> f32 {
 /// item 2): two taps (or one, as 「動作要點幾下」 says) on its head pat it,
 /// on a front paw (a bird's wing) ask for 握手 (a high five), on a hind
 /// paw lift it up high, on its shoulders hug it round, on its back rock it
-/// like a baby. Belly, cheeks, chin and tail have none: a tap there is a
-/// poke. The fox's human form has hers on her head, hands and shoulders
-/// only.
+/// like a baby, on its bottom pat it lightly (each its own way, item 6
+/// (b)). Belly, cheeks, chin and tail have none: a tap there is a poke.
+/// The fox's human form has hers on her head, hands and shoulders only.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum TapAction {
     Pat,
     Paw,
     Hug(HugHold),
+    PatBottom,
 }
 
 fn tap_action(human: bool, zone: Zone) -> Option<TapAction> {
@@ -129,6 +133,7 @@ fn tap_action(human: bool, zone: Zone) -> Option<TapAction> {
         Zone::Shoulder => Some(TapAction::Hug(HugHold::Wrap)),
         Zone::Foot if !human => Some(TapAction::Hug(HugHold::Carry)),
         Zone::Back if !human => Some(TapAction::Hug(HugHold::Cradle)),
+        Zone::Bottom if !human => Some(TapAction::PatBottom),
         _ => None,
     }
 }
@@ -3213,7 +3218,69 @@ impl Pet {
             TapAction::Pat => self.pat_you(ctx),
             TapAction::Paw => self.shake_paw(ctx),
             TapAction::Hug(hold) => self.hug_you(ctx, Some(hold)),
+            TapAction::PatBottom => self.pat_bottom(ctx),
         }
+    }
+
+    /// A light pat on the bottom (PLAN §8, Roger's twenty-seventh pass,
+    /// item 6 (b)), each its own way (see [`Species::bottom_pat`]): a cat
+    /// pushes its rump up, the Shiba kicks a hind leg and looks back
+    /// pleased, the chick hops a step forward, the duckling hops and
+    /// waddles off quacking, the owl stares round at you, the fox turns,
+    /// glares and swats your hand with her tails.
+    fn pat_bottom(&mut self, ctx: &mut Ctx) {
+        use chonkgene_core::species::BottomPat;
+        let out = self.mind.pat_bottom(&ctx.world);
+        let free = out.line == Some(Line::BottomPat)
+            && !self.in_skit
+            && matches!(self.body.motion, Motion::Idle | Motion::Walk);
+        let how = self.species.bottom_pat();
+        diag!(
+            "{}: patted on the bottom: {}",
+            self.save.name,
+            if free {
+                format!("{how:?}")
+            } else {
+                format!("{:?}", out.line)
+            }
+        );
+        if free {
+            let (w, s) = (self.body.size.0, self.fun.scale);
+            // The hand is behind it: away is the other way.
+            let away = if self.cursor.0 < 0.5 * w { 1.0 } else { -1.0 };
+            let halt = |p: &mut Pet| {
+                p.body.motion = Motion::Idle;
+                p.body.speed = 0.0;
+                p.body.pace = 1.0;
+                p.anim.walking = false;
+            };
+            match how {
+                BottomPat::ButtUp => {
+                    halt(self);
+                    self.anim.gesture(Act::ButtUp);
+                }
+                BottomPat::Kick => self.anim.pat_rump(),
+                BottomPat::Hop => {
+                    self.body
+                        .spring(self.body.feet().0 + away * 0.12 * w, 20.0 * s);
+                }
+                BottomPat::HopAway => {
+                    self.anim.startle_hop();
+                    self.body.facing = away;
+                    self.body.motion = Motion::Walk;
+                    self.body.pace = DUCK_HURRY;
+                    self.switch_at = ctx.world.now + 1.6;
+                }
+                // Looks round at the hand behind it, as at a poke there.
+                BottomPat::LookRound => self.anim.noticed_at(Zone::Bottom, self.cursor),
+                BottomPat::Swat => {
+                    halt(self);
+                    self.body.facing = -away;
+                    self.anim.gesture(Act::Swish);
+                }
+            }
+        }
+        self.apply(ctx, out);
     }
 
     /// Your hand offered for 握手 (two taps on a front paw): it gives its
@@ -4943,6 +5010,7 @@ mod tests {
                 Some(Hug(HugHold::Wrap)),
             ),
             (Zone::Back, Some(Hug(HugHold::Cradle)), None),
+            (Zone::Bottom, Some(PatBottom), None),
             (Zone::Belly, None, None),
             (Zone::Cheek, None, None),
             (Zone::Chin, None, None),

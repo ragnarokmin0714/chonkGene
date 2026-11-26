@@ -41,6 +41,27 @@ pub enum Grumpiness {
     Spin,
 }
 
+/// What a light pat on the bottom gets (see [`Species::bottom_pat`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BottomPat {
+    /// 電梯屁股 (a cat): rump up, tail straight up, the hind paws treading.
+    ButtUp,
+    /// The Shiba: a hind leg kicking at the base of its tail, a pleased
+    /// look back.
+    Kick,
+    /// The chick: a startled hop a step forward.
+    Hop,
+    /// The duckling: the hop, then off at a quicker waddle, quacking.
+    HopAway,
+    /// The owl: feathers puffed, its head turned right round to stare at
+    /// you over its back, unimpressed.
+    LookRound,
+    /// The fox (her beast form; her human form has no bottom to pat): she
+    /// turns, glares and swats your hand with her tails, 「放肆！」. A
+    /// glare, no blush.
+    Swat,
+}
+
 /// How much a species likes a hand on a zone (PLAN §8, Roger's sixteenth
 /// pass, item 4: 「摸動物不同部位時，會有其他反應」).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -81,6 +102,20 @@ impl Species {
             Back | Shoulder | Bottom => 5,
             Tail => 6,
         }]
+    }
+
+    /// How it takes a light pat on the bottom (PLAN §8, Roger's
+    /// twenty-seventh pass, item 6 (b); the owl's is ours, his list left
+    /// it out).
+    pub fn bottom_pat(self) -> BottomPat {
+        match self {
+            Species::Munchkin | Species::Fold => BottomPat::ButtUp,
+            Species::Shiba => BottomPat::Kick,
+            Species::Chick => BottomPat::Hop,
+            Species::Duck => BottomPat::HopAway,
+            Species::Owl => BottomPat::LookRound,
+            Species::Fox => BottomPat::Swat,
+        }
     }
 
     /// Its belly loved, but rubbed this long it grabs the hand and bunny
