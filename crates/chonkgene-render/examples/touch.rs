@@ -58,7 +58,8 @@ fn scenes() -> Vec<Scene> {
         expression: Expression::Neutral,
         hold: Some(Hold { zone, from, to }),
         sleep: None,
-        walk_first: matches!(zone, Zone::Tail | Zone::Bottom | Zone::Back),
+        // Sitting facing you, a four-legged pet's hind feet are under it.
+        walk_first: matches!(zone, Zone::Tail | Zone::Bottom | Zone::Back | Zone::Foot),
         hug: None,
         posture: None,
         pace: None,
@@ -160,6 +161,8 @@ fn scenes() -> Vec<Scene> {
         touch("cheek", Zone::Cheek, 0.3, 2.3, 3.2),
         touch("tail", Zone::Tail, 0.3, 1.8, 3.2),
         touch("paw", Zone::Paw, 0.3, 2.3, 3.2),
+        touch("foot", Zone::Foot, 0.3, 2.3, 3.2),
+        touch("shoulder", Zone::Shoulder, 0.3, 2.3, 3.2),
         touch("bottom", Zone::Bottom, 0.3, 2.3, 3.2),
         touch("back", Zone::Back, 0.3, 2.3, 3.2),
         touch("wing", Zone::Wing, 0.3, 2.3, 3.2),

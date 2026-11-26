@@ -1392,6 +1392,81 @@ fn every_mesh_pet_has_a_back_a_rump_and_birds_have_wings() {
     }
 }
 
+/// Roger's twenty-seventh pass, item 2: an action by zone, so every pet
+/// has shoulders (環抱) and feet (舉高高) apart from its front paws (握手;
+/// a bird's are its wings): a four-legged pet's front paws in front of its
+/// feet and its shoulders over its front legs, a bird's shoulders the tops
+/// of its wings, the human form's hands on her forearms, her feet below
+/// them and her shoulders above them.
+#[test]
+fn every_pet_has_shoulders_and_feet_apart_from_its_front_paws() {
+    use chonkgene_rig::ZONES;
+    let zone = |name: &str| ZONES.iter().position(|z| *z == name).unwrap() as u8;
+    let forms = QUAD_SPECIES
+        .iter()
+        .chain(&BIPED_SPECIES)
+        .map(|id| (id.to_string(), mesh_model(id).unwrap()))
+        .chain([(
+            "fox-human".to_string(),
+            human("fox", "ponytail", "white").unwrap(),
+        )]);
+    for (id, (model, sk)) in forms {
+        let mesh = bake(&model, &sk, 0, 0.33, model.bake_cell).unwrap();
+        let of = |z: &str| -> Vec<&chonkgene_render::mesh::Vertex> {
+            mesh.vertices
+                .iter()
+                .zip(&mesh.zones)
+                .filter(|(_, k)| **k == zone(z))
+                .map(|(v, _)| v)
+                .collect()
+        };
+        let mean = |z: &str, axis: usize| {
+            let v = of(z);
+            v.iter().map(|v| v.pos[axis]).sum::<f32>() / v.len().max(1) as f32
+        };
+        let (paw, foot, shoulder) = (of("paw").len(), of("foot").len(), of("shoulder").len());
+        assert!(foot >= 100, "{id}: {foot} foot vertices");
+        assert!(shoulder >= 100, "{id}: {shoulder} shoulder vertices");
+        let main_bone = |v: &chonkgene_render::mesh::Vertex| {
+            let k = (0..4)
+                .max_by(|&a, &b| v.weights[a].total_cmp(&v.weights[b]))
+                .unwrap();
+            sk.names[v.bones[k] as usize].as_str()
+        };
+        if BIPED_SPECIES.contains(&id.as_str()) {
+            assert_eq!(paw, 0, "{id}: a bird's wings are its hands");
+            assert!(
+                mean("shoulder", 1) > mean("wing", 1),
+                "{id}: its shoulders are not the tops of its wings"
+            );
+        } else if id == "fox-human" {
+            assert!(paw >= 100, "{id}: {paw} hand vertices");
+            assert!(
+                of("paw").iter().all(|v| main_bone(v).starts_with("fore_")),
+                "{id}: a hand off her forearms"
+            );
+            assert!(
+                mean("foot", 1) < mean("paw", 1),
+                "{id}: her feet above her hands"
+            );
+            assert!(
+                mean("shoulder", 1) > mean("paw", 1),
+                "{id}: her shoulders below her hands"
+            );
+        } else {
+            assert!(paw >= 100, "{id}: {paw} front paw vertices");
+            assert!(
+                mean("paw", 2) > mean("foot", 2),
+                "{id}: its front paws behind its feet"
+            );
+            assert!(
+                mean("shoulder", 2) > mean("back", 2) && mean("shoulder", 1) > mean("paw", 1),
+                "{id}: its shoulders are not over its front legs"
+            );
+        }
+    }
+}
+
 fn feel(mood: chonkgene_render::skin::Mood) -> chonkgene_render::skin::Feel {
     chonkgene_render::skin::Feel {
         mood,

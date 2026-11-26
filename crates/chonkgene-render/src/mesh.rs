@@ -228,8 +228,135 @@ pub fn bake(
         import(&mut mesh, model, skeleton, coat, "back", &text)
             .map_err(|e| format!("mesh {:?}: {e}", m.name))?;
     }
+    limb_zones(&mut mesh, skeleton);
     Ok(mesh)
 }
+
+/// A front paw's bones (the fox's human form: her arms, her hands).
+fn front_limb(bone: &str) -> bool {
+    ["leg_f", "arm_", "fore_", "hand"]
+        .iter()
+        .any(|p| bone.starts_with(p))
+}
+
+/// The zones the whole pet tells, for an action each (PLAN §8, Roger's
+/// twenty-seventh pass, item 2): a front paw (the human form's hand; 握手)
+/// apart from a hind one (a bird's foot, her legs; 舉高高), and the
+/// shoulders (環抱), cut out of the back:
+///
+/// - four legs: the back and the chest's sides from a little behind the
+///   front legs forward, from where they join the body up (the withers);
+/// - a bird: the top of each wing, where it joins the body (its body
+///   there is hidden under its head and wings);
+/// - the human form: her robe round where each arm joins it, from the
+///   armpit up, and the top half of each upper arm.
+fn limb_zones(mesh: &mut Mesh, sk: &Skeleton) {
+    let index = |name: &str| ZONES.iter().position(|z| *z == name).map(|i| i as u8);
+    let [
+        Some(paw),
+        Some(foot),
+        Some(back),
+        Some(wing),
+        Some(shoulder),
+    ] = ["paw", "foot", "back", "wing", "shoulder"].map(index)
+    else {
+        return;
+    };
+    let front: Vec<bool> = sk.names.iter().map(|n| front_limb(n)).collect();
+    let share = |v: &Vertex, on: &[bool]| -> f32 {
+        v.bones
+            .iter()
+            .zip(&v.weights)
+            .filter(|(b, _)| on.get(**b as usize).copied().unwrap_or(false))
+            .map(|(_, w)| *w)
+            .sum()
+    };
+    let at = |v: &Vertex| v3(v.pos[0], v.pos[1], v.pos[2]);
+    let on_bones = |names: &[&str]| -> Vec<bool> {
+        sk.names
+            .iter()
+            .map(|n| names.contains(&n.as_str()))
+            .collect()
+    };
+    let hind = on_bones(&["leg_bl", "leg_br"]);
+    let belly = index("belly");
+    for (v, z) in mesh.vertices.iter().zip(&mut mesh.zones) {
+        // A paw is a front one only on a front leg; and a four-legged
+        // pet's hind leg is its foot from the thigh down (its paw alone is
+        // a few pixels, half hidden under it).
+        if (*z == paw && share(v, &front) < 0.5)
+            || ((*z == back || Some(*z) == belly) && share(v, &hind) > THIGH)
+        {
+            *z = foot;
+        }
+    }
+    let joint = |names: [&str; 2]| -> Option<[V3; 2]> {
+        let [a, b] = names.map(|n| sk.bone(n).map(|i| sk.pivots[i]));
+        Some([a?, b?])
+    };
+    if let Some(legs) = joint(["leg_fl", "leg_fr"]) {
+        let j = (legs[0] + legs[1]) * 0.5;
+        for (v, z) in mesh.vertices.iter().zip(&mut mesh.zones) {
+            let p = at(v);
+            // The back there, and the chest's sides (sitting up, the
+            // edges of the chest under the head).
+            let side = Some(*z) == belly && v.normal[0].abs() > SHOULDER_SIDE;
+            if (*z == back || side) && p.z >= j.z - SHOULDER_BEHIND && p.y >= j.y {
+                *z = shoulder;
+            }
+        }
+    } else if let Some(arms) = joint(["arm_l", "arm_r"]) {
+        // Her head is a chibi's, as wide as her shoulders and low over
+        // them: the top half of each upper arm counts too.
+        let elbows = joint(["fore_l", "fore_r"]).unwrap_or(arms);
+        let upper = on_bones(&["arm_l", "arm_r"]);
+        for (v, z) in mesh.vertices.iter().zip(&mut mesh.zones) {
+            let p = at(v);
+            let near = arms.iter().zip(&elbows).any(|(a, e)| {
+                (p.y >= a.y - SHOULDER_UNDER_ARM && (p - *a).length() <= SHOULDER_ROUND_ARM)
+                    || (share(v, &upper) > 0.5 && p.y >= (a.y + e.y) * 0.5)
+            });
+            if *z == back && near {
+                *z = shoulder;
+            }
+        }
+    } else {
+        for bone in ["wing_l", "wing_r"].map(|n| sk.bone(n)).iter().flatten() {
+            let on: Vec<bool> = (0..sk.names.len()).map(|b| b == *bone).collect();
+            let mine = |v: &Vertex, z: u8| z == wing && share(v, &on) > 0.5;
+            let (lo, hi) = mesh
+                .vertices
+                .iter()
+                .zip(&mesh.zones)
+                .filter(|(v, z)| mine(v, **z))
+                .fold((f32::MAX, f32::MIN), |(lo, hi), (v, _)| {
+                    (lo.min(v.pos[1]), hi.max(v.pos[1]))
+                });
+            let top = hi - WING_ROOT * (hi - lo);
+            for (v, z) in mesh.vertices.iter().zip(&mut mesh.zones) {
+                if mine(v, *z) && v.pos[1] >= top {
+                    *z = shoulder;
+                }
+            }
+        }
+    }
+}
+
+/// How much of a four-legged pet's skin must move with a hind leg to be
+/// that foot: its thigh melts into its rump, so less than half.
+const THIGH: f32 = 0.35;
+/// How far behind its front legs' joint a four-legged pet's shoulders
+/// reach along its back (world units).
+const SHOULDER_BEHIND: f32 = 0.25;
+/// How far a four-legged pet's chest must face sideways (its normal's x)
+/// to be its shoulder rather than its belly.
+const SHOULDER_SIDE: f32 = 0.6;
+/// The human form's shoulders: how far round each arm's joint, and how far
+/// below it (world units).
+const SHOULDER_ROUND_ARM: f32 = 0.16;
+const SHOULDER_UNDER_ARM: f32 = 0.06;
+/// A bird's wing root: this much of the wing's height, from its top down.
+const WING_ROOT: f32 = 0.35;
 
 /// The shadow's radii across and along the body: what stands on the floor
 /// (legs, belly, feet), a little wider. Tails, hair and a human form's arms

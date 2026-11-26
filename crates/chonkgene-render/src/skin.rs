@@ -545,9 +545,13 @@ impl Moods {
         // A paw (or wing) it does not like touched stays tucked in.
         let paw = match (feel.held, feel.poked) {
             _ if feel.fond == Some(Fondness::Dislikes) => None,
-            // A bird's wing lifts as a paw does.
-            (Some((Zone::Paw | Zone::Wing, bone, secs)), _) => bone.map(|b| (b, ramp(secs))),
-            (None, Some((z @ (Zone::Paw | Zone::Wing), bone, _))) => bone.map(|b| (b, short(z))),
+            // A hind paw and a bird's wing lift as a front paw does.
+            (Some((Zone::Paw | Zone::Foot | Zone::Wing, bone, secs)), _) => {
+                bone.map(|b| (b, ramp(secs)))
+            }
+            (None, Some((z @ (Zone::Paw | Zone::Foot | Zone::Wing), bone, _))) => {
+                bone.map(|b| (b, short(z)))
+            }
             _ => None,
         };
         let scratch = self

@@ -54,9 +54,10 @@ const HAND_SQUEEZE: f32 = 0.09;
 /// Your two hands in a hug: where each presses (pixels) with what grip,
 /// and how firmly, 0 … 1 (see [`MeshRenderer::hug_press`]).
 pub type HandPresses = ([((f32, f32), Grip); 2], f32);
-/// The zones your hands hold it by: its body and legs (last, so a hand
-/// cupped under it can leave them out), never its head, tails or wings.
-const BODY_ZONES: [&str; 4] = ["belly", "back", "bottom", "paw"];
+/// The zones your hands hold it by: its body (a bird's wing roots, its
+/// shoulders, stay close to it) and legs (last, so a hand cupped under it
+/// can leave them out), never its head, tails or wings.
+const BODY_ZONES: [&str; 6] = ["belly", "back", "bottom", "shoulder", "paw", "foot"];
 /// A frame held back by the GPU budget this long goes anyway (PLAN §8,
 /// Roger's eleventh pass, item 5: pets stood frozen for seconds while
 /// others took the budget).
@@ -1059,7 +1060,7 @@ impl MeshRenderer {
         for i in 0..live.mesh.vertices.len() {
             if !ZONES
                 .get(usize::from(live.mesh.zones[i]))
-                .is_some_and(|z| BODY_ZONES[..3].contains(z))
+                .is_some_and(|z| BODY_ZONES[..4].contains(z))
             {
                 continue;
             }
@@ -1420,9 +1421,10 @@ fn dent_for(zone: Zone) -> (f32, f32) {
         Zone::Cheek => (0.09, 0.2),
         Zone::Chin => (0.07, 0.2),
         Zone::Head => (0.06, 0.24),
-        Zone::Paw => (0.05, 0.16),
+        Zone::Paw | Zone::Foot => (0.05, 0.16),
         Zone::Tail => (0.06, 0.14),
         Zone::Back => (0.08, 0.28),
+        Zone::Shoulder => (0.07, 0.22),
         Zone::Wing => (0.05, 0.18),
     }
 }

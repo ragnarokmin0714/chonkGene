@@ -22,6 +22,8 @@ pub mod tickle;
 pub enum Zone {
     Belly,
     Cheek,
+    /// A front paw (the fox's human form: a hand), the one it gives to
+    /// shake (PLAN §8, Roger's twenty-seventh pass, item 2).
     Paw,
     Bottom,
     Head,
@@ -33,6 +35,12 @@ pub enum Zone {
     Back,
     /// A bird's wing, apart from its feet.
     Wing,
+    /// The top of the body between the neck and the front legs, a bird's
+    /// wing root, the human form's shoulders: 環抱 (PLAN §8, Roger's
+    /// twenty-seventh pass, item 2).
+    Shoulder,
+    /// A hind paw, a bird's foot, the human form's legs: 舉高高.
+    Foot,
 }
 
 impl Zone {
@@ -47,6 +55,8 @@ impl Zone {
             "tail" => Self::Tail,
             "back" => Self::Back,
             "wing" => Self::Wing,
+            "shoulder" => Self::Shoulder,
+            "foot" => Self::Foot,
             _ => return None,
         })
     }

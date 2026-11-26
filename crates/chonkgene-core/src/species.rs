@@ -61,7 +61,8 @@ impl Species {
     pub fn fondness(self, zone: Zone) -> Fondness {
         use Fondness::{Dislikes as No, Fine as Ok, Likes as Yes, Loves as Love};
         use Zone::*;
-        // Head, chin, cheek, belly, paw or wing, back or bottom, tail.
+        // Head, chin, cheek, belly, paw (front or hind) or wing, back
+        // (shoulders too) or bottom, tail.
         let row = match self {
             Species::Shiba => [Yes, Love, Yes, Love, No, Love, No],
             Species::Munchkin => [Love, Love, Love, Love, No, Yes, No],
@@ -76,8 +77,8 @@ impl Species {
             Chin => 1,
             Cheek => 2,
             Belly => 3,
-            Paw | Wing => 4,
-            Back | Bottom => 5,
+            Paw | Foot | Wing => 4,
+            Back | Shoulder | Bottom => 5,
             Tail => 6,
         }]
     }

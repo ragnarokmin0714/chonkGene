@@ -767,8 +767,8 @@ impl Animator {
             Zone::Belly => (6.0, 10.0),
             Zone::Bottom => (5.0, 3.0),
             Zone::Cheek | Zone::Head | Zone::Chin => (2.5, 0.0),
-            Zone::Back => (4.0, 1.0),
-            Zone::Paw | Zone::Tail | Zone::Wing => (1.5, 0.0),
+            Zone::Back | Zone::Shoulder => (4.0, 1.0),
+            Zone::Paw | Zone::Foot | Zone::Tail | Zone::Wing => (1.5, 0.0),
         };
         self.body.kick(body * (1.0 - held));
         self.belly.kick(belly);
