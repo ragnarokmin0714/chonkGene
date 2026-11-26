@@ -838,6 +838,13 @@ impl Fun {
         self.fx.push((fx, now));
     }
 
+    /// Asked by a tap (握手 on a front paw): done at once, gladly.
+    pub fn ask_now(&mut self, command: Command, now: f64) {
+        self.order = Some((command, now, false));
+        self.hold_until = 0.0;
+        self.lounge_until = 0.0;
+    }
+
     /// Asked from the menu: done after a moment's thought (more in a bad
     /// mood).
     pub fn ask(&mut self, command: Command, now: f64, level: u32, moody: bool, roll: f32) {

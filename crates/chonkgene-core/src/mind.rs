@@ -524,6 +524,27 @@ impl Mind {
         out
     }
 
+    /// Your hand offered for 握手 (two taps on a front paw, PLAN §8,
+    /// Roger's twenty-seventh pass, item 2): it gives its paw gladly, though
+    /// a paw held down is still disliked. Asleep, or with a grudge, it
+    /// pulls the paw back.
+    pub fn shake_hands(&mut self, w: &World) -> Out {
+        self.last_touch = w.now;
+        if self.sleep.is_some() {
+            return Out::say(Line::TurnOver);
+        }
+        if self.grumpy() {
+            let mut out = Out::say(Line::GrudgePat);
+            self.gain(&mut out, 2, w.day);
+            return out;
+        }
+        // What it says comes as it gives the paw (an order, as 叫牠… ›
+        // 握手 is).
+        let mut out = Out::default().with(Expression::Happy);
+        self.gain(&mut out, 10, w.day);
+        out
+    }
+
     /// The 曼赤肯's belly trap sprung: it grabs the hand and kicks, all in
     /// play (no grudge, 親密度 as for a loved spot).
     pub fn trap(&mut self, w: &World) -> Out {
@@ -746,6 +767,26 @@ mod tests {
         let out = m.trap(&world(100.0));
         assert_eq!((out.line, out.bliss), (Some(Line::Trap), true));
         assert!(!m.grumpy());
+    }
+
+    /// Roger's twenty-seventh pass, item 2: two taps on a paw offer your
+    /// hand, and it gives its paw gladly (the paw a spot it dislikes held);
+    /// asleep or with a grudge it pulls it back.
+    #[test]
+    fn a_paw_is_given_gladly_unless_asleep_or_in_a_grudge() {
+        let (mut m, mut r) = (mind(), rng());
+        assert_eq!(m.species.fondness(Zone::Paw), Fondness::Dislikes);
+        let before = m.affinity.total();
+        let out = m.shake_hands(&world(10.0));
+        assert_eq!((out.line, out.expression), (None, Some(Expression::Happy)));
+        assert!(m.affinity.total() > before, "no 親密度 for a paw given");
+        m.put_to_sleep(&world(20.0), &mut r);
+        assert_eq!(m.shake_hands(&world(30.0)).line, Some(Line::TurnOver));
+        let mut m = mind();
+        m.put_to_sleep(&world(0.0), &mut r);
+        m.shake(&world(5.0));
+        assert!(m.grumpy());
+        assert_eq!(m.shake_hands(&world(12.0)).line, Some(Line::GrudgePat));
     }
 
     #[test]

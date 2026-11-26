@@ -283,6 +283,14 @@ pub fn bring_to_front(window: &dyn HasWindowHandle) {
 }
 
 /// See [`crate::allow_foreground`].
+/// The user's double-click time (Control Panel › Mouse), kept between
+/// 0.2 and 0.9 s so a stray setting cannot make taps unusable.
+pub fn double_click_time() -> std::time::Duration {
+    // SAFETY: GetDoubleClickTime takes nothing and returns milliseconds.
+    let ms = unsafe { windows_sys::Win32::UI::Input::KeyboardAndMouse::GetDoubleClickTime() };
+    std::time::Duration::from_millis(u64::from(ms).clamp(200, 900))
+}
+
 pub fn allow_foreground(pid: u32) {
     // SAFETY: takes a process id; fails harmlessly if we may not.
     unsafe {

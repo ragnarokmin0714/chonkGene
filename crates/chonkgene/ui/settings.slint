@@ -639,7 +639,9 @@ export component SettingsWindow inherits Window {
     callback pin-pet(string);
     callback release();
 
-    // Interaction & sound.
+    // Interaction & sound. `taps`: 0 一下, 1 兩下 (Settings::taps - 1).
+    in-out property <int> taps;
+    callback taps-picked(int);
     in-out property <bool> sound;
     in-out property <float> volume;
     in-out property <bool> irrational;
@@ -1091,6 +1093,30 @@ export component SettingsWindow inherits Window {
                     spacing: 12px;
                     alignment: start;
                     Text { text: @tr("互動與聲音"); color: Theme.ink; font-size: 24px; }
+                    // Roger's twenty-seventh pass, item 2: what a spot
+                    // does, set off by one tap or two.
+                    SectionTitle { text: @tr("摸摸牠們"); }
+                    Section {
+                        VerticalLayout {
+                            padding-left: 20px;
+                            padding-right: 20px;
+                            Row {
+                                VerticalLayout {
+                                    alignment: center;
+                                    spacing: 4px;
+                                    horizontal-stretch: 1;
+                                    Label { text: @tr("動作要點幾下"); }
+                                    Hint { text: root.taps == 1 ? @tr("看點在哪裡：頭是摸摸頭，手是握手，腳是舉高高，肩膀和背是抱抱。點一下是戳戳。") : @tr("點一下就開始。戳戳和搔癢只在肚子和臉頰。"); }
+                                }
+                                Segmented {
+                                    horizontal-stretch: 0;
+                                    options: [@tr("一下"), @tr("兩下")];
+                                    selected <=> root.taps;
+                                    picked(i) => { root.taps-picked(i); }
+                                }
+                            }
+                        }
+                    }
                     SectionTitle { text: @tr("聲音"); }
                     Section {
                         VerticalLayout {

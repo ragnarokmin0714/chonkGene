@@ -22,6 +22,8 @@ const TURN_SECS: f32 = 0.3;
 const HOP_GRAVITY: f32 = 1800.0;
 /// How far a held finger squashes the body, in spring units.
 const PRESS_SQUASH: f32 = 0.28;
+/// The kick of the first of two taps: about a third of a poke on the head.
+const TAP_KICK: f32 = 0.8;
 /// A steady walk shows this many distinct frames a step, so a renderer can
 /// draw each once and copy it after (PLAN §5).
 pub const BEATS: u8 = 12;
@@ -598,6 +600,8 @@ pub struct Animator {
     /// let go: zone, pixel and when.
     held: Option<(Zone, (f32, f32), f32)>,
     last_touch: Option<(Zone, (f32, f32), f32)>,
+    /// The first of two taps, not yet looked at (see [`Animator::tap`]).
+    tapped: Option<(Zone, (f32, f32))>,
     watch: Option<(f32, f32)>,
     /// See [`Touch::scratch`].
     scratch: f32,
@@ -674,6 +678,7 @@ impl Animator {
             trap_until: 0.0,
             held: None,
             last_touch: None,
+            tapped: None,
             scratch: 0.0,
             licks: 0,
             watch: None,
@@ -753,6 +758,35 @@ impl Animator {
         self.held = None;
         self.body.target = 0.0;
         self.body.kick(-3.0);
+    }
+
+    /// The first of two taps on a spot with an action (PLAN §8, Roger's
+    /// twenty-seventh pass, item 2): a small poke at once, so it does not
+    /// feel late, but no turn to look and no hop yet; [`Animator::noticed`]
+    /// gives those if no second tap comes.
+    pub fn tap(&mut self, zone: Zone) {
+        let at = self.held.take().map_or((0.0, 0.0), |(_, at, _)| at);
+        self.tapped = Some((zone, at));
+        self.pressed = false;
+        self.body.target = 0.0;
+        self.body.kick(TAP_KICK);
+    }
+
+    /// The tap of [`Animator::tap`] was only a tap after all: it looks at
+    /// where it came from now (and a bottom poked jumps, as at a poke).
+    pub fn noticed(&mut self) {
+        if let Some((zone, at)) = self.tapped.take() {
+            self.last_touch = Some((zone, at, self.t));
+            if zone == Zone::Bottom {
+                self.jump(220.0, 0);
+            }
+        }
+    }
+
+    /// The tap of [`Animator::tap`] did something else (a second tap came):
+    /// nothing more of it.
+    pub fn untap(&mut self) {
+        self.tapped = None;
     }
 
     /// The finger lets go. A belly held in springs back out by itself; a
@@ -1522,6 +1556,54 @@ mod tests {
         a.poke(Zone::Belly);
         a.step(DT);
         assert_eq!(a.params().beat, None, "a poke is not part of the loop");
+    }
+
+    /// Roger's twenty-seventh pass, item 2: the first of two taps is a
+    /// small poke at once, but it looks round (and a bottom jumps) only
+    /// once no second tap came.
+    #[test]
+    fn a_first_tap_waits_to_look_round() {
+        let kick = |tap: bool| {
+            let mut a = Animator::new(3, 0.33, 0.35);
+            a.press(Zone::Head, (10.0, 20.0));
+            if tap {
+                a.tap(Zone::Head);
+            } else {
+                a.poke(Zone::Head);
+            }
+            let mut most = 0.0f32;
+            run(&mut a, 0.3, |a| most = most.max(a.body.pos.abs()));
+            (most, a)
+        };
+        let (tapped, mut a) = kick(true);
+        let (poked, _) = kick(false);
+        assert!(
+            tapped > 0.0 && tapped < 0.6 * poked,
+            "tap {tapped}, poke {poked}"
+        );
+        assert_eq!(a.params().touch.last, None, "looked round at the first tap");
+        a.noticed();
+        assert!(matches!(
+            a.params().touch.last,
+            Some((Zone::Head, (10.0, 20.0), _))
+        ));
+        // A bottom tapped jumps once noticed, not before.
+        let mut a = Animator::new(3, 0.33, 0.35);
+        a.press(Zone::Bottom, (0.0, 0.0));
+        a.tap(Zone::Bottom);
+        a.step(DT);
+        assert_eq!(a.params().bob, 0.0, "jumped at the first tap");
+        a.noticed();
+        let mut high = 0.0f32;
+        run(&mut a, 0.3, |a| high = high.max(a.params().bob.abs()));
+        assert!(high > 0.0, "no jump once noticed");
+        // A second tap came: nothing more of the first.
+        let mut a = Animator::new(3, 0.33, 0.35);
+        a.press(Zone::Head, (0.0, 0.0));
+        a.tap(Zone::Head);
+        a.untap();
+        a.noticed();
+        assert_eq!(a.params().touch.last, None);
     }
 
     #[test]

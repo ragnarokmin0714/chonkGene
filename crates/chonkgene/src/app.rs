@@ -108,8 +108,30 @@ fn glide_chance(species: Species) -> f32 {
     }
 }
 
-/// Two clicks on a pet this close together are a hug.
-const DOUBLE_CLICK: Duration = Duration::from_millis(450);
+/// What a tap does on each spot (PLAN §8, Roger's twenty-seventh pass,
+/// item 2): two taps (or one, as 「動作要點幾下」 says) on its head pat it,
+/// on a front paw (a bird's wing) ask for 握手 (a high five), on a hind
+/// paw lift it up high, on its shoulders hug it round, on its back rock it
+/// like a baby. Belly, cheeks, chin and tail have none: a tap there is a
+/// poke. The fox's human form has hers on her head, hands and shoulders
+/// only.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum TapAction {
+    Pat,
+    Paw,
+    Hug(HugHold),
+}
+
+fn tap_action(human: bool, zone: Zone) -> Option<TapAction> {
+    match zone {
+        Zone::Head => Some(TapAction::Pat),
+        Zone::Paw | Zone::Wing => Some(TapAction::Paw),
+        Zone::Shoulder => Some(TapAction::Hug(HugHold::Wrap)),
+        Zone::Foot if !human => Some(TapAction::Hug(HugHold::Carry)),
+        Zone::Back if !human => Some(TapAction::Hug(HugHold::Cradle)),
+        _ => None,
+    }
+}
 /// Held on a spot it loves: hearts from this long on, seconds, and again
 /// this often.
 const LOVE_HEARTS_AFTER: f32 = 0.8;
@@ -300,9 +322,11 @@ struct Pet {
     purr_at: f64,
     /// Held on a spot it loves: when the next hearts rise.
     love_at: f64,
-    /// A quick click let go then: a second one soon after is a hug.
-    clicked_at: Option<Instant>,
-    /// That click's poke, waiting until then in case a second click comes
+    /// A quick tap on a spot with an action, let go then (and the spot,
+    /// kept: it may move before the second): a second tap soon after does
+    /// that spot's action.
+    tapped: Option<(Instant, Zone)>,
+    /// That tap's poke, waiting until then in case a second tap comes
     /// (see [`Pet::poke_now`]).
     poke_due: Option<(Instant, Zone)>,
     /// Running (not walking) until then (Roger's eighteenth pass: 奔跑).
@@ -380,8 +404,8 @@ enum Action {
     Dance,
     /// 放聚光燈: a spotlight put down beside it (or taken away).
     Stage,
-    /// 抱抱: you hug it, held as it suits it now (a double-click; asleep,
-    /// cradled and sleeping on).
+    /// 抱抱: you hug it, held as it suits it now (asleep, cradled and
+    /// sleeping on).
     Hug,
     /// The page of how to hold it, and one of them.
     HugHow,
@@ -2447,7 +2471,7 @@ fn menu_page(page: Page, f: &MenuFacts) -> (Vec<Item>, Vec<Action>) {
         }
         Page::HugHow => {
             // Roger's twenty-first pass: three ways to hold it, picked
-            // here (a double-click picks by how it is).
+            // here (or by two taps on shoulders, a hind paw, its back).
             for (label, hold) in [
                 (tr("環抱"), HugHold::Wrap),
                 (tr("舉高高"), HugHold::Carry),
@@ -2988,7 +3012,7 @@ fn spawn(
         pounce_at: None,
         purr_at: 0.0,
         love_at: 0.0,
-        clicked_at: None,
+        tapped: None,
         poke_due: None,
         dash_until: 0.0,
         glide_checked: false,
@@ -3182,6 +3206,31 @@ impl Pet {
     /// A quick click's poke, once no second click came: a start, hopping
     /// back from where the finger was (still facing the same way), and
     /// what it makes of it.
+    /// A tap's action (see [`tap_action`]).
+    fn tap(&mut self, ctx: &mut Ctx, zone: Zone, action: TapAction) {
+        diag!("{}: tapped on {zone:?}: {action:?}", self.save.name);
+        match action {
+            TapAction::Pat => self.pat_you(ctx),
+            TapAction::Paw => self.shake_paw(ctx),
+            TapAction::Hug(hold) => self.hug_you(ctx, Some(hold)),
+        }
+    }
+
+    /// Your hand offered for 握手 (two taps on a front paw): it gives its
+    /// paw (a bird its wing, a high five) at once and gladly, though a paw
+    /// held down is still disliked; asleep or with a grudge it pulls the
+    /// paw back.
+    fn shake_paw(&mut self, ctx: &mut Ctx) {
+        let out = self.mind.shake_hands(&ctx.world);
+        if out.line.is_some() {
+            diag!("{}: paw pulled back", self.save.name);
+            self.anim.flinch(self.cursor);
+        } else if !self.in_skit && matches!(self.body.motion, Motion::Idle | Motion::Walk) {
+            self.fun.ask_now(Ask::Paw, ctx.world.now);
+        }
+        self.apply(ctx, out);
+    }
+
     fn poke_now(&mut self, ctx: &mut Ctx, zone: Zone) {
         if !self.mind.asleep() && matches!(self.body.motion, Motion::Idle | Motion::Walk) {
             let (w, s) = (self.body.size.0, self.fun.scale);
@@ -3320,7 +3369,7 @@ impl Pet {
             && (self.mind.asleep() || matches!(self.body.motion, Motion::Idle | Motion::Walk))
     }
 
-    /// 抱抱 (the menu, or a double-click): it says how it takes it, and if
+    /// 抱抱 (the menu, or two taps): it says how it takes it, and if
     /// it is awake and free your hands hold it, `hold` (none: as suits how
     /// it is now, see [`HugHold::pick`]), and it snuggles in; asleep, it is
     /// cradled and sleeps on.
@@ -3715,6 +3764,8 @@ impl Pet {
             && now >= due
         {
             self.poke_due = None;
+            self.tapped = None;
+            self.anim.noticed();
             self.poke_now(ctx, zone);
         }
         if let Some(at) = self.hello_at
@@ -4281,16 +4332,19 @@ impl ApplicationHandler<UserEvent> for App {
                             p.next = now;
                             return;
                         }
-                        // A double-click: a hug (Roger's sixteenth pass); the
-                        // first click's poke, still waiting, is dropped.
-                        let double = p
-                            .clicked_at
+                        // The second of two taps: what the spot the first
+                        // one found does; that one's poke, still waiting,
+                        // is dropped.
+                        let second = p
+                            .tapped
                             .take()
-                            .is_some_and(|at| now - at <= DOUBLE_CLICK);
-                        if double {
+                            .filter(|&(at, _)| now - at <= chonkgene_platform::double_click_time())
+                            .and_then(|(_, zone)| {
+                                tap_action(p.save.human, zone).map(|a| (zone, a))
+                            });
+                        if let Some((zone, action)) = second {
                             p.poke_due = None;
-                        }
-                        if double {
+                            p.anim.untap();
                             let App {
                                 pets,
                                 shared,
@@ -4321,7 +4375,7 @@ impl ApplicationHandler<UserEvent> for App {
                                 world,
                             };
                             let p = &mut pets[i];
-                            p.hug_you(&mut ctx, None);
+                            p.tap(&mut ctx, zone, action);
                             p.next = now;
                             self.dirty = true;
                             return;
@@ -4415,8 +4469,6 @@ impl ApplicationHandler<UserEvent> for App {
                             return;
                         };
                         p.window.set_cursor(hand(Hand::Open));
-                        // A quick click may be the first of a double-click.
-                        p.clicked_at = (!press.moved && p.anim.held_secs() < 0.3).then_some(now);
                         if press.moved {
                             diag!("{}: put down", p.save.name);
                             p.body.release();
@@ -4437,17 +4489,54 @@ impl ApplicationHandler<UserEvent> for App {
                             let quick =
                                 p.anim.held_secs() < 0.3 && p.anim.params().touch.scratch < 0.2;
                             let held = p.anim.held_secs();
-                            p.anim.poke(zone);
-                            // A quick click may be the first of a double-click
-                            // (a hug): what it does as a poke waits a moment,
-                            // so the pet is still there for the second
-                            // (Roger's eighteenth pass: hugs were hard to set
-                            // off, the first click sent it hopping away).
-                            if quick && !rub {
-                                p.poke_due = Some((now + DOUBLE_CLICK, zone));
-                                p.next = now;
-                                self.dirty = true;
-                                return;
+                            let action = tap_action(p.save.human, zone).filter(|_| quick && !rub);
+                            let mut ctx = Ctx {
+                                el,
+                                shared,
+                                lines,
+                                face: bubble_face,
+                                sounds,
+                                sound_on: settings.sound,
+                                everyone_you: &settings.you,
+                                volume: f32::from(settings.volume) / 100.0,
+                                area: *area,
+                                terrain,
+                                ui_scale: *ui_scale,
+                                world,
+                            };
+                            match action {
+                                // One tap does it.
+                                Some(action) if settings.taps == 1 => {
+                                    p.anim.tap(zone);
+                                    p.anim.untap();
+                                    p.tap(&mut ctx, zone, action);
+                                    p.next = now;
+                                    self.dirty = true;
+                                    return;
+                                }
+                                // The first of two: a small poke now; what it
+                                // does as a poke waits a moment, so the pet is
+                                // still there for the second (Roger's
+                                // eighteenth pass: the first click sent it
+                                // hopping away).
+                                Some(_) => {
+                                    p.anim.tap(zone);
+                                    p.tapped = Some((now, zone));
+                                    p.poke_due =
+                                        Some((now + chonkgene_platform::double_click_time(), zone));
+                                    p.next = now;
+                                    self.dirty = true;
+                                    return;
+                                }
+                                // Nothing to do there: a poke, at once.
+                                None if quick && !rub => {
+                                    p.anim.poke(zone);
+                                    p.poke_now(&mut ctx, zone);
+                                    p.next = now;
+                                    self.dirty = true;
+                                    return;
+                                }
+                                None => p.anim.poke(zone),
                             }
                             let out = if rub {
                                 p.mind.pat(&world, zone)
@@ -4464,20 +4553,6 @@ impl ApplicationHandler<UserEvent> for App {
                                 out.line,
                                 out.expression,
                             );
-                            let mut ctx = Ctx {
-                                el,
-                                shared,
-                                lines,
-                                face: bubble_face,
-                                sounds,
-                                sound_on: settings.sound,
-                                everyone_you: &settings.you,
-                                volume: f32::from(settings.volume) / 100.0,
-                                area: *area,
-                                terrain,
-                                ui_scale: *ui_scale,
-                                world,
-                            };
                             p.apply(&mut ctx, out);
                         }
                         p.next = now;
@@ -4713,7 +4788,7 @@ impl ApplicationHandler<UserEvent> for App {
                 self.start_scene(el, pet, Scene::Dance, world, now);
                 diag!("CHONKGENE_STAGE=dance: asked to dance");
             } else if self.stage_test == "hug-asleep" {
-                // Put to sleep, then hugged as a double-click would.
+                // Put to sleep, then hugged as 抱抱 would.
                 self.act(el, pet, Action::Sleep);
                 self.stage_test = "hug".into();
                 self.stage_at = Some(t + 3.0);
@@ -4850,6 +4925,33 @@ impl ApplicationHandler<UserEvent> for App {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Roger's twenty-seventh pass, item 2: each spot's action, the human
+    /// form's on her head, hands and shoulders only; belly, cheeks, chin,
+    /// tail (and a human form's legs and back) a poke.
+    #[test]
+    fn a_tap_does_what_the_spot_does() {
+        use TapAction::*;
+        for (zone, beast, human) in [
+            (Zone::Head, Some(Pat), Some(Pat)),
+            (Zone::Paw, Some(Paw), Some(Paw)),
+            (Zone::Wing, Some(Paw), Some(Paw)),
+            (Zone::Foot, Some(Hug(HugHold::Carry)), None),
+            (
+                Zone::Shoulder,
+                Some(Hug(HugHold::Wrap)),
+                Some(Hug(HugHold::Wrap)),
+            ),
+            (Zone::Back, Some(Hug(HugHold::Cradle)), None),
+            (Zone::Belly, None, None),
+            (Zone::Cheek, None, None),
+            (Zone::Chin, None, None),
+            (Zone::Tail, None, None),
+        ] {
+            assert_eq!(tap_action(false, zone), beast, "{zone:?}");
+            assert_eq!(tap_action(true, zone), human, "{zone:?} in human form");
+        }
+    }
 
     #[test]
     fn a_shared_name_is_tried_out_by_the_pets_that_take_it() {

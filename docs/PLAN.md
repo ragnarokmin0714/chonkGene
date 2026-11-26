@@ -1734,6 +1734,15 @@ Roger's 「20261125 回饋報告」, talked through with him the same day (his a
    - **Not changed**: the sprite fallback (no GPU, `model.ron` through the raymarcher) still has `paw` for every foot and no shoulders, as it never had backs or wings.
    - **Checked**: `every_pet_has_shoulders_and_feet_apart_from_its_front_paws` (mutation-checked: fails with the pass off); `examples/zones.rs` now draws `fox-human` too, each pet at 100% and at 50% (the smallest the settings allow), and writes its legend; `examples/touch.rs` has `shoulder` and `foot`.
    - **Seen in the picture, for Roger**: sitting facing you, a four-legged pet's hind feet are under it and hardly show (walking side-on they do), so 舉高高 by its feet is a side-on thing; and the human form's chin covers her whole lower face, her cheeks small (for "the human form's zones", later in the order).
+
+   **The tap setting built 2026-11-26** (Roger: 「那就開工吧」):
+   - **「動作要點幾下」** (`Settings::taps`, 2 by default, kept to 1 or 2): in 互動與聲音 under 「摸摸牠們」, not in 一般 (an interaction setting, the same for every pet as asked), a `Segmented` 一下 / 兩下 with a hint for each.
+   - **The double-click time** is the system's (`chonkgene_platform::double_click_time`: Windows `GetDoubleClickTime`, kept to 0.2–0.9 s; 0.4 s elsewhere). The old fixed 0.45 s and "a double-click anywhere is a hug" are gone.
+   - **What a spot does** (`app::tap_action`): head 摸摸頭 (the menu's `pat_you`), front paw or wing 握手 (`shake_paw`: `Mind::shake_hands` gives 親密度 and a happy face, the paw given at once as an order, `Fun::ask_now`, saying 「好」 as 叫牠… › 握手 does; asleep or with a grudge it flinches and says so), hind paw 舉高高, shoulders 環抱, back 搖搖抱 (`hug_you` with that hold). Belly, cheeks, chin and tail have none yet. Her human form: head, hands and shoulders only.
+   - **Two taps**: the first on a spot with an action is a small poke at once (`Animator::tap`, a third of a poke's kick, no hop, no look round); it looks round and reacts as to a poke once the double-click time has passed with no second tap (`Animator::noticed`, then `poke_now`). The spot is kept from the first tap (`Pet::tapped`). A tap where there is no action is a poke at once, no longer held back.
+   - **One tap**: a quick tap on a spot with an action starts it; elsewhere a poke as now. Long presses are as they were in both modes.
+   - **Tests**: `a_tap_does_what_the_spot_does` (app), `a_first_tap_waits_to_look_round` (anim, mutation-checked), `a_paw_is_given_gladly_unless_asleep_or_in_a_grudge` (mind), `taps_are_two_by_default_and_one_can_be_picked` (settings). Windows clippy of the platform crate clean.
+   - **Next**: 6 (b), the bottom pats, as the bottom's action.
 3. **「好朋友／主人」 shown untranslated** (asked where on 2026-11-25): Roger: 似乎解決, he will say if he sees it again. Closed.
 4. **Roger asked: should each pet's interactions show in 「我的寵物」?** Proposed: yes, as a card **「摸摸筆記」** beside the pet's picture:
    - **Shown from the start**: the shared zone → action rows (頭 摸摸頭, 手 握手, 腳 舉高高, 肩 環抱, 背 搖搖抱). Otherwise nobody finds 舉高高 on the feet.
@@ -1798,6 +1807,8 @@ Roger: 「你覺得這個主意如何」, four ideas for the fox, with `inbox/fu
    - Built after 3 and 2, on their colour plumbing.
 
 **Order, proposed**: after the twenty-seventh pass's tap setting: 3 and 2 (small, colour data and the effects reading it) → 5 (the picker on top of them) → 1 (Blender) → 4 (new effects, the face and fur work, lines in three languages). Roger's call.
+
+**Roger, 2026-11-26: 「那就開工吧」**, read as the proposals above taken as they stand (法術 and 護體魔力 split as proposed, one colour a row with tips worked out, the other pets' own colours not now; 天雷 one pet and 重力 everyone round her, cast by herself only in 非理性模式) and the order with them, after the twenty-seventh pass's tap setting and bottom pats. Asked without a proposal, so still his to say: whether 「跟毛色」 becomes the default hair colour (white until then, his rule of 2026-11-16).
 
 ### New species: eleven more pets (Roger, 2026-11-13; planned, none built)
 

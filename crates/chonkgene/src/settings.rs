@@ -854,6 +854,7 @@ fn setup(
         ui.set_volume(f32::from(s.volume) / 100.0);
         ui.set_irrational(s.irrational);
         ui.set_squabble(i32::from(s.squabble.min(2)));
+        ui.set_taps(i32::from(s.taps.clamp(1, 2)) - 1);
         ui.set_language(
             Lang::ALL
                 .iter()
@@ -1163,6 +1164,10 @@ fn setup(
     });
     on!(on_squabble_picked, |_ui, st, i: i32| {
         st.settings.squabble = i.clamp(0, 2) as u8;
+        st.send_settings();
+    });
+    on!(on_taps_picked, |_ui, st, i: i32| {
+        st.settings.taps = i.clamp(0, 1) as u8 + 1;
         st.send_settings();
     });
     on!(on_language_picked, |ui, st, i: i32| {
@@ -1844,6 +1849,36 @@ mod tests {
         ui.set_everyone_you("一二三四五六七八九".into());
         ui.invoke_commit_fields();
         assert_eq!(st.borrow().settings.you, "一二三四五六七八");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Roger's twenty-seventh pass, item 2: 「動作要點幾下」, two taps by
+    /// default; one sticks; a value from a hand-edited file is kept to one
+    /// or two.
+    #[test]
+    fn taps_are_two_by_default_and_one_can_be_picked() {
+        let window = MinimalSoftwareWindow::new(RepaintBufferType::NewBuffer);
+        slint::platform::set_platform(Box::new(Headless(window.clone()))).unwrap();
+        let dir = std::env::temp_dir().join(format!("chonkgene-taps-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let data = DataDir::locate(Some(dir.clone())).unwrap();
+        let ui = SettingsWindow::new().unwrap();
+        let (st, _timers) = setup(&ui, data.clone(), None).unwrap();
+        st.borrow_mut().reachable = false;
+        assert_eq!((st.borrow().settings.taps, ui.get_taps()), (2, 1));
+        ui.invoke_taps_picked(0);
+        assert_eq!(st.borrow().settings.taps, 1);
+        ui.invoke_taps_picked(7);
+        assert_eq!(st.borrow().settings.taps, 2);
+        let mut s = Settings {
+            taps: 9,
+            ..Settings::default()
+        };
+        s.sanitise();
+        assert_eq!(s.taps, 2);
+        s.taps = 0;
+        s.sanitise();
+        assert_eq!(s.taps, 1);
         let _ = std::fs::remove_dir_all(&dir);
     }
 

@@ -111,6 +111,11 @@ pub struct Settings {
     /// 「牠怎麼叫你」 nobody changed calls you, pets adopted later too;
     /// empty, each keeps its species' default. See [`PetSave::calls_you`].
     pub you: String,
+    /// 「動作要點幾下」 (PLAN §8, Roger's twenty-seventh pass, item 2): 2,
+    /// the default, a double tap on a spot does what that spot does (its
+    /// head a pat, a front paw 握手, …) and one tap is a poke; 1, one tap
+    /// does it, pokes and tickles only on the belly and cheeks.
+    pub taps: u8,
 }
 
 /// The intervals 「讓牠們隨機輪班」 offers, minutes (0: off). 15 minutes
@@ -133,6 +138,7 @@ impl Default for Settings {
             language: String::new(),
             rotate_minutes: 0,
             you: String::new(),
+            taps: 2,
         }
     }
 }
@@ -163,6 +169,7 @@ impl Settings {
     /// Clamp what a hand-edited file could get wrong.
     pub fn sanitise(&mut self) {
         self.you = clean_you(&self.you);
+        self.taps = self.taps.clamp(1, 2);
     }
 }
 

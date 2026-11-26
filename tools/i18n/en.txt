@@ -266,3 +266,11 @@
 留空的話，牠們各叫各的。 → Left empty, each keeps its own.
 沒有另外改過的寵物，都會這樣叫你。 → Every pet you haven't changed calls you this.
 留空的話，就照「大家怎麼叫你」。 → Left empty, it uses "What they all call you".
+
+# Roger's twenty-seventh pass, item 2: what a tap does by spot.
+摸摸牠們 → Petting
+動作要點幾下 → Taps for an action
+看點在哪裡：頭是摸摸頭，手是握手，腳是舉高高，肩膀和背是抱抱。點一下是戳戳。 → Tap twice where you like: head for a pat, front paw to shake, hind paw to lift up high, shoulders or back for a hug. One tap is a poke.
+點一下就開始。戳戳和搔癢只在肚子和臉頰。 → One tap starts it. Pokes and tickles stay on the belly and cheeks.
+一下 → Once
+兩下 → Twice

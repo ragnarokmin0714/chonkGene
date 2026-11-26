@@ -101,6 +101,19 @@ pub fn allow_foreground(pid: u32) {
     let _ = pid;
 }
 
+/// Two clicks this close together are a double-click: the system's own
+/// setting on Windows, 0.4 s elsewhere (X11 has no one setting for it).
+pub fn double_click_time() -> std::time::Duration {
+    #[cfg(windows)]
+    {
+        windows::double_click_time()
+    }
+    #[cfg(not(windows))]
+    {
+        std::time::Duration::from_millis(400)
+    }
+}
+
 /// tiny-skia stores premultiplied RGBA; both platforms take premultiplied BGRA.
 fn swizzle(src: &[u8], dst: &mut [u8]) {
     let (src, _) = src.as_chunks::<4>();
