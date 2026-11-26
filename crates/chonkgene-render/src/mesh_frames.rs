@@ -51,6 +51,23 @@ const HAND_R: f32 = 0.36;
 /// Squeezed between your hands it gets this much narrower (half of it)
 /// and taller, at the firmest squeeze.
 const HAND_SQUEEZE: f32 = 0.09;
+/// Let go, the flesh springs back past where it was into a bulge and
+/// wobbles before it settles, 「ㄉㄨㄞ ㄉㄨㄞ」 (PLAN §8, Roger's
+/// twenty-seventh pass, item 2): how quickly (Hz) and how damped, for a
+/// lean pet and the chubbiest (slower and wobblier: three or four bulges
+/// to a lean pet's two). A finger or a hand still pressing is firmer.
+const JIGGLE_HZ: (f32, f32) = (4.6, 3.4);
+const JIGGLE_DAMPING: (f32, f32) = (0.17, 0.09);
+/// Your hands squeezing its cheeks (item 6 (a)): how deep each presses in
+/// (world units, more on a chubbier pet) and how wide (a cheek); how much
+/// its head is squeezed with them (narrower by the first, taller by the
+/// second, its muzzle, bill or face disc pushed out by the third, shares
+/// of its size); and, let go, how far out its cheeks stay puffed while
+/// they are rosy.
+const CHEEK_DENT: f32 = 0.075;
+const CHEEK_R: f32 = 0.24;
+const CHEEK_SQUISH: (f32, f32, f32) = (0.16, 0.07, 0.12);
+const CHEEK_PUFF: f32 = 0.02;
 /// Your two hands in a hug: where each presses (pixels) with what grip,
 /// and how firmly, 0 … 1 (see [`MeshRenderer::hug_press`]).
 pub type HandPresses = ([((f32, f32), Grip); 2], f32);
@@ -213,6 +230,8 @@ pub struct MeshRenderer {
     /// pixel it was found for; how deep they have pressed in; and the dents
     /// sent with the next frame.
     hands: Option<HandPresses>,
+    /// The hands are (or were, till the dents settle) on its cheeks.
+    cheeks: bool,
     hand_verts: [Option<(usize, (f32, f32))>; 2],
     hand_dent: Spring,
     hand_press: [Option<Press>; 2],
@@ -231,6 +250,8 @@ pub struct MeshRenderer {
     floor_shadow: bool,
     /// The fox's spell glowing on its face (`PoseParams::glow`).
     glow: f32,
+    /// Its cheeks rosy from a squeeze (`Touch::rosy`).
+    rosy: f32,
     /// The animator's clock, seconds (the flame tails flicker by it).
     flame_clock: f32,
     /// In a hug or just after: the floor nothing may go below (world
@@ -294,6 +315,7 @@ impl MeshRenderer {
             dent: Spring::default(),
             dent_r: 0.3,
             hands: None,
+            cheeks: false,
             hand_verts: [None; 2],
             hand_dent: Spring::default(),
             hand_press: [None; 2],
@@ -306,6 +328,7 @@ impl MeshRenderer {
             licks: 0,
             floor_shadow: true,
             glow: 0.0,
+            rosy: 0.0,
             flame_clock: 0.0,
             hug_floor: None,
         })
@@ -440,7 +463,8 @@ impl MeshRenderer {
     pub fn min_fps(&self) -> u32 {
         let base = if self.walk.busy()
             || self.dent.x.abs() > 0.002
-            || self.hand_press.iter().any(Option::is_some)
+            || (self.hand_press.iter().any(Option::is_some)
+                && (self.hands.is_some() || self.hand_dent.v.abs() > 0.02))
             || self.walk.fidget().quick()
         {
             30
@@ -692,6 +716,7 @@ impl MeshRenderer {
             Posture::Swim | Posture::Fly | Posture::Glide
         );
         self.glow = params.glow;
+        self.rosy = params.touch.rosy;
         self.flame_clock = params.clock;
         // A poke jiggles the animator's belly: jolt the mesh's.
         if params.belly > 0.15 && self.belly <= 0.15 {
@@ -717,7 +742,14 @@ impl MeshRenderer {
             self.fidget_began = now;
         }
         self.fidget_was = now;
-        let bones = self.sk.pose(&joints);
+        // Its cheeks squeezed between your hands: the head squeezed with
+        // them, and springing back out past round when let go.
+        let squish = self.sk.bone("head").filter(|_| self.cheeks).map(|head| {
+            let q = (self.hand_dent.x / (CHEEK_DENT * (0.8 + 0.4 * self.chonk))).clamp(-0.8, 1.2);
+            let (a, b, c) = CHEEK_SQUISH;
+            (head, v3(1.0 - a * q, 1.0 + b * q, 1.0 + c * q))
+        });
+        let bones = self.sk.pose_with(&joints, squish);
         self.step_px = self.model.parts.iter().fold(0.0_f32, |most, part| {
             let (Some(a), Some(b)) = (self.bones.get(part.bone), bones.get(part.bone)) else {
                 return most;
@@ -737,7 +769,7 @@ impl MeshRenderer {
         self.bones = bones;
         self.settle(params, dt);
         self.dent(params, dt);
-        self.hand_dent(dt);
+        self.hand_dent(params, dt);
         self.look = look;
         self.changed = false;
         // A walking pet's picture must keep up with its window, which moves
@@ -826,6 +858,7 @@ impl MeshRenderer {
         };
         live.canvas.floor_shadow = self.floor_shadow;
         live.canvas.glow = self.glow;
+        live.canvas.rosy = self.rosy;
         live.canvas.clock = self.flame_clock;
         let sent = live
             .canvas
@@ -1171,7 +1204,11 @@ impl MeshRenderer {
     /// skeleton's, for every bone.
     fn settle(&mut self, params: &PoseParams, dt: f32) {
         // Squeezed between your hands in a hug: narrower and taller.
-        let hug = HAND_SQUEEZE * (self.hand_dent.x / HAND_DENT).clamp(-0.5, 1.5);
+        let hug = if self.cheeks {
+            0.0
+        } else {
+            HAND_SQUEEZE * (self.hand_dent.x / HAND_DENT).clamp(-0.5, 1.5)
+        };
         let sq = (0.35 * params.squash + 0.15 * params.belly + self.walk.flatten() - hug)
             .clamp(-0.3, 0.3);
         let breath = 0.03 * params.breath;
@@ -1246,7 +1283,9 @@ impl MeshRenderer {
     /// pets give more) and springs back past flat when it lets go, so the
     /// flesh wobbles out and settles.
     fn dent(&mut self, params: &PoseParams, dt: f32) {
-        let (goal, radius) = match params.touch.held {
+        // Your hands squeezing its cheeks take over from the finger.
+        let held = params.touch.held.filter(|_| params.touch.squeeze == 0.0);
+        let (goal, radius) = match held {
             Some((zone, ..)) => {
                 let (d, r) = dent_for(zone);
                 (d * (0.8 + 0.4 * self.chonk), r)
@@ -1254,10 +1293,15 @@ impl MeshRenderer {
             None => (0.0, self.dent_r),
         };
         self.dent_r = radius;
+        let (hz, damping) = if held.is_some() {
+            (5.5, 0.3)
+        } else {
+            jiggle(self.chonk)
+        };
         let mut x = 0.0;
         let steps = (dt / MAX_STEP).ceil().max(1.0);
         for _ in 0..steps as usize {
-            x = self.dent.step(goal, 0.0, 5.5, 0.3, dt / steps);
+            x = self.dent.step(goal, 0.0, hz, damping, dt / steps);
         }
         let resting = x.abs() < 0.002 && self.dent.v.abs() < 0.02;
         if resting && params.touch.held.is_none() {
@@ -1288,27 +1332,50 @@ impl MeshRenderer {
     }
 
     /// Your hands in a hug pressing in from its sides (see
-    /// [`MeshRenderer::hug_press`]): the dents follow how firmly they
-    /// squeeze, and spring back out when they let go.
-    fn hand_dent(&mut self, dt: f32) {
-        let goal = self
-            .hands
-            .map_or(0.0, |(_, firm)| HAND_DENT * (0.8 + 0.4 * self.chonk) * firm);
+    /// [`MeshRenderer::hug_press`]), or squeezing its cheeks: the dents
+    /// follow how firmly they squeeze, and spring back out when they let
+    /// go, wobbling (「ㄉㄨㄞ ㄉㄨㄞ」); its cheeks stay a little puffed
+    /// while they are rosy.
+    fn hand_dent(&mut self, params: &PoseParams, dt: f32) {
+        if let Some((spots, _)) = self.hands {
+            self.cheeks = spots[0].1 == Grip::Palm;
+        }
+        let k = 0.8 + 0.4 * self.chonk;
+        let goal = match self.hands {
+            Some((_, firm)) if self.cheeks => CHEEK_DENT * k * firm,
+            Some((_, firm)) => HAND_DENT * k * firm,
+            None if self.cheeks => -CHEEK_PUFF * k * params.touch.rosy,
+            None => 0.0,
+        };
+        let (hz, damping) = if self.hands.is_some() {
+            (4.0, 0.35)
+        } else {
+            jiggle(self.chonk)
+        };
         let mut x = 0.0;
         let steps = (dt / MAX_STEP).ceil().max(1.0);
         for _ in 0..steps as usize {
-            x = self.hand_dent.step(goal, 0.0, 4.0, 0.35, dt / steps);
+            x = self.hand_dent.step(goal, 0.0, hz, damping, dt / steps);
         }
         let Some((spots, _)) = self.hands else {
-            if x.abs() < 0.002 && self.hand_dent.v.abs() < 0.02 {
+            if goal == 0.0 && x.abs() < 0.002 && self.hand_dent.v.abs() < 0.02 {
                 self.hand_dent = Spring::default();
                 self.hand_press = [None; 2];
                 self.hand_verts = [None; 2];
+                self.cheeks = false;
                 return;
             }
-            // Let go: the dents spring back where they were.
-            for p in self.hand_press.iter_mut().flatten() {
-                p.depth = x;
+            // Let go: the dents spring back out where they were, on it as
+            // it moves.
+            for k in 0..2 {
+                let at = self.hand_verts[k].and_then(|(i, _)| self.posed(i));
+                if let (Some(p), Some(at)) = (&mut self.hand_press[k], at) {
+                    p.at = at;
+                    p.depth = x;
+                }
+            }
+            if self.cheeks {
+                self.aim_cheeks();
             }
             return;
         };
@@ -1316,18 +1383,21 @@ impl MeshRenderer {
         for (k, (at, grip)) in spots.into_iter().enumerate() {
             // The thumb or the back of a hand presses into the screen at
             // the vertex nearest you there; a cupped hand pushes up at the
-            // bottom of its body. Found again when the hand has moved a
+            // bottom of its body; a palm on a cheek, the cheek's edge,
+            // toward the other hand. Found again when the hand has moved a
             // few pixels (the search goes through the whole mesh).
             let stale = self.hand_verts[k]
                 .is_none_or(|(_, was)| (was.0 - at.0).hypot(was.1 - at.1) > 2.0 * self.scale);
             let dir = match grip {
                 Grip::Cup => v3(0.0, 1.0, 0.0),
                 Grip::Thumb | Grip::Back => fwd,
+                Grip::Palm => v3(if k == 0 { 1.0 } else { -1.0 }, 0.0, 0.0),
             };
             if stale {
                 let found = match grip {
                     Grip::Cup => self.bottom_vertex(at.0).map(|(_, i)| i),
                     Grip::Thumb | Grip::Back => self.nearest(at.0, at.1),
+                    Grip::Palm => self.nearest_cheek(at),
                 };
                 if let Some(i) = found {
                     self.hand_verts[k] = Some((i, at));
@@ -1338,10 +1408,65 @@ impl MeshRenderer {
                     at: self.posed(i)?,
                     dir,
                     depth: x,
-                    radius: HAND_R,
+                    radius: if grip == Grip::Palm { CHEEK_R } else { HAND_R },
                 })
             });
         }
+        if self.cheeks {
+            self.aim_cheeks();
+        }
+    }
+
+    /// Your hands on its cheeks push toward each other, level.
+    fn aim_cheeks(&mut self) {
+        if let [Some(a), Some(b)] = &mut self.hand_press {
+            let d = b.at - a.at;
+            let d = v3(d.x, 0.0, d.z);
+            let len = d.dot(d).sqrt();
+            if len > 1e-4 {
+                a.dir = d * (1.0 / len);
+                b.dir = -a.dir;
+            }
+        }
+    }
+
+    /// The cheek vertex drawn nearest pixel `at` of the picture shown.
+    fn nearest_cheek(&self, at: (f32, f32)) -> Option<usize> {
+        let live = self.live.as_ref()?;
+        let cheek = ZONES.iter().position(|z| *z == "cheek")?;
+        (0..live.mesh.vertices.len())
+            .filter(|&i| usize::from(live.mesh.zones[i]) == cheek)
+            .map(|i| {
+                let (x, y) = live.canvas.project(self.skinned(&live.mesh, i));
+                ((x - at.0).hypot(y - at.1), i)
+            })
+            .min_by(|a, b| a.0.total_cmp(&b.0))
+            .map(|(_, i)| i)
+    }
+
+    /// Where your hands squeeze its cheeks in the picture shown, pixels:
+    /// the outer edge of each cheek (left, then right), halfway up it.
+    /// None until the bake has landed (or with no cheeks).
+    pub fn cheeks_at(&self) -> Option<[(f32, f32); 2]> {
+        let live = self.live.as_ref()?;
+        let cheek = ZONES.iter().position(|z| *z == "cheek")?;
+        let pts: Vec<(f32, f32)> = (0..live.mesh.vertices.len())
+            .filter(|&i| usize::from(live.mesh.zones[i]) == cheek)
+            .map(|i| live.canvas.project(self.skinned(&live.mesh, i)))
+            .collect();
+        let (lo, hi) = pts.iter().fold((f32::MAX, f32::MIN), |(lo, hi), p| {
+            (lo.min(p.1), hi.max(p.1))
+        });
+        let mid = 0.5 * (lo + hi);
+        // The outermost on each side, near the middle row.
+        let band = 0.3 * (hi - lo) + 1.0;
+        let row = |side: f32| {
+            pts.iter()
+                .filter(|p| (p.1 - mid).abs() <= band)
+                .max_by(|a, b| (a.0 * side).total_cmp(&(b.0 * side)))
+                .copied()
+        };
+        Some([row(-1.0)?, row(1.0)?])
     }
 
     /// Into the screen, the way the camera looks.
@@ -1413,6 +1538,16 @@ impl MeshRenderer {
     }
 }
 
+/// How the flesh springs back once let go (「ㄉㄨㄞ ㄉㄨㄞ」, see
+/// [`JIGGLE_HZ`]): Hz and damping for a pet this chubby (0 … 1).
+fn jiggle(chonk: f32) -> (f32, f32) {
+    let c = chonk.clamp(0.0, 1.0);
+    (
+        JIGGLE_HZ.0 + (JIGGLE_HZ.1 - JIGGLE_HZ.0) * c,
+        JIGGLE_DAMPING.0 + (JIGGLE_DAMPING.1 - JIGGLE_DAMPING.0) * c,
+    )
+}
+
 /// How deep a finger presses in on each zone (world units) and how wide
 /// the dent is: the belly and bottom are the softest.
 fn dent_for(zone: Zone) -> (f32, f32) {
@@ -1437,6 +1572,11 @@ fn touched_look(touch: &Touch, dog: bool) -> Option<Look> {
     // The belly trap: laughing as it kicks.
     if touch.trap > 0.2 {
         return Some(Look::Laugh);
+    }
+    // Its cheeks squeezed between your hands: eyes squeezed shut, the
+    // mouth pushed into a pout.
+    if touch.squeeze > 0.2 {
+        return Some(Look::Pout);
     }
     // A spot it does not like: eyes squeezed, a little frown.
     if touch.fond == Some(Fondness::Dislikes) && touch.held.is_some_and(|(.., secs)| secs > 0.12) {
@@ -1477,4 +1617,38 @@ fn spawn_bake(
         let _ = tx.send(bake(&model, &sk, coat, chonk, model.bake_cell));
     });
     rx
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Times let-go flesh bulges out past flat (each more than a twelfth
+    /// of how deep it was pressed) on a pet this chubby.
+    fn bulges(chonk: f32) -> usize {
+        let (hz, damping) = jiggle(chonk);
+        let mut s = Spring { x: 1.0, v: 0.0 };
+        let (mut n, mut out) = (0, false);
+        for _ in 0..600 {
+            let x = s.step(0.0, 0.0, hz, damping, MAX_STEP);
+            if x < -1.0 / 12.0 && !out {
+                n += 1;
+                out = true;
+            } else if x > 0.0 {
+                out = false;
+            }
+        }
+        n
+    }
+
+    /// Let go, the flesh bulges out past flat and wobbles before it
+    /// settles, 「ㄉㄨㄞ ㄉㄨㄞ」 (Roger's twenty-seventh pass, item 2): two
+    /// or three times on a lean or an ordinary pet, more on a chubby one.
+    #[test]
+    fn let_go_flesh_wobbles_more_the_chubbier() {
+        let (lean, usual, chubby) = (bulges(0.0), bulges(0.33), bulges(1.0));
+        assert!((2..=3).contains(&lean), "lean {lean}");
+        assert!((2..=3).contains(&usual), "usual {usual}");
+        assert!(chubby > usual, "chubby {chubby}, usual {usual}");
+    }
 }

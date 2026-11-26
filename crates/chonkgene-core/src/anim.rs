@@ -108,6 +108,14 @@ pub enum Act {
     /// twenty-seventh pass, item 6 (b)): the rump pushed up, the tail
     /// straight up, the hind paws treading.
     ButtUp,
+    /// Its cheeks just squeezed between your hands, on a cheek it loves
+    /// (PLAN §8, Roger's twenty-seventh pass, item 6 (a)): it rubs its face
+    /// on your hand, side to side, pleased.
+    Nuzzle,
+    /// Its cheeks just squeezed between your hands, on a cheek it only
+    /// likes or does not mind: pouting, it rubs them with its front paws (a
+    /// bird with its wings, the fox's human form holds hers).
+    CheekRub,
     /// Nose down to a ball and a bump that sends it rolling.
     Nudge,
     /// Nose down to something lying on the floor, taking it in the mouth
@@ -336,6 +344,8 @@ impl Act {
                 | Act::Tilt
                 | Act::Chew
                 | Act::Hug
+                | Act::Nuzzle
+                | Act::CheekRub
         )
     }
 }
@@ -409,6 +419,8 @@ pub fn gesture_secs(act: Act) -> Option<f32> {
         Act::Chew => Some(6.0),
         Act::Swish => Some(1.2),
         Act::ButtUp => Some(2.2),
+        Act::Nuzzle => Some(2.0),
+        Act::CheekRub => Some(2.2),
         Act::Nudge => Some(0.8),
         Act::Pick => Some(PICK_SECS),
         Act::Dance => Some(DANCE_SECS),
@@ -445,6 +457,14 @@ pub struct Touch {
     /// twenty-seventh pass, item 6 (b)): a hind leg kicking at the base of
     /// its tail and a pleased look back over its shoulder, 0 … 1.
     pub rump: f32,
+    /// Your two hands squeezing its cheeks (PLAN §8, Roger's twenty-seventh
+    /// pass, item 6 (a): a finger held still on a cheek turns into them),
+    /// 0 … 1 as they come in; 0 when let go (the renderer springs the face
+    /// back out, 「ㄉㄨㄞ ㄉㄨㄞ」).
+    pub squeeze: f32,
+    /// Its cheeks rosy from the squeeze, 0 … 1: a little while it is
+    /// squeezed, deepest just let go, fading over [`ROSY_SECS`].
+    pub rosy: f32,
 }
 
 impl Touch {
@@ -472,6 +492,16 @@ const SCRATCH_PX: f32 = 80.0;
 const SCRATCH_FADE: f32 = 1.2;
 /// How long anything shows a touch let go (the look back, a paw lifted).
 pub const TOUCH_SHOWS_SECS: f32 = 4.0;
+/// A finger held still on a cheek this long becomes your two hands
+/// squeezing it (in place of a pat there, as a rub is), and they come in
+/// over this long, seconds. A finger rubbing about is a scratch instead.
+pub const SQUEEZE_AFTER: f32 = HOLD_SECS;
+const SQUEEZE_IN: f32 = 0.3;
+const SQUEEZE_SCRATCH: f32 = 0.5;
+/// How long its cheeks stay rosy after a squeeze, seconds, and how rosy
+/// while still squeezed.
+pub const ROSY_SECS: f32 = 5.0;
+const ROSY_HELD: f32 = 0.5;
 
 /// Inputs a renderer maps onto bones by convention (see chonkgene-render).
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -616,6 +646,8 @@ pub struct Animator {
     /// Until when the bottom pat's kick and look back last (see
     /// [`Touch::rump`]).
     rump_until: f32,
+    /// When a squeeze of its cheeks let go (see [`Touch::rosy`]).
+    rosy_from: f32,
     watch: Option<(f32, f32)>,
     /// See [`Touch::scratch`].
     scratch: f32,
@@ -694,6 +726,7 @@ impl Animator {
             last_touch: None,
             tapped: None,
             rump_until: f32::MIN,
+            rosy_from: f32::MIN,
             scratch: 0.0,
             licks: 0,
             watch: None,
@@ -767,6 +800,20 @@ impl Animator {
         self.held.map_or(0.0, |(.., since)| self.t - since)
     }
 
+    /// Your hands squeezing its cheeks now (see [`Touch::squeeze`]): a
+    /// finger held still on a cheek long enough, unless it is asleep.
+    pub fn squeeze(&self) -> f32 {
+        match self.held {
+            Some((Zone::Cheek, _, since))
+                if self.expression != Expression::Asleep && self.scratch < SQUEEZE_SCRATCH =>
+            {
+                let u = ((self.t - since - SQUEEZE_AFTER) / SQUEEZE_IN).clamp(0.0, 1.0);
+                u * u * (3.0 - 2.0 * u)
+            }
+            _ => 0.0,
+        }
+    }
+
     /// The press turned into a lift: let go of the squish and stretch.
     pub fn lift(&mut self) {
         self.pressed = false;
@@ -818,6 +865,9 @@ impl Animator {
     /// The finger lets go. A belly held in springs back out by itself; a
     /// quick tap that had no time to squash it kicks it instead.
     pub fn poke(&mut self, zone: Zone) {
+        if self.squeeze() > 0.0 {
+            self.rosy_from = self.t;
+        }
         let held = (self.body.pos / PRESS_SQUASH).clamp(0.0, 1.0);
         let at = self.held.take().map_or((0.0, 0.0), |(_, at, _)| at);
         self.last_touch = Some((zone, at, self.t));
@@ -1338,6 +1388,11 @@ impl Animator {
                     let since = RUMP_SECS - left;
                     ((since / 0.15).min(left / 0.5)).clamp(0.0, 1.0)
                 },
+                squeeze: self.squeeze(),
+                rosy: {
+                    let left = (1.0 - (self.t - self.rosy_from) / ROSY_SECS).clamp(0.0, 1.0);
+                    (left * left * (3.0 - 2.0 * left)).max(ROSY_HELD * self.squeeze())
+                },
             },
             posture: self.posture,
             lively: match self.expression {
@@ -1599,6 +1654,59 @@ mod tests {
     /// Roger's twenty-seventh pass, item 2: the first of two taps is a
     /// small poke at once, but it looks round (and a bottom jumps) only
     /// once no second tap came.
+    /// A finger held still on a cheek turns into your two hands squeezing
+    /// it (PLAN §8, Roger's twenty-seventh pass, item 6 (a)); let go, its
+    /// cheeks stay rosy for a few seconds. Not on another spot, not when
+    /// the finger rubs about (a scratch), not asleep.
+    #[test]
+    fn a_finger_held_on_a_cheek_squeezes_it_rosy() {
+        let mut a = Animator::new(3, 0.33, 0.35);
+        a.press(Zone::Cheek, (10.0, 20.0));
+        run(&mut a, 0.5, |_| {});
+        assert_eq!(
+            a.params().touch.squeeze,
+            0.0,
+            "squeezed before a poke is over"
+        );
+        run(&mut a, 0.5, |_| {});
+        let held = a.params().touch;
+        assert!(held.squeeze > 0.99, "squeeze {}", held.squeeze);
+        assert!(
+            held.rosy > 0.3 && held.rosy < 0.9,
+            "rosy held {}",
+            held.rosy
+        );
+        a.poke(Zone::Cheek);
+        let let_go = a.params().touch;
+        assert_eq!(let_go.squeeze, 0.0);
+        assert!(let_go.rosy > 0.99, "rosy let go {}", let_go.rosy);
+        run(&mut a, 0.5 * ROSY_SECS, |_| {});
+        let half = a.params().touch.rosy;
+        assert!(half > 0.2 && half < 0.8, "rosy halfway {half}");
+        run(&mut a, 0.5 * ROSY_SECS + 0.1, |_| {});
+        assert_eq!(a.params().touch.rosy, 0.0, "still rosy");
+
+        let squeezed = |a: &mut Animator, zone: Zone, rub: bool| {
+            a.press(zone, (0.0, 0.0));
+            let mut most = 0.0f32;
+            for k in 0..60 {
+                if rub {
+                    a.knead((if k % 2 == 0 { 30.0 } else { 0.0 }, 0.0));
+                }
+                a.step(DT);
+                most = most.max(a.params().touch.squeeze);
+            }
+            a.poke(zone);
+            run(a, 0.1, |_| {});
+            (most, a.params().touch.rosy)
+        };
+        let mut a = Animator::new(3, 0.33, 0.35);
+        assert_eq!(squeezed(&mut a, Zone::Head, false), (0.0, 0.0), "the head");
+        assert_eq!(squeezed(&mut a, Zone::Cheek, true), (0.0, 0.0), "a scratch");
+        a.expression = Expression::Asleep;
+        assert_eq!(squeezed(&mut a, Zone::Cheek, false), (0.0, 0.0), "asleep");
+    }
+
     #[test]
     fn a_first_tap_waits_to_look_round() {
         let kick = |tap: bool| {

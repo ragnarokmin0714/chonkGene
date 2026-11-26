@@ -61,6 +61,8 @@ pub enum Line {
     ObeyLater,
     /// Patted on the bottom (two taps there), each its own way.
     BottomPat,
+    /// Its cheeks squeezed between your hands and let go.
+    CheekSqueeze,
     /// Bringing a thrown toy back.
     Fetch,
     /// At the catnip: a cat in bliss, anyone else in character.
@@ -132,7 +134,7 @@ pub enum Line {
 }
 
 impl Line {
-    pub const ALL: [Line; 62] = [
+    pub const ALL: [Line; 63] = [
         Line::Hello,
         Line::WelcomeBack,
         Line::PokeSmall,
@@ -163,6 +165,7 @@ impl Line {
         Line::Obey,
         Line::ObeyLater,
         Line::BottomPat,
+        Line::CheekSqueeze,
         Line::Fetch,
         Line::Catnip,
         Line::CatnipMeh,
@@ -230,6 +233,7 @@ impl Line {
             Line::Obey => "obey",
             Line::ObeyLater => "obey_later",
             Line::BottomPat => "bottom_pat",
+            Line::CheekSqueeze => "cheek_squeeze",
             Line::Fetch => "fetch",
             Line::Catnip => "catnip",
             Line::CatnipMeh => "catnip_meh",
@@ -580,6 +584,34 @@ impl Mind {
         out
     }
 
+    /// Its cheeks squeezed between your hands and let go (PLAN §8, Roger's
+    /// twenty-seventh pass, item 6 (a); in place of a pat there): pleased
+    /// on a cheek it loves, pouting otherwise (the face is the renderer's,
+    /// as it rubs its cheeks); 親密度 as for a pat there, a little less.
+    /// Asleep it only stirs; with a grudge it will not have it.
+    pub fn squeeze_cheeks(&mut self, w: &World) -> Out {
+        self.last_touch = w.now;
+        if self.sleep.is_some() {
+            return Out::say(Line::TurnOver);
+        }
+        if self.grumpy() {
+            let mut out = Out::say(Line::GrudgePat);
+            self.gain(&mut out, 2, w.day);
+            return out;
+        }
+        let mut out = Out::say(Line::CheekSqueeze);
+        let xp = match self.species.fondness(Zone::Cheek) {
+            Fondness::Loves => {
+                out.expression = Some(Expression::Happy);
+                12
+            }
+            Fondness::Likes => 8,
+            Fondness::Fine | Fondness::Dislikes => 4,
+        };
+        self.gain(&mut out, xp, w.day);
+        out
+    }
+
     /// The 曼赤肯's belly trap sprung: it grabs the hand and kicks, all in
     /// play (no grudge, 親密度 as for a loved spot).
     pub fn trap(&mut self, w: &World) -> Out {
@@ -855,6 +887,27 @@ mod tests {
         m.put_to_sleep(&world(0.0), &mut r);
         m.shake(&world(5.0));
         assert_eq!(m.pat_bottom(&world(12.0)).line, Some(Line::GrudgePat));
+    }
+
+    #[test]
+    fn squeezed_cheeks_please_those_who_love_it_there() {
+        let mut r = rng();
+        for s in Species::ALL {
+            let mut m = of(s);
+            let before = m.affinity.total();
+            let out = m.squeeze_cheeks(&world(10.0));
+            assert_eq!(out.line, Some(Line::CheekSqueeze), "{s:?}");
+            let loves = s.fondness(Zone::Cheek) == Fondness::Loves;
+            assert_eq!(out.expression == Some(Expression::Happy), loves, "{s:?}");
+            assert!(m.affinity.total() > before, "{s:?}");
+        }
+        let mut m = mind();
+        m.put_to_sleep(&world(20.0), &mut r);
+        assert_eq!(m.squeeze_cheeks(&world(30.0)).line, Some(Line::TurnOver));
+        let mut m = mind();
+        m.put_to_sleep(&world(0.0), &mut r);
+        m.shake(&world(5.0));
+        assert_eq!(m.squeeze_cheeks(&world(12.0)).line, Some(Line::GrudgePat));
     }
 
     #[test]

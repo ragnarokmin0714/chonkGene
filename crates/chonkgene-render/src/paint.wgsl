@@ -176,6 +176,13 @@ fn paint_eyes(q: vec3<f32>, r: vec3<f32>, base: vec3<f32>, px: f32) -> vec3<f32>
         }
         let db = ell(uv, vec2<f32>(u.blush.x * side, u.blush.y), u.blush.zw);
         c = mix(c, u.palette[u32(u.spots.y)].rgb, 0.55 * ink(db, aa * 8.0));
+        // Rosy from a squeeze of its cheeks (u.style.z, mesh.wgsl only):
+        // the blush deeper and wider, pink (never a sore red).
+        let rosy = u.style.z;
+        if rosy > 0.0 {
+            let dr = ell(uv, vec2<f32>(u.blush.x * side, u.blush.y), u.blush.zw * (1.0 + 0.45 * rosy));
+            c = mix(c, vec3<f32>(1.0, 0.55, 0.62), 0.65 * rosy * ink(dr, aa * 10.0));
+        }
         if u.iris.z > 0.5 {
             for (var i = 0; i < 3; i++) {
                 let y = -0.31 + 0.06 * f32(i);

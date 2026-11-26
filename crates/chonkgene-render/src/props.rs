@@ -2160,6 +2160,9 @@ pub enum Grip {
     /// Palm up under it, the fingers curled up its front (you see their
     /// backs). Presses up from below.
     Cup,
+    /// Flat on a cheek from its side, the fingers up the side of its head
+    /// (you see the back of the hand). Presses toward the other hand.
+    Palm,
 }
 
 /// Where your hands hold a pet you hug, this frame (Roger's twentieth
@@ -2366,6 +2369,39 @@ pub fn hug_hands(
 /// pixels at 100%.
 const HAND_LEN: f32 = 26.0;
 
+/// Your two hands squeezing its cheeks (PLAN §8, Roger's twenty-seventh
+/// pass, item 6 (a)): `cheeks` the outer edge of each, left then right
+/// (pixels, see `MeshRenderer::cheeks_at`), `squeeze` 0 … 1 as they come
+/// in from off its sides. Flat on them, the heels of the hands on the
+/// cheeks and the fingers up the sides of its head, leaning in, the backs
+/// toward you; pressing toward each other. None before they come.
+pub fn cheek_hands(cheeks: [(f32, f32); 2], s: f32, squeeze: f32) -> Option<HugHands> {
+    if squeeze <= 0.0 {
+        return None;
+    }
+    let l = HAND_LEN * s;
+    let off = (1.0 - squeeze) * HAND_OFF * s;
+    let hand = |(x, y): (f32, f32), side: f32| HugHand {
+        at: (x + side * (CHEEK_OUT * l + off), y - CHEEK_UP * l),
+        press: (x - side * HAND_IN * s, y),
+        angle: -PI / 2.0 - side * CHEEK_LEAN,
+        side,
+        grip: Grip::Palm,
+    };
+    Some(HugHands {
+        hands: [hand(cheeks[0], -1.0), hand(cheeks[1], 1.0)],
+        reach: squeeze,
+        firm: squeeze,
+    })
+}
+
+/// A hand on a cheek (see [`cheek_hands`]): how far out from the cheek's
+/// edge and up from it its palm's middle is (shares of [`HAND_LEN`]), and
+/// how far its fingers lean in toward the face, radians.
+const CHEEK_OUT: f32 = -0.02;
+const CHEEK_UP: f32 = 0.08;
+const CHEEK_LEAN: f32 = 0.42;
+
 /// Which part of your hands to draw (see [`draw_hug_hands`]).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum HandLayer {
@@ -2398,7 +2434,7 @@ pub fn draw_hug_hands(pm: &mut Pixmap, hands: &HugHands, layer: HandLayer, s: f3
             (HandLayer::Behind, Grip::Thumb) => Part::Palm,
             (HandLayer::Behind, _) => continue,
             (HandLayer::Front, Grip::Thumb) => Part::Thumb,
-            (HandLayer::Front, Grip::Back | Grip::Cup) => Part::Back,
+            (HandLayer::Front, Grip::Back | Grip::Cup | Grip::Palm) => Part::Back,
         };
         // Each on its own first: rubbing out one's wrist must not rub out
         // the other where they cross.
@@ -3375,6 +3411,22 @@ mod tests {
         }
         // Before the hands come in, and after they let go: none.
         assert!(hug_hands(&body, Build::Dog, HugHold::Wrap, 1.0, 1.0, 0.0, 3.2).is_none());
+        // On its cheeks: one on each cheek's edge, fingers up and leaning
+        // in, pressing toward the other; coming in from off its sides.
+        let cheeks = [(40.0, 50.0), (80.0, 50.0)];
+        assert!(cheek_hands(cheeks, 1.0, 0.0).is_none());
+        let near = cheek_hands(cheeks, 1.0, 1.0).expect("hands on its cheeks");
+        let far = cheek_hands(cheeks, 1.0, 0.3).expect("hands coming");
+        let [l, r] = near.hands;
+        assert_eq!(grips(&near), [Grip::Palm, Grip::Palm]);
+        assert!(
+            (l.at.0 - 40.0).abs() < 4.0 && (r.at.0 - 80.0).abs() < 4.0,
+            "{l:?} {r:?}"
+        );
+        assert!(l.press.0 > 40.0 && r.press.0 < 80.0, "{l:?} {r:?}");
+        assert!(l.angle.sin() < -0.9 && r.angle.sin() < -0.9, "fingers up");
+        assert!(l.angle.cos() > 0.0 && r.angle.cos() < 0.0, "leaning in");
+        assert!(far.hands[0].at.0 < l.at.0 && far.hands[1].at.0 > r.at.0);
         assert!(hug_hands(&body, Build::Dog, HugHold::Wrap, 1.0, 1.0, 3.2, 3.2).is_none());
     }
 

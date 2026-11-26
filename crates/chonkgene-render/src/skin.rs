@@ -232,6 +232,14 @@ impl Skeleton {
     /// Every bone's rest → posed map for `joints` (one per bone; bone 0,
     /// the root, moves the whole pet about the floor under it).
     pub fn pose(&self, joints: &[Joint]) -> Vec<Affine> {
+        self.pose_with(joints, None)
+    }
+
+    /// As [`Skeleton::pose`], with one bone (and all that hangs from it)
+    /// stretched along its own axes about its pivot by `k` (1: as it is):
+    /// a head squeezed between your hands, narrower, taller, its muzzle
+    /// pushed out.
+    pub fn pose_with(&self, joints: &[Joint], stretch: Option<(usize, V3)>) -> Vec<Affine> {
         let mut out = vec![Affine::IDENTITY; self.names.len()];
         for &b in &self.order {
             let parent = self.parents[b].map_or(Affine::IDENTITY, |p| out[p]);
@@ -243,6 +251,10 @@ impl Skeleton {
             } else {
                 let k = 1.0 + j.swell;
                 m.mul(M3::diag(v3(k, k, k)))
+            };
+            let m = match stretch {
+                Some((at, k)) if at == b => m.mul(M3::diag(k)),
+                _ => m,
             };
             let local = Affine {
                 m,
@@ -1520,7 +1532,11 @@ impl Walk {
         let butt_up = self
             .gesture
             .is_some_and(|g| g.act == chonkgene_core::anim::Act::ButtUp);
-        let goal = if (self.sitting || self.feel.mood == Mood::Sulk || sits_up)
+        // Rubbing its cheeks with its front paws, it sits for it.
+        let rubbing = self
+            .gesture
+            .is_some_and(|g| g.act == chonkgene_core::anim::Act::CheekRub);
+        let goal = if (self.sitting || self.feel.mood == Mood::Sulk || sits_up || rubbing)
             && !self.lying
             && !lying_about
             && !walking
@@ -1920,6 +1936,38 @@ impl Walk {
                     j[b.head].rot.x += e * (24.0 * (1.0 - wipe) + 6.0 * lick * (1.0 - wipe));
                     j[b.head].rot.y -= e * wipe * (10.0 + 8.0 * swipe);
                     j[b.head].rot.z -= e * wipe * 8.0;
+                }
+                // Its cheeks just squeezed, on a cheek it loves (PLAN §8,
+                // Roger's twenty-seventh pass, item 6 (a)): it rubs its face
+                // on your hand, side to side, leaning into it.
+                Act::Nuzzle => {
+                    let w = (TAU * 1.4 * g.t).sin();
+                    j[b.head].rot.z += e * 16.0 * w;
+                    j[b.head].rot.y += e * 10.0 * w;
+                    j[b.head].rot.x -= e * 8.0;
+                    j[b.body].rot.z += e * 4.0 * (TAU * 1.4 * g.t - 0.6).sin();
+                }
+                // Its cheeks just squeezed, on a cheek it does not love:
+                // sitting, pouting, both front paws up in front of it and
+                // the face rubbed into them, side to side (a chibi's short
+                // legs cannot reach its cheeks: the head comes down to
+                // them, as a cat washing does).
+                Act::CheekRub => {
+                    let w = TAU * 2.2 * g.t;
+                    let mut k = 0.0;
+                    for &(leg, offset, front) in &self.legs {
+                        if front {
+                            let out = if offset < 0.5 { 1.0 } else { -1.0 };
+                            let rub = (w + PI * k).sin();
+                            j[leg].rot.x -= e * (72.0 + 10.0 * rub);
+                            j[leg].rot.z += out * e * (14.0 + 4.0 * rub);
+                            j[leg].shift.y += e * 0.12;
+                            k += 1.0;
+                        }
+                    }
+                    j[b.head].rot.x += e * 24.0;
+                    j[b.head].rot.y += e * 12.0 * w.sin();
+                    j[b.head].rot.z += e * 8.0 * w.sin();
                 }
                 // A shake from head to tail: the body rolls quickly about
                 // its length, the head a beat ahead, dying away at the end.

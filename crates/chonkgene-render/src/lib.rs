@@ -361,10 +361,23 @@ impl Renderer {
             let build = props::Build::of(r.species());
             props::hug_hands(&body, build, hold, facing, s, t, secs)
         });
-        r.hug_press(hands.map(|h| {
-            let [a, b] = h.hands;
-            ([(a.press, a.grip), (b.press, b.grip)], h.firm)
-        }));
+        r.hug_press(hands.as_ref().map(presses));
+        hands
+    }
+
+    /// Its cheeks squeezed between your hands (`squeeze` 0 … 1, see
+    /// `Touch::squeeze`; `s` the pet's scale): where they are this frame,
+    /// found on the picture shown and pressing in on the next one drawn
+    /// (see [`props::cheek_hands`]); none: let go (its cheeks spring back
+    /// out). Only the mesh pets are held by hands.
+    pub fn cheek_hands(&mut self, squeeze: f32, s: f32) -> Option<props::HugHands> {
+        let Self::Mesh(r) = self else {
+            return None;
+        };
+        let hands = r
+            .cheeks_at()
+            .and_then(|c| props::cheek_hands(c, s, squeeze));
+        r.hug_press(hands.as_ref().map(presses));
         hands
     }
 
@@ -389,6 +402,13 @@ impl Renderer {
 
 /// The sprite for an expression and what the body is doing. Strong
 /// feelings take over the whole body; otherwise steps and gestures do.
+/// Where your hands press in, with what grip, and how firmly (see
+/// `MeshRenderer::hug_press`).
+fn presses(h: &props::HugHands) -> mesh_frames::HandPresses {
+    let [a, b] = h.hands;
+    ([(a.press, a.grip), (b.press, b.grip)], h.firm)
+}
+
 pub fn key_for(expression: Expression, params: &PoseParams) -> Key {
     let eyes = if params.eyes_open > 0.66 {
         Look::Open
@@ -424,6 +444,10 @@ pub fn key_for(expression: Expression, params: &PoseParams) -> Key {
         Act::Sniff | Act::Rub | Act::Nudge | Act::Pick => (PoseId::Stretch, eyes),
         Act::Bliss => (PoseId::BellyUp, Look::Happy),
         Act::Swish => (PoseId::LookLeft, Look::Happy),
+        // Its cheeks just squeezed: rubbing its face on your hand, pleased;
+        // or pouting, rubbing them.
+        Act::Nuzzle => (PoseId::LookLeft, Look::Happy),
+        Act::CheekRub => (PoseId::Sit, Look::Pout),
     };
     let cradled = params.act == Act::Hug
         && params.hug == chonkgene_core::anim::Hug::ByYou(props::HugHold::Cradle);

@@ -7,7 +7,9 @@
 //! casting all through, her flame tails). Scenes: `poke` (a quick poke in
 //! the belly), `rub` (a long belly rub), `chin`, `head`, `cheek`, `tail`,
 //! `paw`, `bottom`, `back`, `wing` (each held, then let go), `pat` (your
-//! hand patting its head, 摸摸頭 from its menu), `trap` (the
+//! hand patting its head, 摸摸頭 from its menu), `squeeze` (held still
+//! on a cheek: your hands squeeze both, let go they spring out rosy and
+//! it rubs its face or its cheeks), `trap` (the
 //! 曼赤肯's belly rubbed into its trap), `scratch` (held on the head
 //! and rubbed about), `laugh`, `fedup`, `sulk`, `jog` and `run` (running
 //! at pace 1.6, half way into a gallop, and 2.2, a full one),
@@ -159,6 +161,7 @@ fn scenes() -> Vec<Scene> {
         touch("chin", Zone::Chin, 0.3, 2.8, 3.8),
         touch("head", Zone::Head, 0.3, 2.8, 3.8),
         touch("cheek", Zone::Cheek, 0.3, 2.3, 3.2),
+        touch("squeeze", Zone::Cheek, 0.3, 2.3, 6.0),
         touch("tail", Zone::Tail, 0.3, 1.8, 3.2),
         touch("paw", Zone::Paw, 0.3, 2.3, 3.2),
         touch("foot", Zone::Foot, 0.3, 2.3, 3.2),
@@ -306,10 +309,23 @@ fn main() {
                     // app's pat).
                     let rub = a.held_secs() >= HOLD_SECS
                         && species.fondness(zone) != chonkgene_core::species::Fondness::Dislikes;
+                    let squeezed = a.params().touch.squeeze > 0.0;
                     a.poke(zone);
                     pressed = None;
                     if rub {
                         a.expression = Expression::Happy;
+                    }
+                    // Its cheeks let go (the app's `cheeks_let_go`): a
+                    // loved cheek, its face rubbed on your hand, pleased;
+                    // otherwise pouting, rubbing them.
+                    if squeezed {
+                        use chonkgene_core::species::Fondness;
+                        if species.fondness(zone) == Fondness::Loves {
+                            a.gesture(Act::Nuzzle);
+                        } else {
+                            a.expression = Expression::Neutral;
+                            a.gesture(Act::CheekRub);
+                        }
                     }
                 }
                 if a.expression == Expression::Happy {
@@ -389,6 +405,8 @@ fn main() {
                 _ => (false, HugHold::Wrap),
             };
             let secs = hold.secs();
+            // Or squeezing its cheeks (a finger held still on one).
+            let squeeze = a.params().touch.squeeze;
             let hands = r.body_at().filter(|_| by_you).and_then(|(belly, chest)| {
                 let body = BodyShape {
                     belly,
@@ -399,6 +417,10 @@ fn main() {
                 };
                 let build = Build::of(r.species());
                 hug_hands(&body, build, hold, a.facing, scale, t - 0.3, secs)
+            });
+            let hands = hands.or_else(|| {
+                let cheeks = r.cheeks_at().filter(|_| squeeze > 0.0)?;
+                chonkgene_render::props::cheek_hands(cheeks, scale, squeeze)
             });
             r.hug_press(hands.map(|h| {
                 let [p, q] = h.hands;
@@ -425,7 +447,7 @@ fn main() {
                 pm.save_png(&path).expect("write frame");
                 continue;
             }
-            if by_you {
+            if by_you || hands.is_some() {
                 // The hands over it; held up in front, it is lifted too (the
                 // app moves its window).
                 let mut src =

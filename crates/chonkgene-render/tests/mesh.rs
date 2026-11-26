@@ -565,10 +565,15 @@ fn app_renderer(id: &str) -> Option<chonkgene_render::MeshRenderer> {
 
 /// [`app_renderer`] for a body `chonk` chubby (0 … 1).
 fn chubby_renderer(id: &str, chonk: f32) -> Option<chonkgene_render::MeshRenderer> {
+    let (model, _) = mesh_model(id).unwrap();
+    model_renderer(model, chonk)
+}
+
+/// [`app_renderer`] for any model (the fox's human form).
+fn model_renderer(model: Model, chonk: f32) -> Option<chonkgene_render::MeshRenderer> {
     use std::sync::OnceLock;
     static GPU: OnceLock<Option<Gpu>> = OnceLock::new();
     let gpu = GPU.get_or_init(|| Gpu::new().ok()).as_ref()?;
-    let (model, _) = mesh_model(id).unwrap();
     chonkgene_render::MeshRenderer::new(gpu, std::sync::Arc::new(model), 1.0, chonk, 0)
 }
 
@@ -1785,7 +1790,8 @@ fn a_finger_dents_the_flesh_under_it() {
 }
 
 /// Held, the flesh stays pressed in; let go, it springs back out past
-/// flat, wobbles and settles flat again.
+/// flat into a bulge and wobbles, 「ㄉㄨㄞ ㄉㄨㄞ」 (Roger's twenty-seventh
+/// pass, item 2: two or three bulges), and settles flat again.
 #[test]
 fn pressed_flesh_springs_back_when_let_go() {
     use chonkgene_core::Zone;
@@ -1818,11 +1824,97 @@ fn pressed_flesh_springs_back_when_let_go() {
         "held, pressed in {:?}",
         held.last()
     );
+    let deep = held.last().copied().unwrap_or(0.0);
     a.poke(Zone::Head);
     let after = frames(&mut r, &mut a, 2.5);
     let out = after.iter().copied().fold(0.0f32, f32::min);
     assert!(out < -0.01, "let go, it sprang out only {out:.3}");
+    // Each time out past a twelfth of how deep it was pressed.
+    let (mut bulges, mut bulging) = (0, false);
+    for &d in &after {
+        if d < -deep / 12.0 && !bulging {
+            bulges += 1;
+            bulging = true;
+        } else if d > 0.0 {
+            bulging = false;
+        }
+    }
+    assert!(bulges >= 2, "let go, it bulged out {bulges} times");
     assert_eq!(after.last(), Some(&0.0), "still pressed in at the end");
+}
+
+/// Its cheeks squeezed between your hands (PLAN §8, Roger's twenty-seventh
+/// pass, item 6 (a)): its face is narrower while they press; let go, it
+/// springs back out wider than it was (「ㄉㄨㄞ ㄉㄨㄞ」) and settles as it
+/// was. Every pet, and the fox's human form, each against itself left
+/// alone (its head moves on its own meanwhile: looking about, sitting).
+#[test]
+fn squeezed_cheeks_narrow_the_face_and_spring_back_out() {
+    use chonkgene_core::anim::{Animator, Expression};
+    let model = |id: &str| {
+        if id == "fox-human" {
+            human("fox", "ponytail", "white").unwrap().0
+        } else {
+            mesh_model(id).unwrap().0
+        }
+    };
+    // Cheek to cheek, pixels, every frame: 1.5 s alone, 1 s squeezed (or
+    // not), 3 s let go; and how deep the hands are in at the end.
+    const ALONE: usize = 45;
+    const HELD: usize = 30;
+    let trace = |id: &str, squeezed: bool| -> Option<(Vec<f32>, f32)> {
+        let mut r = model_renderer(model(id), 0.33)?;
+        let mut a = Animator::new(1, 0.33, 0.35).with_pops(false);
+        r.still();
+        let mut widths = Vec::new();
+        for f in 0..ALONE + HELD + 90 {
+            let squeeze = if squeezed && (ALONE..ALONE + HELD).contains(&f) {
+                1.0
+            } else {
+                0.0
+            };
+            let hands = r
+                .cheeks_at()
+                .and_then(|c| chonkgene_render::props::cheek_hands(c, 1.0, squeeze));
+            r.hug_press(hands.map(|h| {
+                let [p, q] = h.hands;
+                ([(p.press, p.grip), (q.press, q.grip)], h.firm)
+            }));
+            a.step(1.0 / 30.0);
+            r.render(&a.params(), Expression::Neutral);
+            r.finish();
+            let [left, right] = r.cheeks_at().expect("its cheeks");
+            widths.push(right.0 - left.0);
+        }
+        Some((widths, r.hands_in()))
+    };
+    for id in QUAD_SPECIES
+        .iter()
+        .chain(&BIPED_SPECIES)
+        .chain(&["fox-human"])
+    {
+        let Some((alone, _)) = trace(id, false) else {
+            eprintln!("skipped: no GPU");
+            return;
+        };
+        let (squeezed, dents) = trace(id, true).expect("the GPU went");
+        let at = |f: usize| (squeezed[f], alone[f]);
+        let (held, was) = at(ALONE + HELD - 1);
+        assert!(
+            held < 0.92 * was,
+            "{id}: squeezed {held:.1} px wide, {was:.1} alone"
+        );
+        let out = (ALONE + HELD..ALONE + HELD + 18)
+            .map(|f| squeezed[f] - alone[f])
+            .fold(f32::MIN, f32::max);
+        assert!(out > 1.5, "{id}: let go, only {out:.1} px wider than alone");
+        assert_eq!(dents, 0.0, "{id}: let go, the dents settle");
+        let (last, was) = at(squeezed.len() - 1);
+        assert!(
+            (last - was).abs() < 0.5,
+            "{id}: settled {last:.1} px wide, {was:.1} alone"
+        );
+    }
 }
 
 /// Roger, 2026-11-04: whatever a pet is doing (sitting, idling, smiling,

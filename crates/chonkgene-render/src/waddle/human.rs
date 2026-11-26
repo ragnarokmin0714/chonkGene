@@ -863,6 +863,18 @@ impl Waddle {
                 j[self.head].rot.z += facing * 26.0 * e;
                 set(&mut layer, n, CHEEK, e);
             }
+            // Her cheeks just squeezed (PLAN §8, Roger's twenty-seventh
+            // pass, item 6 (a)): she holds them, rubbing, red, the head
+            // shaking a little; or, loved, rubs her face on your hand.
+            Act::CheekRub => {
+                let c = v3(0.0, (TAU * 2.0 * t).sin(), (TAU * 2.0 * t).cos()) * 0.015;
+                both(&mut layer, CHEEK.plus(c), e);
+                j[self.head].rot.z += 6.0 * e * (TAU * 1.1 * t).sin();
+            }
+            Act::Nuzzle => {
+                j[self.head].rot.z += 14.0 * e * (TAU * 1.4 * t).sin();
+                j[self.head].rot.y += 8.0 * e * (TAU * 1.4 * t).sin();
+            }
             Act::Rub | Act::Bliss => {
                 both(&mut layer, CHEEK, e);
                 j[self.head].rot.z += 10.0 * e * (TAU * 0.8 * t).sin();

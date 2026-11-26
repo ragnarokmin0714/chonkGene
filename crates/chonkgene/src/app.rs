@@ -3222,6 +3222,41 @@ impl Pet {
         }
     }
 
+    /// Its cheeks squeezed between your hands and let go (PLAN §8, Roger's
+    /// twenty-seventh pass, item 6 (a)): its face springs back out past
+    /// round and wobbles, rosy for a few seconds (the renderer's); on a
+    /// cheek it loves it rubs its face on your hand, pleased, otherwise it
+    /// pouts and rubs its cheeks with its paws (a bird with its wings, the
+    /// fox's human form holds hers).
+    fn cheeks_let_go(&mut self, ctx: &mut Ctx) {
+        let out = self.mind.squeeze_cheeks(&ctx.world);
+        let free = out.line == Some(Line::CheekSqueeze)
+            && !self.in_skit
+            && matches!(self.body.motion, Motion::Idle | Motion::Walk);
+        let act = if self.species.fondness(Zone::Cheek) == Fondness::Loves {
+            Act::Nuzzle
+        } else {
+            Act::CheekRub
+        };
+        diag!(
+            "{}: cheeks squeezed and let go: {}",
+            self.save.name,
+            if free {
+                format!("{act:?}")
+            } else {
+                format!("{:?}", out.line)
+            }
+        );
+        if free {
+            self.body.motion = Motion::Idle;
+            self.body.speed = 0.0;
+            self.body.pace = 1.0;
+            self.anim.walking = false;
+            self.anim.gesture(act);
+        }
+        self.apply(ctx, out);
+    }
+
     /// A light pat on the bottom (PLAN §8, Roger's twenty-seventh pass,
     /// item 6 (b)), each its own way (see [`Species::bottom_pat`]): a cat
     /// pushes its rump up, the Shiba kicks a hind leg and looks back
@@ -4138,15 +4173,19 @@ impl Pet {
         let mut params = self.anim.params();
         params.travelling = self.travelling();
         params.glow = self.glow_at(t);
-        // Your hands in a hug: found on its last picture, pressing in on
-        // this one, drawn over it (`compose`).
+        // Your hands in a hug, or squeezing its cheeks: found on its last
+        // picture, pressing in on this one, drawn over it (`compose`).
         let hug = self
             .fun
             .hug_by_you
             .map(|(since, hold)| (hold, (t - since) as f32, hold.secs()));
-        self.fun.hands = self
-            .renderer
-            .hug_hands(hug, self.anim.facing, self.fun.scale);
+        let squeeze = params.touch.squeeze;
+        self.fun.hands = if squeeze > 0.0 {
+            self.renderer.cheek_hands(squeeze, self.fun.scale)
+        } else {
+            self.renderer
+                .hug_hands(hug, self.anim.facing, self.fun.scale)
+        };
         // Your hand patting its head, on the top of its head as last shown.
         self.fun.pat_hand = self.fun.pat_by_you.and_then(|(since, kind)| {
             let pose = props::pat_pose(kind, (t - since) as f32)?;
@@ -4556,6 +4595,9 @@ impl ApplicationHandler<UserEvent> for App {
                             let quick =
                                 p.anim.held_secs() < 0.3 && p.anim.params().touch.scratch < 0.2;
                             let held = p.anim.held_secs();
+                            // Held still on a cheek, your hands came to
+                            // squeeze it: let go, that is its answer.
+                            let squeezed = p.anim.params().touch.squeeze > 0.0;
                             let action = tap_action(p.save.human, zone).filter(|_| quick && !rub);
                             let mut ctx = Ctx {
                                 el,
@@ -4604,6 +4646,12 @@ impl ApplicationHandler<UserEvent> for App {
                                     return;
                                 }
                                 None => p.anim.poke(zone),
+                            }
+                            if squeezed {
+                                p.cheeks_let_go(&mut ctx);
+                                p.next = now;
+                                self.dirty = true;
+                                return;
                             }
                             let out = if rub {
                                 p.mind.pat(&world, zone)

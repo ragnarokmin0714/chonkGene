@@ -71,6 +71,8 @@ pub struct MeshCanvas {
     /// The fox's spell glowing on its face, 0 … 1 (paint.wgsl
     /// `spell_glow`).
     pub glow: f32,
+    /// Its cheeks rosy from a squeeze, 0 … 1 (paint.wgsl, the blush).
+    pub rosy: f32,
     /// Seconds, for what flickers (mesh.wgsl `flame_tails`).
     pub clock: f32,
 }
@@ -275,6 +277,7 @@ impl MeshCanvas {
             press: [None; 2],
             floor_shadow: true,
             glow: 0.0,
+            rosy: 0.0,
             clock: 0.0,
         }
     }
@@ -358,6 +361,7 @@ impl MeshCanvas {
         }
         let mut u = uniforms(scene, &self.cam, &Frame::default(), true, 0);
         u[3][3] = self.glow;
+        u[13][2] = self.rosy;
         u.push(v4(self.eye_r, yaw.to_radians()));
         u.push(v4(self.mouth_r, self.clock));
         u.push([ROOT_PIVOT.x, ROOT_PIVOT.z, self.shadow_r.0, self.shadow_r.1]);

@@ -990,6 +990,29 @@ impl Waddle {
                 Act::Tilt => {
                     j[self.head].rot.z += facing * 30.0 * e;
                 }
+                // Its cheeks just squeezed, on a cheek it loves (PLAN §8,
+                // Roger's twenty-seventh pass, item 6 (a)): its face rubbed
+                // on your hand, side to side.
+                Act::Nuzzle => {
+                    let w = (TAU * 1.4 * g.t).sin();
+                    j[self.head].rot.z += e * 18.0 * w;
+                    j[self.head].rot.y += e * 10.0 * w;
+                    j[self.body].rot.z += e * 3.0 * (TAU * 1.4 * g.t - 0.6).sin();
+                }
+                // Its cheeks just squeezed, on a cheek it does not love:
+                // both wings up at its face, rubbing it, the head shaking.
+                Act::CheekRub => {
+                    for (side, wing) in self.wings.iter().enumerate() {
+                        if let Some(wg) = *wing {
+                            let sign = if side == 0 { 1.0 } else { -1.0 };
+                            let rub = (TAU * 2.6 * g.t + PI * side as f32).sin();
+                            j[wg].rot.z += sign * e * (40.0 + 8.0 * rub);
+                            j[wg].rot.x -= e * (75.0 + 10.0 * rub);
+                        }
+                    }
+                    j[self.head].rot.z += e * 8.0 * (TAU * 1.3 * g.t).sin();
+                    j[self.head].rot.x += e * 6.0;
+                }
                 // Beak down to the thing on the floor, held while it takes
                 // it, and back up.
                 Act::Pick => {
