@@ -1788,7 +1788,16 @@ Roger: 「你覺得這個主意如何」, four ideas for the fox, with `inbox/fu
    - **重力法術**: every pet it hits is pressed flat, its face pulled into a squashed, scrunched grimace (eyes narrowed sideways, wrinkles drawn in ink, mouth open, cheeks sagging, a duck's bill and the owl's disc squashed); let go, it springs up past its height and wobbles back (「ㄉㄨㄞ ㄉㄨㄞ」, the press dent's overshoot planned in item 2 of the twenty-seventh pass), with an impact: a flash ring, speed lines, the pet's own window shaking. **Proposed**: never the whole screen shaking or flashing (§1.7, don't disturb).
    - **Asked**: who they hit (proposed: 天雷 one pet, the one squabbling with her or the nearest; 重力 everyone round her, as 定身術), and whether she casts them by herself (proposed: only in 非理性模式, rarely; from 施法… any time).
 
-**Order, proposed**: after the twenty-seventh pass's tap setting: 3 and 2 (small, colour data and the effects reading it) → 1 (Blender) → 4 (new effects, the face and fur work, lines in three languages). Roger's call.
+5. **Roger, the same day: colours of her own choosing** for her hair, tails, seal, spells (法術) and casting glow (護體魔力), the preset colours still there to pick while customising. Yes; it is item 3's `magic` colour and item 2's hair made open. **Proposed**:
+   - **Each row** in her settings card (髮色, 尾巴, 咒印, 法術, 護體魔力): the preset dots as now (「跟毛色」 first, then each coat's or hair's colours), and last a 「自訂」 dot. Tapped, it opens our own cute picker under the row (no stock colour dialog): about twenty soft swatches in the UI's style, a hue strip and a lightness strip. Picking a preset dot again leaves the custom colour remembered in the 「自訂」 dot, to go back to; each row has 「恢復預設」.
+   - **One colour a row**: the tips worked out from it (hair tips and tail tips lighter, as the presets' two-tone ones); 紅髮's red to gold stays a preset.
+   - **Kept looking right whatever is picked**: a seal too close to the fur or skin under it gets a thin edge, dark or light; a dark glow is drawn as mist of that colour round a lightened core, since a dark colour cannot glow. On the beast form the tails' root stays her body's fur and the picked colour runs from the middle to the tips.
+   - **Where it shows at once**: the seal, spells and glow are shader and effect colours, live while dragging. Hair and tails are baked into her mesh, so they show when the strip is let go, as a 髮色 change remakes her now (in fox-fire).
+   - **Per pet**, as coat and hair are (`PetSave`), and for both forms.
+   - **Asked**: 法術 = what lands on others (定身術's bubble, 天雷's bolt, 重力's press, 祝福術's hearts) and 護體魔力 = the light round her while casting (floor ring, column, fox-fire, burning tails); one colour or two for hair and tails (proposed one, tips worked out); whether the other pets get 「自訂」 coat colours later.
+   - Built after 3 and 2, on their colour plumbing.
+
+**Order, proposed**: after the twenty-seventh pass's tap setting: 3 and 2 (small, colour data and the effects reading it) → 5 (the picker on top of them) → 1 (Blender) → 4 (new effects, the face and fur work, lines in three languages). Roger's call.
 
 ### New species: eleven more pets (Roger, 2026-11-13; planned, none built)
 
