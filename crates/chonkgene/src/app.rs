@@ -4276,9 +4276,21 @@ impl Pet {
     }
 
     /// Its window moves on its own, not walking: flying, falling (a hop, a
-    /// leap, thrown), held up by the spell.
+    /// leap, thrown), gliding down, sliding on its belly, held up by the
+    /// spell.
     fn travelling(&self) -> bool {
-        self.float.is_some() || matches!(self.body.motion, Motion::Fly | Motion::Fall)
+        self.float.is_some() || moves_itself(self.body.motion)
+    }
+}
+
+/// A motion that moves the pet's window by itself every frame, so its
+/// frames must keep up (full rate, past the GPU budget). Roger,
+/// 2026-11-26: thrown up, its glide down was jerky; gliding (and sliding)
+/// had been left out and were drawn at the resting rate.
+fn moves_itself(motion: Motion) -> bool {
+    match motion {
+        Motion::Fly | Motion::Fall | Motion::Glide | Motion::Slide => true,
+        Motion::Idle | Motion::Walk | Motion::Held => false,
     }
 }
 
@@ -5040,6 +5052,19 @@ impl ApplicationHandler<UserEvent> for App {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Thrown up, falling, gliding down or sliding on its belly, its window
+    /// moves by itself and its frames keep up (Roger, 2026-11-26: the glide
+    /// down was jerky); walking, idle or in your hand, the rest decides.
+    #[test]
+    fn a_window_moving_by_itself_gets_full_frames() {
+        for m in [Motion::Fly, Motion::Fall, Motion::Glide, Motion::Slide] {
+            assert!(moves_itself(m), "{m:?}");
+        }
+        for m in [Motion::Idle, Motion::Walk, Motion::Held] {
+            assert!(!moves_itself(m), "{m:?}");
+        }
+    }
 
     /// Roger's twenty-seventh pass, item 2: each spot's action, the human
     /// form's on her head, hands and shoulders only; belly, cheeks, chin,
