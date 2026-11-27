@@ -5,114 +5,121 @@ msgstr ""
 "Content-Transfer-Encoding: 8bit\n"
 "Language: ja\n"
 
-#: crates/chonkgene-core/src/species.rs:278
+#: crates/chonkgene-core/src/species.rs:311
 msgid "柴犬"
 msgstr "柴犬"
 
-#: crates/chonkgene-core/src/species.rs:279
+#: crates/chonkgene-core/src/species.rs:312
 msgid "曼赤肯貓"
 msgstr "マンチカン"
 
-#: crates/chonkgene-core/src/species.rs:280
+#: crates/chonkgene-core/src/species.rs:313
 msgid "蘇格蘭折耳貓"
 msgstr "スコティッシュ"
 
-#: crates/chonkgene-core/src/species.rs:281
+#: crates/chonkgene-core/src/species.rs:314
 msgid "貓頭鷹"
 msgstr "フクロウ"
 
-#: crates/chonkgene-core/src/species.rs:282
+#: crates/chonkgene-core/src/species.rs:315
 msgid "小雞"
 msgstr "ひよこ"
 
-#: crates/chonkgene-core/src/species.rs:283
+#: crates/chonkgene-core/src/species.rs:316
 msgid "小鴨"
 msgstr "こがも"
 
-#: crates/chonkgene-core/src/species.rs:284
+#: crates/chonkgene-core/src/species.rs:317
 msgid "九尾狐"
 msgstr "九尾の狐"
 
-#: crates/chonkgene-core/src/species.rs:296
+#: crates/chonkgene-core/src/species.rs:329
 msgid "阿柴"
 msgstr "しばまる"
 
-#: crates/chonkgene-core/src/species.rs:297
+#: crates/chonkgene-core/src/species.rs:330
 #: crates/chonkgene/src/settings.rs:48
-#: crates/chonkgene/src/store.rs:684
+#: crates/chonkgene/src/store.rs:693
 msgid "奶茶"
 msgstr "チャイ"
 
-#: crates/chonkgene-core/src/species.rs:298
+#: crates/chonkgene-core/src/species.rs:331
 msgid "芋圓"
 msgstr "タロ"
 
-#: crates/chonkgene-core/src/species.rs:299
+#: crates/chonkgene-core/src/species.rs:332
 msgid "咕咕"
 msgstr "ふくまる"
 
-#: crates/chonkgene-core/src/species.rs:300
+#: crates/chonkgene-core/src/species.rs:333
 msgid "蛋黃"
 msgstr "きみ"
 
-#: crates/chonkgene-core/src/species.rs:301
+#: crates/chonkgene-core/src/species.rs:334
 msgid "湯圓"
 msgstr "だんご"
 
-#: crates/chonkgene-core/src/species.rs:302
+#: crates/chonkgene-core/src/species.rs:335
+#: crates/chonkgene/src/store.rs:722
+msgid "藻藻"
+msgstr "もも"
+
+#: crates/chonkgene-core/src/species.rs:344
+#: crates/chonkgene/src/store.rs:715
+#: crates/chonkgene/src/store.rs:716
 msgid "小九"
 msgstr "きゅう"
 
-#: crates/chonkgene-core/src/species.rs:312
+#: crates/chonkgene-core/src/species.rs:357
 msgid "主人"
 msgstr "ご主人"
 
-#: crates/chonkgene-core/src/species.rs:313
-#: crates/chonkgene/src/store.rs:677
+#: crates/chonkgene-core/src/species.rs:358
+#: crates/chonkgene/src/store.rs:686
 msgid "好朋友"
 msgstr "ともだち"
 
-#: crates/chonkgene-core/src/species.rs:314
+#: crates/chonkgene-core/src/species.rs:359
 msgid "奴才"
 msgstr "下僕"
 
-#: crates/chonkgene-core/src/species.rs:315
+#: crates/chonkgene-core/src/species.rs:360
 msgid "同學"
 msgstr "クラスメイト"
 
-#: crates/chonkgene-core/src/species.rs:316
+#: crates/chonkgene-core/src/species.rs:361
 msgid "老大"
 msgstr "親分"
 
-#: crates/chonkgene-core/src/species.rs:317
+#: crates/chonkgene-core/src/species.rs:362
 msgid "領隊"
 msgstr "隊長"
 
-#: crates/chonkgene-core/src/species.rs:318
+#: crates/chonkgene-core/src/species.rs:363
 msgid "小主人"
 msgstr "おチビ"
 
-#: crates/chonkgene-core/src/species.rs:366
+#: crates/chonkgene-core/src/species.rs:411
 msgid "肉乾"
 msgstr "ジャーキー"
 
-#: crates/chonkgene-core/src/species.rs:367
+#: crates/chonkgene-core/src/species.rs:412
 msgid "罐罐"
 msgstr "缶詰"
 
-#: crates/chonkgene-core/src/species.rs:368
+#: crates/chonkgene-core/src/species.rs:413
 msgid "小餅乾"
 msgstr "クッキー"
 
-#: crates/chonkgene-core/src/species.rs:369
+#: crates/chonkgene-core/src/species.rs:414
 msgid "玉米粒"
 msgstr "コーン"
 
-#: crates/chonkgene-core/src/species.rs:370
+#: crates/chonkgene-core/src/species.rs:415
 msgid "豌豆"
 msgstr "えんどう豆"
 
-#: crates/chonkgene-core/src/species.rs:372
+#: crates/chonkgene-core/src/species.rs:417
 msgid "豆皮壽司"
 msgstr "いなり寿司"
 
@@ -126,12 +133,12 @@ msgid "收起來 / 叫回來"
 msgstr "隠す / 呼びもどす"
 
 #: crates/chonkgene-platform/src/tray.rs:31
-#: crates/chonkgene/src/app.rs:2291
+#: crates/chonkgene/src/app.rs:2295
 msgid "設定…"
 msgstr "設定…"
 
 #: crates/chonkgene-platform/src/tray.rs:32
-#: crates/chonkgene/src/app.rs:2295
+#: crates/chonkgene/src/app.rs:2299
 msgid "結束肉肉賴桌"
 msgstr "chonkGene を終了"
 
@@ -144,17 +151,17 @@ msgid "拿狗尾草逗牠們 / 收起來"
 msgstr "ねこじゃらしで遊ぶ / しまう"
 
 #: crates/chonkgene-platform/src/tray.rs:41
-#: crates/chonkgene/src/app.rs:2393
+#: crates/chonkgene/src/app.rs:2397
 msgid "丟球給牠們"
 msgstr "ボールを投げる"
 
 #: crates/chonkgene-platform/src/tray.rs:42
-#: crates/chonkgene/src/app.rs:2395
+#: crates/chonkgene/src/app.rs:2399
 msgid "丟飛盤給牠們"
 msgstr "フリスビーを投げる"
 
 #: crates/chonkgene-platform/src/tray.rs:43
-#: crates/chonkgene/src/app.rs:2403
+#: crates/chonkgene/src/app.rs:2407
 msgid "放一把貓薄荷"
 msgstr "またたびを置く"
 
@@ -163,43 +170,43 @@ msgid "放聚光燈 / 收起來"
 msgstr "スポットライトを置く / しまう"
 
 #: crates/chonkgene-platform/src/tray.rs:48
-#: crates/chonkgene/src/app.rs:2379
+#: crates/chonkgene/src/app.rs:2383
 msgid "場景"
 msgstr "シーン"
 
 #: crates/chonkgene-platform/src/tray.rs:50
-#: crates/chonkgene/src/app.rs:2444
+#: crates/chonkgene/src/app.rs:2448
 msgid "玩水池"
 msgstr "水あそび"
 
 #: crates/chonkgene-platform/src/tray.rs:51
-#: crates/chonkgene/src/app.rs:2445
+#: crates/chonkgene/src/app.rs:2449
 msgid "曬太陽"
 msgstr "ひなたぼっこ"
 
 #: crates/chonkgene-platform/src/tray.rs:52
-#: crates/chonkgene/src/app.rs:2446
+#: crates/chonkgene/src/app.rs:2450
 msgid "追蝴蝶"
 msgstr "ちょうちょを追う"
 
 #: crates/chonkgene-platform/src/tray.rs:53
-#: crates/chonkgene/src/app.rs:2447
+#: crates/chonkgene/src/app.rs:2451
 msgid "啃骨頭"
 msgstr "骨をかじる"
 
 #: crates/chonkgene-platform/src/tray.rs:54
-#: crates/chonkgene/src/app.rs:2448
+#: crates/chonkgene/src/app.rs:2452
 msgid "啄種子"
 msgstr "種をついばむ"
 
 #: crates/chonkgene-platform/src/tray.rs:55
-#: crates/chonkgene/src/app.rs:2449
+#: crates/chonkgene/src/app.rs:2453
 msgid "飛上樹枝"
 msgstr "枝にとまる"
 
 #: crates/chonkgene-platform/src/tray.rs:56
-#: crates/chonkgene/src/app.rs:2312
-#: crates/chonkgene/src/app.rs:2450
+#: crates/chonkgene/src/app.rs:2316
+#: crates/chonkgene/src/app.rs:2454
 msgid "狐火"
 msgstr "狐火"
 
@@ -207,216 +214,216 @@ msgstr "狐火"
 msgid "親密度 Lv.{level}"
 msgstr "なかよし度 Lv.{level}"
 
-#: crates/chonkgene/src/app.rs:1825
-#: crates/chonkgene/src/app.rs:4949
+#: crates/chonkgene/src/app.rs:1829
+#: crates/chonkgene/src/app.rs:5089
 msgid "睡覺中"
 msgstr "おやすみ中"
 
-#: crates/chonkgene/src/app.rs:1827
+#: crates/chonkgene/src/app.rs:1831
 msgid "有起床氣"
 msgstr "寝起きで不機嫌"
 
-#: crates/chonkgene/src/app.rs:2258
+#: crates/chonkgene/src/app.rs:2262
 msgid "返回"
 msgstr "もどる"
 
-#: crates/chonkgene/src/app.rs:2271
+#: crates/chonkgene/src/app.rs:2275
 msgid "抱抱"
 msgstr "だっこ"
 
-#: crates/chonkgene/src/app.rs:2273
+#: crates/chonkgene/src/app.rs:2277
 msgid "抱抱…"
 msgstr "だっこ…"
 
-#: crates/chonkgene/src/app.rs:2275
+#: crates/chonkgene/src/app.rs:2279
 msgid "摸摸頭"
 msgstr "頭をなでる"
 
-#: crates/chonkgene/src/app.rs:2276
+#: crates/chonkgene/src/app.rs:2280
 msgid "餵零食"
 msgstr "おやつをあげる"
 
-#: crates/chonkgene/src/app.rs:2277
+#: crates/chonkgene/src/app.rs:2281
 msgid "還有 {snacks} 份"
 msgstr "あと {snacks} こ"
 
-#: crates/chonkgene/src/app.rs:2279
+#: crates/chonkgene/src/app.rs:2283
 msgid "吃飽了"
 msgstr "おなかいっぱい"
 
-#: crates/chonkgene/src/app.rs:2282
+#: crates/chonkgene/src/app.rs:2286
 msgid "輕輕叫醒牠"
 msgstr "そっと起こす"
 
-#: crates/chonkgene/src/app.rs:2284
+#: crates/chonkgene/src/app.rs:2288
 msgid "讓牠去睡覺"
 msgstr "寝かせる"
 
-#: crates/chonkgene/src/app.rs:2288
+#: crates/chonkgene/src/app.rs:2292
 msgid "叫牠…"
 msgstr "おねがい…"
 
-#: crates/chonkgene/src/app.rs:2290
+#: crates/chonkgene/src/app.rs:2294
 msgid "一起玩…"
 msgstr "いっしょに遊ぶ…"
 
-#: crates/chonkgene/src/app.rs:2292
+#: crates/chonkgene/src/app.rs:2296
 msgid "名字・造型"
 msgstr "名前・見た目"
 
-#: crates/chonkgene/src/app.rs:2294
+#: crates/chonkgene/src/app.rs:2298
 msgid "全部收起來"
 msgstr "みんなかくす"
 
-#: crates/chonkgene/src/app.rs:2298
+#: crates/chonkgene/src/app.rs:2302
 msgid "坐下"
 msgstr "おすわり"
 
-#: crates/chonkgene/src/app.rs:2298
+#: crates/chonkgene/src/app.rs:2302
 msgid "趴下"
 msgstr "ふせ"
 
-#: crates/chonkgene/src/app.rs:2298
+#: crates/chonkgene/src/app.rs:2302
 msgid "過來"
 msgstr "おいで"
 
-#: crates/chonkgene/src/app.rs:2298
+#: crates/chonkgene/src/app.rs:2302
 msgid "轉圈"
 msgstr "くるっと回る"
 
-#: crates/chonkgene/src/app.rs:2298
+#: crates/chonkgene/src/app.rs:2302
 msgid "握手"
 msgstr "おて"
 
-#: crates/chonkgene/src/app.rs:2302
-#: crates/chonkgene/src/app.rs:2451
+#: crates/chonkgene/src/app.rs:2306
+#: crates/chonkgene/src/app.rs:2455
 msgid "跳舞"
 msgstr "ダンス"
 
-#: crates/chonkgene/src/app.rs:2305
+#: crates/chonkgene/src/app.rs:2309
 msgid "去抱抱…"
 msgstr "だっこしにいく…"
 
-#: crates/chonkgene/src/app.rs:2311
+#: crates/chonkgene/src/app.rs:2315
 msgid "定身術"
 msgstr "金縛りの術"
 
-#: crates/chonkgene/src/app.rs:2313
+#: crates/chonkgene/src/app.rs:2317
 msgid "祝福術"
 msgstr "祝福の術"
 
-#: crates/chonkgene/src/app.rs:2314
+#: crates/chonkgene/src/app.rs:2318
 msgid "招喚術"
 msgstr "招集の術"
 
-#: crates/chonkgene/src/app.rs:2319
+#: crates/chonkgene/src/app.rs:2323
 msgid "施法"
 msgstr "術"
 
-#: crates/chonkgene/src/app.rs:2324
+#: crates/chonkgene/src/app.rs:2328
 msgid "變身"
 msgstr "変身"
 
-#: crates/chonkgene/src/app.rs:2326
-#: crates/chonkgene/src/app.rs:5033
+#: crates/chonkgene/src/app.rs:2330
+#: crates/chonkgene/src/app.rs:5173
 msgid "變回原型"
 msgstr "元の姿に戻る"
 
-#: crates/chonkgene/src/app.rs:2328
-#: crates/chonkgene/src/app.rs:5028
+#: crates/chonkgene/src/app.rs:2332
+#: crates/chonkgene/src/app.rs:5168
 msgid "變成人型"
 msgstr "人の姿になる"
 
-#: crates/chonkgene/src/app.rs:2338
+#: crates/chonkgene/src/app.rs:2342
 msgid "玩躲貓貓"
 msgstr "かくれんぼ"
 
-#: crates/chonkgene/src/app.rs:2348
+#: crates/chonkgene/src/app.rs:2352
 msgid "從水池上岸"
 msgstr "池からあがる"
 
-#: crates/chonkgene/src/app.rs:2349
+#: crates/chonkgene/src/app.rs:2353
 msgid "不跳了"
 msgstr "ダンスをやめる"
 
-#: crates/chonkgene/src/app.rs:2351
-#: crates/chonkgene/src/app.rs:5117
+#: crates/chonkgene/src/app.rs:2355
+#: crates/chonkgene/src/app.rs:5257
 msgid "把{thing}收起來"
 msgstr "{thing}をしまう"
 
-#: crates/chonkgene/src/app.rs:2358
+#: crates/chonkgene/src/app.rs:2362
 msgid "牠睡著了，醒來再玩"
 msgstr "おやすみ中。起きたらね"
 
-#: crates/chonkgene/src/app.rs:2361
+#: crates/chonkgene/src/app.rs:2365
 msgid "牠在忙，等等再叫牠"
 msgstr "いそがしいみたい。あとでね"
 
-#: crates/chonkgene/src/app.rs:2373
+#: crates/chonkgene/src/app.rs:2377
 msgid "在高處"
 msgstr "高いところ"
 
-#: crates/chonkgene/src/app.rs:2385
+#: crates/chonkgene/src/app.rs:2389
 msgid "把狗尾草收起來"
 msgstr "ねこじゃらしをしまう"
 
-#: crates/chonkgene/src/app.rs:2387
+#: crates/chonkgene/src/app.rs:2391
 msgid "拿狗尾草逗牠們"
 msgstr "ねこじゃらしで遊ぶ"
 
-#: crates/chonkgene/src/app.rs:2392
+#: crates/chonkgene/src/app.rs:2396
 msgid "大家一起玩"
 msgstr "みんなで遊ぶ"
 
-#: crates/chonkgene/src/app.rs:2401
+#: crates/chonkgene/src/app.rs:2405
 msgid "把貓薄荷收起來"
 msgstr "またたびをしまう"
 
-#: crates/chonkgene/src/app.rs:2410
+#: crates/chonkgene/src/app.rs:2414
 msgid "把聚光燈收起來"
 msgstr "スポットライトをしまう"
 
-#: crates/chonkgene/src/app.rs:2412
+#: crates/chonkgene/src/app.rs:2416
 msgid "放聚光燈"
 msgstr "スポットライトを置く"
 
-#: crates/chonkgene/src/app.rs:2423
+#: crates/chonkgene/src/app.rs:2427
 msgid "環抱"
 msgstr "うしろからだっこ"
 
-#: crates/chonkgene/src/app.rs:2424
+#: crates/chonkgene/src/app.rs:2428
 msgid "舉高高"
 msgstr "たかいたかい"
 
-#: crates/chonkgene/src/app.rs:2425
+#: crates/chonkgene/src/app.rs:2429
 msgid "搖搖抱"
 msgstr "ゆらゆらだっこ"
 
-#: crates/chonkgene/src/app.rs:2457
+#: crates/chonkgene/src/app.rs:2461
 msgid "水池"
 msgstr "池"
 
-#: crates/chonkgene/src/app.rs:2458
+#: crates/chonkgene/src/app.rs:2462
 msgid "陽光"
 msgstr "ひだまり"
 
-#: crates/chonkgene/src/app.rs:2459
+#: crates/chonkgene/src/app.rs:2463
 msgid "蝴蝶"
 msgstr "ちょうちょ"
 
-#: crates/chonkgene/src/app.rs:2460
+#: crates/chonkgene/src/app.rs:2464
 msgid "骨頭"
 msgstr "骨"
 
-#: crates/chonkgene/src/app.rs:2461
+#: crates/chonkgene/src/app.rs:2465
 msgid "種子"
 msgstr "種"
 
-#: crates/chonkgene/src/app.rs:2462
+#: crates/chonkgene/src/app.rs:2466
 msgid "樹枝"
 msgstr "枝"
 
-#: crates/chonkgene/src/app.rs:2464
+#: crates/chonkgene/src/app.rs:2468
 msgid "聚光燈"
 msgstr "スポットライト"
 

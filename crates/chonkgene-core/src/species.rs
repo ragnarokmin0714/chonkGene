@@ -348,7 +348,20 @@ impl Species {
             Species::Owl => mark("咕咕"),
             Species::Chick => mark("蛋黃"),
             Species::Duck => mark("湯圓"),
-            Species::Fox => mark("小九"),
+            Species::Fox => mark("藻藻"),
+        }
+    }
+
+    /// Names it had by default before, as the code wrote them: a save
+    /// still holding one, in any language, was never renamed and takes
+    /// today's default (`PetSave::localize_defaults`). Roger, 2026-11-27:
+    /// 「小九」 was not cute enough; the fox is 藻藻 now, after 玉藻前
+    /// (read もも in Japanese, a peach).
+    pub fn former_names_zh(self) -> &'static [&'static str] {
+        const FOX: [&str; 1] = [mark("小九")];
+        match self {
+            Species::Fox => &FOX,
+            _ => &[],
         }
     }
 

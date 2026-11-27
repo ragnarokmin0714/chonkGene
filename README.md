@@ -4,7 +4,7 @@ A gang of chubby desktop pets that lounge on your desktop all day being cute.
 
 <p align="center"><img src="docs/media/hero.gif" alt="The pets on a desktop: running, sliding along on their bellies, one floating under a bunch of balloons" width="100%"></p>
 
-<p align="center"><img src="docs/media/family.png" alt="All seven: 阿柴 the Shiba Inu, 奶茶 the Munchkin cat, 芋圓 the Scottish Fold, 小九 the nine-tailed fox, 咕咕 the owl, 蛋黃 the chick and 湯圓 the duckling" width="100%"></p>
+<p align="center"><img src="docs/media/family.png" alt="All seven: 阿柴 the Shiba Inu, 奶茶 the Munchkin cat, 芋圓 the Scottish Fold, 藻藻 the nine-tailed fox, 咕咕 the owl, 蛋黃 the chick and 湯圓 the duckling" width="100%"></p>
 
 - **Seven pets**: a Shiba Inu, a Munchkin cat, a Scottish Fold, a nine-tailed fox, an owl, a chick and a duckling, each with its own personality (the fox is a bossy big sister to the others, and tsundere to you).
 - **Touch them**: bellies squish and jiggle; every pet has spots it loves (a cat's chin and belly, the Shiba's tail base) and spots it would rather you left alone; keep poking and some roll over laughing while others look thoroughly fed up. The Munchkin's belly is a trap.

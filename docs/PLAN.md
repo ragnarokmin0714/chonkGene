@@ -1851,7 +1851,12 @@ Roger: 「擁抱和打架 物理動作還有很大的改進空間，這個也排
 - **Weight**: a run-up and a small bump on meeting, both wobbling; swaying together with one leading; a small pet lifted or pushed further than a big one; letting go with a step back.
 - **Hits that land**: a wind-up before a swat or a tail swing, and on contact the other jolts where it was hit (a dent and a spring there), is knocked back a few pixels with a skid, a dust puff (`Fx::Brawl`); shoving head to head, legs braced; tumbling over together.
 - **Asked**: a short screen recording of a hug and a fight that look wrong to him (Gemini can watch a video and say what it sees, for a second opinion), or a list of the moments.
-- **Order, proposed**: after the twenty-eighth pass's item 4 and before the twenty-ninth pass (her tipsy rounds hug and squeeze the others, so they would be built on the better hugs). Roger's call.
+- **Order, proposed**: after the twenty-eighth pass's item 4 and before the twenty-ninth pass (her tipsy rounds hug and squeeze the others, so they would be built on the better hugs). **Roger: 沒問題.**
+
+### Roger, 2026-11-27: the fox's name
+
+「叫小九 不夠可愛 根據 傳奇九尾 玉藻前 取一個可愛的名字」. **Done**: her default name is **藻藻** (from 玉藻前; read もも in Japanese, a peach, so `ja` has もも and `en` Momo). Not 玉玉 (Chinese internet slang for 抑鬱), not 小玉 (the same shape as 小九, and タマ is the stock Japanese cat's name), not Tamamo itself (the name of a well-known game character too). A save still holding 小九 in any language was never renamed and takes the new name (`Species::former_names_zh`, in `PetSave::localize_defaults`, test `a_fox_still_called_by_her_old_default_takes_the_new_one`); a fox renamed by hand keeps hers. README and the release notes say 藻藻.
+
 
 ### New species: eleven more pets (Roger, 2026-11-13; planned, none built)
 

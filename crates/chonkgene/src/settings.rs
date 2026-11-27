@@ -1671,7 +1671,7 @@ mod tests {
         assert_eq!(
             out,
             [1, 8, 2, 3, 4, 5, 6],
-            "dropped before 芋圓, 小九 rested"
+            "dropped before 芋圓, 藻藻 rested"
         );
         assert_eq!(slint::Model::row_count(&ui.get_den_pets()), 1);
         // Saved for the pet process (not running here).

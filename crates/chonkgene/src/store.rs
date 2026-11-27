@@ -275,6 +275,15 @@ impl PetSave {
             return false;
         };
         let mut changed = false;
+        // A name it had by default before (the fox's 小九): today's.
+        if species
+            .former_names_zh()
+            .iter()
+            .any(|old| is_default(&self.name, old))
+        {
+            self.name = i18n::tr_in(lang, species.default_name_zh()).into();
+            changed = true;
+        }
         let mut fields = vec![(&mut self.name, species.default_name_zh())];
         if !self.own_you {
             fields.push((&mut self.you, species.default_you_zh()));
@@ -724,6 +733,35 @@ mod tests {
         munchkin.name = "小麻糬".into();
         munchkin.localize_defaults_in(Lang::En);
         assert_eq!(munchkin.name, "小麻糬");
+    }
+
+    /// Roger, 2026-11-27: the fox's default name is 藻藻 now (after 玉藻前).
+    /// A fox still called 小九 in any language was never renamed: she
+    /// takes the new name in the language shown; one renamed keeps hers.
+    #[test]
+    fn a_fox_still_called_by_her_old_default_takes_the_new_one() {
+        let mut rng = fastrand::Rng::with_seed(1);
+        for (was, lang) in [
+            (i18n::tr_in(Lang::ZhTw, "小九"), Lang::ZhTw),
+            (i18n::tr_in(Lang::En, "小九"), Lang::Ja),
+            (i18n::tr_in(Lang::Ja, "小九"), Lang::En),
+        ] {
+            let mut fox = PetSave::adopt(1, Species::Fox, "white", &mut rng);
+            fox.name = was.into();
+            assert!(fox.localize_defaults_in(lang), "{was}");
+            assert_eq!(fox.name, i18n::tr_in(lang, "藻藻"), "{was}");
+        }
+        assert_ne!(i18n::tr_in(Lang::En, "小九"), "小九", "Kyu untranslated");
+        assert_eq!(Species::Fox.default_name_zh(), "藻藻");
+        let mut fox = PetSave::adopt(1, Species::Fox, "white", &mut rng);
+        fox.name = "小狐狸".into();
+        fox.localize_defaults_in(Lang::ZhTw);
+        assert_eq!(fox.name, "小狐狸");
+        // Nobody else had another name before.
+        let mut shiba = PetSave::adopt(2, Species::Shiba, "red", &mut rng);
+        shiba.name = "小九".into();
+        shiba.localize_defaults_in(Lang::ZhTw);
+        assert_eq!(shiba.name, "小九", "a Shiba named 小九 by hand");
     }
 
     #[test]
