@@ -41,6 +41,52 @@ fn with_alpha(c: [u8; 4], a: f32) -> [u8; 4] {
     ]
 }
 
+/// The colour of the fox's magic (her coat's, see `chonkgene_rig::Coat::
+/// magic`; PLAN §8, Roger's twenty-eighth pass, item 3), and the shades her
+/// effects are drawn in: what glows is the colour itself, or for a dark
+/// one (night's dark purple) the colour lightened, with a mist of the dark
+/// colour round it (a dark colour cannot glow: it reads as a shadow).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Magic(pub [u8; 3]);
+
+impl Default for Magic {
+    fn default() -> Self {
+        Magic::DEFAULT
+    }
+}
+
+impl Magic {
+    /// The pale blue the fox-fire always was.
+    pub const DEFAULT: Magic = Magic([0xA8, 0xD4, 0xFF]);
+
+    fn lum(self) -> f32 {
+        let [r, g, b] = self.0.map(|c| f32::from(c) / 255.0);
+        0.3 * r + 0.59 * g + 0.11 * b
+    }
+
+    /// Too dark to glow (see [`Magic`]).
+    pub fn dark(self) -> bool {
+        self.lum() < 0.4
+    }
+
+    /// What glows, lightened toward white by `k` more (as paint.wgsl
+    /// `magic_light` for the glow itself), opacity `a`.
+    pub fn light(self, k: f32, a: u8) -> [u8; 4] {
+        let lift = ((0.5 - self.lum()) * 1.6).clamp(0.0, 0.6);
+        let k = 1.0 - (1.0 - lift) * (1.0 - k.clamp(0.0, 1.0));
+        let [r, g, b] = self
+            .0
+            .map(|c| (f32::from(c) + (255.0 - f32::from(c)) * k).round() as u8);
+        [r, g, b, a]
+    }
+
+    /// The colour as it is, opacity `a`: a dark one's mist.
+    pub fn mist(self, a: u8) -> [u8; 4] {
+        let [r, g, b] = self.0;
+        [r, g, b, a]
+    }
+}
+
 fn circle(pm: &mut Pixmap, x: f32, y: f32, r: f32, c: [u8; 4]) {
     if let Some(p) = PathBuilder::from_circle(x, y, r.max(0.1)) {
         pm.fill_path(
@@ -680,7 +726,7 @@ impl Fx {
 
 /// Draw `fx`, `t` seconds in, at `at` (pixels of `pm`: the top of the head
 /// for hearts, the feet for dust, the waterline for a splash).
-pub fn effect(pm: &mut Pixmap, fx: Fx, at: (f32, f32), s: f32, t: f32) {
+pub fn effect(pm: &mut Pixmap, fx: Fx, at: (f32, f32), s: f32, t: f32, magic: Magic) {
     let u = (t / fx.secs()).clamp(0.0, 1.0);
     let fade = 1.0 - u * u;
     let (x, y) = at;
@@ -756,9 +802,10 @@ pub fn effect(pm: &mut Pixmap, fx: Fx, at: (f32, f32), s: f32, t: f32) {
         }
         Fx::Bubble | Fx::Dream => {
             let fade = (1.0 - ((u - 0.92) / 0.08).max(0.0)).min(1.0);
-            bubble(pm, at, (74.0 * s, 70.0 * s), s, t, fade, fx == Fx::Dream);
+            let size = (74.0 * s, 70.0 * s);
+            bubble(pm, at, size, s, t, fade, fx == Fx::Dream, magic);
         }
-        Fx::Spell => spell(pm, at, s, t, u, fade),
+        Fx::Spell => spell(pm, at, s, t, u, fade, magic),
         Fx::Brawl => brawl(pm, at, s, t, 1.0 - ((u - 0.9) / 0.1).max(0.0)),
         Fx::Fright => fright(pm, at, s, t, fade),
         Fx::Notes => notes(pm, at, s, t, fade),
@@ -805,6 +852,7 @@ pub fn effect(pm: &mut Pixmap, fx: Fx, at: (f32, f32), s: f32, t: f32) {
 /// The spell's bubble (or a dream bubble) round a pet, `t` seconds in:
 /// as [`effect`] for [`Fx::Bubble`] and [`Fx::Dream`], but in the middle
 /// `at` and of the radii `size` that [`bubble_fit`] found for it.
+#[allow(clippy::too_many_arguments)]
 pub fn bubble_round(
     pm: &mut Pixmap,
     dream: bool,
@@ -812,10 +860,11 @@ pub fn bubble_round(
     size: (f32, f32),
     s: f32,
     t: f32,
+    magic: Magic,
 ) {
     let u = (t / Fx::Bubble.secs()).clamp(0.0, 1.0);
     let fade = (1.0 - ((u - 0.92) / 0.08).max(0.0)).min(1.0);
-    bubble(pm, at, size, s, t, fade, dream);
+    bubble(pm, at, size, s, t, fade, dream, magic);
 }
 
 /// Where the opaque part of `pm` is (alpha over half): left, top, right,
@@ -860,9 +909,11 @@ pub fn bubble_fit(
     ((cx, cy), (rx, ry))
 }
 
-/// The spell's bubble round a pet (see [`Fx::Bubble`]): see-through, a
-/// bright rim, a highlight and a twinkle going round it; `dream`: lilac,
-/// with a crescent moon and stars (see [`Fx::Dream`]).
+/// The spell's bubble round a pet (see [`Fx::Bubble`]): see-through in
+/// the caster's `magic` colour, a bright rim, a highlight and a twinkle
+/// going round it; `dream`: lilac, with a crescent moon and stars (see
+/// [`Fx::Dream`]; a dream's look whoever cast it).
+#[allow(clippy::too_many_arguments)]
 fn bubble(
     pm: &mut Pixmap,
     at: (f32, f32),
@@ -871,6 +922,7 @@ fn bubble(
     t: f32,
     fade: f32,
     dream: bool,
+    magic: Magic,
 ) {
     let (x, y) = at;
     // Swelling up as it forms, wobbling a little after.
@@ -888,7 +940,7 @@ fn bubble(
             if dream {
                 [0xD8, 0xC8, 0xFF, 70]
             } else {
-                [0xBF, 0xE6, 0xFF, 60]
+                magic.light(0.45, 60)
             },
             fade,
         ),
@@ -921,13 +973,20 @@ fn bubble(
     if let Some(r) = Rect::from_xywh(x - rx, y - ry, 2.0 * rx, 2.0 * ry) {
         rim.push_oval(r);
     }
-    stroke_path(
-        pm,
-        rim,
-        with_alpha([0xF4, 0xFB, 0xFF, 200], fade),
-        2.4 * s,
-        id,
-    );
+    // A dark magic's mist round the rim (the dream's stays lilac).
+    if !dream && magic.dark() {
+        let mut mist = PathBuilder::new();
+        if let Some(r) = Rect::from_xywh(x - rx, y - ry, 2.0 * rx, 2.0 * ry) {
+            mist.push_oval(r);
+        }
+        stroke_path(pm, mist, with_alpha(magic.mist(90), fade), 6.0 * s, id);
+    }
+    let rim_c = if dream {
+        [0xF4, 0xFB, 0xFF, 200]
+    } else {
+        magic.light(0.85, 200)
+    };
+    stroke_path(pm, rim, with_alpha(rim_c, fade), 2.4 * s, id);
     let mut shine = PathBuilder::new();
     shine.move_to(x - 0.75 * rx, y - 0.2 * ry);
     shine.quad_to(x - 0.7 * rx, y - 0.75 * ry, x - 0.15 * rx, y - 0.85 * ry);
@@ -948,8 +1007,9 @@ fn bubble(
     );
 }
 
-/// The fox's casting ring (see [`Fx::Spell`]).
-fn spell(pm: &mut Pixmap, at: (f32, f32), s: f32, t: f32, u: f32, fade: f32) {
+/// The fox's casting ring (see [`Fx::Spell`]), the column of light and
+/// the fox-fire in her coat's `magic` colour.
+fn spell(pm: &mut Pixmap, at: (f32, f32), s: f32, t: f32, u: f32, fade: f32, magic: Magic) {
     let (x, y) = at;
     let id = Transform::identity();
     // Wide, and the fire tall and big, so it reads as a spell from across
@@ -971,28 +1031,30 @@ fn spell(pm: &mut Pixmap, at: (f32, f32), s: f32, t: f32, u: f32, fade: f32) {
             y - kf * 0.75 * rise,
             rx * (1.0 - 0.45 * kf),
             ry + kf * 0.3 * rise,
-            with_alpha([0xA8, 0xD4, 0xFF, 22], a),
+            with_alpha(magic.light(0.2, 22), a),
             id,
         );
     }
-    oval(
-        pm,
-        x,
-        y,
-        rx,
-        ry,
-        with_alpha([0xA8, 0xD8, 0xFF, 90], fade),
-        id,
-    );
-    for (k, c) in [[0x9E, 0xD4, 0xFF, 240], [0xFF, 0xB3, 0xD1, 220]]
+    oval(pm, x, y, rx, ry, with_alpha(magic.light(0.2, 90), fade), id);
+    // Two rings, the outer the magic's glow and the inner paler; a dark
+    // magic's mist round each.
+    for (k, c) in [magic.light(0.0, 240), magic.light(0.45, 220)]
         .iter()
         .enumerate()
     {
         let f = 1.0 - 0.18 * k as f32;
-        let mut ring = PathBuilder::new();
-        if let Some(r) = Rect::from_xywh(x - f * rx, y - f * ry, 2.0 * f * rx, 2.0 * f * ry) {
-            ring.push_oval(r);
+        let oval_at = |pb: &mut PathBuilder| {
+            if let Some(r) = Rect::from_xywh(x - f * rx, y - f * ry, 2.0 * f * rx, 2.0 * f * ry) {
+                pb.push_oval(r);
+            }
+        };
+        if magic.dark() {
+            let mut mist = PathBuilder::new();
+            oval_at(&mut mist);
+            stroke_path(pm, mist, with_alpha(magic.mist(110), fade), 9.0 * s, id);
         }
+        let mut ring = PathBuilder::new();
+        oval_at(&mut ring);
         stroke_path(pm, ring, with_alpha(*c, fade), 3.4 * s, id);
     }
     // A flash going out as it is cast.
@@ -1024,10 +1086,11 @@ fn spell(pm: &mut Pixmap, at: (f32, f32), s: f32, t: f32, u: f32, fade: f32) {
             x + a.cos() * rx * (1.0 - 0.35 * p) + sway * p,
             y - p * rise + a.sin() * ry,
         );
-        let c = if k % 2 == 0 {
-            [0x8F, 0xCF, 0xFF, 255]
-        } else {
-            [0xFF, 0xA8, 0xCC, 255]
+        // Every other flame paler (a dark magic's: its mist).
+        let c = match (k % 2, magic.dark()) {
+            (0, _) => magic.light(0.0, 255),
+            (_, true) => magic.mist(255),
+            _ => magic.light(0.45, 255),
         };
         let alpha = fade * (1.0 - p * p) * grow;
         flame(pm, (ox, oy), (2.3 - 1.1 * p) * s, c, t + k as f32, alpha);
@@ -3300,15 +3363,19 @@ pub fn pond_front(pm: &mut Pixmap, pond: (f32, f32), x: f32, line: f32, s: f32, 
     }
 }
 
-/// The fox's fire: little orbs of blue and pink fox-fire hanging round the
-/// pet's middle `at`, each in its own place, bobbing and drifting a little
-/// (Roger: not going round and round), `t` seconds in.
-pub fn foxfire(pm: &mut Pixmap, at: (f32, f32), reach: (f32, f32), s: f32, t: f32) {
+/// The fox's fire: little orbs of fox-fire in her `magic` colour's shades
+/// hanging round the pet's middle `at`, each in its own place, bobbing and
+/// drifting a little (Roger: not going round and round), `t` seconds in.
+pub fn foxfire(pm: &mut Pixmap, at: (f32, f32), reach: (f32, f32), s: f32, t: f32, magic: Magic) {
     let colours = [
-        [0x8F, 0xC8, 0xFF, 230],
-        [0xFF, 0x9E, 0xC6, 230],
-        [0xB6, 0xA8, 0xFF, 230],
-        [0x8F, 0xE8, 0xF0, 230],
+        magic.light(0.0, 230),
+        if magic.dark() {
+            magic.mist(230)
+        } else {
+            magic.light(0.4, 230)
+        },
+        magic.light(0.2, 230),
+        magic.light(0.6, 230),
     ];
     for (k, c) in colours.iter().enumerate() {
         let kf = k as f32;
@@ -3760,7 +3827,14 @@ mod tests {
     fn effects_fade_out_by_their_end() {
         for fx in Fx::ALL {
             let mut pm = Pixmap::new(160, 160).unwrap();
-            effect(&mut pm, fx, (80.0, 90.0), 1.0, 0.3 * fx.secs());
+            effect(
+                &mut pm,
+                fx,
+                (80.0, 90.0),
+                1.0,
+                0.3 * fx.secs(),
+                Magic::DEFAULT,
+            );
             let early = pm
                 .data()
                 .as_chunks::<4>()
@@ -3770,7 +3844,7 @@ mod tests {
                 .count();
             assert!(early > 20, "{fx:?} shows nothing early on");
             let mut pm = Pixmap::new(160, 160).unwrap();
-            effect(&mut pm, fx, (80.0, 90.0), 1.0, fx.secs());
+            effect(&mut pm, fx, (80.0, 90.0), 1.0, fx.secs(), Magic::DEFAULT);
             let end = pm
                 .data()
                 .as_chunks::<4>()
@@ -3787,10 +3861,76 @@ mod tests {
     #[test]
     fn a_tussle_cloud_hides_the_pet_behind_it() {
         let mut pm = Pixmap::new(260, 190).unwrap();
-        effect(&mut pm, Fx::Brawl, (130.0, 110.0), 1.0, 1.0);
+        effect(&mut pm, Fx::Brawl, (130.0, 110.0), 1.0, 1.0, Magic::DEFAULT);
         for (x, y) in [(130, 110), (70, 110), (190, 110), (130, 70), (130, 150)] {
             let a = pm.pixel(x, y).map_or(0, |p| p.alpha());
             assert_eq!(a, 255, "the pet shows through at ({x}, {y})");
         }
+    }
+}
+
+/// Roger's twenty-eighth pass, item 3: the fox's spell, fox-fire and
+/// bubble in her coat's magic colour; a dark one glows lightened, with a
+/// mist of its own colour round it.
+#[cfg(test)]
+mod magic_colours {
+    use super::*;
+
+    /// The average colour of what `draw` paints (weighted by opacity).
+    fn tint(draw: impl Fn(&mut Pixmap)) -> [f32; 3] {
+        let mut pm = Pixmap::new(400, 400).unwrap();
+        draw(&mut pm);
+        let (mut sum, mut n) = ([0.0f32; 3], 0.0f32);
+        for p in pm.pixels() {
+            let a = f32::from(p.alpha());
+            if a > 10.0 {
+                let c = p.demultiply();
+                sum[0] += f32::from(c.red()) * a;
+                sum[1] += f32::from(c.green()) * a;
+                sum[2] += f32::from(c.blue()) * a;
+                n += a * 255.0;
+            }
+        }
+        sum.map(|v| v / n.max(1.0))
+    }
+
+    #[test]
+    fn her_spell_is_drawn_in_her_magic_colour() {
+        let (red, blue) = (Magic([0xE3, 0x35, 0x4B]), Magic([0x7C, 0xC8, 0xF4]));
+        let spell = |m: Magic| tint(|pm| effect(pm, Fx::Spell, (200.0, 300.0), 1.0, 0.6, m));
+        let fire = |m: Magic| tint(|pm| foxfire(pm, (200.0, 200.0), (120.0, 60.0), 1.0, 0.5, m));
+        let bubble = |m: Magic| tint(|pm| effect(pm, Fx::Bubble, (200.0, 200.0), 1.0, 1.0, m));
+        for (what, f) in [
+            ("spell", &spell as &dyn Fn(Magic) -> [f32; 3]),
+            ("fox-fire", &fire),
+            ("bubble", &bubble),
+        ] {
+            let (r, b) = (f(red), f(blue));
+            assert!(r[0] > r[2] + 0.05, "{what} red: {r:?}");
+            assert!(b[2] > b[0] + 0.05, "{what} blue: {b:?}");
+        }
+        // Dark: glows lightened, and its own colour shows as mist.
+        let night = Magic([0x5B, 0x2D, 0x91]);
+        assert!(night.dark() && !red.dark() && !blue.dark());
+        let [r, g, b, _] = night.light(0.0, 255);
+        let lum = 0.3 * f32::from(r) + 0.59 * f32::from(g) + 0.11 * f32::from(b);
+        assert!(lum > 0.5 * 255.0 && b > g, "night glows lilac: {r} {g} {b}");
+        let darkest = |m: Magic| {
+            let mut pm = Pixmap::new(400, 400).unwrap();
+            effect(&mut pm, Fx::Spell, (200.0, 300.0), 1.0, 0.6, m);
+            pm.pixels()
+                .iter()
+                .filter(|p| p.alpha() > 60)
+                .map(|p| {
+                    let c = p.demultiply();
+                    u32::from(c.red()) + u32::from(c.green()) + u32::from(c.blue())
+                })
+                .min()
+                .unwrap()
+        };
+        assert!(
+            darkest(night) < darkest(blue),
+            "night's mist round the light"
+        );
     }
 }

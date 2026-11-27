@@ -120,6 +120,7 @@
 烏骨 → Silkie
 金色 → Gold
 夜色 → Night
+跟毛色 → Match fur
 雪狐 → Snow fox
 其他 → Other
 

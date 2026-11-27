@@ -151,6 +151,11 @@ impl Sprites {
         s
     }
 
+    /// The coat's magic colour (see `chonkgene_rig::Coat::magic`).
+    pub fn magic(&self) -> [u8; 4] {
+        coat_magic(&self.model, self.variant().coat)
+    }
+
     pub fn variant(&self) -> Variant {
         self.look
     }
@@ -319,4 +324,13 @@ fn ready(sprite: Sprite) -> Option<Ready> {
         pixmap,
         offset: (x0 as f32, y0 as f32),
     })
+}
+
+/// Coat `coat`'s magic colour on `model` (the first coat's past the end).
+pub fn coat_magic(model: &Model, coat: usize) -> [u8; 4] {
+    model
+        .coats
+        .get(coat)
+        .or(model.coats.first())
+        .map_or(chonkgene_rig::MAGIC, |c| c.magic)
 }

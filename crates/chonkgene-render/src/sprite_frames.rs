@@ -102,6 +102,11 @@ impl SpriteRenderer {
         }
     }
 
+    /// The coat's magic colour (see `chonkgene_rig::Coat::magic`).
+    pub fn magic(&self) -> [u8; 4] {
+        self.sprites.magic()
+    }
+
     pub fn set_coat(&mut self, coat: usize) {
         let v = self.sprites.variant();
         self.sprites.set_variant(Variant { coat, ..v });

@@ -77,14 +77,28 @@ fn hair_label(hair: &str) -> &'static str {
     }
 }
 
-/// Her hair colours as dots: the hair, and its tips under it.
-fn hair_rows(model: &Model) -> ModelRc<CoatRow> {
+/// Her hair colours as dots: the hair, and its tips under it. First
+/// 「跟毛色」 (id empty, the default: PLAN §8, Roger's twenty-eighth pass,
+/// item 2), in the colours of her coat `coat` now; then each one of its own.
+fn hair_rows(model: &Model, coat: &str) -> ModelRc<CoatRow> {
     let slot = |name: &str| model.slots.iter().position(|s| s == name);
     let (hair, tip) = (slot("hair"), slot("hairtip"));
-    let rows: Vec<CoatRow> = model
-        .hairs
-        .iter()
-        .map(|d| {
+    let own = model
+        .coat(coat)
+        .or(Some(0))
+        .and_then(|i| model.coats.get(i))
+        .map(|c| {
+            let pick = |s: Option<usize>| s.map_or([0xE6, 0xEB, 0xF3, 0xFF], |i| c.colors[i]);
+            CoatRow {
+                label: tr("跟毛色").into(),
+                id: SharedString::new(),
+                main: color(pick(hair)),
+                light: color(pick(tip)),
+            }
+        });
+    let rows: Vec<CoatRow> = own
+        .into_iter()
+        .chain(model.hairs.iter().map(|d| {
             let pick = |s: Option<usize>| {
                 d.colors
                     .iter()
@@ -97,7 +111,7 @@ fn hair_rows(model: &Model) -> ModelRc<CoatRow> {
                 main: color(pick(hair)),
                 light: color(pick(tip)),
             }
-        })
+        }))
         .collect();
     ModelRc::new(VecModel::from(rows))
 }
@@ -604,12 +618,12 @@ fn show_pet(ui: &SettingsWindow, st: &mut State) {
             FormLock::Human => 2,
         });
         ui.set_hairdo(HAIRDOS.iter().position(|h| *h == p.hairdo).unwrap_or(0) as i32);
-        ui.set_hairs(hair_rows(&model));
-        let first = model.hairs.first().map(|d| d.name.as_str()).unwrap_or("");
+        ui.set_hairs(hair_rows(&model, &p.coat));
+        // None chosen (or one gone): 「跟毛色」.
         let hair = if model.hairs.iter().any(|d| d.name == p.hair) {
             p.hair.as_str()
         } else {
-            first
+            ""
         };
         ui.set_hair(hair.into());
     }
@@ -1003,6 +1017,13 @@ fn setup(
     on!(on_coat_picked, |ui, st, id: SharedString| {
         ui.set_coat(id.clone());
         edit(&ui, st, |p| p.coat = id.to_string());
+        // 「跟毛色」's dot shows the new coat's hair.
+        if ui.get_has_human()
+            && let Some(species) = st.pet_mut().and_then(|p| p.species())
+            && let Ok(model) = chonkgene_render::skin::human_model(species.id())
+        {
+            ui.set_hairs(hair_rows(&model, &id));
+        }
     });
     // Her human form: kept in one form (she takes it at once), or free;
     // her hairdo and hair colour (seen in the preview if she is in it).

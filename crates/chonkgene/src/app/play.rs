@@ -773,6 +773,9 @@ pub(super) struct Fun {
     pub chin_hand: Option<props::ChinHand>,
     pub chin_down: bool,
     pub chin_out: Option<chonkgene_core::mind::Out>,
+    /// The magic colour of whoever put it in a spell's bubble (her coat's;
+    /// PLAN §8, Roger's twenty-eighth pass, item 3).
+    pub bubble_magic: props::Magic,
     /// When it last finished a 肉肉舞 (it does not dance again at once).
     pub danced: f64,
     /// When it last went into a pond to join the others.
@@ -1364,6 +1367,7 @@ impl Pet {
                 (0.42 * w, 0.18 * h),
                 s,
                 t as f32,
+                self.renderer.magic(),
             );
         }
         // Your fingers round its back, behind it (Roger's twenty-first
@@ -1489,7 +1493,8 @@ impl Pet {
         for &(fx, since) in &self.fun.fx {
             if let (Fx::Bubble | Fx::Dream, Some((at, size))) = (fx, self.fun.bubble_fit) {
                 let t = (t - since) as f32;
-                props::bubble_round(canvas, fx == Fx::Dream, at, size, s, t);
+                let magic = self.fun.bubble_magic;
+                props::bubble_round(canvas, fx == Fx::Dream, at, size, s, t, magic);
                 continue;
             }
             let at = match fx {
@@ -1500,7 +1505,12 @@ impl Pet {
                 Fx::Spell => (w / 2.0, floor),
                 Fx::Bubble | Fx::Dream | Fx::Brawl => (w / 2.0, floor - 0.95 * PPU * s),
             };
-            props::effect(canvas, fx, at, s, (t - since) as f32);
+            // Her own spell in her magic's colour; a bubble in its caster's.
+            let magic = match fx {
+                Fx::Bubble | Fx::Dream => self.fun.bubble_magic,
+                _ => self.renderer.magic(),
+            };
+            props::effect(canvas, fx, at, s, (t - since) as f32, magic);
         }
         if let Some((x0, x1)) = hidden_part
             && let Some(r) = tiny_skia::Rect::from_ltrb(x0, 0.0, x1, h)

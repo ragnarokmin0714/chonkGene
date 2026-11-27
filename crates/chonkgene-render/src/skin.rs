@@ -3321,3 +3321,69 @@ mod tests {
         }
     }
 }
+
+/// Roger's twenty-eighth pass, items 2 and 3: the fox's coats, in both
+/// forms, each with one magic colour (白色 red, 雪狐 pale blue, 金色 gold,
+/// 夜色 dark purple), her seal gold on 金色 and a bright violet on 夜色;
+/// her hair 「跟毛色」 by default, 金色 and 夜色 hair as those coats'
+/// tails (the fur to the tail tips), the presets of those names the same.
+#[cfg(test)]
+mod fox_colours {
+    use super::*;
+
+    fn rgb(c: [u8; 4]) -> [f32; 3] {
+        [c[0], c[1], c[2]].map(|v| f32::from(v) / 255.0)
+    }
+
+    #[test]
+    fn each_coat_has_its_magic_and_its_hair_matches_its_tails() {
+        let (beast, _) = quad("fox").unwrap();
+        let human = human_model("fox").unwrap();
+        for model in [&beast, &human] {
+            let slot = |n: &str| model.slots.iter().position(|s| s == n).unwrap();
+            let coat = |n: &str| model.coats.iter().find(|c| c.name == n).unwrap();
+            let [r, g, b] = rgb(coat("white").magic);
+            assert!(r > 0.8 && g < 0.4 && b < 0.4, "white: red magic");
+            let [r, g, b] = rgb(coat("snow").magic);
+            assert!(b > 0.85 && b > g && g > r, "snow: pale blue magic");
+            let [r, g, b] = rgb(coat("gold").magic);
+            assert!(r > 0.9 && g > 0.6 && b < 0.35, "gold: gold magic");
+            let [r, g, b] = rgb(coat("night").magic);
+            assert!(
+                b > r && r > g && r + g + b < 1.3,
+                "night: dark purple magic"
+            );
+            // (Not called `mark`: tools/i18n/extract.py takes mark("…")
+            // for words to translate.)
+            let seal = |n: &str| rgb(coat(n).colors[slot("mark")]);
+            let [r, g, b] = seal("gold");
+            assert!(r > 0.9 && g > 0.6 && b < 0.35, "gold: a gold seal");
+            let [r, g, b] = seal("night");
+            assert!(
+                b > 0.9 && r > g && r + g + b > 2.0,
+                "night: a bright violet seal"
+            );
+        }
+        // Her hair (the human form's): the coat's own is 「跟毛色」.
+        let slot = |n: &str| human.slots.iter().position(|s| s == n).unwrap();
+        let (hair, tip) = (slot("hair"), slot("hairtip"));
+        for name in ["gold", "night"] {
+            let coat = human.coats.iter().find(|c| c.name == name).unwrap();
+            assert_eq!(coat.colors[hair], coat.colors[slot("fur")], "{name} hair");
+            assert_eq!(
+                coat.colors[tip],
+                coat.colors[slot("tailtip")],
+                "{name} tips"
+            );
+            let dye = human.hairs.iter().find(|d| d.name == name).unwrap();
+            assert_eq!(
+                dye.colors,
+                vec![(hair, coat.colors[hair]), (tip, coat.colors[tip])],
+                "the {name} hair matches the {name} coat"
+            );
+        }
+        // Chosen apart from the coat, a hair colour still goes over it.
+        let red = human.dyed("red");
+        assert_ne!(red.coats[0].colors[hair], human.coats[0].colors[hair]);
+    }
+}

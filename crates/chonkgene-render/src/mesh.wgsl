@@ -19,7 +19,9 @@ struct Uniforms {
     spots: vec4<f32>,
     blush: vec4<f32>,
     frame: vec4<f32>,
-    // x: big chibi eyes (1.0); y: the marks at rest are the seal (1.0).
+    // x: big chibi eyes (1.0); y: the marks at rest are the seal (1.0);
+    // z: cheeks rosy; w: the coat's magic colour, packed (paint.wgsl
+    // `magic`).
     style: vec4<f32>,
     palette: array<vec4<f32>, 16>,
     // Radii of the parts the eyes and mouth are painted on; eye_r.w: the
@@ -209,10 +211,13 @@ fn woven(b: vec2<f32>, half: f32, base: vec3<f32>, gold: vec3<f32>, px: f32) -> 
 }
 
 // The fox casting (fwd.w, as her face's glow): her tails burn from white at
-// the root through gold and orange to red at the tips (Roger's picture
-// 施法狀態), the colours licking up and down them as a flame flickers, and
-// glowing a little of their own. `m` is the vertex's mouth.w: minus how much
-// it is a tail's, and past -1 how far along it (mesh.rs).
+// the root through her coat's magic colour to a deeper one at the tips
+// (Roger's picture 施法狀態; his twenty-eighth pass, item 3: one colour per
+// coat), a warm one (white's red, gold's gold) going through gold on the
+// way, as a flame does; the colours licking up and down them as a flame
+// flickers, and glowing a little of their own. `m` is the vertex's
+// mouth.w: minus how much it is a tail's, and past -1 how far along it
+// (mesh.rs).
 fn flame_tails(m: f32, pp: vec3<f32>, ao: f32, lit: vec3<f32>) -> vec3<f32> {
     let g = u.fwd.w;
     let tail = clamp01(-m);
@@ -223,12 +228,17 @@ fn flame_tails(m: f32, pp: vec3<f32>, ao: f32, lit: vec3<f32>) -> vec3<f32> {
     let t = u.mouth_r.w;
     let flick = vnoise(pp * 2.6 + vec3<f32>(0.0, -2.4 * t, 0.9 * t));
     let h = clamp01(s + 0.28 * (flick - 0.5));
-    var fc = mix(vec3<f32>(1.0, 0.99, 0.95), vec3<f32>(1.0, 0.84, 0.36), ss(0.3, 0.55, h));
-    fc = mix(fc, vec3<f32>(1.0, 0.55, 0.18), ss(0.55, 0.78, h));
-    fc = mix(fc, vec3<f32>(0.93, 0.21, 0.17), ss(0.8, 0.97, h));
-    // The fur's own light and shade kept under the colour, a glow on top.
-    let shade = dot(lit, vec3<f32>(0.3, 0.55, 0.15));
-    let burn = fc * (0.5 + 0.55 * shade) + vec3<f32>(0.08, 0.05, 0.0) * flick;
+    let mc = magic();
+    let glow = magic_light(mc);
+    let warm = clamp01((mc.r - mc.b) * 2.0);
+    let light = mix(mix(glow, vec3<f32>(1.0), 0.45), vec3<f32>(1.0, 0.84, 0.36), 0.8 * warm);
+    var fc = mix(vec3<f32>(1.0, 0.99, 0.95), light, ss(0.3, 0.55, h));
+    fc = mix(fc, mc, ss(0.55, 0.78, h));
+    fc = mix(fc, mc * 0.8, ss(0.8, 0.97, h));
+    // The fur's own light and shade kept under the colour, a glow on top
+    // (half of it: on a dark coat, night's, all of it greyed the flames).
+    let shade = 0.5 + 0.5 * dot(lit, vec3<f32>(0.3, 0.55, 0.15));
+    let burn = fc * (0.5 + 0.55 * shade) + 0.09 * glow * flick;
     return mix(lit, clamp(burn, vec3<f32>(0.0), vec3<f32>(1.0)), g * tail * ss(0.0, 0.25, s + 0.15));
 }
 

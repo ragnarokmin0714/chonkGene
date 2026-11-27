@@ -198,6 +198,9 @@ impl Default for GaitFile {
 struct CoatFile {
     name: String,
     colors: HashMap<String, String>,
+    /// The colour of its magic (see [`Coat::magic`]).
+    #[serde(default)]
+    magic: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -409,8 +412,17 @@ pub struct Coat {
     pub name: String,
     /// One colour per slot, straight RGBA.
     pub colors: Vec<[u8; 4]>,
+    /// The colour of its magic (the fox's: her casting glow, the ring,
+    /// the column of light, the fox-fire, the spell's bubble, her burning
+    /// tails; PLAN §8, Roger's twenty-eighth pass, item 3), straight RGBA;
+    /// its `mark` colour where the coat names none, else [`MAGIC`].
+    pub magic: [u8; 4],
     swatch: (usize, usize),
 }
+
+/// A coat's magic with neither a colour of its own nor a `mark` slot: the
+/// pale blue the fox-fire always was.
+pub const MAGIC: [u8; 4] = [0xA8, 0xD4, 0xFF, 255];
 
 impl Coat {
     /// The two colours that stand for this coat in menus and settings.
@@ -830,9 +842,19 @@ fn resolve(file: ModelFile, shared: HashMap<String, PoseFile>) -> Result<Model, 
         if c.colors.len() != file.slots.len() {
             return Err(ctx(format!("coat {:?} names an unknown slot", c.name)));
         }
+        let magic = match &c.magic {
+            Some(hex) => parse_hex(hex)
+                .ok_or_else(|| ctx(format!("coat {:?}: bad magic {hex:?}", c.name)))?,
+            None => file
+                .slots
+                .iter()
+                .position(|s| s == "mark")
+                .map_or(MAGIC, |m| colors[m]),
+        };
         coats.push(Coat {
             name: c.name.clone(),
             colors,
+            magic,
             swatch,
         });
     }

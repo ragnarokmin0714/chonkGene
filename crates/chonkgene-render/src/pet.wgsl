@@ -52,7 +52,9 @@ struct Uniforms {
     blush: vec4<f32>,
     // Squash (> 0 flattens), breath (−1…1), lean (radians), lift (world units).
     frame: vec4<f32>,
-    // x: big chibi eyes (1.0); y: the marks at rest are the seal (1.0).
+    // x: big chibi eyes (1.0); y: the marks at rest are the seal (1.0);
+    // z: cheeks rosy (mesh.wgsl); w: the magic colour, packed (paint.wgsl
+    // `magic`; mesh.wgsl only).
     style: vec4<f32>,
     palette: array<vec4<f32>, 16>,
 }

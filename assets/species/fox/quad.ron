@@ -16,24 +16,29 @@
     canvas: Some((6.2, 4.1)),
     slots: ["fur", "light", "ear", "ink", "blush", "mark", "tip", "tailmid", "tailtip", "sock", "rope", "braid", "bell", "iris", "brow"],
     coats: [
-        (name: "white", colors: {
+        // Magic: red (Roger's twenty-eighth pass, item 3), as her seal.
+        (name: "white", magic: Some("#E3354B"), colors: {
             "fur": "#FFF9F3", "light": "#FFFFFF", "ear": "#F9C9D4", "ink": "#3B2A22", "blush": "#FF9AAE",
             "mark": "#E3354B", "tip": "#E04460", "tailmid": "#F7A8B8", "tailtip": "#D93050", "sock": "#FFF3F5", "rope": "#D8323F", "braid": "#F2C14E", "bell": "#F2C14E", "iris": "#E0607E", "brow": "#DCC2A8",
         }),
         // 雪狐 (Roger's picture 平常, and the 銀白 look of his parts
         // picture): snow-white, ice-blue marks and eyes, a white twisted
         // rope with a silver bell, pale blue tail tips.
-        (name: "snow", colors: {
+        (name: "snow", magic: Some("#7CC8F4"), colors: {
             "fur": "#FBFCFF", "light": "#FFFFFF", "ear": "#F6C9D3", "ink": "#2B2F3E", "blush": "#FFB3C4",
             "mark": "#5DB8EC", "tip": "#EEF4FB", "tailmid": "#DCEEFB", "tailtip": "#8CCBF2", "sock": "#F4F8FD", "rope": "#F4F6FA", "braid": "#B9C3D2", "bell": "#C9D2DE", "iris": "#4A8FDB", "brow": "#D5D2D4",
         }),
-        (name: "gold", colors: {
+        // The seal and magic gold (on her gold fur the seal gets a dark
+        // amber edge, paint.wgsl `seal_edge`).
+        (name: "gold", magic: Some("#F5B83D"), colors: {
             "fur": "#F0A050", "light": "#FFF8EE", "ear": "#FFD9C2", "ink": "#3B2A22", "blush": "#FF8C94",
-            "mark": "#E8454F", "tip": "#5A3A2E", "tailmid": "#FBD9B0", "tailtip": "#FFFFFF", "sock": "#5A3A2E", "rope": "#D8323F", "braid": "#F2C14E", "bell": "#F2C14E", "iris": "#B8742A", "brow": "#FFF1DC",
+            "mark": "#F2B035", "tip": "#5A3A2E", "tailmid": "#FBD9B0", "tailtip": "#FFFFFF", "sock": "#5A3A2E", "rope": "#D8323F", "braid": "#F2C14E", "bell": "#F2C14E", "iris": "#B8742A", "brow": "#FFF1DC",
         }),
-        (name: "night", colors: {
+        // The seal a bright violet; her magic a dark purple, drawn as mist
+        // round a light lilac core (a dark colour cannot glow).
+        (name: "night", magic: Some("#5B2D91"), colors: {
             "fur": "#4A4060", "light": "#EDE7F5", "ear": "#C9A4C9", "ink": "#231C2A", "blush": "#FF8CA8",
-            "mark": "#7FD4FF", "tip": "#2A2436", "tailmid": "#7A88C8", "tailtip": "#9FE3FF", "sock": "#2A2436", "rope": "#E6E6F2", "braid": "#AEB8CC", "bell": "#C8D0E0", "iris": "#58B8F0", "brow": "#9A8CB8",
+            "mark": "#A47BFF", "tip": "#2A2436", "tailmid": "#7A88C8", "tailtip": "#9FE3FF", "sock": "#2A2436", "rope": "#E6E6F2", "braid": "#AEB8CC", "bell": "#C8D0E0", "iris": "#58B8F0", "brow": "#9A8CB8",
         }),
     ],
     pivots: {

@@ -122,10 +122,12 @@ pub enum Cmd {
         id: u64,
     },
     /// Held up in the air by the spell, frozen mid-pose in a bubble of
-    /// light, for `secs`; then it drops softly onto its feet.
+    /// light (in the colour of `by`'s magic, the one who cast it), for
+    /// `secs`; then it drops softly onto its feet.
     Freeze {
         id: u64,
         secs: f32,
+        by: u64,
     },
     /// Just put down by the spell, frightened: it jumps back from the fox
     /// (at `from`), starts, and sweats.
@@ -733,7 +735,11 @@ impl Director {
                 let bounced = b.species == Species::Owl && b.id != a.id;
                 let secs = FLOAT_SECS;
                 if bounced {
-                    out.push(Cmd::Freeze { id: a.id, secs });
+                    out.push(Cmd::Freeze {
+                        id: a.id,
+                        secs,
+                        by: a.id,
+                    });
                     out.push(Cmd::Say {
                         id: a.id,
                         line: Line::SkitFloated,
@@ -743,7 +749,11 @@ impl Director {
                         .iter()
                         .filter(|p| (p.available || p.asleep) && p.id != a.id)
                     {
-                        out.push(Cmd::Freeze { id: p.id, secs });
+                        out.push(Cmd::Freeze {
+                            id: p.id,
+                            secs,
+                            by: a.id,
+                        });
                     }
                     if b.id != a.id {
                         out.push(Cmd::Say {
@@ -1681,7 +1691,8 @@ mod tests {
         let cmds = until_over(&mut dir, &mut cast, 0.0);
         assert!(cmds.contains(&Cmd::Freeze {
             id: 3,
-            secs: FLOAT_SECS
+            secs: FLOAT_SECS,
+            by: 1,
         }));
         assert!(!cmds.iter().any(|c| matches!(c, Cmd::Scare { id: 3, .. })));
         assert!(cmds.iter().any(|c| matches!(c, Cmd::Scare { id: 2, .. })));

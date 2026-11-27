@@ -46,9 +46,10 @@ fn leaf(uv: vec2<f32>, a: vec2<f32>, b: vec2<f32>, w: f32) -> f32 {
 }
 
 // The fox's marks at rest, as face.rs `fox_marks`: three leaves fanned up
-// on the forehead, two long strokes back along each cheek. x: coverage;
+// on the forehead, two long strokes back along each cheek. x: coverage
+// (of the marks grown by `grow`, for an edge round them; so the others);
 // y: how far out toward the ears (the strokes pale toward their ends).
-fn fox_marks(uv: vec2<f32>, aa: f32) -> vec2<f32> {
+fn fox_marks(uv: vec2<f32>, aa: f32, grow: f32) -> vec2<f32> {
     var d = leaf(uv, vec2<f32>(0.0, 0.45), vec2<f32>(0.0, 0.71), 0.05);
     for (var k = 0; k < 2; k++) {
         let side = select(-1.0, 1.0, k == 1);
@@ -56,7 +57,7 @@ fn fox_marks(uv: vec2<f32>, aa: f32) -> vec2<f32> {
         d = min(d, tapered(uv, vec2<f32>(0.5 * side, -0.2), vec2<f32>(0.88 * side, -0.1), 0.04, 0.005));
         d = min(d, tapered(uv, vec2<f32>(0.52 * side, -0.31), vec2<f32>(0.86 * side, -0.25), 0.034, 0.005));
     }
-    return vec2<f32>(ink(d, aa), ss(0.55, 0.86, abs(uv.x)));
+    return vec2<f32>(ink(d - grow, aa), ss(0.55, 0.86, abs(uv.x)));
 }
 
 // The seal in the fox's human form, as face.rs `seal_marks` at rest,
@@ -68,7 +69,7 @@ fn fox_marks(uv: vec2<f32>, aa: f32) -> vec2<f32> {
 // longer and bolder; a flick of eyeliner at each eye's outer corner, all
 // in the mark's colour (no rings round the eyes: the beast's seal has
 // them, hers does not). x: coverage; y: a soft halo round them.
-fn seal_marks(uv: vec2<f32>, aa: f32, eye: vec4<f32>, g: f32) -> vec2<f32> {
+fn seal_marks(uv: vec2<f32>, aa: f32, eye: vec4<f32>, g: f32, grow: f32) -> vec2<f32> {
     let ex = eye.x;
     let ey = eye.y;
     let rx = eye.z;
@@ -97,7 +98,7 @@ fn seal_marks(uv: vec2<f32>, aa: f32, eye: vec4<f32>, g: f32) -> vec2<f32> {
         let f1 = vec2<f32>((ex + (0.9 + 0.5 * ss(0.3, 1.0, g)) * rx) * side, ey + 0.75 * ry);
         d = min(d, tapered(uv, f0, f1, 0.016 * ss(0.2, 0.5, g), 0.002));
     }
-    return vec2<f32>(ink(d, aa), ink(d - 0.04, aa * 6.0));
+    return vec2<f32>(ink(d - grow, aa), ink(d - 0.04, aa * 6.0));
 }
 
 // Her cheek stroke `i` (0 the top) on side `side`, as face.rs `whisker`:
@@ -247,21 +248,70 @@ fn paint_eyes(q: vec3<f32>, r: vec3<f32>, base: vec3<f32>, px: f32) -> vec3<f32>
     if u.spots.w >= 0.0 {
         let mark = u.palette[u32(u.spots.w)].rgb;
         let g = u.fwd.w;
+        // A seal too like the fur or skin under it (the gold one on her
+        // gold fur) gets a thin edge round it, dark or light, so it shows
+        // (Roger's twenty-eighth pass, item 3).
+        let edge = seal_edge(mark, c);
         if u.style.y > 0.5 {
             // Her human form: her seal grows from its rest into the lotus.
-            c = mix(c, mix(mark, mark * 0.85, g), seal_marks(uv, aa, u.eye, g).x);
+            if edge.a > 0.0 {
+                c = mix(c, edge.rgb, edge.a * seal_marks(uv, aa, u.eye, g, SEAL_EDGE).x);
+            }
+            c = mix(c, mix(mark, mark * 0.85, g), seal_marks(uv, aa, u.eye, g, 0.0).x);
         } else {
             // Casting, the rest marks give way to the seal (咒印) as it
             // grows.
-            let m0 = fox_marks(uv, aa);
-            c = mix(c, mix(mark, white, 0.35 * m0.y), m0.x * (1.0 - ss(0.2, 0.7, g)));
+            let rest = 1.0 - ss(0.2, 0.7, g);
+            let spell = min(2.0 * g, 1.0);
+            if edge.a > 0.0 {
+                var e = fox_marks(uv, aa, SEAL_EDGE).x * rest;
+                if g > 0.0 {
+                    e = max(e, spell_marks(uv, aa, g, SEAL_EDGE).x * spell);
+                }
+                c = mix(c, edge.rgb, edge.a * e);
+            }
+            let m0 = fox_marks(uv, aa, 0.0);
+            c = mix(c, mix(mark, white, 0.35 * m0.y), m0.x * rest);
             if g > 0.0 {
-                let m = spell_marks(uv, aa, g);
-                c = mix(c, mark * 0.85, m.x * min(2.0 * g, 1.0));
+                let m = spell_marks(uv, aa, g, 0.0);
+                c = mix(c, mark * 0.85, m.x * spell);
             }
         }
     }
     return c;
+}
+
+// How far out the edge round a seal reaches past it, face units.
+const SEAL_EDGE: f32 = 0.014;
+
+// The edge a seal of colour `mark` needs over `under` (see the marks
+// above): rgb its colour (the mark darkened, or lightened if it is dark),
+// a how much (none once the two differ enough to tell apart).
+fn seal_edge(mark: vec3<f32>, under: vec3<f32>) -> vec4<f32> {
+    let need = 1.0 - ss(0.22, 0.4, length(mark - under));
+    let lum = dot(mark, vec3<f32>(0.3, 0.59, 0.11));
+    let rgb = select(mix(mark, vec3<f32>(1.0), 0.65), mark * 0.45, lum > 0.45);
+    return vec4<f32>(rgb, need);
+}
+
+// The coat's magic colour (mesh.wgsl's u.style.w, packed by mesh_gpu.rs
+// `pack_rgb`): the fox's casting glow and burning tails. None (pet.wgsl):
+// the red the glow always was.
+fn magic() -> vec3<f32> {
+    let p = u32(u.style.w + 0.5);
+    if p == 0u {
+        return vec3<f32>(1.0, 0.42, 0.36);
+    }
+    let v = p - 1u;
+    return vec3<f32>(f32((v >> 16u) & 255u), f32((v >> 8u) & 255u), f32(v & 255u)) / 255.0;
+}
+
+// What of magic colour `m` glows: itself, or a dark one lightened toward
+// white (a dark colour cannot glow; it would read as a shadow): night's
+// dark purple glows lilac.
+fn magic_light(m: vec3<f32>) -> vec3<f32> {
+    let lum = dot(m, vec3<f32>(0.3, 0.59, 0.11));
+    return mix(m, vec3<f32>(1.0), clamp((0.5 - lum) * 1.6, 0.0, 0.6));
 }
 
 // The fox casting (u.fwd.w, 0 … 1; mesh.wgsl only): her seal (咒印, after
@@ -271,7 +321,7 @@ fn paint_eyes(q: vec3<f32>, r: vec3<f32>, base: vec3<f32>, px: f32) -> vec3<f32>
 // brow; three stacked stripes along each cheek, drawn out toward the ears;
 // a ring round each eye.
 // x: how much of `uv` they cover; y: a soft halo round them.
-fn spell_marks(uv: vec2<f32>, aa: f32, g: f32) -> vec2<f32> {
+fn spell_marks(uv: vec2<f32>, aa: f32, g: f32, grow: f32) -> vec2<f32> {
     let rise = ss(0.0, 0.6, g);
     let top = CREST_AT + vec2<f32>(0.0, 0.36 * rise);
     var d = tapered(uv, CREST_AT, top, 0.065 * rise, 0.004);
@@ -302,7 +352,7 @@ fn spell_marks(uv: vec2<f32>, aa: f32, g: f32) -> vec2<f32> {
         let ring = length((uv - ec) / vec2<f32>(u.eye.z * 1.22, u.eye.w * 1.18)) - 1.0;
         d = min(d, abs(ring) * u.eye.z - 0.01 * ss(0.5, 1.0, g));
     }
-    return vec2<f32>(ink(d, aa), ink(d - 0.04, aa * 6.0));
+    return vec2<f32>(ink(d - grow, aa), ink(d - 0.04, aa * 6.0));
 }
 
 // Light the casting fox gives off, over the lit colour `lit`: the forehead
@@ -318,7 +368,8 @@ fn spell_glow(q: vec3<f32>, r: vec3<f32>, lit: vec3<f32>, px: f32) -> vec3<f32> 
     let aa = px / r.y;
     let white = vec3<f32>(1.0);
     let mark = u.palette[u32(u.spots.w)].rgb;
-    let hot = vec3<f32>(1.0, 0.42, 0.36);
+    // Her coat's magic (Roger's twenty-eighth pass, item 3), lit.
+    let hot = magic_light(magic());
     var c = lit;
     var eye_c = mix(hot, white, 0.35);
     var pupil = 0.55;
@@ -338,12 +389,12 @@ fn spell_glow(q: vec3<f32>, r: vec3<f32>, lit: vec3<f32>, px: f32) -> vec3<f32> 
         let halo = ink(ell(uv, ec, er * vec2<f32>(1.6, 1.5)), aa * 10.0);
         c = mix(c, eye_c, g * (0.2 * halo + eye_w * ring));
     }
-    var m = spell_marks(uv, aa, g);
+    var m = spell_marks(uv, aa, g, 0.0);
     var crest = CREST_AT + vec2<f32>(0.0, 0.16);
     var crest_r = vec2<f32>(0.24, 0.3);
     if u.style.y > 0.5 {
         // Her human form's seal, and its crest between her eyes.
-        m = seal_marks(uv, aa, u.eye, g);
+        m = seal_marks(uv, aa, u.eye, g, 0.0);
         crest = vec2<f32>(0.0, u.eye.y + 1.0 * u.eye.w);
         crest_r = vec2<f32>(0.18, 0.22);
     }

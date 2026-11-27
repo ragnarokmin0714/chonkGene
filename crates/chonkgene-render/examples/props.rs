@@ -4,7 +4,8 @@
 //! `cargo run --release -p chonkgene-render --example props -- <out dir> [scale]`
 //! writes `props.png`: each thing at three moments (its spin and clock
 //! moving on), then each effect part way through, a body swimming in the
-//! pond and the fox's fire.
+//! pond and the fox's fire (`MAGIC=#rrggbb` in the environment: the fox's
+//! effects in that magic colour).
 
 use chonkgene_core::play::Thing;
 use chonkgene_render::props::{self, Fx, Look};
@@ -30,6 +31,14 @@ fn main() {
         std::process::exit(2);
     };
     let scale: f32 = args.get(1).and_then(|s| s.parse().ok()).unwrap_or(1.5);
+    // `MAGIC=#5B2D91`: the fox's effects in that magic colour.
+    let magic = std::env::var("MAGIC")
+        .ok()
+        .and_then(|h| {
+            let v = u32::from_str_radix(h.trim_start_matches('#'), 16).ok()?;
+            Some(props::Magic([(v >> 16) as u8, (v >> 8) as u8, v as u8]))
+        })
+        .unwrap_or_default();
     std::fs::create_dir_all(out).expect("out dir");
     let cell = (360.0 * scale) as u32;
     let row = (340.0 * scale) as u32;
@@ -92,6 +101,7 @@ fn main() {
             (x, 0.6 * row as f32),
             scale,
             0.35 * fx.secs(),
+            magic,
         );
     }
     board.draw_pixmap(
@@ -153,6 +163,7 @@ fn main() {
         (90.0 * scale, 40.0 * scale),
         scale,
         1.0,
+        magic,
     );
     board.draw_pixmap(
         0,

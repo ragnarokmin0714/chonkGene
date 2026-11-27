@@ -162,6 +162,21 @@ impl Renderer {
         }
     }
 
+    /// Its coat's magic colour (the fox's casting glow, ring, fox-fire,
+    /// spell bubble and burning tails; PLAN §8, Roger's twenty-eighth
+    /// pass, item 3).
+    pub fn magic(&self) -> props::Magic {
+        let [r, g, b, _] = match self {
+            Self::Sprites(r) => r.magic(),
+            Self::Gpu(r) => r.magic(),
+            Self::Mesh(r) => {
+                let [r, g, b] = r.magic();
+                [r, g, b, 255]
+            }
+        };
+        props::Magic([r, g, b])
+    }
+
     pub fn set_coat(&mut self, coat: usize) {
         match self {
             Self::Sprites(r) => r.set_coat(coat),

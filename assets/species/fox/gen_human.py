@@ -479,9 +479,10 @@ HEADER = '''// 九尾狐's human form (人型形態). Written by gen_human.py (t
 //   python3 gen_human.py && python3 gen_tails.py human | python3 ../splice.py human.ron
 //
 // Her coat (the beast form's, by the same names) gives the tails, the
-// marks, the eyes, the trim, the sash and the bell; the hair's colour is
-// chosen on its own (`hairs`, white by default), and so is the hairdo
-// (parts with a `style`: 綁單馬尾, 綁雙馬尾, 公主頭).
+// marks, the eyes, the trim, the sash, the bell and her magic; its hair is
+// 「跟毛色」, the default: a hair colour chosen on its own (`hairs`) goes
+// over it, and so is the hairdo (parts with a `style`: 綁單馬尾, 綁雙馬尾,
+// 公主頭).
 (
     species: "fox",
     bake_cell: 0.025,
@@ -492,41 +493,49 @@ HEADER = '''// 九尾狐's human form (人型形態). Written by gen_human.py (t
     coats: [
         // 紅髮版's colours: a red border with gold, a red sash and a red and
         // gold rope (`gold` is the braid and the bell), red marks, red eyes;
-        // tails as the beast form's: white, a pink blush, red tips.
-        (name: "white", colors: {
+        // tails as the beast form's: white, a pink blush, red tips. Hair
+        // (跟毛色) white; magic red.
+        (name: "white", magic: Some("#E3354B"), colors: {
             "skin": "#FFE6DC", "robe": "#FFFDF8", "trim": "#D2232F", "gold": "#F0BC42", "sash": "#D2232F",
-            "hair": "#E9EDF5", "hairtip": "#CCD6E6", "ribbon": "#D2232F", "fluff": "#FFFFFF",
+            "hair": "#E6EBF3", "hairtip": "#B2BDD1", "ribbon": "#D2232F", "fluff": "#FFFFFF",
             "fur": "#FFF9F3", "tailmid": "#F7A8B8", "tailtip": "#D93050",
             "ink": "#3A2224", "blush": "#FF9AAA", "mark": "#D8202E", "iris": "#E02E30",
         }),
         // 銀白版's: a silver-grey border, a white rope with a silver bell,
-        // ice-blue marks and eyes, tails tipped pale blue.
-        (name: "snow", colors: {
+        // ice-blue marks and eyes, tails tipped pale blue. Hair white,
+        // tipped pale blue as the tails are; magic pale blue.
+        (name: "snow", magic: Some("#7CC8F4"), colors: {
             "skin": "#FFE6DC", "robe": "#FFFEFC", "trim": "#AEB9CB", "gold": "#C9D1DD", "sash": "#EEF1F6",
-            "hair": "#E9EDF5", "hairtip": "#CCD6E6", "ribbon": "#D2232F", "fluff": "#FFFFFF",
+            "hair": "#EEF3FA", "hairtip": "#9CCFF0", "ribbon": "#D2232F", "fluff": "#FFFFFF",
             "fur": "#FBFCFF", "tailmid": "#DCEEFB", "tailtip": "#8CCBF2",
             "ink": "#22283A", "blush": "#FFB0C0", "mark": "#62B6EA", "iris": "#4A8FDB",
         }),
-        (name: "gold", colors: {
+        // Hair as her tails (the fur to the tail tips); the seal and magic
+        // gold (Roger's twenty-eighth pass).
+        (name: "gold", magic: Some("#F5B83D"), colors: {
             "skin": "#FFE6DC", "robe": "#FFFDF8", "trim": "#D2232F", "gold": "#F0BC42", "sash": "#D2232F",
-            "hair": "#E9EDF5", "hairtip": "#CCD6E6", "ribbon": "#D2232F", "fluff": "#FFF8EE",
+            "hair": "#F0A050", "hairtip": "#FFFFFF", "ribbon": "#D2232F", "fluff": "#FFF8EE",
             "fur": "#F0A050", "tailmid": "#FBD9B0", "tailtip": "#FFFFFF",
-            "ink": "#3A2224", "blush": "#FF8C94", "mark": "#E8454F", "iris": "#B8742A",
+            "ink": "#3A2224", "blush": "#FF8C94", "mark": "#F2B035", "iris": "#B8742A",
         }),
-        (name: "night", colors: {
+        // Hair as her tails; the seal a bright violet, her magic a dark
+        // purple (drawn as mist round a light core: dark cannot glow).
+        (name: "night", magic: Some("#5B2D91"), colors: {
             "skin": "#FFE6DC", "robe": "#FBFAFF", "trim": "#5E6AB8", "gold": "#C8D0E0", "sash": "#4A4060",
-            "hair": "#E9EDF5", "hairtip": "#CCD6E6", "ribbon": "#D2232F", "fluff": "#EDE7F5",
+            "hair": "#4A4060", "hairtip": "#9FE3FF", "ribbon": "#D2232F", "fluff": "#EDE7F5",
             "fur": "#4A4060", "tailmid": "#7A88C8", "tailtip": "#9FE3FF",
-            "ink": "#231C2A", "blush": "#FF8CA8", "mark": "#7FD4FF", "iris": "#58B8F0",
+            "ink": "#231C2A", "blush": "#FF8CA8", "mark": "#A47BFF", "iris": "#58B8F0",
         }),
     ],
-    // The hair's colour, chosen apart from the coat (Roger: white by
-    // default). 紅髮 is red fading to gold at the ends, as in his picture.
+    // The hair's colour, chosen apart from the coat (none chosen: the
+    // coat's, 「跟毛色」, Roger's yes of 2026-11-26). 紅髮 is red fading to
+    // gold at the ends, as in his picture; 金色 and 夜色 as the coats of
+    // those names' tails, so the same name matches.
     hairs: [
         (name: "white", colors: {"hair": "#E6EBF3", "hairtip": "#B2BDD1"}),
         (name: "red", colors: {"hair": "#D8322A", "hairtip": "#F9B84E"}),
-        (name: "gold", colors: {"hair": "#EFA04C", "hairtip": "#FFE3B5"}),
-        (name: "night", colors: {"hair": "#4B4262", "hairtip": "#8A96D6"}),
+        (name: "gold", colors: {"hair": "#F0A050", "hairtip": "#FFFFFF"}),
+        (name: "night", colors: {"hair": "#4A4060", "hairtip": "#9FE3FF"}),
     ],
     pivots: {
         "body": (0, -0.55, 0),

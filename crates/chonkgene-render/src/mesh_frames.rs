@@ -411,6 +411,12 @@ impl MeshRenderer {
         }
     }
 
+    /// Its coat's magic colour (the fox's: see `chonkgene_rig::Coat::magic`).
+    pub fn magic(&self) -> [u8; 3] {
+        let m = crate::sprites::coat_magic(&self.model, self.coat);
+        [m[0], m[1], m[2]]
+    }
+
     pub fn set_coat(&mut self, coat: usize) {
         if coat != self.coat {
             self.coat = coat;
@@ -829,6 +835,7 @@ impl MeshRenderer {
     fn push(&mut self, how: Ask, keep_up: bool) {
         let starved = how == Ask::Now;
         let fwd = self.canvas_forward();
+        let magic = self.magic();
         let Some(live) = self.live.as_mut() else {
             return;
         };
@@ -860,6 +867,7 @@ impl MeshRenderer {
         live.canvas.glow = self.glow;
         live.canvas.rosy = self.rosy;
         live.canvas.clock = self.flame_clock;
+        live.canvas.magic = magic;
         let sent = live
             .canvas
             .try_submit(self.gpu, &scene, &self.bones, yaw, how);

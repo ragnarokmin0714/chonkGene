@@ -195,6 +195,11 @@ impl GpuRenderer {
         }
     }
 
+    /// The coat's magic colour (see `chonkgene_rig::Coat::magic`).
+    pub fn magic(&self) -> [u8; 4] {
+        crate::sprites::coat_magic(&self.model, self.variant.coat)
+    }
+
     pub fn set_coat(&mut self, coat: usize) {
         if coat != self.variant.coat {
             self.variant.coat = coat;

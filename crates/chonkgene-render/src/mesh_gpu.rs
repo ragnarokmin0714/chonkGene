@@ -75,6 +75,16 @@ pub struct MeshCanvas {
     pub rosy: f32,
     /// Seconds, for what flickers (mesh.wgsl `flame_tails`).
     pub clock: f32,
+    /// The coat's magic colour (the fox's casting glow and burning tails,
+    /// paint.wgsl `magic`), RGB.
+    pub magic: [u8; 3],
+}
+
+/// `rgb` as one float the shaders unpack (paint.wgsl `magic`): its 24 bits
+/// plus one, exact in an f32's mantissa; 0 stands for none.
+pub fn pack_rgb(rgb: [u8; 3]) -> f32 {
+    let [r, g, b] = rgb.map(u32::from);
+    (1 + ((r << 16) | (g << 8) | b)) as f32
 }
 
 impl MeshCanvas {
@@ -279,6 +289,7 @@ impl MeshCanvas {
             glow: 0.0,
             rosy: 0.0,
             clock: 0.0,
+            magic: [0xA8, 0xD4, 0xFF],
         }
     }
 
@@ -362,6 +373,7 @@ impl MeshCanvas {
         let mut u = uniforms(scene, &self.cam, &Frame::default(), true, 0);
         u[3][3] = self.glow;
         u[13][2] = self.rosy;
+        u[13][3] = pack_rgb(self.magic);
         u.push(v4(self.eye_r, yaw.to_radians()));
         u.push(v4(self.mouth_r, self.clock));
         u.push([ROOT_PIVOT.x, ROOT_PIVOT.z, self.shadow_r.0, self.shadow_r.1]);

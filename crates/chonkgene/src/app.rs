@@ -2611,6 +2611,14 @@ fn woken(next: Instant, cmd: &Cmd, now: Instant) -> Instant {
 fn direct(pets: &mut [Pet], ctx: &mut Ctx, cmds: Vec<Cmd>) {
     for cmd in cmds {
         let id = cmd.id();
+        // A spell's bubble takes its caster's magic colour.
+        let caster = match cmd {
+            Cmd::Freeze { by, .. } => pets
+                .iter()
+                .find(|q| q.save.id == by)
+                .map(|q| q.renderer.magic()),
+            _ => None,
+        };
         let Some(p) = pets.iter_mut().find(|p| p.save.id == id) else {
             continue;
         };
@@ -2735,6 +2743,7 @@ fn direct(pets: &mut [Pet], ctx: &mut Ctx, cmds: Vec<Cmd>) {
                         Fx::Bubble
                     };
                     p.fun.effect(fx, now);
+                    p.fun.bubble_magic = caster.unwrap_or_default();
                     // Big enough for all of it (its pose stays put while
                     // it floats).
                     let pm = p.renderer.pixmap();
