@@ -1283,6 +1283,47 @@ impl MeshRenderer {
                 }
             }
         }
+        // Her human form sitting on her heels: her skirt, flared out round
+        // her, was cut off (Roger, 2026-11-27): it went down through the
+        // floor, and its front, near the camera looking down, showed below
+        // the floor line, where the taskbar (or whatever she stands on)
+        // covers her picture. Her body (not her tails, nor moved sideways) is
+        // lifted as far as needed for the lowest of it to stay over the
+        // floor line.
+        let lift = self.walk.lift();
+        if lift > 0.0
+            && let Some(live) = &self.live
+        {
+            let bottom =
+                live.canvas.size().1 as f32 - (crate::raymarch::FLOOR_PX - LIFT_UNDER) * self.scale;
+            let (mut under, mut low) = (0.0f32, f32::MAX);
+            for v in live.mesh.vertices.iter().step_by(5) {
+                // (A tail's skin has mouth.w under -0.5, see mesh.rs.)
+                if v.mouth[3] < -0.5 {
+                    continue;
+                }
+                let rest = v3(v.pos[0], v.pos[1], v.pos[2]);
+                let mut p = V3::ZERO;
+                for (b, w) in v.bones.iter().zip(v.weights) {
+                    if w > 0.0 {
+                        p = p + self.bones[*b as usize].apply(rest) * w;
+                    }
+                }
+                let p = world.apply(p);
+                low = low.min(p.y);
+                // How far up it must go to stay over the line, world units
+                // (pixels per unit up, there).
+                let (y, y_up) = (
+                    live.canvas.project(p).1,
+                    live.canvas.project(p + v3(0.0, 1.0, 0.0)).1,
+                );
+                if y > bottom && y > y_up {
+                    under = under.max((y - bottom) / (y - y_up));
+                }
+            }
+            let need = under.max(FLOOR - low).max(0.0);
+            world.t.y += need * lift;
+        }
         for b in &mut self.bones {
             *b = world.then(b);
         }
@@ -1606,6 +1647,10 @@ impl MeshRenderer {
         }
     }
 }
+
+/// How far under the floor line the lowest skin of a body lifted for it
+/// (see `Mover::lift`) may show, pixels at 100%: its soft edge.
+const LIFT_UNDER: f32 = 1.0;
 
 /// How far toward you the chin's skin must face to count as seen (the
 /// cosine against the camera), for where its bottom is (see

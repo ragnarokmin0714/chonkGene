@@ -90,6 +90,14 @@ const SEAT_SPLAY: f32 = 62.0;
 const SEAT_FLARE: f32 = 0.2;
 const SEAT_LEAN: f32 = 4.0;
 const SEAT_LOW: f32 = 0.57;
+/// Her human form sitting on her heels: how much calmer her tails' sway
+/// is (a share taken off it), so the fan behind her does not swing down
+/// out of the bottom of her picture.
+const SEAT_CALM: f32 = 0.7;
+/// Her human form sitting on her heels: how far her tails' fan, raised
+/// behind her, is drawn in upward too, degrees (the lowest either side
+/// lay on the floor and hung out of the bottom of her picture).
+const SEAT_FAN_UP: f32 = 15.0;
 /// Dozing off sitting up (her `Chin` sleep): slumped forward, head down.
 const DOZE_SLUMP: f32 = 9.0;
 /// Curled up on her side asleep (her `Curl` sleep): rolled over (degrees),
@@ -227,6 +235,16 @@ impl Mover {
         match self {
             Self::Quad(w) => w.ground(),
             Self::Biped(w) => w.ground,
+        }
+    }
+
+    /// How far (0 … 1) to keep its body (its tails apart) from going
+    /// down through the floor this frame, lifting it straight up as far as
+    /// needed: the fox's human form sitting on her heels, her skirt flared.
+    pub fn lift(&self) -> f32 {
+        match self {
+            Self::Quad(_) => 0.0,
+            Self::Biped(w) => w.floor_lift,
         }
     }
 
@@ -418,6 +436,8 @@ pub struct Waddle {
     /// Out: see [`Walk::ground`].
     ground: f32,
     flatten: f32,
+    /// Out: see [`Mover::lift`].
+    floor_lift: f32,
     /// The little movements under every held pose, and this frame's.
     fidgets: Fidgets,
     fidget: Out,
@@ -523,6 +543,7 @@ impl Waddle {
             moods: Moods::soft(),
             flick: Spring::default(),
             ground: 0.0,
+            floor_lift: 0.0,
             flatten: 0.0,
             fidgets: Fidgets::new(fidget_kit(sk, model), 1),
             fidget: Out::default(),

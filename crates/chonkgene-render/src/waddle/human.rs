@@ -16,7 +16,7 @@ use chonkgene_rig::{FLOOR, Model, sdf::Shape};
 
 use super::{CURL_HEAD, CURL_LEGS, CURL_ROLL, DOZE_SLUMP, SEAT_FLARE, SEAT_LEAN, SEAT_LEGS};
 use super::{HAIR_BOB, HAIR_HANG, HAIR_PACE, HAIR_TRAIL, HAIR_TURN};
-use super::{SEAT_SPLAY, SIT_DROP, SIT_LEGS, Shake, Waddle};
+use super::{SEAT_CALM, SEAT_FAN_UP, SEAT_SPLAY, SIT_DROP, SIT_LEGS, Shake, Waddle};
 use crate::fidget::{Kind, Out};
 use crate::skin::{
     FLOW_HZ, Gesture, Joint, Levels, SWISH_HZ, SWISH_REST, SWISH_WALK, Skeleton, SleepPose, Wave,
@@ -445,6 +445,9 @@ impl Waddle {
         j[0].rot.z -= k.facing * CURL_ROLL * curl;
         j[self.head].rot.z -= k.facing * CURL_HEAD * curl;
         self.ground = self.ground.max(curl);
+        // Sitting on her heels her skirt flares out round her: kept from
+        // going through the floor (see `Mover::lift`).
+        self.floor_lift = seat;
 
         // Her own moves, each with its hands' places.
         let moods = self.her_moods(arms, j, lv, k.facing);
@@ -503,6 +506,7 @@ impl Waddle {
             let wave = Wave {
                 amp: (SWISH_REST + (SWISH_WALK - SWISH_REST) * s)
                     * (1.0 - 0.75 * k.lie)
+                    * (1.0 - SEAT_CALM * seat)
                     * (1.0 + 0.9 * lv.laugh)
                     * (1.0 - 0.8 * lv.melt)
                     * (1.0 + 1.6 * wag),
@@ -524,7 +528,14 @@ impl Waddle {
             for (i, (tail, quilt)) in self.tails.iter_mut().zip(&self.quilts).enumerate() {
                 tail.wave(j, &wave, dt);
                 let root = tail.bones[0];
-                j[root].rot = j[root].rot + quilt[side] * curl;
+                // Sitting on her heels, fanned up behind her as the beast
+                // form sits (the lotus of Roger's 三視圖): lying round her
+                // on the floor, their fronts hung down out of her picture
+                // under her skirt (Roger, 2026-11-27: 裙子會被切掉).
+                j[root].rot = j[root].rot + quilt[side] * curl + tail.sit_turn * seat;
+                // And the fan drawn in upward a little, so its lowest tails
+                // either side stay off the floor.
+                j[root].rot.z += SEAT_FAN_UP * seat * tail.dir.x.signum();
                 // One after another they lift and settle.
                 if let Some(r) = ripple {
                     let lag = 0.6 * i as f32 / n.max(1) as f32;

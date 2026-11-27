@@ -958,7 +958,7 @@ pub(crate) struct Tail {
     offset: f32,
     /// The turn (degrees, as [`M3::euler`]) that takes the root from where
     /// it rests to its place in the fan, sitting.
-    sit_turn: V3,
+    pub(crate) sit_turn: V3,
     /// The turns that wrap it round the pet asleep: the root's, and each
     /// segment's after it (several tails only; see [`blanket`]).
     lie_turn: V3,
@@ -971,7 +971,7 @@ pub(crate) struct Tail {
     /// rests, base to tip (a cat's 電梯屁股).
     raise: f32,
     /// Which way its root points at rest (base to the next joint).
-    dir: V3,
+    pub(crate) dir: V3,
 }
 
 /// One frame of the tails' travelling wave, as [`Tail::wave`] takes it.

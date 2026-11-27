@@ -3150,3 +3150,58 @@ fn rolled_over_laughing_its_front_paws_show() {
         );
     }
 }
+
+/// Roger, 2026-11-27: sitting on her heels, the fox's skirt was cut off at
+/// the bottom. Flared out round her, it went down through the floor, its
+/// front below the floor line (where the taskbar she stands on covers her
+/// picture); and her tails, lying round her on the floor, hung down out of
+/// the bottom of her picture under it. Now, all the while she sits and
+/// whatever her hairdo, what shows under that line is no more than her
+/// tails and a soft edge, and nothing reaches the bottom of her picture.
+#[test]
+fn sitting_on_her_heels_her_skirt_stays_over_the_floor_line() {
+    use chonkgene_core::anim::{Expression, PoseParams, Posture};
+    for (style, hair) in [
+        ("ponytail", "white"),
+        ("princess", "red"),
+        ("twintails", ""),
+    ] {
+        let model = human("fox", style, hair).unwrap().0;
+        let Some(mut r) = model_renderer(model, 0.33) else {
+            eprintln!("no GPU: skipped");
+            return;
+        };
+        let p = |k: usize| PoseParams {
+            clock: k as f32 / 30.0,
+            posture: Posture::Sit,
+            ..Default::default()
+        };
+        for k in 0..240 {
+            r.render(&p(k), Expression::Neutral);
+            r.finish();
+            if k < 90 || k % 15 != 0 {
+                continue;
+            }
+            let pm = r.pixmap().clone();
+            let (w, h) = (pm.width(), pm.height());
+            let opaque = |x: u32, y: u32| pm.pixel(x, y).is_some_and(|c| c.alpha() > 200);
+            for y in h - 2..h {
+                let n = (0..w).filter(|&x| opaque(x, y)).count();
+                assert_eq!(
+                    n, 0,
+                    "{style}: cut off along the bottom (row {y}, frame {k})"
+                );
+            }
+            let line = h as f32 - chonkgene_render::raymarch::FLOOR_PX + 1.5;
+            for y in (line.ceil() as u32)..h {
+                for x in (0..w).filter(|&x| opaque(x, y)) {
+                    let hit = r.hit(x as f32 + 0.5, y as f32 + 0.5);
+                    assert!(
+                        matches!(hit, None | Some("tail")),
+                        "{style}: her {hit:?} under the floor line at ({x}, {y}), frame {k}"
+                    );
+                }
+            }
+        }
+    }
+}
