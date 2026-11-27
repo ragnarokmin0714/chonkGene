@@ -3,7 +3,7 @@
 //! to a few numbers every renderer understands.
 
 use crate::Zone;
-use crate::species::Fondness;
+use crate::species::{ChinScratch, Fondness};
 use crate::spring::Spring;
 
 const BREATH_PERIOD: f32 = 3.2;
@@ -465,6 +465,10 @@ pub struct Touch {
     /// Its cheeks rosy from the squeeze, 0 … 1: a little while it is
     /// squeezed, deepest just let go, fading over [`ROSY_SECS`].
     pub rosy: f32,
+    /// A chin scratch under way (two taps on its chin, PLAN §8, Roger's
+    /// twenty-seventh pass, item 2): how it takes it and how many seconds
+    /// in (see [`crate::chin::ChinScratch::beats`]).
+    pub chin: Option<(ChinScratch, f32)>,
 }
 
 impl Touch {
@@ -648,6 +652,8 @@ pub struct Animator {
     rump_until: f32,
     /// When a squeeze of its cheeks let go (see [`Touch::rosy`]).
     rosy_from: f32,
+    /// A chin scratch under way, since when (see [`Touch::chin`]).
+    chin: Option<(ChinScratch, f32)>,
     watch: Option<(f32, f32)>,
     /// See [`Touch::scratch`].
     scratch: f32,
@@ -727,6 +733,7 @@ impl Animator {
             tapped: None,
             rump_until: f32::MIN,
             rosy_from: f32::MIN,
+            chin: None,
             scratch: 0.0,
             licks: 0,
             watch: None,
@@ -854,6 +861,21 @@ impl Animator {
     /// Patted on the bottom, the Shiba's way (see [`Touch::rump`]).
     pub fn pat_rump(&mut self) {
         self.rump_until = self.t + RUMP_SECS;
+    }
+
+    /// A chin scratch starting now, taken `how` (see [`Touch::chin`]), or
+    /// none: over, or cut short.
+    pub fn scratch_chin(&mut self, how: Option<ChinScratch>) {
+        self.chin = how.map(|k| (k, self.t));
+    }
+
+    /// Your hand off its chin a moment in a chin scratch (the Shiba's jowls
+    /// patted from below): the flesh springs back, but it is no poke, so
+    /// no start and no look round.
+    pub fn let_go(&mut self) {
+        self.held = None;
+        self.pressed = false;
+        self.body.target = 0.0;
     }
 
     /// The tap of [`Animator::tap`] did something else (a second tap came):
@@ -1393,6 +1415,10 @@ impl Animator {
                     let left = (1.0 - (self.t - self.rosy_from) / ROSY_SECS).clamp(0.0, 1.0);
                     (left * left * (3.0 - 2.0 * left)).max(ROSY_HELD * self.squeeze())
                 },
+                chin: self
+                    .chin
+                    .map(|(k, since)| (k, self.t - since))
+                    .filter(|&(k, t)| t < k.secs()),
             },
             posture: self.posture,
             lively: match self.expression {
@@ -1705,6 +1731,30 @@ mod tests {
         assert_eq!(squeezed(&mut a, Zone::Cheek, true), (0.0, 0.0), "a scratch");
         a.expression = Expression::Asleep;
         assert_eq!(squeezed(&mut a, Zone::Cheek, false), (0.0, 0.0), "asleep");
+    }
+
+    /// A chin scratch (PLAN §8, Roger's twenty-seventh pass, item 2): the
+    /// renderer is told how it takes it and how far in, until it is over;
+    /// the Shiba's jowls let go between pats spring back with no start and
+    /// no look round, as a poke would give.
+    #[test]
+    fn a_chin_scratch_is_told_until_it_is_over() {
+        let mut a = Animator::new(3, 0.33, 0.35);
+        a.scratch_chin(Some(ChinScratch::Jowls));
+        run(&mut a, 1.0, |_| {});
+        let (kind, t) = a.params().touch.chin.expect("under way");
+        assert_eq!(kind, ChinScratch::Jowls);
+        assert!((t - 1.0).abs() < 0.05, "{t}");
+        a.press(Zone::Chin, (5.0, 5.0));
+        run(&mut a, 0.2, |_| {});
+        a.let_go();
+        let touch = a.params().touch;
+        assert!(touch.held.is_none() && touch.last.is_none(), "{touch:?}");
+        run(&mut a, ChinScratch::Jowls.secs(), |_| {});
+        assert!(a.params().touch.chin.is_none(), "over");
+        a.scratch_chin(Some(ChinScratch::Round));
+        a.scratch_chin(None);
+        assert!(a.params().touch.chin.is_none(), "cut short");
     }
 
     #[test]

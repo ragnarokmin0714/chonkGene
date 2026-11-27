@@ -5,7 +5,7 @@
 //! it (lines in bubbles, expressions, actions, sounds).
 
 use crate::anim::Expression;
-use crate::species::{BottomPat, Fondness, Grumpiness, Species, in_hours};
+use crate::species::{BottomPat, ChinScratch, Fondness, Grumpiness, Species, in_hours};
 use crate::tickle::{Reaction, Tickle};
 use crate::{Personality, Zone};
 
@@ -63,6 +63,8 @@ pub enum Line {
     BottomPat,
     /// Its cheeks squeezed between your hands and let go.
     CheekSqueeze,
+    /// Its chin scratched (two taps there), each its own way.
+    ChinScratch,
     /// Bringing a thrown toy back.
     Fetch,
     /// At the catnip: a cat in bliss, anyone else in character.
@@ -134,7 +136,7 @@ pub enum Line {
 }
 
 impl Line {
-    pub const ALL: [Line; 63] = [
+    pub const ALL: [Line; 64] = [
         Line::Hello,
         Line::WelcomeBack,
         Line::PokeSmall,
@@ -166,6 +168,7 @@ impl Line {
         Line::ObeyLater,
         Line::BottomPat,
         Line::CheekSqueeze,
+        Line::ChinScratch,
         Line::Fetch,
         Line::Catnip,
         Line::CatnipMeh,
@@ -234,6 +237,7 @@ impl Line {
             Line::ObeyLater => "obey_later",
             Line::BottomPat => "bottom_pat",
             Line::CheekSqueeze => "cheek_squeeze",
+            Line::ChinScratch => "chin_scratch",
             Line::Fetch => "fetch",
             Line::Catnip => "catnip",
             Line::CatnipMeh => "catnip_meh",
@@ -612,6 +616,36 @@ impl Mind {
         out
     }
 
+    /// Its chin scratched (two taps there, PLAN §8, Roger's twenty-seventh
+    /// pass, item 2), each its own way (see [`Species::chin_scratch`]):
+    /// pleased, the fox too, though she only says 「哼」 (her face stays
+    /// hers). 親密度 as for a pat there; a loved chin gives hearts. Asleep
+    /// it only stirs; with a grudge it will not have it.
+    pub fn scratch_chin(&mut self, w: &World) -> Out {
+        self.last_touch = w.now;
+        if self.sleep.is_some() {
+            return Out::say(Line::TurnOver);
+        }
+        if self.grumpy() {
+            let mut out = Out::say(Line::GrudgePat);
+            self.gain(&mut out, 2, w.day);
+            return out;
+        }
+        let mut out = Out::say(Line::ChinScratch);
+        if self.species.chin_scratch() != ChinScratch::Hook {
+            out.expression = Some(Expression::Happy);
+        }
+        let fond = self.species.fondness(Zone::Chin);
+        out.bliss = fond == Fondness::Loves;
+        let xp = match fond {
+            Fondness::Loves => 16,
+            Fondness::Likes => 10,
+            Fondness::Fine | Fondness::Dislikes => 6,
+        };
+        self.gain(&mut out, xp, w.day);
+        out
+    }
+
     /// The 曼赤肯's belly trap sprung: it grabs the hand and kicks, all in
     /// play (no grudge, 親密度 as for a loved spot).
     pub fn trap(&mut self, w: &World) -> Out {
@@ -908,6 +942,43 @@ mod tests {
         m.put_to_sleep(&world(0.0), &mut r);
         m.shake(&world(5.0));
         assert_eq!(m.squeeze_cheeks(&world(12.0)).line, Some(Line::GrudgePat));
+    }
+
+    /// Roger's twenty-seventh pass, item 2: a chin scratch, each its own
+    /// way; pleased (hearts where the chin is loved: the Shiba and the
+    /// cats), the fox keeping her face for her 「哼」; asleep it only
+    /// stirs, with a grudge it will not have it.
+    #[test]
+    fn a_chin_scratch_pleases_each_its_own_way() {
+        let mut r = rng();
+        for s in Species::ALL {
+            let mut m = of(s);
+            let before = m.affinity.total();
+            let out = m.scratch_chin(&world(10.0));
+            assert_eq!(out.line, Some(Line::ChinScratch), "{s:?}");
+            let fox = s.chin_scratch() == ChinScratch::Hook;
+            assert_eq!(out.expression == Some(Expression::Happy), !fox, "{s:?}");
+            assert_eq!(
+                out.bliss,
+                s.fondness(Zone::Chin) == Fondness::Loves,
+                "{s:?}"
+            );
+            assert!(m.affinity.total() > before, "{s:?}");
+        }
+        assert!(
+            Species::ALL
+                .iter()
+                .all(|s| s.fondness(Zone::Chin) > Fondness::Fine)
+        );
+        assert_eq!(Species::Shiba.chin_scratch(), ChinScratch::Jowls);
+        assert_eq!(Species::Fold.chin_scratch(), ChinScratch::Topple);
+        let mut m = mind();
+        m.put_to_sleep(&world(20.0), &mut r);
+        assert_eq!(m.scratch_chin(&world(30.0)).line, Some(Line::TurnOver));
+        let mut m = mind();
+        m.put_to_sleep(&world(0.0), &mut r);
+        m.shake(&world(5.0));
+        assert_eq!(m.scratch_chin(&world(12.0)).line, Some(Line::GrudgePat));
     }
 
     #[test]

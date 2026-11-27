@@ -10,6 +10,7 @@
 use std::f32::consts::{PI, TAU};
 
 use chonkgene_core::anim::{Act, Hug};
+use chonkgene_core::chin::ChinScratch;
 
 use chonkgene_rig::math::{V3, v3};
 use chonkgene_rig::{FLOOR, Model};
@@ -226,6 +227,15 @@ impl Mover {
         match self {
             Self::Quad(w) => w.ground(),
             Self::Biped(w) => w.ground,
+        }
+    }
+
+    /// The tip bone of the fox's tail hooking your hand (her chin
+    /// scratch, four legs only).
+    pub fn hook_tip(&self) -> Option<usize> {
+        match self {
+            Self::Quad(w) => w.hook_tip(),
+            Self::Biped(_) => None,
         }
     }
 
@@ -1476,8 +1486,59 @@ impl Waddle {
                 j[w].rot.z += up * 70.0;
             }
         }
+        // A chin scratch, each its own way (PLAN §8, Roger's twenty-seventh
+        // pass, item 2), over what a hand on its chin does already.
+        if let Some((kind, cb)) = self.feel.chin_beats() {
+            match kind {
+                // The head going round after your finger (tipped side to
+                // side and nodding), further each time, the round body
+                // leaning with it (a head turned much further tears its
+                // skin); the face feathers fluffed out.
+                ChinScratch::Round => {
+                    j[self.head].rot.z -= facing * OWL_HEAD_SHARE * cb.roll;
+                    j[self.head].rot.x += cb.nod;
+                    j[self.body].rot.z -= facing * (1.0 - OWL_HEAD_SHARE) * cb.roll;
+                    j[self.head].swell += OWL_FLUFF * cb.own;
+                }
+                // Head up, puffed out round into a ball of fluff, the
+                // wings held out from it.
+                ChinScratch::Puff => {
+                    j[self.head].rot.x -= 20.0 * cb.lift;
+                    j[self.body].swell += CHICK_PUFF * cb.own;
+                    // The head no bigger for it: a ball under a head.
+                    j[self.head].swell += 1.0 / (1.0 + CHICK_PUFF * cb.own) - 1.0;
+                    for (side, wing) in self.wings.iter().enumerate() {
+                        if let Some(w) = *wing {
+                            let sign = if side == 0 { 1.0 } else { -1.0 };
+                            j[w].rot.z += sign * 14.0 * cb.own;
+                        }
+                    }
+                }
+                // The bill down at your finger in quick nibbles, its
+                // bottom waggling all the while.
+                ChinScratch::Nibble => {
+                    j[self.head].rot.x += 16.0 * cb.own + 8.0 * cb.wag;
+                    let w = (TAU * 4.5 * t).sin();
+                    if let Some(tail) = self.tail {
+                        j[tail].rot.z += 30.0 * cb.wag * w;
+                    }
+                    j[self.body].rot.z += 5.0 * cb.wag * w;
+                }
+                ChinScratch::Jowls
+                | ChinScratch::Knuckles
+                | ChinScratch::Topple
+                | ChinScratch::Hook => {}
+            }
+        }
     }
 }
+
+/// A chin scratch: how much the owl's head fluffs out and the chick puffs
+/// up, shares of their size; how much of the owl's turn its head takes
+/// (the body the rest).
+const OWL_FLUFF: f32 = 0.1;
+const OWL_HEAD_SHARE: f32 = 0.6;
+const CHICK_PUFF: f32 = 0.2;
 
 /// The fidgets her human form draws from (see
 /// [`crate::fidget`]): her own, not the four-legged fox's.

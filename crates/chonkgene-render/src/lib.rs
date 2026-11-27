@@ -305,6 +305,44 @@ impl Renderer {
         (x + facing.signum() * 0.16 * w as f32, y + 0.32 * h as f32)
     }
 
+    /// The bottom of its chin, in pixmap pixels, for your hand to scratch
+    /// it from below: found on the mesh pets' picture; under the mouth
+    /// for the others.
+    pub fn chin(&self, facing: f32) -> (f32, f32) {
+        if let Self::Mesh(r) = self
+            && let Some(at) = r.chin_at()
+        {
+            return at;
+        }
+        let (x, y) = self.mouth(facing);
+        (x, y + 0.06 * self.size().1 as f32)
+    }
+
+    /// Your hand scratching its chin for `beats`, under its chin as last
+    /// shown (to the fox's hooking tail as the beats say); `s` the pet's
+    /// scale (see [`props::chin_hand`]).
+    pub fn chin_hand(
+        &self,
+        beats: &chonkgene_core::chin::ChinBeats,
+        facing: f32,
+        s: f32,
+    ) -> props::ChinHand {
+        let build = match self {
+            Self::Mesh(r) => props::Build::of(r.species()),
+            _ => props::Build::Dog,
+        };
+        props::chin_hand(self.chin(facing), facing, s, beats, self.hook_at(), build)
+    }
+
+    /// The tip of the fox's tail hooking your hand, pixmap pixels (her
+    /// chin scratch; the mesh pets only).
+    pub fn hook_at(&self) -> Option<(f32, f32)> {
+        match self {
+            Self::Mesh(r) => r.hook_at(),
+            _ => None,
+        }
+    }
+
     /// Where something it carries goes, in pixmap pixels, and how far it
     /// turns with the head (radians, as [`Self::head_roll`]): between her
     /// hands, upright, for the fox's human form; in the mouth (see

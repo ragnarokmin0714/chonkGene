@@ -1023,6 +1023,7 @@ impl MeshRenderer {
             fond: touch.fond,
             trap: touch.trap,
             rump: touch.rump,
+            chin: touch.chin,
         }
     }
 
@@ -1469,6 +1470,55 @@ impl MeshRenderer {
         Some([row(-1.0)?, row(1.0)?])
     }
 
+    /// The bottom of its chin in the picture shown, pixels: across the
+    /// middle of its chin, the lowest of its face turned toward you (the
+    /// jaw's edge; the chin's own skin goes on down the throat, lower the
+    /// further its chin goes up). Your hand scratches it from there. None
+    /// until the bake has landed, or with no chin.
+    pub fn chin_at(&self) -> Option<(f32, f32)> {
+        let live = self.live.as_ref()?;
+        let zone = |name: &str| ZONES.iter().position(|z| *z == name);
+        let (chin, head) = (zone("chin")?, zone("head")?);
+        let fwd = self.canvas_forward();
+        let seen = |i: usize| {
+            let v = &live.mesh.vertices[i];
+            let n = v3(v.normal[0], v.normal[1], v.normal[2]);
+            self.shown_bones[v.bones[0] as usize].m.apply(n).dot(fwd) < -CHIN_FACING
+        };
+        let on = |z: usize| {
+            (0..live.mesh.vertices.len())
+                .filter(|&i| usize::from(live.mesh.zones[i]) == z && seen(i))
+                .map(|i| live.canvas.project(self.skinned(&live.mesh, i)))
+                .collect::<Vec<_>>()
+        };
+        let chin_pts = on(chin);
+        if chin_pts.is_empty() {
+            return None;
+        }
+        let (lo, hi) = chin_pts.iter().fold((f32::MAX, f32::MIN), |(lo, hi), p| {
+            (lo.min(p.0), hi.max(p.0))
+        });
+        let mid = 0.5 * (lo + hi);
+        let band = 0.25 * (hi - lo) + 1.0;
+        let lowest = |pts: &[(f32, f32)]| {
+            pts.iter()
+                .filter(|p| (p.0 - mid).abs() <= band)
+                .map(|p| p.1)
+                .reduce(f32::max)
+        };
+        let y = lowest(&on(head)).or_else(|| lowest(&chin_pts))?;
+        Some((mid, y))
+    }
+
+    /// The tip of the fox's tail hooking your hand in the picture shown,
+    /// pixels (her chin scratch); none while no tail hooks it.
+    pub fn hook_at(&self) -> Option<(f32, f32)> {
+        let live = self.live.as_ref()?;
+        let b = self.walk.hook_tip()?;
+        let at = self.shown_bones.get(b)?.apply(self.sk.pivots[b]);
+        Some(live.canvas.project(at))
+    }
+
     /// Into the screen, the way the camera looks.
     fn canvas_forward(&self) -> V3 {
         let (s, c) = crate::raymarch::TILT_DEG.to_radians().sin_cos();
@@ -1538,6 +1588,11 @@ impl MeshRenderer {
     }
 }
 
+/// How far toward you the chin's skin must face to count as seen (the
+/// cosine against the camera), for where its bottom is (see
+/// [`MeshRenderer::chin_at`]).
+const CHIN_FACING: f32 = 0.2;
+
 /// How the flesh springs back once let go (「ㄉㄨㄞ ㄉㄨㄞ」, see
 /// [`JIGGLE_HZ`]): Hz and damping for a pet this chubby (0 … 1).
 fn jiggle(chonk: f32) -> (f32, f32) {
@@ -1572,6 +1627,23 @@ fn touched_look(touch: &Touch, dog: bool) -> Option<Look> {
     // The belly trap: laughing as it kicks.
     if touch.trap > 0.2 {
         return Some(Look::Laugh);
+    }
+    // A chin scratch: the owl's eyes half shut as its head goes round, the
+    // 折耳貓 melted with its eyes lines, the chick's shut as it puffs up.
+    if let Some((kind, t)) = touch.chin
+        && let Some(cb) = kind.beats(t)
+    {
+        use chonkgene_core::chin::ChinScratch;
+        match kind {
+            ChinScratch::Round if cb.own > 0.3 => return Some(Look::Half),
+            ChinScratch::Topple if cb.own > 0.3 => return Some(Look::Asleep),
+            ChinScratch::Puff if cb.own > 0.2 => return Some(Look::Happy),
+            // The hand there: content all through, not only while it
+            // presses (the Shiba's pats let go between): a dog's grin, eyes
+            // squeezed shut.
+            _ if cb.hand > 0.5 => return Some(if dog { Look::Pant } else { Look::Happy }),
+            _ => {}
+        }
     }
     // Its cheeks squeezed between your hands: eyes squeezed shut, the
     // mouth pushed into a pout.

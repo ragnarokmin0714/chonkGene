@@ -765,6 +765,14 @@ pub(super) struct Fun {
     pub pat_hand: Option<props::PatHand>,
     pub pat_down: bool,
     pub pat_out: Option<chonkgene_core::mind::Out>,
+    /// Two taps on its chin: your hand scratching it since when, and how it
+    /// takes it (see `Pet::chin_step`); where the hand is this frame;
+    /// whether it was on its chin last frame; what it made it feel, shown
+    /// as the pat's is (the words once scratched, the rest after).
+    pub chin_by_you: Option<(f64, chonkgene_core::chin::ChinScratch)>,
+    pub chin_hand: Option<props::ChinHand>,
+    pub chin_down: bool,
+    pub chin_out: Option<chonkgene_core::mind::Out>,
     /// When it last finished a 肉肉舞 (it does not dance again at once).
     pub danced: f64,
     /// When it last went into a pond to join the others.
@@ -1318,6 +1326,7 @@ impl Pet {
             || lifted
             || self.fun.hands.is_some()
             || self.fun.pat_hand.is_some()
+            || self.fun.chin_hand.is_some()
             || !self.fun.fx.is_empty()
             || self.fun.carry.is_some()
             || in_pond
@@ -1427,6 +1436,10 @@ impl Pet {
         // Your hand patting its head (摸摸頭), over it.
         if let (Some(hand), Some((since, _))) = (&self.fun.pat_hand, self.fun.pat_by_you) {
             props::draw_pat_hand(canvas, hand, (t - since) as f32);
+        }
+        // Your hand scratching its chin, over it.
+        if let (Some(hand), Some((since, _))) = (&self.fun.chin_hand, self.fun.chin_by_you) {
+            props::draw_chin_hand(canvas, hand, (t - since) as f32);
         }
         if let Some(thing) = self.fun.carry {
             // In the mouth, turned with the head as it gnaws or trots

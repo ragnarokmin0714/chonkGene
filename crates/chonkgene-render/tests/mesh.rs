@@ -2999,3 +2999,118 @@ fn a_pet_hugging_another_is_never_cut_off() {
     }
     assert!(short.is_empty(), "{}", short.join("\n"));
 }
+
+/// Roger's twenty-seventh pass, item 2: a chin scratch, each its own way,
+/// against the same pet left alone: the Shiba's double chin pushed up, the
+/// 曼赤肯's chin up and then its face rubbed side to side, the 折耳貓 rolled
+/// over on its side, the owl's head going round both ways (its body
+/// leaning with it), the chick puffed out, the duckling's head nibbling
+/// and its tail waggling, the fox's tail brought round to the hand.
+#[test]
+fn a_chin_scratch_moves_each_pet_its_own_way() {
+    use chonkgene_core::chin::ChinScratch;
+    use chonkgene_core::species::Species;
+    use chonkgene_render::skin::{Feel, Joint};
+    const DT: f32 = 1.0 / 60.0;
+    for species in Species::ALL {
+        let id = species.id();
+        let kind = species.chin_scratch();
+        let (model, sk) = mesh_model(id).unwrap();
+        // Every frame's joints and posed bones, scratched or not, and the
+        // tail tip its walk says hooks the hand.
+        let run = |scratched: bool| {
+            let mut walk = Mover::new(&sk, 1.0, &model).unwrap();
+            settle(&mut walk, 2.0);
+            let mut frames: Vec<(Vec<Joint>, Option<usize>)> = Vec::new();
+            for k in 0..(kind.secs() / DT) as usize {
+                walk.feel(Feel {
+                    chin: scratched.then_some((kind, k as f32 * DT)),
+                    ..Default::default()
+                });
+                let j = walk.step(DT, false, 1.0);
+                frames.push((j, walk.hook_tip()));
+            }
+            frames
+        };
+        let (on, off) = (run(true), run(false));
+        let bone = |n: &str| sk.bone(n).unwrap_or_else(|| panic!("{id}: no {n}"));
+        let span = |f: &[(Vec<Joint>, Option<usize>)], get: &dyn Fn(&[Joint]) -> f32| {
+            let v: Vec<f32> = f.iter().map(|(j, _)| get(j)).collect();
+            let lo = v.iter().copied().fold(f32::MAX, f32::min);
+            let hi = v.iter().copied().fold(f32::MIN, f32::max);
+            (lo, hi)
+        };
+        let more = |get: &dyn Fn(&[Joint]) -> f32, by: f32, what: &str| {
+            let ((a, b), (c, d)) = (span(&on, get), span(&off, get));
+            assert!(
+                b - a > d - c + by,
+                "{id}: {what} spans {:.2} scratched, {:.2} left alone",
+                b - a,
+                d - c
+            );
+        };
+        match kind {
+            ChinScratch::Jowls => {
+                let chin = bone("chin");
+                let (_, up) = span(&on, &|j| j[chin].shift.y);
+                assert!(up > 0.04, "{id}: double chin pushed up {up:.3}");
+            }
+            ChinScratch::Knuckles => {
+                let head = bone("head");
+                let (up, _) = span(&on, &|j| j[head].rot.x);
+                let (rest, _) = span(&off, &|j| j[head].rot.x);
+                assert!(up < rest - 15.0, "{id}: chin up {up:.0}° ({rest:.0}°)");
+                more(&|j| j[head].rot.z, 15.0, "the head's rub");
+            }
+            ChinScratch::Topple => {
+                let (lo, hi) = span(&on, &|j| j[0].rot.z);
+                assert!(hi.max(-lo) > 60.0, "{id}: rolled over {lo:.0}…{hi:.0}°");
+            }
+            ChinScratch::Round => {
+                let (head, body) = (bone("head"), bone("body"));
+                let (lo, hi) = span(&on, &|j| j[head].rot.z);
+                assert!(
+                    lo < -15.0 && hi > 25.0 && hi - lo > 55.0,
+                    "{id}: head round {lo:.0}…{hi:.0}°"
+                );
+                more(&|j| j[body].rot.z, 15.0, "the body's lean");
+                more(&|j| j[head].rot.x, 20.0, "the head's nod");
+            }
+            ChinScratch::Puff => {
+                let body = bone("body");
+                let (_, puff) = span(&on, &|j| j[body].swell);
+                assert!(puff > 0.15, "{id}: puffed {puff:.2}");
+            }
+            ChinScratch::Nibble => {
+                more(&|j| j[bone("head")].rot.x, 10.0, "the nibbling");
+                more(&|j| j[bone("tail")].rot.z, 30.0, "the waggle");
+            }
+            ChinScratch::Hook => {
+                let hooked: Vec<_> = on
+                    .iter()
+                    .filter_map(|(j, tip)| Some((j, (*tip)?)))
+                    .collect();
+                assert!(hooked.len() > 30, "{id}: a tail hooked the hand");
+                assert!(
+                    off.iter().all(|(_, tip)| tip.is_none()),
+                    "{id}: hooked alone"
+                );
+                // The tip comes forward round her side, against the same
+                // moment left alone.
+                let (j, tip) = hooked[hooked.len() / 2];
+                let at = |j: &[Joint]| {
+                    let bones = sk.pose(j);
+                    bones[tip].apply(sk.pivots[tip])
+                };
+                let k = on.iter().position(|(o, _)| std::ptr::eq(o, j)).unwrap();
+                let (now, alone) = (at(j), at(&off[k].0));
+                assert!(
+                    now.z > alone.z + 0.4,
+                    "{id}: tail tip at z {:.2}, left alone {:.2}",
+                    now.z,
+                    alone.z
+                );
+            }
+        }
+    }
+}

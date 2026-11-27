@@ -62,6 +62,38 @@ pub enum BottomPat {
     Swat,
 }
 
+/// What a chin scratch gets (see [`Species::chin_scratch`]; PLAN §8,
+/// Roger's twenty-seventh pass, item 2: he gave the cats and the dog, the
+/// rest are ours).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ChinScratch {
+    /// The Shiba: its double chin held from below, patted and squeezed, the
+    /// flesh bouncing 「ㄉㄨㄞ ㄉㄨㄞ」; eyes squeezed into a Shiba smile, the
+    /// curled tail going.
+    Jowls,
+    /// The 曼赤肯: 反手撓下巴 (the back of the hand, knuckles stroking up):
+    /// the chin goes up and up, purring, then it rubs its cheek on your
+    /// knuckles (marking you as its own).
+    Knuckles,
+    /// The 折耳貓: 反手撓下巴, the head tilting further and further until
+    /// the whole cat slowly topples over sideways, melted.
+    Topple,
+    /// The owl: under its face disc, the face feathers fluffed out, eyes
+    /// half shut, the head following your finger round and round, further
+    /// and further over (its round body leaning with it).
+    Round,
+    /// The chick: under the beak, head up, eyes shut, puffed into a round
+    /// ball of fluff, 「啾～」.
+    Puff,
+    /// The duckling: it nibbles your finger with its bill, its bottom
+    /// waggling.
+    Nibble,
+    /// The fox (her beast form): 「哼」 while pressing her head into your
+    /// hand, the nine tails swaying slowly; the hand going, a tail hooks
+    /// it to keep it there.
+    Hook,
+}
+
 /// How much a species likes a hand on a zone (PLAN §8, Roger's sixteenth
 /// pass, item 4: 「摸動物不同部位時，會有其他反應」).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -115,6 +147,20 @@ impl Species {
             Species::Duck => BottomPat::HopAway,
             Species::Owl => BottomPat::LookRound,
             Species::Fox => BottomPat::Swat,
+        }
+    }
+
+    /// How it takes a chin scratch (two taps on its chin; see
+    /// [`ChinScratch`]).
+    pub fn chin_scratch(self) -> ChinScratch {
+        match self {
+            Species::Shiba => ChinScratch::Jowls,
+            Species::Munchkin => ChinScratch::Knuckles,
+            Species::Fold => ChinScratch::Topple,
+            Species::Owl => ChinScratch::Round,
+            Species::Chick => ChinScratch::Puff,
+            Species::Duck => ChinScratch::Nibble,
+            Species::Fox => ChinScratch::Hook,
         }
     }
 

@@ -116,14 +116,16 @@ fn glide_chance(species: Species) -> f32 {
 /// on a front paw (a bird's wing) ask for 握手 (a high five), on a hind
 /// paw lift it up high, on its shoulders hug it round, on its back rock it
 /// like a baby, on its bottom pat it lightly (each its own way, item 6
-/// (b)). Belly, cheeks, chin and tail have none: a tap there is a poke.
-/// The fox's human form has hers on her head, hands and shoulders only.
+/// (b)), on its chin scratch it (each its own way too). Belly, cheeks and
+/// tail have none: a tap there is a poke. The fox's human form has hers on
+/// her head, hands and shoulders only (her chin comes with her own zones).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum TapAction {
     Pat,
     Paw,
     Hug(HugHold),
     PatBottom,
+    Chin,
 }
 
 fn tap_action(human: bool, zone: Zone) -> Option<TapAction> {
@@ -134,6 +136,7 @@ fn tap_action(human: bool, zone: Zone) -> Option<TapAction> {
         Zone::Foot if !human => Some(TapAction::Hug(HugHold::Carry)),
         Zone::Back if !human => Some(TapAction::Hug(HugHold::Cradle)),
         Zone::Bottom if !human => Some(TapAction::PatBottom),
+        Zone::Chin if !human => Some(TapAction::Chin),
         _ => None,
     }
 }
@@ -533,14 +536,17 @@ fn voice_pitch(size: f32, chonk: f32) -> f32 {
     (size.max(0.2).powf(-0.3) * (1.0 - 0.12 * (chonk - 0.33))).clamp(0.8, 1.25)
 }
 
-/// Which sound goes with a line: a patted cat purrs.
+/// Which sound goes with a line: a patted cat purrs (its chin scratched,
+/// too).
 fn line_sound(line: Line, species: Species) -> Sound {
     match line {
-        Line::Pat | Line::PatLove if matches!(species, Species::Munchkin | Species::Fold) => {
+        Line::Pat | Line::PatLove | Line::ChinScratch
+            if matches!(species, Species::Munchkin | Species::Fold) =>
+        {
             Sound::Purr
         }
         Line::Hugged if matches!(species, Species::Munchkin | Species::Fold) => Sound::Purr,
-        Line::PatLove | Line::Hug | Line::Hugged => Sound::Greet,
+        Line::PatLove | Line::ChinScratch | Line::Hug | Line::Hugged => Sound::Greet,
         Line::BearHugged => Sound::Laugh,
         Line::Dislike => Sound::Grumpy,
         Line::Trap => Sound::Laugh,
@@ -3219,7 +3225,111 @@ impl Pet {
             TapAction::Paw => self.shake_paw(ctx),
             TapAction::Hug(hold) => self.hug_you(ctx, Some(hold)),
             TapAction::PatBottom => self.pat_bottom(ctx),
+            TapAction::Chin => self.scratch_chin(ctx),
         }
+    }
+
+    /// Two taps on its chin (PLAN §8, Roger's twenty-seventh pass, item 2):
+    /// your hand comes up under its chin and scratches it a few seconds,
+    /// and it takes it its own way (see [`Species::chin_scratch`] and
+    /// [`chonkgene_core::chin`]): the Shiba's jowls patted and squeezed, a
+    /// cat's chin up and up (the 曼赤肯 rubbing its cheek on your knuckles
+    /// after, the 折耳貓 toppling over), the owl's head going round, the
+    /// chick puffed, the duckling nibbling your finger, the fox pressing
+    /// her head into your hand and hooking it with a tail as it goes. What
+    /// it says comes once it is being scratched, its face and hearts once
+    /// it is over. Asleep, or in a mood, or not free for it: the pat's
+    /// way (a word, no hand).
+    fn scratch_chin(&mut self, ctx: &mut Ctx) {
+        let now = ctx.world.now;
+        let out = self.mind.scratch_chin(&ctx.world);
+        let why_not = if out.line != Some(Line::ChinScratch) {
+            Some("asleep or in a mood")
+        } else if self.in_skit {
+            Some("in a skit")
+        } else if self.press.is_some() {
+            Some("being held")
+        } else if !matches!(self.body.motion, Motion::Idle | Motion::Walk) {
+            Some("not on its feet")
+        } else if self.fun.engaged() {
+            Some("busy")
+        } else if self.in_your_hands() {
+            Some("in your hands")
+        } else if self.leave_at.is_some() {
+            Some("going to rest")
+        } else {
+            None
+        };
+        if let Some(why) = why_not {
+            diag!("{}: chin scratched, no hand ({why})", self.save.name);
+            if out.line == Some(Line::GrudgePat) {
+                self.anim.flinch(self.cursor);
+            }
+            self.apply(ctx, out);
+            return;
+        }
+        let how = self.species.chin_scratch();
+        diag!("{}: chin scratched ({how:?})", self.save.name);
+        self.fun.end_leisure();
+        self.body.motion = Motion::Idle;
+        self.body.speed = 0.0;
+        self.body.pace = 1.0;
+        self.anim.walking = false;
+        self.anim.scratch_chin(Some(how));
+        self.fun.chin_by_you = Some((now, how));
+        self.fun.chin_down = false;
+        self.fun.chin_out = Some(out);
+        self.switch_at = self.switch_at.max(now + f64::from(how.secs()) + 1.0);
+    }
+
+    /// The chin scratch under way, every frame: its chin pressed in under
+    /// your hand while it is on it, rubbed along as it strokes, let go (no
+    /// poke: no start, no look round) between the Shiba's pats. Cut short
+    /// if you take hold of it or a skit takes it.
+    fn chin_step(&mut self, ctx: &mut Ctx) {
+        let Some((since, how)) = self.fun.chin_by_you else {
+            return;
+        };
+        let t = (ctx.world.now - since) as f32;
+        let beats = how
+            .beats(t)
+            .filter(|_| self.press.is_none() && !self.in_skit);
+        let hand = beats.map(|b| {
+            self.renderer
+                .chin_hand(&b, self.anim.facing, self.fun.scale)
+        });
+        match (beats, hand) {
+            (Some(b), Some(h)) if b.on && !self.fun.chin_down => {
+                self.anim.press(Zone::Chin, h.press);
+                self.anim.fond = Some(self.species.fondness(Zone::Chin));
+            }
+            (Some(b), Some(h)) if b.on => self.anim.knead(h.press),
+            // Taken hold of, your finger has its chin now: not let go.
+            _ if self.fun.chin_down && self.press.is_none() => self.anim.let_go(),
+            _ => {}
+        }
+        self.fun.chin_down = beats.is_some_and(|b| b.on);
+        if t >= how.say_at()
+            && let Some(out) = self.fun.chin_out.as_mut()
+            && let Some(line) = out.line.take()
+        {
+            self.say(ctx, line);
+        }
+        if beats.is_none() {
+            self.fun.chin_by_you = None;
+            self.fun.chin_down = false;
+            self.anim.scratch_chin(None);
+            if let Some(out) = self.fun.chin_out.take() {
+                self.apply(ctx, out);
+            }
+        }
+    }
+
+    /// Hugged, patted or chin-scratched by you just now.
+    fn in_your_hands(&self) -> bool {
+        self.fun.hug_by_you.is_some()
+            || self.fun.pat_by_you.is_some()
+            || self.fun.chin_by_you.is_some()
     }
 
     /// Its cheeks squeezed between your hands and let go (PLAN §8, Roger's
@@ -3381,7 +3491,7 @@ impl Pet {
             Some("not on its feet")
         } else if self.fun.engaged() {
             Some("busy")
-        } else if self.fun.hug_by_you.is_some() || self.fun.pat_by_you.is_some() {
+        } else if self.in_your_hands() {
             Some("in your hands")
         } else if self.leave_at.is_some() {
             Some("going to rest")
@@ -3467,6 +3577,7 @@ impl Pet {
             && !self.in_skit
             && self.fun.hug_by_you.is_none()
             && self.fun.pat_by_you.is_none()
+            && self.fun.chin_by_you.is_none()
             && !self.fun.engaged()
             && (self.mind.asleep() || matches!(self.body.motion, Motion::Idle | Motion::Walk))
     }
@@ -3862,6 +3973,7 @@ impl Pet {
         self.touch_step(ctx);
         self.cradle_step(ctx);
         self.pat_step(ctx);
+        self.chin_step(ctx);
         if let Some((due, zone)) = self.poke_due
             && now >= due
         {
@@ -4196,6 +4308,14 @@ impl Pet {
                 &pose,
             ))
         });
+        // Your hand scratching its chin, under its chin as last shown.
+        self.fun.chin_hand = self.fun.chin_by_you.and_then(|(since, how)| {
+            let beats = how.beats((t - since) as f32)?;
+            Some(
+                self.renderer
+                    .chin_hand(&beats, self.anim.facing, self.fun.scale),
+            )
+        });
         self.renderer.set_holding(self.fun.carry.is_some());
         if self.mind.asleep() {
             self.renderer
@@ -4222,6 +4342,7 @@ impl Pet {
                 || self.fun.on_sand
                 || self.anim.doing() == Some(Act::Hug)
                 || self.fun.pat_by_you.is_some()
+                || self.fun.chin_by_you.is_some()
                 || self.fun.carry.is_some()
                 || self.fun.scene.is_some_and(|r| r.scene == Scene::Bone)
                 || move_test()
@@ -5086,7 +5207,7 @@ mod tests {
             (Zone::Bottom, Some(PatBottom), None),
             (Zone::Belly, None, None),
             (Zone::Cheek, None, None),
-            (Zone::Chin, None, None),
+            (Zone::Chin, Some(Chin), None),
             (Zone::Tail, None, None),
         ] {
             assert_eq!(tap_action(false, zone), beast, "{zone:?}");

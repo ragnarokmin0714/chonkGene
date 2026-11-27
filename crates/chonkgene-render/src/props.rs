@@ -2145,6 +2145,16 @@ impl Build {
             _ => Build::Bird,
         }
     }
+
+    /// How big your hand is scratching its chin, against
+    /// [`CHIN_HAND`]: smaller under a bird's little face, so it does not
+    /// cover it.
+    pub fn chin_hand(self) -> f32 {
+        match self {
+            Build::Bird => 0.75,
+            Build::Dog | Build::Fox | Build::Cat { .. } => 1.0,
+        }
+    }
 }
 
 /// The shape a hand takes on it.
@@ -2439,7 +2449,7 @@ pub fn draw_hug_hands(pm: &mut Pixmap, hands: &HugHands, layer: HandLayer, s: f3
         // Each on its own first: rubbing out one's wrist must not rub out
         // the other where they cross.
         one.fill(Color::TRANSPARENT);
-        child_hand(&mut one, hand, part, s, t);
+        child_hand(&mut one, hand, part, s, t, 0.0);
         let id = Transform::identity();
         sheet.draw_pixmap(0, 0, one.as_ref(), &PixmapPaint::default(), id, None);
     }
@@ -2655,9 +2665,102 @@ pub fn draw_pat_hand(pm: &mut Pixmap, pat: &PatHand, t: f32) {
         side: -pat.facing,
         grip: Grip::Back,
     };
-    child_hand(&mut one, &hand, Part::Back, pat.scale, t);
+    child_hand(&mut one, &hand, Part::Back, pat.scale, t, 0.0);
     let paint = PixmapPaint {
         opacity: 0.8 * pat.reach.clamp(0.0, 1.0),
+        ..PixmapPaint::default()
+    };
+    pm.draw_pixmap(0, 0, one.as_ref(), &paint, Transform::identity(), None);
+}
+
+/// Your hand scratching its chin this frame (see [`chin_hand`]).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ChinHand {
+    /// Where the middle of the palm is, below its chin, pixels.
+    pub palm: (f32, f32),
+    /// Where it presses in, on the pet (the dent's middle), pixels.
+    pub press: (f32, f32),
+    /// Which way the fingers point, radians on the screen (up, leaning a
+    /// little the way it faces).
+    pub angle: f32,
+    /// The way it faces (+1 right).
+    pub facing: f32,
+    /// How far it has come in (0 … 1).
+    pub reach: f32,
+    /// The hand's size, as the `s` it is drawn at.
+    pub scale: f32,
+}
+
+/// The chin-scratching hand against a hugging one: smaller than the
+/// patting hand, so its fingers stay under the face.
+const CHIN_HAND: f32 = 1.5;
+/// How far the tops of the fingertips reach above the middle of the palm,
+/// curled (see [`CHIN_CURL`]), as a share of the hand's length (see
+/// [`child_hand`]'s fingers), and how far they tuck in under the chin.
+const CHIN_TIPS: f32 = 0.56;
+const CHIN_TUCK: f32 = 0.04;
+/// How far its fingers curl in under the chin (see [`child_hand`]): the
+/// knuckles up, 反手撓下巴.
+const CHIN_CURL: f32 = 0.6;
+
+/// Your hand under its chin for `beats` (see
+/// [`chonkgene_core::chin::ChinScratch::beats`]): `chin` the bottom of its
+/// chin (pixels, on the picture shown, see `MeshRenderer::chin_at`),
+/// `facing` +1 right, `build` the pet's (a bird's hand is smaller). Up
+/// from below, the back of the hand toward you, the
+/// fingertips tucked in under the chin (反手撓下巴, the knuckles up);
+/// moving as the beats say, stroking, circling, patting. The fox's: off
+/// toward `tail`, the tip of the tail hooking it, as far as the beats say.
+pub fn chin_hand(
+    chin: (f32, f32),
+    facing: f32,
+    s: f32,
+    beats: &chonkgene_core::chin::ChinBeats,
+    tail: Option<(f32, f32)>,
+    build: Build,
+) -> ChinHand {
+    let f = if facing < 0.0 { -1.0 } else { 1.0 };
+    let scale = s * CHIN_HAND * build.chin_hand();
+    let l = HAND_LEN * scale;
+    let (dx, dy) = (beats.off.0 * l * f, beats.off.1 * l);
+    // Its fingertips to the tail's tip.
+    let chin = match tail {
+        Some(tip) if beats.to_tail > 0.0 => {
+            let k = beats.to_tail;
+            (chin.0 + (tip.0 - chin.0) * k, chin.1 + (tip.1 - chin.1) * k)
+        }
+        _ => chin,
+    };
+    ChinHand {
+        palm: (chin.0 + dx, chin.1 + (CHIN_TIPS - CHIN_TUCK) * l + dy),
+        press: (chin.0 + dx, chin.1 - HAND_IN * s + dy.min(0.0)),
+        angle: -PI / 2.0 + f * 0.15,
+        facing: f,
+        reach: beats.hand,
+        scale,
+    }
+}
+
+/// Your hand scratching its chin (see [`chin_hand`]), over its picture, a
+/// little see-through as the patting hand is; the fingers curling a
+/// little in turn as they scratch, `t` seconds in.
+pub fn draw_chin_hand(pm: &mut Pixmap, chin: &ChinHand, t: f32) {
+    if chin.reach <= 0.0 {
+        return;
+    }
+    let Some(mut one) = Pixmap::new(pm.width(), pm.height()) else {
+        return;
+    };
+    let hand = HugHand {
+        at: chin.palm,
+        press: chin.press,
+        angle: chin.angle,
+        side: chin.facing,
+        grip: Grip::Back,
+    };
+    child_hand(&mut one, &hand, Part::Back, chin.scale, 1.6 * t, CHIN_CURL);
+    let paint = PixmapPaint {
+        opacity: 0.8 * chin.reach.clamp(0.0, 1.0),
         ..PixmapPaint::default()
     };
     pm.draw_pixmap(0, 0, one.as_ref(), &paint, Transform::identity(), None);
@@ -2676,8 +2779,10 @@ enum Part {
     Thumb,
 }
 
-/// A child's hand (see [`draw_hug_hands`]), opaque, into `pm`.
-fn child_hand(pm: &mut Pixmap, hand: &HugHand, part: Part, s: f32, t: f32) {
+/// A child's hand (see [`draw_hug_hands`]), opaque, into `pm`; its
+/// fingers curled away from you by `curl` (0 straight … 1 a fist: shorter,
+/// the knuckles up, the nails out of sight).
+fn child_hand(pm: &mut Pixmap, hand: &HugHand, part: Part, s: f32, t: f32, curl: f32) {
     const SKIN: [u8; 4] = [0xFF, 0xE2, 0xD2, 255];
     const LIGHT: [u8; 4] = [0xFF, 0xF2, 0xEA, 255];
     const LINE: [u8; 4] = [0xE6, 0xA4, 0x92, 255];
@@ -2726,9 +2831,9 @@ fn child_hand(pm: &mut Pixmap, hand: &HugHand, part: Part, s: f32, t: f32) {
         .iter()
         .enumerate()
         .map(|(k, &(x, lean, len))| {
-            let curl = 1.0 - 0.2 * (TAU * 1.3 * t - 0.9 * k as f32).sin().max(0.0);
+            let wave = 1.0 - 0.2 * (TAU * 1.3 * t - 0.9 * k as f32).sin().max(0.0);
             let base = (x * l, -0.2 * l);
-            let (lean, len) = (lean * spread, len * l * curl);
+            let (lean, len) = (lean * spread, len * l * wave * (1.0 - 0.45 * curl));
             (base, (base.0 + lean.sin() * len, base.1 - lean.cos() * len))
         })
         .collect();
@@ -2790,6 +2895,11 @@ fn child_hand(pm: &mut Pixmap, hand: &HugHand, part: Part, s: f32, t: f32) {
             blob(pm, 0.02 * l, -0.06 * l, 0.17 * l, 0.1 * l, LIGHT);
             for &(a, b) in &tips {
                 blob(pm, a.0, a.1 + 0.02 * l, 0.3 * fr, 0.22 * fr, DIMPLE);
+                if curl >= 0.5 {
+                    // Curled under: the second knuckles where the nails were.
+                    blob(pm, b.0, b.1 + 0.4 * fr, 0.34 * fr, 0.24 * fr, DIMPLE);
+                    continue;
+                }
                 let (dx, dy) = (b.0 - a.0, b.1 - a.1);
                 let n = dx.hypot(dy).max(1e-3);
                 let nail = (b.0 - dx / n * 0.45 * fr, b.1 - dy / n * 0.45 * fr);

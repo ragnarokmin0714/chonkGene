@@ -9,7 +9,8 @@
 //! `paw`, `bottom`, `back`, `wing` (each held, then let go), `pat` (your
 //! hand patting its head, 摸摸頭 from its menu), `squeeze` (held still
 //! on a cheek: your hands squeeze both, let go they spring out rosy and
-//! it rubs its face or its cheeks), `trap` (the
+//! it rubs its face or its cheeks), `chinscratch` (two taps on its chin:
+//! your hand scratches it from below, each its own way), `trap` (the
 //! 曼赤肯's belly rubbed into its trap), `scratch` (held on the head
 //! and rubbed about), `laugh`, `fedup`, `sulk`, `jog` and `run` (running
 //! at pace 1.6, half way into a gallop, and 2.2, a full one),
@@ -181,6 +182,9 @@ fn scenes() -> Vec<Scene> {
         feel("buttup", Expression::Happy, 3.0),
         feel("rump", Expression::Happy, 2.6),
         feel("swish", Expression::Neutral, 2.0),
+        // Two taps on its chin: your hand scratches it from below, from
+        // 0.3 s, each its own way.
+        feel("chinscratch", Expression::Neutral, 7.2),
         feel("sulk", Expression::Sulk, 4.5),
         sleep("sleep-chin", SleepPose::Chin),
         sleep("sleep-curl", SleepPose::Curl),
@@ -270,6 +274,7 @@ fn main() {
         let mut hugged = false;
         let mut gestured = false;
         let (mut pat_down, mut pat_was) = (false, false);
+        let (mut chin_down, mut chin_was) = (false, false);
         let mut mound = None;
         let frames = (scene.secs * FPS * slow).round() as u32;
         for f in 0..frames {
@@ -391,6 +396,42 @@ fn main() {
                     expression = Expression::Happy;
                 }
             }
+            // A chin scratch, as the app drives it (`Pet::chin_step`): the
+            // hand on its chin pressing in, rubbing along as it strokes, off
+            // it (no poke) between the Shiba's pats; happy once it is over.
+            use chonkgene_render::props::{chin_hand, draw_chin_hand};
+            let chin_t = t - 0.3;
+            let chin_kind = species.chin_scratch();
+            let build = chonkgene_render::props::Build::of(r.species());
+            let chin = (scene.name == "chinscratch")
+                .then(|| chin_kind.beats(chin_t))
+                .flatten();
+            if scene.name == "chinscratch" {
+                if chin.is_some() && !chin_was {
+                    a.scratch_chin(Some(chin_kind));
+                }
+                let hand = chin
+                    .zip(r.chin_at())
+                    .map(|(cb, at)| chin_hand(at, a.facing, scale, &cb, r.hook_at(), build));
+                match (chin, hand) {
+                    (Some(cb), Some(h)) if cb.on && !chin_down => {
+                        a.press(Zone::Chin, h.press);
+                        a.fond = Some(species.fondness(Zone::Chin));
+                    }
+                    (Some(cb), Some(h)) if cb.on => a.knead(h.press),
+                    _ if chin_down => a.let_go(),
+                    _ => {}
+                }
+                chin_down = chin.is_some_and(|cb| cb.on);
+                if chin_was && chin.is_none() {
+                    a.scratch_chin(None);
+                    a.expression = Expression::Happy;
+                }
+                chin_was = chin.is_some();
+                if a.expression == Expression::Happy {
+                    expression = Expression::Happy;
+                }
+            }
             a.expression = expression;
             for _ in 0..4 {
                 a.step(0.25 / FPS / slow);
@@ -440,6 +481,13 @@ fn main() {
                 r.finish();
             }
             let path = format!("{out}/{}-{f:03}.png", scene.name);
+            if let (Some(cb), Some(at)) = (chin, r.chin_at()) {
+                let mut pm = r.pixmap().clone();
+                let hand = chin_hand(at, a.facing, scale, &cb, r.hook_at(), build);
+                draw_chin_hand(&mut pm, &hand, chin_t);
+                pm.save_png(&path).expect("write frame");
+                continue;
+            }
             if let Some(p) = pat {
                 let mut pm = r.pixmap().clone();
                 let hand = pat_hand(r.anchor(), a.facing, scale, &p);

@@ -7,6 +7,7 @@
 
 use chonkgene_core::Zone;
 use chonkgene_core::anim::{Hug, HugHold};
+use chonkgene_core::chin::{ChinBeats, ChinScratch};
 use chonkgene_core::species::Fondness;
 use chonkgene_rig::math::{M3, V3, v3};
 use chonkgene_rig::{FLOOR, Model, builtin};
@@ -370,6 +371,17 @@ pub struct Feel {
     /// Patted on the bottom, the Shiba's way: a hind leg kicking and a
     /// look back, 0 … 1 (see [`chonkgene_core::anim::Touch::rump`]).
     pub rump: f32,
+    /// A chin scratch under way: how it takes it, seconds in (see
+    /// [`chonkgene_core::anim::Touch::chin`]).
+    pub chin: Option<(ChinScratch, f32)>,
+}
+
+impl Feel {
+    /// The chin scratch under way, its kind and where it is now.
+    pub fn chin_beats(&self) -> Option<(ChinScratch, ChinBeats)> {
+        let (kind, t) = self.chin?;
+        Some((kind, kind.beats(t)?))
+    }
 }
 
 impl Feel {
@@ -853,6 +865,15 @@ const ROLL_TUCK: f32 = 72.0;
 const ROLL_LIFT: f32 = 0.3;
 const RUB_ROLL: f32 = 145.0;
 const SIDE_ROLL: f32 = 85.0;
+/// A chin scratch: how far a cat's chin goes up beyond a hand held on it
+/// (degrees), how far the Shiba's double chin is pushed up (world units),
+/// and where the fox's hooking tail is aimed (its left, up, forward;
+/// turned to the side she faces) and how far it curls round the hand
+/// (degrees, root to tip).
+const CHIN_LIFT: f32 = 22.0;
+const JOWL_PUSH: f32 = 0.07;
+const HOOK_DIR: (f32, f32, f32) = (0.7, 0.2, 0.68);
+const HOOK_CURL: f32 = 70.0;
 /// Eating, the pet crouches over the snack: it sinks this share of its
 /// legs' length.
 const EAT_CROUCH: f32 = 0.3;
@@ -943,6 +964,8 @@ pub(crate) struct Tail {
     /// The turn about x (degrees) that stands it straight up from where it
     /// rests, base to tip (a cat's 電梯屁股).
     raise: f32,
+    /// Which way its root points at rest (base to the next joint).
+    dir: V3,
 }
 
 /// One frame of the tails' travelling wave, as [`Tail::wave`] takes it.
@@ -976,10 +999,11 @@ impl Tail {
             .zip(turns.into_iter().zip(blankets))
             .enumerate()
             .map(|(i, (bones, (sit_turn, (lie_turn, lie_curl))))| {
-                let up = match bones[..] {
-                    [a, b, ..] => (sk.pivots[b] - sk.pivots[a]).normalize().y.abs(),
-                    _ => 1.0,
+                let dir = match bones[..] {
+                    [a, b, ..] => (sk.pivots[b] - sk.pivots[a]).normalize(),
+                    _ => v3(0.0, 1.0, 0.0),
                 };
+                let up = dir.y.abs();
                 // From up toward behind (-z): what a turn about x takes
                 // away.
                 let raise = match (bones.first(), bones.last()) {
@@ -1000,6 +1024,7 @@ impl Tail {
                     lie_curl,
                     swish_axes: (up, (1.0 - up * up).max(0.0).sqrt()),
                     raise,
+                    dir,
                 }
             })
             .collect()
@@ -1163,6 +1188,9 @@ pub struct Walk {
     /// (rolled over, melted), and flatten it (melted), this frame.
     ground: f32,
     flatten: f32,
+    /// Out: the tip bone of the fox's tail hooking your hand this frame
+    /// (her chin scratch), for your hand to go to.
+    hook_tip: Option<usize>,
     /// The little movements under every held pose, and this frame's.
     fidgets: Fidgets,
     fidget: Out,
@@ -1270,6 +1298,7 @@ impl Walk {
             body_h: sk.bone("body").map_or(0.8, |b| sk.pivots[b].y - FLOOR),
             ground: 0.0,
             flatten: 0.0,
+            hook_tip: None,
             fidgets: Fidgets::new("", 1),
             fidget: Out::default(),
             ear_k: 1.0,
@@ -1344,6 +1373,11 @@ impl Walk {
     /// how much to flatten it (see the fields).
     pub fn ground(&self) -> f32 {
         self.ground
+    }
+
+    /// The tip bone of the fox's tail hooking your hand (see `hook_tip`).
+    pub fn hook_tip(&self) -> Option<usize> {
+        self.hook_tip
     }
 
     pub fn flatten(&self) -> f32 {
@@ -1651,7 +1685,20 @@ impl Walk {
             TailStyle::Wag | TailStyle::Ripple => 0.85 * f.lively,
             TailStyle::Curl => 0.0,
         };
-        let wag = f.get(Kind::Wag).map_or(0.0, |w| w.0).max(joy).max(keen);
+        // A chin scratch: the Shiba's curl going hard; the fox's tails
+        // swaying slowly, wide.
+        let chin = self.feel.chin_beats();
+        let (chin_wag, sway) = match chin {
+            Some((ChinScratch::Hook, cb)) => (0.0, cb.wag),
+            Some((_, cb)) => (cb.wag, 0.0),
+            None => (0.0, 0.0),
+        };
+        let wag = f
+            .get(Kind::Wag)
+            .map_or(0.0, |w| w.0)
+            .max(joy)
+            .max(keen)
+            .max(chin_wag);
         // Dancing (肉肉舞): the Shiba's tail goes round like a helicopter,
         // the fox fans its tails out like a peacock.
         let dance = self
@@ -1670,7 +1717,8 @@ impl Walk {
             lie
         };
         let hz = (SWISH_HZ.0 + (SWISH_HZ.1 - SWISH_HZ.0) * s) * if flow { FLOW_HZ } else { 1.0 };
-        self.swish = (self.swish + dt * hz * (1.0 + 2.5 * wag + 0.6 * curl)).fract();
+        self.swish =
+            (self.swish + dt * hz * (1.0 + 2.5 * wag + 0.6 * curl) * (1.0 - 0.45 * sway)).fract();
         // Laughing it thrashes its tail; melted it lies limp; held, it goes
         // stiff in your hand.
         let held_tail = matches!(self.feel.held, Some((Zone::Tail, ..)));
@@ -1679,7 +1727,7 @@ impl Walk {
             * (1.0 - 0.75 * lie * (1.0 - 0.7 * f.lively))
             * (1.0 + 0.8 * treat + 0.9 * lv.laugh)
             * (1.0 - 0.8 * lv.melt)
-            * (1.0 + 1.6 * wag)
+            * (1.0 + 1.6 * wag + 0.9 * sway)
             * if held_tail { 0.25 } else { 1.0 };
         let wave = Wave {
             amp,
@@ -1691,7 +1739,21 @@ impl Walk {
             flick: lv.flick,
             flow,
         };
-        for tail in &mut self.tails {
+        // The fox's chin scratch: the hand going, the tail furthest round
+        // on the side toward you hooks it (see `hook`): turned the way she
+        // faces, her right side (−x) shows when she faces right.
+        let hooking = match chin {
+            Some((ChinScratch::Hook, cb)) if cb.own > 0.0 => Some(cb.own),
+            _ => None,
+        };
+        let side = if facing < 0.0 { 1.0 } else { -1.0 };
+        let hooker = hooking.and_then(|_| {
+            (0..self.tails.len()).max_by(|&a, &b| {
+                (self.tails[a].dir.x * side).total_cmp(&(self.tails[b].dir.x * side))
+            })
+        });
+        self.hook_tip = hooker.and_then(|h| self.tails[h].bones.last().copied());
+        for (k, tail) in self.tails.iter_mut().enumerate() {
             tail.wave(&mut j, &wave, dt);
             // Sulking, back to you, the tails stay together: a fan seen
             // from behind stretches the skin between them.
@@ -1711,6 +1773,11 @@ impl Walk {
             j[base].rot = j[base].rot + tail.sit_turn * fan + tail.lie_turn * fold;
             for &bone in &tail.bones[1..] {
                 j[bone].rot = j[bone].rot + tail.lie_curl * fold;
+            }
+            if let (Some(e), Some(h)) = (hooking, hooker)
+                && h == k
+            {
+                hook(&mut j, tail, side, tail.sit_turn * fan, e);
             }
         }
         if let Some(i) = b.belly {
@@ -1756,7 +1823,13 @@ impl Walk {
             );
         }
         if let Some(i) = b.chin {
-            let y = self.chin.step(0.0, -acc - 0.02 * nod_acc, 4.0, 0.18, dt);
+            // The Shiba's double chin pushed up by your hand, and let go,
+            // bouncing (「ㄉㄨㄞ ㄉㄨㄞ」).
+            let jowls = match chin {
+                Some((ChinScratch::Jowls, cb)) => JOWL_PUSH * cb.own,
+                _ => 0.0,
+            };
+            let y = self.chin.step(jowls, -acc - 0.02 * nod_acc, 4.0, 0.18, dt);
             j[i].shift = v3(0.0, y.clamp(-0.09, 0.09), 0.0);
         }
 
@@ -2739,7 +2812,15 @@ impl Walk {
                 .max(RUB_ROLL * lv.rub.min(1.0))
                 .max(UP_ROLL * self.cradle)
         };
-        let goal = awake_roll.max(lie * (SIDE_ROLL * sw[2] + UP_ROLL * sw[3]));
+        // The 折耳貓's chin scratched long enough: over it goes, melted.
+        let chin = self.feel.chin_beats();
+        let topple = match chin {
+            Some((ChinScratch::Topple, cb)) => cb.own,
+            _ => 0.0,
+        };
+        let goal = awake_roll
+            .max(lie * (SIDE_ROLL * sw[2] + UP_ROLL * sw[3]))
+            .max(SIDE_ROLL * topple);
         let roll = self.roll.step(goal, 0.0, 1.2, 0.85, dt).max(0.0);
         let b = &self.bones;
         if roll > 0.5 {
@@ -2975,6 +3056,71 @@ impl Walk {
                 j[leg].shift.y += 0.05 * lv.kick;
             }
         }
+        if let Some((kind, cb)) = chin {
+            self.chin_scratch(j, kind, &cb, facing, t);
+        }
+    }
+
+    /// A chin scratch, each its own way (PLAN §8, Roger's twenty-seventh
+    /// pass, item 2), over what a hand held on its chin already does (the
+    /// chin up, a dog's hind leg kicking, a cat treading, eyes shut on a
+    /// loved spot). The Shiba's jowls and wagging and the fox's tails are
+    /// with the soft spots and the tails.
+    fn chin_scratch(
+        &mut self,
+        j: &mut [Joint],
+        kind: ChinScratch,
+        cb: &ChinBeats,
+        facing: f32,
+        t: f32,
+    ) {
+        use std::f32::consts::TAU;
+        let b = &self.bones;
+        match kind {
+            // The chin up and up as your knuckles stroke it, then the head
+            // down to the hand and its cheek rubbed on it, side to side.
+            ChinScratch::Knuckles => {
+                j[b.head].rot.x -= CHIN_LIFT * cb.lift - 12.0 * cb.own;
+                let w = (TAU * 1.5 * t).sin();
+                j[b.head].rot.z += cb.own * 20.0 * w;
+                j[b.head].rot.y += cb.own * 14.0 * w;
+                j[b.body].rot.z += cb.own * 4.0 * (TAU * 1.5 * t - 0.6).sin();
+            }
+            // The head tilting further and further, then over it goes (the
+            // roll in `react`): on its side, legs out, the head lolling.
+            ChinScratch::Topple => {
+                j[b.head].rot.x -= 0.5 * CHIN_LIFT * cb.lift;
+                j[b.head].rot.z -= facing * cb.roll;
+                for &(leg, _, front) in &self.legs {
+                    j[leg].rot.x += if front { 50.0 } else { 40.0 } * cb.own;
+                }
+            }
+            // Her head pressed down into your hand, nuzzling it slowly.
+            ChinScratch::Hook => {
+                j[b.head].rot.x += 30.0 * cb.lift;
+                j[b.head].shift.y -= 0.04 * cb.lift;
+                j[b.head].rot.z += 7.0 * cb.lift * (TAU * 0.6 * t).sin();
+            }
+            ChinScratch::Jowls | ChinScratch::Round | ChinScratch::Puff | ChinScratch::Nibble => {}
+        }
+    }
+}
+
+/// The fox's tail hooking your hand as it goes, in her chin scratch
+/// (`e` 0 … 1): its root turned from where it rests (`fanned` the turn the
+/// fan gave it, taken back) round her side to the front, on `side` (+1
+/// her left), and the rest of it curled in round the hand. A tail is too
+/// short to reach her chin: the hand comes to its tip (see
+/// `MeshRenderer::hook_at`).
+fn hook(j: &mut [Joint], tail: &Tail, side: f32, fanned: V3, e: f32) {
+    let want = v3(side * HOOK_DIR.0, HOOK_DIR.1, HOOK_DIR.2);
+    let turn = aim(tail.dir, want) - fanned;
+    let root = tail.bones[0];
+    j[root].rot = j[root].rot + turn * e;
+    let curl = HOOK_CURL / (tail.bones.len() - 1).max(1) as f32;
+    for &bone in &tail.bones[1..] {
+        j[bone].rot.y -= side * curl * e;
+        j[bone].rot.x -= 0.4 * curl * e;
     }
 }
 
