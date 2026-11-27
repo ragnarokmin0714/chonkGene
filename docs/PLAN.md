@@ -1841,7 +1841,17 @@ Roger, 「chonkGene 20261127 使用回饋報告」: 「九尾喜歡喝酒、發�
 - **Her human form**: the same, and the lines stay 傲嬌 and silly, never flirting (the rule of the twenty-seventh pass, item 6 (c)).
 - **How it is drawn between two pets**: she stands up face to face (the hug's approach), her paws forward; the other's face squeezes in its own window as under your hands, without your hands drawn.
 - **Asked, the one real choice: real 酒, or a drink of the immortals?** Showing drinking and being drunk can raise an age rating (Taiwan's 菸酒 descriptor starts at 輔15; PEGI's drugs descriptor covers alcohol shown prominently or to advantage), and desktop pets are used by children too; the catnip was planned "a happy, silly state, not drunk" for that reason (木天蓼 its fallback). (a) **Real 酒** in a gourd (no real brand, no glass of beer): her idea exactly, the rating may go up. (b) **A peach of the immortals (醉仙桃) or 桃花蜜**: the same 微醺 → 酒瘋 → asleep, as catnip is the cats' bliss, no rating cost. **Proposed (b)**; Roger's call.
-- **Order, proposed**: after the twenty-eighth pass's item 4 (天雷, 重力), whose "her spell lands on another pet" plumbing this shares.
+- **Order, proposed**: after the twenty-eighth pass's item 4 (天雷, 重力), whose "her spell lands on another pet" plumbing this shares, and after the more physical hugs (below), which it builds on.
+
+### Roger, 2026-11-27: hugs and fights, more physical (to plan)
+
+Roger: 「擁抱和打架 物理動作還有很大的改進空間，這個也排進去之後改善」. What they are now: a hug between pets walks the two together until their centres are 90 px apart (`HUG_CONTACT`), then each takes its pose in its own window, the windows overlapping; a play-fight (`skit.rs` `Kind::Play`) or squabble is turns of each one's own move (a swat, a tail swing, a peck) beside the other, and the one hit hardly answers it. **Directions** (to talk through with Roger before building; he has not said yet which moments look worst):
+- **Touching for real**: the distance found from both bodies' outlines (as your hands find a pet's, `BodyShape`), not a fixed 90 px, so a chick and the fox meet cheek to cheek as a Shiba and a cat do; no gap, no sinking into each other.
+- **Paws that hold and flesh that gives**: the hugger's paws (her arms in the bear hug) laid round the other's body and pressing in, the hugged one's flesh denting under them and springing back after (the dents and 「ㄉㄨㄞ ㄉㄨㄞ」 of the twenty-seventh pass), both squeezed a little.
+- **Weight**: a run-up and a small bump on meeting, both wobbling; swaying together with one leading; a small pet lifted or pushed further than a big one; letting go with a step back.
+- **Hits that land**: a wind-up before a swat or a tail swing, and on contact the other jolts where it was hit (a dent and a spring there), is knocked back a few pixels with a skid, a dust puff (`Fx::Brawl`); shoving head to head, legs braced; tumbling over together.
+- **Asked**: a short screen recording of a hug and a fight that look wrong to him (Gemini can watch a video and say what it sees, for a second opinion), or a list of the moments.
+- **Order, proposed**: after the twenty-eighth pass's item 4 and before the twenty-ninth pass (her tipsy rounds hug and squeeze the others, so they would be built on the better hugs). Roger's call.
 
 ### New species: eleven more pets (Roger, 2026-11-13; planned, none built)
 
