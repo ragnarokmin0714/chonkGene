@@ -1457,12 +1457,10 @@ impl MeshRenderer {
     /// the outer edge of each cheek (left, then right), halfway up it.
     /// None until the bake has landed (or with no cheeks).
     pub fn cheeks_at(&self) -> Option<[(f32, f32); 2]> {
-        let live = self.live.as_ref()?;
-        let cheek = ZONES.iter().position(|z| *z == "cheek")?;
-        let pts: Vec<(f32, f32)> = (0..live.mesh.vertices.len())
-            .filter(|&i| usize::from(live.mesh.zones[i]) == cheek)
-            .map(|i| live.canvas.project(self.skinned(&live.mesh, i)))
-            .collect();
+        let pts = self.zone_points("cheek");
+        if pts.is_empty() {
+            return None;
+        }
         let (lo, hi) = pts.iter().fold((f32::MAX, f32::MIN), |(lo, hi), p| {
             (lo.min(p.1), hi.max(p.1))
         });
@@ -1525,6 +1523,19 @@ impl MeshRenderer {
         let b = self.walk.hook_tip()?;
         let at = self.shown_bones.get(b)?.apply(self.sk.pivots[b]);
         Some(live.canvas.project(at))
+    }
+
+    /// Where the skin of zone `name` lies in the picture shown, pixels, a
+    /// point a vertex (hidden or not); none before the bake has landed.
+    pub fn zone_points(&self, name: &str) -> Vec<(f32, f32)> {
+        let (Some(live), Some(zone)) = (self.live.as_ref(), ZONES.iter().position(|z| *z == name))
+        else {
+            return Vec::new();
+        };
+        (0..live.mesh.vertices.len())
+            .filter(|&i| usize::from(live.mesh.zones[i]) == zone)
+            .map(|i| live.canvas.project(self.skinned(&live.mesh, i)))
+            .collect()
     }
 
     /// Into the screen, the way the camera looks.

@@ -865,6 +865,12 @@ const ROLL_TUCK: f32 = 72.0;
 const ROLL_LIFT: f32 = 0.3;
 const RUB_ROLL: f32 = 145.0;
 const SIDE_ROLL: f32 = 85.0;
+/// Rolled over awake (laughing, a belly rub, cradled): the front paws
+/// held up over its chest beside the chin, and a little apart, degrees
+/// (Roger, 2026-11-27: tickled onto its back, its paws vanished; folded
+/// toward its head, -55°, they hid behind it).
+const ROLL_FRONT: f32 = 15.0;
+const ROLL_FRONT_OUT: f32 = 10.0;
 /// A chin scratch: how far a cat's chin goes up beyond a hand held on it
 /// (degrees), how far the Shiba's double chin is pushed up (world units),
 /// and where the fox's hooking tail is aimed (its left, up, forward;
@@ -2844,9 +2850,13 @@ impl Walk {
             for (k, &(leg, _, front)) in self.legs.iter().enumerate() {
                 let pedal =
                     (18.0 * lv.laugh + 6.0 * lv.rub) * (TAU * 2.4 * t + k as f32 * 1.57).sin();
-                let folded = if front { -55.0 } else { -35.0 } * (1.0 - 0.45 * limp);
+                let folded = if front { ROLL_FRONT } else { -35.0 } * (1.0 - 0.45 * limp);
                 let swing = 6.0 * limp * (TAU * 0.45 * t + 0.6 + 0.3 * k as f32).sin();
                 j[leg].rot.x += awake * (folded + pedal + swing);
+                if front {
+                    let out = if self.legs[k].1 < 0.5 { 1.0 } else { -1.0 };
+                    j[leg].rot.z += awake * out * ROLL_FRONT_OUT;
+                }
             }
             // Rolled over side-on, you are off to its side: the head turns
             // to you (undoing the turn it keeps at rest).

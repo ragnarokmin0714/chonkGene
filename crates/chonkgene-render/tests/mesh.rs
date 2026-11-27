@@ -3114,3 +3114,39 @@ fn a_chin_scratch_moves_each_pet_its_own_way() {
         }
     }
 }
+
+/// Roger, 2026-11-27: tickled until it rolled onto its back, its front
+/// paws were gone (folded toward its head, they hid behind it). Rolled
+/// over laughing, a good share of each front paw's skin is what a click
+/// there lands on.
+#[test]
+fn rolled_over_laughing_its_front_paws_show() {
+    use chonkgene_core::anim::{Expression, PoseParams};
+    for id in ["shiba", "munchkin", "fold"] {
+        let Some(mut r) = app_renderer(id) else {
+            eprintln!("no GPU: skipped");
+            return;
+        };
+        for k in 0..90 {
+            let p = PoseParams {
+                clock: k as f32 / 30.0,
+                ..Default::default()
+            };
+            r.render(&p, Expression::Giggle);
+            r.finish();
+        }
+        let pts = r.zone_points("paw");
+        assert!(pts.len() > 50, "{id}: {} paw vertices", pts.len());
+        let step = pts.len() / 60;
+        let tried: Vec<_> = pts.iter().step_by(step.max(1)).collect();
+        let seen = tried
+            .iter()
+            .filter(|&&&(x, y)| r.hit(x, y) == Some("paw"))
+            .count();
+        assert!(
+            seen * 5 >= tried.len(),
+            "{id}: {seen} of {} front paw points show",
+            tried.len()
+        );
+    }
+}
