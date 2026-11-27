@@ -2906,6 +2906,11 @@ pub(crate) fn hand(h: Hand) -> Cursor {
 /// The fox's face glows this long from the start of a cast (through the
 /// others floating, for 定身術), seconds.
 const SPELL_GLOW_SECS: f64 = 5.2;
+/// The fox's human form against the pets (Roger, 2026-11-27: even a small
+/// child is bigger and taller than a pet; his pick of ×1.3 off
+/// `inbox/fox-human-height.png`, the extra GPU time taken): about 190 px
+/// at 100% against their 140–155.
+const HUMAN_SCALE: f32 = 1.3;
 /// Frightened by the spell, a pet jumps back this share of its width.
 const SCARE_JUMP: f32 = 0.12;
 
@@ -2956,7 +2961,6 @@ fn spawn(
 ) -> Result<Pet, String> {
     let species = save.species().ok_or("unknown species")?;
     let kind = &kinds[&species];
-    let scale = save.size * ui_scale;
     // The fox in her human form, where she can take it (her figure is
     // meshes: on sprites she stays as she is on all fours).
     let human = (save.human && morphs(species))
@@ -2967,6 +2971,10 @@ fn spawn(
             None
         })
         .map(|(m, _)| Arc::new(m));
+    // In her human form she stands taller than the pets (see
+    // `HUMAN_SCALE`): everything of her with it, her window, hops, your
+    // hands on her, her effects, as 「大小」 would.
+    let scale = save.size * ui_scale * if human.is_some() { HUMAN_SCALE } else { 1.0 };
     let mesh = human.or_else(|| kind.quad.clone());
     let coat = mesh
         .as_deref()
