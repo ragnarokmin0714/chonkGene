@@ -1830,6 +1830,19 @@ Roger: 「你覺得這個主意如何」, four ideas for the fox, with `inbox/fu
 
 **Roger, 2026-11-26: 「那就開工吧」**, read as the proposals above taken as they stand (法術 and 護體魔力 split as proposed, one colour a row with tips worked out, the other pets' own colours not now; 天雷 one pet and 重力 everyone round her, cast by herself only in 非理性模式) and the order with them, after the twenty-seventh pass's tap setting and bottom pats. Asked without a proposal, so still his to say: whether 「跟毛色」 becomes the default hair colour (white until then, his rule of 2026-11-16). **Roger, 2026-11-26: 可以**: 「跟毛色」 becomes the default hair colour when item 2 is built (white until then).
 
+### Roger's twenty-ninth pass (idea, 2026-11-27; proposal, his answers owed)
+
+Roger, 「chonkGene 20261127 使用回饋報告」: 「九尾喜歡喝酒、發起酒瘋還會耍傲驕，裝可愛、到處捏其他寵物的臉、和抱它們。你覺得這樣的設定可以嗎？」
+
+**Answered: yes, it suits her** (a fox spirit and her drink is an old pairing; 傲嬌 that drink loosens is a character in itself), and most of it is built already: the cheek squeeze and rosy cheeks (twenty-seventh pass, 6 (a)), pets hugging each other and her bear hug, her 傲嬌 lines. **Proposed**:
+- **The arc, about a minute and a half**: 微醺 (rosy face, the `rosy` blush held; hiccups 「嗝」 in her bubbles; swaying, tails out of step) → 酒瘋: 傲嬌 first (「才、才沒有醉！……嗝」), then 裝可愛 (「人家要抱抱嘛～」), wandering to the others to squeeze their cheeks and hug them → falls asleep where she is (「……再一杯……」). Waking: 傲嬌 denial (「昨天什麼都沒發生。」), no hangover.
+- **The others take it each their own way**, by how they like their cheeks (`Species::fondness`): the 曼赤肯 and the owl lean in, the rest pout and rub their cheeks afterwards (`Act::CheekRub`); one with a grudge against her, or asleep, is left alone or steps away from her; her squeeze is a softer one than yours and leaves them rosy too.
+- **How it starts**: her menu gives her the drink (once a day, as snacks are counted); by herself, rarely and in the evening, only in 非理性模式 (as her own spells). Never in 勿擾; a sleeping pet is not woken.
+- **Her human form**: the same, and the lines stay 傲嬌 and silly, never flirting (the rule of the twenty-seventh pass, item 6 (c)).
+- **How it is drawn between two pets**: she stands up face to face (the hug's approach), her paws forward; the other's face squeezes in its own window as under your hands, without your hands drawn.
+- **Asked, the one real choice: real 酒, or a drink of the immortals?** Showing drinking and being drunk can raise an age rating (Taiwan's 菸酒 descriptor starts at 輔15; PEGI's drugs descriptor covers alcohol shown prominently or to advantage), and desktop pets are used by children too; the catnip was planned "a happy, silly state, not drunk" for that reason (木天蓼 its fallback). (a) **Real 酒** in a gourd (no real brand, no glass of beer): her idea exactly, the rating may go up. (b) **A peach of the immortals (醉仙桃) or 桃花蜜**: the same 微醺 → 酒瘋 → asleep, as catnip is the cats' bliss, no rating cost. **Proposed (b)**; Roger's call.
+- **Order, proposed**: after the twenty-eighth pass's item 4 (天雷, 重力), whose "her spell lands on another pet" plumbing this shares.
+
 ### New species: eleven more pets (Roger, 2026-11-13; planned, none built)
 
 Roger, 2026-11-13: 「這是 chonkGene 接下來要新增的寵物」, with a concept picture he made with Gemini (`inbox/Gemini_Generated_Image_1w2xeh1w2xeh1w2x.jpeg`, 「超萌動物大集合」; a reference for look only, nothing from it ships). It shows nine animals; the Munchkin is already in the cast, so eight are new. Roger then added three not in the picture (same day: 「再加個 無尾熊 和 熊貓 台灣黑熊」): the koala, the giant panda and the Formosan black bear, eleven in all. When they come relative to the open items above is Roger's call (his order of 2026-11-13 is to clear what is planned first).
